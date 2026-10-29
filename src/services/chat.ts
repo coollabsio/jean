@@ -19,7 +19,6 @@ import type {
   SessionSearchResponse,
   ChatMessage,
   ChatHistory,
-  LoadedMessages,
   Session,
   WorktreeSessions,
   Question,
@@ -59,11 +58,6 @@ import {
   useConsolidatedAllSessions,
   useConsolidatedUnreadSessions,
 } from './multi-server-sessions'
-
-/** Default number of recent runs loaded on initial session fetch. */
-export const INITIAL_RUN_LIMIT = 10
-/** Number of older runs to load per scroll-up batch. */
-export const OLDER_RUN_BATCH = 10
 
 /** Move a continued session to its new position in every cached Recent page. */
 export function touchRecentSessionCaches(
@@ -765,7 +759,6 @@ export function useSession(
           worktreeId,
           worktreePath,
           sessionId,
-          limit: INITIAL_RUN_LIMIT,
         })
         logger.info('[useSession] loaded', {
           sessionId,
@@ -778,15 +771,9 @@ export function useSession(
         // Preserve optimistic messages from sendMessage.onMutate that the
         // backend hasn't persisted yet (race: refetchOnMount fires before
         // the send_chat_message invoke writes the user message to disk).
-        // Also preserve messages the user loaded via scroll-up pagination:
-        // fresh fetch uses INITIAL_RUN_LIMIT so its loaded_run_start_index
-        // reflects only the last N runs — using it would wrongly re-show
-        // the "load older" button for runs the cache already contains.
         const cached = queryClient.getQueryData<Session>(
           chatQueryKeys.session(sessionId)
         )
-        const cachedStart = cached?.loaded_run_start_index
-        const freshStart = session.loaded_run_start_index ?? 0
         const cachedIncludesCancelledAssistant = cached?.messages.some(
           message => message.role === 'assistant' && message.cancelled
         )
@@ -794,8 +781,7 @@ export function useSession(
           cached &&
           cached.messages.length > session.messages.length &&
           !cachedIncludesCancelledAssistant &&
-          (useChatStore.getState().sendingSessionIds[sessionId] ||
-            (typeof cachedStart === 'number' && cachedStart < freshStart))
+          useChatStore.getState().sendingSessionIds[sessionId]
 
         if (cached && shouldPreserveCachedMessages) {
           logger.warn(
@@ -804,17 +790,9 @@ export function useSession(
               sessionId,
               cachedCount: cached.messages.length,
               diskCount: session.messages.length,
-              cachedStart: cached.loaded_run_start_index,
-              freshStart: session.loaded_run_start_index,
             }
           )
-          return {
-            ...session,
-            messages: cached.messages,
-            // Keep cached pagination cursor (reflects what's actually in
-            // messages); fresh total_runs is still authoritative.
-            loaded_run_start_index: cached.loaded_run_start_index,
-          }
+          return { ...session, messages: cached.messages }
         }
 
         return session
@@ -829,79 +807,6 @@ export function useSession(
     // Respects staleTime; cross-client sync handled by cache:invalidate broadcast
     // from Rust after send_chat_message completes (JSONL fully written).
     refetchOnMount: true,
-  })
-}
-
-/**
- * Hook to load an older window of messages for an already-cached session.
- * Prepends the fetched messages into the existing `useSession` cache and
- * advances `loaded_run_start_index` so subsequent calls walk backward.
- */
-export function useLoadOlderMessages() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    retry: false,
-    mutationFn: async ({
-      sessionId,
-      beforeRunIndex,
-      limit = OLDER_RUN_BATCH,
-    }: {
-      sessionId: string
-      beforeRunIndex: number
-      limit?: number
-    }): Promise<LoadedMessages> => {
-      if (!isTauri()) {
-        throw new Error('Not in Tauri context')
-      }
-      logger.debug('[useLoadOlderMessages] fetching', {
-        sessionId,
-        beforeRunIndex,
-        limit,
-      })
-      const result = await invoke<LoadedMessages>(
-        'load_older_session_messages',
-        {
-          sessionId,
-          beforeRunIndex,
-          limit,
-        }
-      )
-      logger.info('[useLoadOlderMessages] loaded', {
-        sessionId,
-        added: result.messages.length,
-        newStart: result.loaded_run_start_index,
-      })
-      return result
-    },
-    onSuccess: (loaded, { sessionId }) => {
-      queryClient.setQueryData<Session>(
-        chatQueryKeys.session(sessionId),
-        old => {
-          if (!old) return old
-          // Guard: if backend returned empty (race) keep cache untouched.
-          if (loaded.messages.length === 0) {
-            return {
-              ...old,
-              total_runs: loaded.total_runs,
-              loaded_run_start_index: loaded.loaded_run_start_index,
-            }
-          }
-          return {
-            ...old,
-            messages: [...loaded.messages, ...old.messages],
-            total_runs: loaded.total_runs,
-            loaded_run_start_index: loaded.loaded_run_start_index,
-          }
-        }
-      )
-    },
-    onError: error => {
-      if (isWsDisconnectError(error)) return
-      const message = error instanceof Error ? error.message : String(error)
-      logger.error('Failed to load older messages', { error })
-      toast.error('Failed to load older messages', { description: message })
-    },
   })
 }
 

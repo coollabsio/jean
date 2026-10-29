@@ -25,10 +25,6 @@ describe('ChatWindow zen composer', () => {
     expect(inputSource).toContain("zenMode ? 'h-12 max-h-12'")
   })
 
-  it('hides old-prompt loading controls in zen mode', () => {
-    expect(source).toContain('hasOlderOnDisk={!zenMode && hasOlderOnDisk}')
-  })
-
   it('exposes the composer so mobile toasts can sit above the textarea', () => {
     expect(source).toContain('data-chat-composer=')
     expect(source).toContain('setChatComposerNode')

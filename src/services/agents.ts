@@ -1,5 +1,9 @@
-import { useEffect } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
 import { isNativeApp } from '@/lib/environment'
 import { decorateServerEvent } from '@/lib/server-command-routing'
 import {
@@ -419,8 +423,11 @@ export function useAgentsList(enabledServerIds: string[]) {
   const sourceKey = sources
     .map(source => `${source.serverId}:${source.online}`)
     .join('|')
-  const query = useQuery({
-    queryKey: agentsQueryKeys.list(),
+  // The server set is part of the key: a server that comes online or goes
+  // away starts a new fetch, and callers with other server sets get their own
+  // cache entry.
+  return useQuery({
+    queryKey: [...agentsQueryKeys.list(), sourceKey],
     queryFn: () =>
       native
         ? loadAgentsForServers(sources, (serverId, command) =>
@@ -433,13 +440,8 @@ export function useAgentsList(enabledServerIds: string[]) {
           ),
     enabled,
     staleTime: 10_000,
+    placeholderData: keepPreviousData,
   })
-  // A server came online or went away: load its agents.
-  const { refetch } = query
-  useEffect(() => {
-    if (enabled) void refetch()
-  }, [sourceKey, enabled, refetch])
-  return query
 }
 
 export function useAgentDetails(agentId: string | null) {

@@ -1,5 +1,4 @@
-import { useEffect } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { isNativeApp } from '@/lib/environment'
 import { useRemoteConnections } from '@/lib/remote-connections'
 import { useServerConnectionSnapshots } from '@/lib/server-connections'
@@ -80,8 +79,10 @@ export function useConsolidatedAllSessions(enabled = true) {
     .map(source => `${source.serverId}:${source.online}`)
     .join('|')
 
-  const query = useQuery({
-    queryKey: ['all-sessions'],
+  // The server set is part of the key, so a server that comes online or goes
+  // away starts a new fetch.
+  return useQuery({
+    queryKey: ['all-sessions', sourceKey],
     queryFn: () =>
       native
         ? loadAllSessionsForServers(sources, (serverId, command) =>
@@ -92,15 +93,8 @@ export function useConsolidatedAllSessions(enabled = true) {
     staleTime: 60_000,
     gcTime: 120_000,
     refetchInterval: native ? 60_000 : false,
+    placeholderData: keepPreviousData,
   })
-
-  useEffect(() => {
-    if (enabled) void query.refetch()
-    // Refetch when the set of available instances changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, sourceKey])
-
-  return query
 }
 
 /**

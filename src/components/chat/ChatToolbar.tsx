@@ -1,5 +1,5 @@
 import { DevinLocationPicker } from '@/components/chat/toolbar/DevinLocationPicker'
-import { memo, useCallback, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useMemo, useRef, useState } from 'react'
 import { Zap } from '@/components/icons/reicon'
 import { dismissibleToast } from '@/lib/dismissible-toast'
 import { invoke } from '@/lib/transport'
@@ -26,7 +26,10 @@ import {
 } from '@/types/chat'
 import type { ChatToolbarProps } from '@/components/chat/toolbar/types'
 import { MobileToolbarMenu } from '@/components/chat/toolbar/MobileToolbarMenu'
-import { MobileSettingsMenu } from '@/components/chat/toolbar/MobileSettingsMenu'
+import {
+  MobileSettingsMenu,
+  type MobileSettingsMenuHandle,
+} from '@/components/chat/toolbar/MobileSettingsMenu'
 import { MobileBackendModelPickerSheet } from '@/components/chat/toolbar/MobileBackendModelPickerSheet'
 import { DesktopToolbarControls } from '@/components/chat/toolbar/DesktopToolbarControls'
 import { DockBurgerButton } from '@/components/chat/toolbar/DockBurgerButton'
@@ -170,9 +173,7 @@ export const ChatToolbar = memo(function ChatToolbar({
   const [mcpDropdownOpen, setMcpDropdownOpen] = useState(false)
   const [mobileBackendModelPickerOpen, setMobileBackendModelPickerOpen] =
     useState(false)
-  // Bumped after a mobile model pick so MobileSettingsMenu opens effort/thinking
-  // without forcing the user to reopen the gear (issue #574).
-  const [openReasoningSheetSignal, setOpenReasoningSheetSignal] = useState(0)
+  const mobileSettingsMenuRef = useRef<MobileSettingsMenuHandle>(null)
   const isMobile = useIsMobile()
   const zenMode = useUIStore(state => state.zenMode)
   const [revertConfirmOpen, setRevertConfirmOpen] = useState(false)
@@ -229,30 +230,6 @@ export const ChatToolbar = memo(function ChatToolbar({
     availableMcpServers,
     enabledMcpServers,
   })
-  useEffect(() => {
-    if (!selectedModelReasoning) return
-    const values = new Set(
-      selectedModelReasoning.levels.map(level => level.value)
-    )
-    // Adaptive/Default is only valid for Antigravity models.
-    if (selectedModel?.toLowerCase().includes('antigravity')) {
-      values.add('adaptive')
-    }
-    if (selectedModelReasoning.type === 'effort') {
-      if (!values.has(selectedEffortLevel)) {
-        onEffortLevelChange(selectedModelReasoning.default as EffortLevel)
-      }
-    } else if (!values.has(selectedThinkingLevel)) {
-      onThinkingLevelChange(selectedModelReasoning.default as ThinkingLevel)
-    }
-  }, [
-    onEffortLevelChange,
-    onThinkingLevelChange,
-    selectedEffortLevel,
-    selectedModel,
-    selectedModelReasoning,
-    selectedThinkingLevel,
-  ])
   const availableExecutionModes = getSupportedExecutionModes(
     selectedBackend
   ).filter(mode => !hidePlanMode || mode !== 'plan')
@@ -353,10 +330,10 @@ export const ChatToolbar = memo(function ChatToolbar({
   )
 
   const handleAfterMobileModelSelect = useCallback(() => {
-    // Defer so selectedBackend/model props refresh before the reasoning sheet
-    // decides effort vs thinking options.
+    // Defer so the menu re-renders with the new model before it checks the
+    // reasoning control.
     requestAnimationFrame(() => {
-      setOpenReasoningSheetSignal(n => n + 1)
+      mobileSettingsMenuRef.current?.openReasoningSheet()
     })
   }, [])
 
@@ -560,7 +537,7 @@ export const ChatToolbar = memo(function ChatToolbar({
               handleProviderChange={handleProviderChange}
               handleEffortLevelChange={handleEffortLevelChange}
               handleThinkingLevelChange={handleThinkingLevelChange}
-              openReasoningSheetSignal={openReasoningSheetSignal}
+              ref={mobileSettingsMenuRef}
               loadedIssueContexts={loadedIssueContexts}
               loadedPRContexts={loadedPRContexts}
               loadedDiscussionContexts={loadedDiscussionContexts}

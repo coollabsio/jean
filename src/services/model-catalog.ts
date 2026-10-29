@@ -494,6 +494,23 @@ export function getCatalogModelFastInfo(
   return getModelFastInfo(backend, model)
 }
 
+/**
+ * Returns `level` when the model supports it, else the model's default.
+ * Effort applies to `effort` models; thinking applies to `thinking` models.
+ */
+export function supportedReasoningLevel<T extends string>(
+  reasoning: ModelReasoningCapability | null | undefined,
+  model: string,
+  kind: ModelReasoningCapability['type'],
+  level: T
+): T {
+  if (reasoning?.type !== kind) return level
+  const values = new Set(reasoning.levels.map(option => option.value))
+  // Adaptive/Default is only valid for Antigravity models.
+  if (model.toLowerCase().includes('antigravity')) values.add('adaptive')
+  return values.has(level) ? level : (reasoning.default as T)
+}
+
 export function getCatalogModelReasoning(
   catalog: ModelCatalog | null | undefined,
   backend: CatalogBackend,

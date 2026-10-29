@@ -1,6 +1,6 @@
 import { SettingsSection } from '@/components/preferences/SettingsSection'
 import { InlineField } from '@/components/preferences/InlineField'
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback } from 'react'
 import { ChevronRight, Loader2, Plus, X } from '@/components/icons/reicon'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -14,6 +14,7 @@ import {
   useJeanConfig,
   useSaveJeanConfig,
   normalizeRunScripts,
+  type JeanConfig,
 } from '@/services/projects'
 
 export function JeanJsonPane({
@@ -24,45 +25,52 @@ export function JeanJsonPane({
 }) {
   const { data: jeanConfig, isLoading: isConfigLoading } =
     useJeanConfig(projectPath)
+  // A new config from disk starts a fresh form with its values.
+  return (
+    <JeanJsonForm
+      key={JSON.stringify(jeanConfig ?? null)}
+      projectPath={projectPath}
+      jeanConfig={jeanConfig ?? null}
+      isConfigLoading={isConfigLoading}
+    />
+  )
+}
+
+function JeanJsonForm({
+  projectPath,
+  jeanConfig,
+  isConfigLoading,
+}: {
+  projectPath: string
+  jeanConfig: JeanConfig | null
+  isConfigLoading: boolean
+}) {
   const saveJeanConfig = useSaveJeanConfig()
 
-  const [localSetup, setLocalSetup] = useState('')
-  const [localTeardown, setLocalTeardown] = useState('')
+  const [localSetup, setLocalSetup] = useState(jeanConfig?.scripts.setup ?? '')
+  const [localTeardown, setLocalTeardown] = useState(
+    jeanConfig?.scripts.teardown ?? ''
+  )
   const [localRun, setLocalRun] = useState<{ id: string; value: string }[]>(
-    () => [{ id: generateId(), value: '' }]
+    () => {
+      const scripts = normalizeRunScripts(jeanConfig?.scripts.run)
+      return (scripts.length > 0 ? scripts : ['']).map(value => ({
+        id: generateId(),
+        value,
+      }))
+    }
   )
   const [localPorts, setLocalPorts] = useState<
     { id: string; port: string; label: string; host: string }[]
-  >([])
-  const [synced, setSynced] = useState(false)
-
-  // Sync from query data
-  useEffect(() => {
-    if (jeanConfig) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setLocalSetup(jeanConfig.scripts.setup ?? '')
-      setLocalTeardown(jeanConfig.scripts.teardown ?? '')
-      const scripts = normalizeRunScripts(jeanConfig.scripts.run)
-      setLocalRun(
-        (scripts.length > 0 ? scripts : ['']).map(value => ({
-          id: generateId(),
-          value,
-        }))
-      )
-
-      const ports = jeanConfig.ports ?? []
-      setLocalPorts(
-        ports.map(p => ({
-          id: generateId(),
-          port: String(p.port),
-          label: p.label,
-          host: p.host ?? '',
-        }))
-      )
-
-      setSynced(true)
-    }
-  }, [jeanConfig])
+  >(() =>
+    (jeanConfig?.ports ?? []).map(p => ({
+      id: generateId(),
+      port: String(p.port),
+      label: p.label,
+      host: p.host ?? '',
+    }))
+  )
+  const synced = jeanConfig !== null
 
   const originalRunScripts = normalizeRunScripts(jeanConfig?.scripts.run)
   const currentRunFiltered: string[] = []

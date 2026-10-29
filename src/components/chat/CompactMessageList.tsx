@@ -9,12 +9,7 @@ import {
   useRef,
   useState,
 } from 'react'
-import {
-  ChevronRight,
-  Loader2,
-  Activity,
-  Brain,
-} from '@/components/icons/reicon'
+import { ChevronRight, Activity, Brain } from '@/components/icons/reicon'
 import { Markdown } from '@/components/ui/markdown'
 import {
   REVEAL_CHAT_MESSAGE_EVENT,
@@ -79,17 +74,10 @@ import {
 } from './ToolCallInline'
 import type { MessageListHandle } from './message-list-handle'
 import {
-  capturePrependScrollAnchor,
-  restorePrependScrollAnchor,
-  type PrependScrollAnchor,
-} from './message-scroll-anchor'
-import {
   RECAP_HEADING_RE,
   extractRecapSection,
   stripRecapFromMessage,
 } from './recap-utils'
-
-const SCROLL_THRESHOLD = 300
 
 interface CompactMessageListProps {
   messages: ChatMessage[]
@@ -134,10 +122,6 @@ interface CompactMessageListProps {
   shouldScrollToBottom?: boolean
   onScrollToBottomHandled?: () => void
   completedDurationMs?: number | null
-  hasOlderOnDisk?: boolean
-  isLoadingOlder?: boolean
-  onLoadOlderRuns?: () => void
-  loadedRunStartIndex?: number
   /** Show only assistant prose: no tool activity rows or edited files */
   hideToolActivity?: boolean
   /** Sends a user message to this session (answers to `ask_user` questions) */
@@ -788,18 +772,12 @@ export const CompactMessageList = memo(
         shouldScrollToBottom,
         onScrollToBottomHandled,
         completedDurationMs,
-        hasOlderOnDisk = false,
-        isLoadingOlder = false,
-        onLoadOlderRuns,
-        loadedRunStartIndex = 0,
         hideToolActivity = false,
         onSendAnswer,
       },
       ref
     ) {
       const messageRefs = useRef(new Map<number, HTMLDivElement>())
-      const pendingPrependAnchorRef = useRef<PrependScrollAnchor | null>(null)
-      const pendingPrependMessagesLengthRef = useRef<number | null>(null)
 
       // Stable accessor for the full message list. Kept in a ref so the
       // identity handed to memoized rows never changes — "subsequent edits"
@@ -1060,55 +1038,6 @@ export const CompactMessageList = memo(
         ]
       )
 
-      const loadOlder = useCallback(() => {
-        const container = scrollContainerRef.current
-        if (
-          !container ||
-          !hasOlderOnDisk ||
-          isLoadingOlder ||
-          !onLoadOlderRuns ||
-          pendingPrependMessagesLengthRef.current !== null
-        ) {
-          return
-        }
-        pendingPrependAnchorRef.current = capturePrependScrollAnchor(container)
-        pendingPrependMessagesLengthRef.current = messages.length
-        onLoadOlderRuns()
-      }, [
-        scrollContainerRef,
-        hasOlderOnDisk,
-        isLoadingOlder,
-        onLoadOlderRuns,
-        messages.length,
-      ])
-
-      // Restore scroll position after older messages prepend.
-      useLayoutEffect(() => {
-        const container = scrollContainerRef.current
-        const anchor = pendingPrependAnchorRef.current
-        const prevLen = pendingPrependMessagesLengthRef.current
-        if (!container || prevLen === null) return
-        if (isLoadingOlder) return
-
-        pendingPrependAnchorRef.current = null
-        pendingPrependMessagesLengthRef.current = null
-
-        if (messages.length === prevLen) return
-
-        restorePrependScrollAnchor(container, anchor)
-      }, [scrollContainerRef, isLoadingOlder, messages.length])
-
-      // Scroll-to-top auto-load.
-      useEffect(() => {
-        const container = scrollContainerRef.current
-        if (!container || !hasOlderOnDisk) return
-        const handleScroll = () => {
-          if (container.scrollTop < SCROLL_THRESHOLD) loadOlder()
-        }
-        container.addEventListener('scroll', handleScroll, { passive: true })
-        return () => container.removeEventListener('scroll', handleScroll)
-      }, [scrollContainerRef, hasOlderOnDisk, loadOlder])
-
       // Scroll-to-bottom on new message arrival. Layout effect pins before
       // paint, so a sent prompt never paints below the fold first. Pin the
       // container (not the last message): content below the last message, such
@@ -1119,7 +1048,6 @@ export const CompactMessageList = memo(
         if (
           container &&
           shouldScrollToBottom &&
-          pendingPrependMessagesLengthRef.current === null &&
           messages.length > prevMessageCountRef.current
         ) {
           container.scrollTop = container.scrollHeight
@@ -1161,26 +1089,11 @@ export const CompactMessageList = memo(
 
       if (messages.length === 0) return null
 
+      // The full history is mounted. content-visibility lets the browser skip
+      // layout and paint for rows outside the viewport; `auto` remembers each
+      // row's real height after it renders once.
       return (
-        <div className="flex flex-col w-full">
-          {hasOlderOnDisk && (
-            <button
-              type="button"
-              onClick={loadOlder}
-              disabled={isLoadingOlder}
-              className="w-full text-center text-muted-foreground text-xs py-2 opacity-60 hover:opacity-100 transition-opacity cursor-pointer disabled:cursor-wait"
-            >
-              {isLoadingOlder ? (
-                <span className="inline-flex items-center gap-2">
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  Loading old prompts…
-                </span>
-              ) : (
-                `↑ Load old prompts (${loadedRunStartIndex} older runs on disk)`
-              )}
-            </button>
-          )}
-
+        <div className="flex flex-col w-full [&>*]:[content-visibility:auto] [&>*]:[contain-intrinsic-size:auto_200px]">
           {renderItems.map(item => {
             if (item.kind === 'message') {
               const hasFollowUpMessage =

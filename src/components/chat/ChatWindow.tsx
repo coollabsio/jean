@@ -56,7 +56,6 @@ import {
   useSetSessionBackend,
   useSetSessionProvider,
   useCreateSession,
-  useLoadOlderMessages,
   chatQueryKeys,
   reconnectNativeCliSession,
   canReconnectSession,
@@ -224,6 +223,7 @@ import { useCodexUsage } from '@/services/codex-cli'
 import { getLimitResetAtMs, isUsageLimitError } from '@/lib/usage-limit'
 import {
   getCatalogModelReasoning,
+  supportedReasoningLevel,
   useModelCatalog,
 } from '@/services/model-catalog'
 import { useAvailablePiModels } from '@/services/pi-cli'
@@ -767,25 +767,6 @@ const ChatWindowContent = memo(function ChatWindowContent({
     isSessionSwitching,
   ])
 
-  const loadOlderMessages = useLoadOlderMessages()
-  const loadedRunStartIndex = session?.loaded_run_start_index ?? 0
-  const totalRuns = session?.total_runs ?? 0
-  const hasOlderOnDisk = loadedRunStartIndex > 0 && totalRuns > 0
-  const handleLoadOlderRuns = useCallback(() => {
-    if (!deferredSessionId || !hasOlderOnDisk || loadOlderMessages.isPending) {
-      return
-    }
-    loadOlderMessages.mutate({
-      sessionId: deferredSessionId,
-      beforeRunIndex: loadedRunStartIndex,
-    })
-  }, [
-    deferredSessionId,
-    hasOlderOnDisk,
-    loadedRunStartIndex,
-    loadOlderMessages,
-  ])
-
   const { data: preferences } = usePreferences()
   const patchPreferences = usePatchPreferences()
   const sessionModalOpen = useUIStore(state => state.sessionChatModalOpen)
@@ -1061,7 +1042,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
   const sessionThinkingLevel = useChatStore(state =>
     deferredSessionId ? state.thinkingLevels[deferredSessionId] : undefined
   )
-  const selectedThinkingLevel =
+  const rawSelectedThinkingLevel =
     (session?.selected_thinking_level as ThinkingLevel) ??
     sessionThinkingLevel ??
     defaultThinkingLevel
@@ -1094,7 +1075,6 @@ const ChatWindowContent = memo(function ChatWindowContent({
     (session?.selected_effort_level as EffortLevel | undefined) ??
     sessionEffortLevel ??
     defaultEffortLevel
-  const selectedEffortLevel: EffortLevel = rawSelectedEffortLevel
 
   // MCP servers: resolve enabled servers cascade (session → project → global)
   // Fetches from ALL installed backends so toolbar shows grouped sections
@@ -1113,6 +1093,20 @@ const ChatWindowContent = memo(function ChatWindowContent({
     modelCatalog,
     selectedBackend,
     selectedModel
+  )
+  // A saved level the current model does not support falls back to the
+  // model's default, without a write back to the session.
+  const selectedEffortLevel = supportedReasoningLevel(
+    selectedModelReasoning,
+    selectedModel,
+    'effort',
+    rawSelectedEffortLevel
+  )
+  const selectedThinkingLevel = supportedReasoningLevel(
+    selectedModelReasoning,
+    selectedModel,
+    'thinking',
+    rawSelectedThinkingLevel
   )
   // Custom providers don't support Opus 4.6 adaptive thinking — use thinking levels instead
   const useAdaptiveThinkingFlag =
@@ -2925,12 +2919,6 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                     handleScrollToBottomHandled
                                   }
                                   completedDurationMs={completedDurationMs}
-                                  hasOlderOnDisk={!zenMode && hasOlderOnDisk}
-                                  isLoadingOlder={loadOlderMessages.isPending}
-                                  onLoadOlderRuns={
-                                    zenMode ? undefined : handleLoadOlderRuns
-                                  }
-                                  loadedRunStartIndex={loadedRunStartIndex}
                                 />
                               </>
                             )}

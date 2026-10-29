@@ -490,16 +490,6 @@ export interface WakeupCancelledEvent {
 }
 
 /**
- * Result of loading a window of session messages from disk.
- * Returned by `load_older_session_messages`.
- */
-export interface LoadedMessages {
-  messages: ChatMessage[]
-  total_runs: number
-  loaded_run_start_index: number
-}
-
-/**
  * All sessions for a worktree (stored in app data directory, NOT in the worktree)
  * Location: ~/Library/Application Support/<app>/sessions/<worktree_id>.json
  */

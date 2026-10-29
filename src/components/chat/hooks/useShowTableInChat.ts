@@ -1,7 +1,7 @@
 import { useCallback, useLayoutEffect, useRef, type RefObject } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { chatQueryKeys, useLoadOlderMessages } from '@/services/chat'
+import { chatQueryKeys } from '@/services/chat'
 import {
   REVEAL_CHAT_MESSAGE_EVENT,
   findTableMessageIndex,
@@ -23,21 +23,12 @@ interface ShowTableInChatOptions {
   stopFollowingTail: () => void
 }
 
-const nextFrame = () =>
-  new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
-
-async function afterRender() {
-  await nextFrame()
-  await nextFrame()
-}
-
 /**
- * Scroll to a pinned table in the chat. Loads older runs from disk and opens
- * the compact activity row when the table is not rendered yet.
+ * Scroll to a pinned table in the chat. Opens the compact activity row when
+ * the table is not rendered yet.
  */
 export function useShowTableInChat(options: ShowTableInChatOptions) {
   const queryClient = useQueryClient()
-  const { mutateAsync: loadOlder } = useLoadOlderMessages()
   const latest = useRef(options)
   useLayoutEffect(() => {
     latest.current = options
@@ -83,42 +74,22 @@ export function useShowTableInChat(options: ShowTableInChatOptions) {
         return true
       }
 
-      let session = readSession()
-      let index = findIndex(session?.messages ?? [])
-      const loadedId = session?.messages[index]?.id ?? null
-      if (await reveal(loadedId, 0)) return
-
-      try {
-        while (index < 0 && (session?.loaded_run_start_index ?? 0) > 0) {
-          const before = session?.loaded_run_start_index ?? 0
-          await loadOlder({ sessionId, beforeRunIndex: before })
-          session = readSession()
-          if ((session?.loaded_run_start_index ?? 0) === before) break
-          index = findIndex(session?.messages ?? [])
-        }
-      } catch (error) {
-        toast.error('Failed to load older messages', {
-          description: String(error),
-        })
-        return
-      }
-
+      const session = readSession()
+      const index = findIndex(session?.messages ?? [])
       const message = session?.messages[index]
+      if (await reveal(message?.id ?? null, 0)) return
+
       if (!message) {
         toast.info('The message with this table is no longer in the chat')
         return
       }
 
-      // Let older messages render so the list start index is current.
-      await afterRender()
       const { listStartIndex } = latest.current
       if (index < listStartIndex) {
         toast.info('Exit zen mode to see this table in the chat')
         return
       }
 
-      // Loading older messages can re-pin the chat to the bottom.
-      latest.current.stopFollowingTail()
       window.dispatchEvent(
         new CustomEvent<RevealChatMessageDetail>(REVEAL_CHAT_MESSAGE_EVENT, {
           detail: { messageId: message.id },
@@ -130,6 +101,6 @@ export function useShowTableInChat(options: ShowTableInChatOptions) {
         toast.info('Could not find this table in the chat')
       }
     },
-    [queryClient, loadOlder]
+    [queryClient]
   )
 }

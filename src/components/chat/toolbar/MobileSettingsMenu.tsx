@@ -1,10 +1,10 @@
 import {
   useCallback,
-  useEffect,
   useMemo,
-  useRef,
+  useImperativeHandle,
   useState,
   type ReactNode,
+  type Ref,
 } from 'react'
 import {
   Brain,
@@ -147,6 +147,14 @@ const EMPTY_RUN_SCRIPTS: string[] = []
 const EMPTY_PACKAGE_SCRIPTS: PackageScript[] = []
 const EMPTY_FAVORITE_PACKAGE_SCRIPTS: string[] = []
 
+export interface MobileSettingsMenuHandle {
+  /**
+   * Open the effort/thinking sheet without reopening the gear menu
+   * (issue #574). Does nothing when the model has no reasoning control.
+   */
+  openReasoningSheet: () => void
+}
+
 interface MobileSettingsMenuProps {
   isDisabled: boolean
   providerLocked?: boolean
@@ -170,11 +178,8 @@ interface MobileSettingsMenuProps {
   handleProviderChange: (value: string) => void
   handleEffortLevelChange: (value: string) => void
   handleThinkingLevelChange: (value: string) => void
-  /**
-   * Bump this after a mobile model pick so the reasoning (effort/thinking)
-   * sheet opens without reopening the gear menu (issue #574).
-   */
-  openReasoningSheetSignal?: number
+  /** Lets the toolbar open the reasoning sheet after a mobile model pick. */
+  ref?: Ref<MobileSettingsMenuHandle>
 
   loadedIssueContexts: LoadedIssueContext[]
   loadedPRContexts: LoadedPullRequestContext[]
@@ -234,7 +239,7 @@ export function MobileSettingsMenu({
   handleProviderChange,
   handleEffortLevelChange,
   handleThinkingLevelChange,
-  openReasoningSheetSignal = 0,
+  ref,
   loadedIssueContexts,
   loadedPRContexts,
   loadedDiscussionContexts,
@@ -370,8 +375,12 @@ export function MobileSettingsMenu({
   const isMobile = useIsMobile()
   const queryClient = useQueryClient()
   const [menuOpen, setMenuOpen] = useState(false)
-  const [effortSheetOpen, setEffortSheetOpen] = useState(false)
-  const [thinkingSheetOpen, setThinkingSheetOpen] = useState(false)
+  const [reasoningSheetOpen, setReasoningSheetOpen] = useState(false)
+  // One sheet state: the current model decides effort vs thinking at render.
+  const effortSheetOpen =
+    reasoningSheetOpen && !hideReasoningControl && usesEffortControl
+  const thinkingSheetOpen =
+    reasoningSheetOpen && !hideReasoningControl && !usesEffortControl
   const [mcpSheetOpen, setMcpSheetOpen] = useState(false)
   const [scriptsSheetOpen, setScriptsSheetOpen] = useState(false)
   const [contextsSheetOpen, setContextsSheetOpen] = useState(false)
@@ -428,14 +437,9 @@ export function MobileSettingsMenu({
     requestAnimationFrame(() => onOpenBackendModelPicker())
   }
 
-  const openEffortPicker = () => {
+  const openReasoningPicker = () => {
     setMenuOpen(false)
-    requestAnimationFrame(() => setEffortSheetOpen(true))
-  }
-
-  const openThinkingPicker = () => {
-    setMenuOpen(false)
-    requestAnimationFrame(() => setThinkingSheetOpen(true))
+    requestAnimationFrame(() => setReasoningSheetOpen(true))
   }
 
   const openMcpPicker = () => {
@@ -453,23 +457,11 @@ export function MobileSettingsMenu({
     requestAnimationFrame(() => setContextsSheetOpen(true))
   }
 
-  // After mobile model selection, auto-open effort/thinking so users don't
-  // have to reopen the settings cog (issue #574).
-  const lastReasoningSheetSignalRef = useRef(0)
-  useEffect(() => {
-    if (!openReasoningSheetSignal) return
-    if (openReasoningSheetSignal === lastReasoningSheetSignalRef.current) return
-    lastReasoningSheetSignalRef.current = openReasoningSheetSignal
-    if (hideReasoningControl) return
-    setMenuOpen(false)
-    if (usesEffortControl) {
-      setThinkingSheetOpen(false)
-      requestAnimationFrame(() => setEffortSheetOpen(true))
-    } else {
-      setEffortSheetOpen(false)
-      requestAnimationFrame(() => setThinkingSheetOpen(true))
-    }
-  }, [openReasoningSheetSignal, hideReasoningControl, usesEffortControl])
+  useImperativeHandle(ref, () => ({
+    openReasoningSheet: () => {
+      if (!hideReasoningControl) openReasoningPicker()
+    },
+  }))
 
   const getActiveResumeCommand = useCallback(() => {
     if (!worktreeId) return null
@@ -791,7 +783,7 @@ export function MobileSettingsMenu({
           )}
 
           {hideReasoningControl ? null : usesEffortControl && isMobile ? (
-            <DropdownMenuItem onSelect={openEffortPicker}>
+            <DropdownMenuItem onSelect={openReasoningPicker}>
               <Brain className="h-4 w-4 text-muted-foreground" />
               <span>Effort</span>
               <span className="ml-auto w-16 text-right text-xs text-muted-foreground">
@@ -829,7 +821,7 @@ export function MobileSettingsMenu({
               </DropdownMenuSubContent>
             </DropdownMenuSub>
           ) : isMobile ? (
-            <DropdownMenuItem onSelect={openThinkingPicker}>
+            <DropdownMenuItem onSelect={openReasoningPicker}>
               <Brain className="h-4 w-4 text-muted-foreground" />
               <span>Thinking</span>
               <span className="ml-auto w-16 text-right text-xs text-muted-foreground">
@@ -1134,7 +1126,7 @@ export function MobileSettingsMenu({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <Sheet open={effortSheetOpen} onOpenChange={setEffortSheetOpen}>
+      <Sheet open={effortSheetOpen} onOpenChange={setReasoningSheetOpen}>
         <SheetContent
           side="bottom"
           className="max-h-[75svh] overflow-hidden rounded-t-xl p-0"
@@ -1160,7 +1152,7 @@ export function MobileSettingsMenu({
                   aria-pressed={selected}
                   onClick={() => {
                     handleEffortLevelChange(option.value)
-                    setEffortSheetOpen(false)
+                    setReasoningSheetOpen(false)
                   }}
                 >
                   <span className="flex-1">
@@ -1177,7 +1169,7 @@ export function MobileSettingsMenu({
         </SheetContent>
       </Sheet>
 
-      <Sheet open={thinkingSheetOpen} onOpenChange={setThinkingSheetOpen}>
+      <Sheet open={thinkingSheetOpen} onOpenChange={setReasoningSheetOpen}>
         <SheetContent
           side="bottom"
           className="max-h-[75svh] overflow-hidden rounded-t-xl p-0"
@@ -1205,7 +1197,7 @@ export function MobileSettingsMenu({
                   aria-pressed={selected}
                   onClick={() => {
                     handleThinkingLevelChange(option.value)
-                    setThinkingSheetOpen(false)
+                    setReasoningSheetOpen(false)
                   }}
                 >
                   <span className="flex-1">

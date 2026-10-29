@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  supportedReasoningLevel,
   MODEL_CATALOG_URL,
   clearCachedModelCatalog,
   fetchModelCatalog,
@@ -441,5 +442,50 @@ describe('model catalog', () => {
     expect(
       getCatalogModelReasoning(catalog, 'claude', 'claude-invalid')
     ).toBeUndefined()
+  })
+})
+
+describe('supportedReasoningLevel', () => {
+  const effort = {
+    type: 'effort' as const,
+    default: 'high',
+    levels: [
+      { value: 'low', label: 'Low' },
+      { value: 'high', label: 'High' },
+    ],
+  }
+
+  it('keeps a supported level', () => {
+    expect(supportedReasoningLevel(effort, 'gpt', 'effort', 'low')).toBe('low')
+  })
+
+  it('falls back to the model default for an unsupported level', () => {
+    expect(supportedReasoningLevel(effort, 'gpt', 'effort', 'max')).toBe('high')
+  })
+
+  it('leaves the other reasoning kind unchanged', () => {
+    expect(
+      supportedReasoningLevel(effort, 'gpt', 'thinking', 'ultrathink')
+    ).toBe('ultrathink')
+  })
+
+  it('keeps any level when the model has no reasoning data', () => {
+    expect(supportedReasoningLevel(undefined, 'gpt', 'effort', 'max')).toBe(
+      'max'
+    )
+  })
+
+  it('allows adaptive only for Antigravity models', () => {
+    expect(
+      supportedReasoningLevel(
+        effort,
+        'antigravity/gemini',
+        'effort',
+        'adaptive'
+      )
+    ).toBe('adaptive')
+    expect(supportedReasoningLevel(effort, 'gpt', 'effort', 'adaptive')).toBe(
+      'high'
+    )
   })
 })
