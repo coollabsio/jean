@@ -1091,7 +1091,7 @@ mod tests {
         prefs.agent_browser_enabled = true;
         assert_eq!(
             crate::apply_agent_browser_preference(prompt.clone(), Some(&prefs)),
-            prompt
+            format!("{prompt}\n{}", crate::AGENT_BROWSER_SCREENSHOT_RULE)
         );
     }
 
@@ -2536,14 +2536,19 @@ pub(crate) fn upgrade_legacy_parallel_execution_prompt(prompt: Option<String>) -
     })
 }
 
-/// Drop Agent Browser instructions from a system prompt when the integration
+/// Leaves Agent Browser screenshots in Jean's screenshot folder, which Jean
+/// cleans up, instead of paths the agent picks.
+const AGENT_BROWSER_SCREENSHOT_RULE: &str = "- When you take an Agent Browser screenshot, do not give a file path. Agent Browser saves it in Jean's screenshot folder and returns the path.";
+
+/// Add the Agent Browser screenshot rule when the integration is on. Drop
+/// Agent Browser instructions from a system prompt when the integration
 /// is off, so agents are not told to use a browser tool that is not there.
 pub(crate) fn apply_agent_browser_preference(
     prompt: String,
     preferences: Option<&AppPreferences>,
 ) -> String {
     if preferences.is_some_and(|prefs| prefs.agent_browser_enabled) {
-        return prompt;
+        return format!("{prompt}\n{AGENT_BROWSER_SCREENSHOT_RULE}");
     }
     prompt
         .lines()
@@ -5415,6 +5420,11 @@ pub async fn start_runtime_services(context: RuntimeContext) -> Result<(), Strin
             jean_mcp_config::install_jean_mcp_config_impl(context.clone(), None, None).await
         {
             log::warn!("Failed to activate required Jean MCP configs: {error}");
+        }
+
+        let pruned = agent_browser::prune_old_screenshots(&context);
+        if pruned > 0 {
+            log::info!("Removed {pruned} old agent-browser screenshots");
         }
 
         // Agent Browser is opt-in. When it is off, remove the MCP entries that

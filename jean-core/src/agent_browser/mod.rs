@@ -43,6 +43,13 @@ const RESTORE_KEY: &str = "jean";
 const IDLE_TIMEOUT_ENV: &str = "AGENT_BROWSER_IDLE_TIMEOUT_MS";
 const IDLE_TIMEOUT_MS: &str = "900000";
 
+/// Default folder for screenshots taken without a path. It is under app data,
+/// so chat galleries load them through the asset protocol, and Jean deletes
+/// files older than [`SCREENSHOT_MAX_AGE`] on startup.
+const SCREENSHOT_DIR_ENV: &str = "AGENT_BROWSER_SCREENSHOT_DIR";
+const SCREENSHOT_DIR_NAME: &str = "browser-screenshots";
+const SCREENSHOT_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(30 * 24 * 60 * 60);
+
 /// agent-browser session name for a Jean session.
 pub fn session_name(jean_session_id: &str) -> String {
     format!("jean-{jean_session_id}")
@@ -88,24 +95,34 @@ pub struct AgentBrowserUpdateStatus {
 
 struct McpEntry {
     command: String,
+    screenshot_dir: Option<String>,
 }
 
-/// Env written into every backend's MCP entry. The per-session
-/// `AGENT_BROWSER_SESSION` is not here: Jean sets it on each run.
-const ENTRY_ENV: [(&str, &str); 2] = [
-    (RESTORE_ENV, RESTORE_KEY),
-    (IDLE_TIMEOUT_ENV, IDLE_TIMEOUT_MS),
-];
-
 impl McpEntry {
-    fn new(command: String) -> Self {
-        Self { command }
+    fn new(command: String, screenshot_dir: Option<PathBuf>) -> Self {
+        Self {
+            command,
+            screenshot_dir: screenshot_dir.map(|dir| dir.to_string_lossy().to_string()),
+        }
+    }
+
+    /// Env written into every backend's MCP entry. The per-session
+    /// `AGENT_BROWSER_SESSION` is not here: Jean sets it on each run.
+    fn env(&self) -> Vec<(&'static str, &str)> {
+        let mut env = vec![
+            (RESTORE_ENV, RESTORE_KEY),
+            (IDLE_TIMEOUT_ENV, IDLE_TIMEOUT_MS),
+        ];
+        if let Some(dir) = &self.screenshot_dir {
+            env.push((SCREENSHOT_DIR_ENV, dir));
+        }
+        env
     }
 
     fn env_map(&self) -> serde_json::Map<String, Value> {
-        ENTRY_ENV
-            .iter()
-            .map(|(key, value)| (key.to_string(), Value::from(*value)))
+        self.env()
+            .into_iter()
+            .map(|(key, value)| (key.to_string(), Value::from(value)))
             .collect()
     }
 
@@ -155,9 +172,10 @@ impl McpEntry {
     }
 
     fn codex_snippet(&self) -> String {
-        let env = ENTRY_ENV
-            .iter()
-            .map(|(key, value)| format!("{key} = \"{value}\""))
+        let env = self
+            .env()
+            .into_iter()
+            .map(|(key, value)| format!("{key} = \"{}\"", escape_toml_string(value)))
             .collect::<Vec<_>>()
             .join(", ");
         format!(
@@ -172,7 +190,7 @@ impl McpEntry {
         table["command"] = toml_edit::value(self.command.clone());
         table["args"] = toml_edit::value(toml_edit::Array::from_iter(["mcp"]));
         let mut env = toml_edit::InlineTable::new();
-        for (key, value) in ENTRY_ENV {
+        for (key, value) in self.env() {
             env.insert(key, value.into());
         }
         table["env"] = toml_edit::value(env);
@@ -279,7 +297,37 @@ fn build_entry(app: &AppHandle) -> McpEntry {
         .path
         .filter(|p| !p.is_empty())
         .unwrap_or_else(|| "agent-browser".to_string());
-    McpEntry::new(command)
+    McpEntry::new(command, screenshot_dir(app))
+}
+
+/// Default agent-browser screenshot folder under app data.
+fn screenshot_dir(app: &AppHandle) -> Option<PathBuf> {
+    let app_data = app.path().app_data_dir().ok()?;
+    Some(app_data.join(SCREENSHOT_DIR_NAME))
+}
+
+/// Delete screenshots in Jean's screenshot folder older than
+/// [`SCREENSHOT_MAX_AGE`]. Returns how many files were removed.
+pub(crate) fn prune_old_screenshots(app: &AppHandle) -> usize {
+    screenshot_dir(app).map_or(0, |dir| prune_files_older_than(&dir, SCREENSHOT_MAX_AGE))
+}
+
+fn prune_files_older_than(dir: &Path, max_age: std::time::Duration) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    let Some(cutoff) = std::time::SystemTime::now().checked_sub(max_age) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .filter(|entry| {
+            entry.metadata().is_ok_and(|meta| {
+                meta.is_file() && meta.modified().is_ok_and(|modified| modified < cutoff)
+            })
+        })
+        .filter(|entry| std::fs::remove_file(entry.path()).is_ok())
+        .count()
 }
 
 /// Per-thread Codex config override that sets the agent-browser session.
@@ -372,6 +420,7 @@ pub async fn get_agent_browser_status(app: AppHandle) -> Result<AgentBrowserStat
             .clone()
             .filter(|p| !p.is_empty())
             .unwrap_or_else(|| "agent-browser".to_string()),
+        screenshot_dir(&app),
     );
 
     Ok(AgentBrowserStatus {
@@ -548,6 +597,7 @@ pub(crate) fn install_agent_browser_sync(app: &AppHandle) -> Result<AgentBrowser
             .path
             .clone()
             .unwrap_or_else(|| binary.to_string_lossy().to_string()),
+        screenshot_dir(app),
     );
 
     Ok(AgentBrowserStatus {
@@ -916,7 +966,7 @@ mod antigravity_install_tests {
     fn installs_agent_browser_in_antigravity_global_config() {
         let temp = tempfile::tempdir().expect("tempdir");
         let path = temp.path().join("mcp_config.json");
-        let entry = McpEntry::new("agent-browser".to_string());
+        let entry = McpEntry::new("agent-browser".to_string(), None);
 
         install_antigravity_at(path.clone(), &entry).expect("install");
 
@@ -1094,7 +1144,7 @@ mod tests {
 
     #[test]
     fn mcp_entry_uses_shared_restore_key_without_shared_profile() {
-        let server = McpEntry::new("agent-browser".into()).claude_server_json();
+        let server = McpEntry::new("agent-browser".into(), None).claude_server_json();
         assert_eq!(server["args"], json!(["mcp"]));
         assert_eq!(server["env"]["AGENT_BROWSER_RESTORE"], "jean");
         assert_eq!(server["env"]["AGENT_BROWSER_IDLE_TIMEOUT_MS"], "900000");
@@ -1102,11 +1152,64 @@ mod tests {
         assert!(server["env"].get("AGENT_BROWSER_PROFILE").is_none());
         // The session is set per run, never globally.
         assert!(server["env"].get(SESSION_ENV).is_none());
+        assert!(server["env"].get(SCREENSHOT_DIR_ENV).is_none());
+    }
+
+    #[test]
+    fn mcp_entry_sets_screenshot_dir_in_every_config_format() {
+        let dir = PathBuf::from(r"C:\Users\me\AppData\com.jean.desktop\browser-screenshots");
+        let entry = McpEntry::new("agent-browser".into(), Some(dir.clone()));
+        let expected = dir.to_string_lossy().to_string();
+
+        assert_eq!(
+            entry.claude_server_json()["env"][SCREENSHOT_DIR_ENV],
+            expected
+        );
+        assert_eq!(
+            entry.opencode_server_json()["environment"][SCREENSHOT_DIR_ENV],
+            expected
+        );
+        let doc = entry
+            .codex_snippet()
+            .parse::<toml_edit::DocumentMut>()
+            .unwrap();
+        assert_eq!(
+            doc["mcp_servers"]["agent-browser"]["env"][SCREENSHOT_DIR_ENV].as_str(),
+            Some(expected.as_str())
+        );
+        assert_eq!(
+            entry.codex_table_item()["env"][SCREENSHOT_DIR_ENV].as_str(),
+            Some(expected.as_str())
+        );
+    }
+
+    #[test]
+    fn prune_removes_only_files_older_than_max_age() {
+        let dir = TempDir::new().unwrap();
+        let old = dir.path().join("old.png");
+        let fresh = dir.path().join("fresh.png");
+        fs::write(&old, b"old").unwrap();
+        fs::write(&fresh, b"fresh").unwrap();
+        let month_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(31 * 86400);
+        fs::File::options()
+            .write(true)
+            .open(&old)
+            .unwrap()
+            .set_modified(month_ago)
+            .unwrap();
+
+        assert_eq!(prune_files_older_than(dir.path(), SCREENSHOT_MAX_AGE), 1);
+        assert!(!old.exists());
+        assert!(fresh.exists());
+        assert_eq!(
+            prune_files_older_than(&dir.path().join("missing"), SCREENSHOT_MAX_AGE),
+            0
+        );
     }
 
     #[test]
     fn mcp_entry_codex_snippet_is_valid_toml() {
-        let snippet = McpEntry::new("agent-browser".into()).codex_snippet();
+        let snippet = McpEntry::new("agent-browser".into(), None).codex_snippet();
         let doc = snippet.parse::<toml_edit::DocumentMut>().unwrap();
         let server = &doc["mcp_servers"]["agent-browser"];
         assert_eq!(
@@ -1127,7 +1230,7 @@ mod tests {
         let path = dir.path().join("config.toml");
         install_toml_server(
             path.clone(),
-            &McpEntry::new("agent-browser".into()),
+            &McpEntry::new("agent-browser".into(), None),
             "Codex",
             false,
         )
@@ -1159,7 +1262,7 @@ mod tests {
         )
         .unwrap();
 
-        let entry = McpEntry::new("agent-browser".into());
+        let entry = McpEntry::new("agent-browser".into(), None);
         install_json_server(path.clone(), "mcpServers", entry.claude_server_json()).unwrap();
 
         let parsed: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
@@ -1180,7 +1283,7 @@ mod tests {
         let path = dir.path().join("config.toml");
         fs::write(&path, "[mcp_servers.existing]\ncommand = \"foo\"\n").unwrap();
 
-        let entry = McpEntry::new("/usr/bin/agent-browser".into());
+        let entry = McpEntry::new("/usr/bin/agent-browser".into(), None);
         install_toml_server(path.clone(), &entry, "Codex", false).unwrap();
 
         let content = fs::read_to_string(&path).unwrap();
@@ -1199,7 +1302,7 @@ mod tests {
             r#"{ "mcpServers": { "other": { "command": "x" } } }"#,
         )
         .unwrap();
-        let entry = McpEntry::new("agent-browser".into());
+        let entry = McpEntry::new("agent-browser".into(), None);
         install_json_server(path.clone(), "mcpServers", entry.claude_server_json()).unwrap();
 
         assert!(remove_json_server(&path, "mcpServers", "env")
@@ -1227,7 +1330,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("config.toml");
         fs::write(&path, "[mcp_servers.existing]\ncommand = \"foo\"\n").unwrap();
-        let entry = McpEntry::new("/usr/bin/agent-browser".into());
+        let entry = McpEntry::new("/usr/bin/agent-browser".into(), None);
         install_toml_server(path.clone(), &entry, "Codex", false).unwrap();
 
         assert!(remove_toml_server(&path).unwrap().is_some());
