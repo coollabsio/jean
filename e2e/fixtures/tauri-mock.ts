@@ -259,8 +259,10 @@ export async function activateWorktree(
   }
   await expect(projectsHeader).toBeVisible({ timeout: 3000 })
 
-  // Click the worktree
-  await page.getByText(worktreeName).click()
+  // Click the worktree row in the sidebar (the canvas lists it too)
+  await page
+    .getByRole('button', { name: `${worktreeName} Expand sessions` })
+    .click()
   await page.waitForTimeout(1000)
 
   // Wait for chat view (dashboard empty state should be gone)

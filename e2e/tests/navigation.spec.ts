@@ -16,10 +16,14 @@ test.describe('Navigation', () => {
 
     // Sidebar should show project and worktrees
     await expect(projectsHeader).toBeVisible({ timeout: 3000 })
-    await expect(mockPage.getByText('fuzzy-tiger')).toBeVisible({
+    await expect(
+      mockPage.getByRole('button', { name: 'fuzzy-tiger Expand sessions' })
+    ).toBeVisible({
       timeout: 3000,
     })
-    await expect(mockPage.getByText('calm-dolphin')).toBeVisible({
+    await expect(
+      mockPage.getByRole('button', { name: 'calm-dolphin Expand sessions' })
+    ).toBeVisible({
       timeout: 3000,
     })
   })
@@ -37,7 +41,9 @@ test.describe('Navigation', () => {
     }
 
     // Click a worktree
-    await mockPage.getByText('fuzzy-tiger').click()
+    await mockPage
+      .getByRole('button', { name: 'fuzzy-tiger Expand sessions' })
+      .click()
     await mockPage.waitForTimeout(1000)
 
     // Dashboard empty state should no longer be visible
