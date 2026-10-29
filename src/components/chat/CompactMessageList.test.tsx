@@ -43,36 +43,67 @@ function message(
   }
 }
 
+function compactProps(
+  messages: ChatMessage[],
+  props: Partial<ComponentProps<typeof CompactMessageList>> = {}
+): ComponentProps<typeof CompactMessageList> {
+  return {
+    messages,
+    scrollContainerRef: createRef<HTMLDivElement>(),
+    totalMessages: messages.length,
+    lastPlanMessageIndex: -1,
+    sessionId: 'session-1',
+    worktreePath: '/tmp/worktree',
+    approveShortcut: 'Cmd+Enter',
+    isSending: false,
+    onPlanApproval: vi.fn(),
+    onQuestionAnswer: noopQuestionAnswer,
+    onQuestionSkip: vi.fn(),
+    onFileClick: vi.fn(),
+    onFixFinding: noopFixFinding,
+    onFixAllFindings: noopFixAllFindings,
+    isQuestionAnswered: vi.fn(() => false),
+    getSubmittedAnswers: vi.fn(() => undefined),
+    areQuestionsSkipped: vi.fn(() => false),
+    isFindingFixed: vi.fn(() => false),
+    ...props,
+  }
+}
+
 function renderCompact(
   messages: ChatMessage[],
   props: Partial<ComponentProps<typeof CompactMessageList>> = {}
 ) {
-  return render(
-    <CompactMessageList
-      messages={messages}
-      scrollContainerRef={createRef<HTMLDivElement>()}
-      totalMessages={messages.length}
-      lastPlanMessageIndex={-1}
-      sessionId="session-1"
-      worktreePath="/tmp/worktree"
-      approveShortcut="Cmd+Enter"
-      isSending={false}
-      onPlanApproval={vi.fn()}
-      onQuestionAnswer={noopQuestionAnswer}
-      onQuestionSkip={vi.fn()}
-      onFileClick={vi.fn()}
-      onFixFinding={noopFixFinding}
-      onFixAllFindings={noopFixAllFindings}
-      isQuestionAnswered={vi.fn(() => false)}
-      getSubmittedAnswers={vi.fn(() => undefined)}
-      areQuestionsSkipped={vi.fn(() => false)}
-      isFindingFixed={vi.fn(() => false)}
-      {...props}
-    />
-  )
+  return render(<CompactMessageList {...compactProps(messages, props)} />)
 }
 
 describe('CompactMessageList', () => {
+  it('pins the scroll container to its full height when a prompt is sent', () => {
+    const container = document.createElement('div')
+    Object.defineProperty(container, 'scrollHeight', {
+      configurable: true,
+      value: 1800,
+    })
+    const scrollContainerRef = { current: container }
+    const onScrollToBottomHandled = vi.fn()
+    const first = [
+      message('user-1', 'user', 100, 'hello'),
+      message('assistant-1', 'assistant', 104, 'Hello!'),
+    ]
+    const props = {
+      scrollContainerRef,
+      shouldScrollToBottom: true,
+      onScrollToBottomHandled,
+    }
+    const { rerender } = renderCompact(first, props)
+
+    const next = [...first, message('user-2', 'user', 200, 'next prompt')]
+    rerender(<CompactMessageList {...compactProps(next, props)} />)
+
+    expect(container.scrollTop).toBe(1800)
+    expect(onScrollToBottomHandled).toHaveBeenCalledTimes(1)
+  })
+
   it('renders a single pure text assistant response once instead of as activity plus text', () => {
     renderCompact([
       message('user-1', 'user', 100, 'hello'),

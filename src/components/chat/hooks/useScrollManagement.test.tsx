@@ -109,12 +109,12 @@ function setupHook({
       stopFollowingTail,
       scrollToBottom,
     } = useScrollManagement({
-        messages: msgs,
-        virtualizedListRef,
-        activeSessionId: sessionId,
-        contentReady: ready,
-        isSending: sending,
-      })
+      messages: msgs,
+      virtualizedListRef,
+      activeSessionId: sessionId,
+      contentReady: ready,
+      isSending: sending,
+    })
 
     return (
       <div
@@ -245,6 +245,22 @@ describe('useScrollManagement streaming auto-scroll', () => {
     const { viewport } = setupHook()
 
     await triggerResize()
+
+    expect(viewport.scrollTop).toBe(2000)
+  })
+
+  it('pins the streaming tail in the resize callback, before the next frame', () => {
+    isMobile = true
+    const { viewport } = setupHook()
+    viewport.scrollTop = 1600
+    // Frames never run: a pin deferred to rAF would paint the old position.
+    vi.mocked(window.requestAnimationFrame).mockImplementation(() => 1)
+
+    act(() => {
+      for (const callback of resizeObserverCallbacks) {
+        callback([], {} as ResizeObserver)
+      }
+    })
 
     expect(viewport.scrollTop).toBe(2000)
   })

@@ -150,9 +150,11 @@ export function useChatWindowEvents({
   // read but not deps: isAtBottom changing shouldn't re-trigger scroll, and scrollToBottom is stable.
   // streamingContent is excluded because it changes every ~50ms during streaming, causing cascading
   // smooth scroll animations. Content block length changes are sufficient to track streaming progress.
+  // While sending, the streaming ResizeObserver owns scrolling (tail or desktop
+  // plan pin). Instant: a smooth scroll to a growing bottom flickers and stops short.
   useEffect(() => {
-    if (isAtBottom) {
-      scrollToBottom()
+    if (isAtBottom && !isSending) {
+      scrollToBottom(true)
     }
     // react-doctor-disable-next-line react-doctor/exhaustive-deps -- intentional: isAtBottom changes must not re-trigger scroll (see comment above)
   }, [

@@ -1065,24 +1065,26 @@ export const CompactMessageList = memo(
         return () => container.removeEventListener('scroll', handleScroll)
       }, [scrollContainerRef, hasOlderOnDisk, loadOlder])
 
-      // Scroll-to-bottom on new message arrival.
+      // Scroll-to-bottom on new message arrival. Layout effect pins before
+      // paint, so a sent prompt never paints below the fold first. Pin the
+      // container (not the last message): content below the last message, such
+      // as the prompt top spacer, belongs to the tail too.
       const prevMessageCountRef = useRef(messages.length)
-      useEffect(() => {
+      useLayoutEffect(() => {
+        const container = scrollContainerRef.current
         if (
+          container &&
           shouldScrollToBottom &&
           pendingPrependMessagesLengthRef.current === null &&
           messages.length > prevMessageCountRef.current
         ) {
-          const lastEl = messageRefs.current.get(lastIndex)
-          if (lastEl) {
-            lastEl.scrollIntoView({ behavior: 'instant', block: 'end' })
-            onScrollToBottomHandled?.()
-          }
+          container.scrollTop = container.scrollHeight
+          onScrollToBottomHandled?.()
         }
         prevMessageCountRef.current = messages.length
       }, [
+        scrollContainerRef,
         messages.length,
-        lastIndex,
         shouldScrollToBottom,
         onScrollToBottomHandled,
       ])

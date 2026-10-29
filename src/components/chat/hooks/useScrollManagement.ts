@@ -595,7 +595,8 @@ export function useScrollManagement({
   }, [clearPendingRestoreRetry])
 
   // [Tier 2 + 5] Auto-scroll during streaming using ResizeObserver.
-  // rAF-coalesced: at most one scroll per animation frame.
+  // Pins inside the observer callback (after layout, before paint) so a frame
+  // never paints at the old position. RO already fires at most once per frame.
   // Plan elements use direct scrollTop instead of scrollIntoView on desktop.
   // On mobile, always follow the live tail: pinning a plan to the top reads as
   // a jump away from the streaming response.
@@ -605,97 +606,44 @@ export function useScrollManagement({
     const viewport = scrollViewportRef.current
     if (!viewport || !viewport.firstElementChild) return
 
-    let rafId = 0
-
     const observer = new ResizeObserver(() => {
-      cancelAnimationFrame(rafId)
-      rafId = requestAnimationFrame(() => {
-        // Respect cooldown after user scrolled up
-        if (Date.now() < userScrollUpUntilRef.current) return
-        // Don't scroll if user has intentionally scrolled away from the stream
-        if (!isFollowingTailRef.current) return
+      // Respect cooldown after user scrolled up
+      if (Date.now() < userScrollUpUntilRef.current) return
+      // Don't scroll if user has intentionally scrolled away from the stream
+      if (!isFollowingTailRef.current) return
 
-        // [Tier 5] If a plan is visible on desktop, pin it to the top using
-        // direct scrollTop. Mobile should keep following the streaming tail.
-        const planEl = viewport.querySelector(
-          '[data-plan-display]'
-        ) as HTMLElement | null
-        if (!isMobile && planEl) {
-          // Accumulate offsetTop up the offsetParent chain to the viewport
-          let offset = 0
-          let el: HTMLElement | null = planEl
-          while (el && el !== viewport) {
-            offset += el.offsetTop
-            el = el.offsetParent as HTMLElement | null
-          }
-          viewport.scrollTop = offset
-        } else {
-          scrollToTail(viewport)
+      // [Tier 5] If a plan is visible on desktop, pin it to the top using
+      // direct scrollTop. Mobile should keep following the streaming tail.
+      const planEl = viewport.querySelector(
+        '[data-plan-display]'
+      ) as HTMLElement | null
+      if (!isMobile && planEl) {
+        // Accumulate offsetTop up the offsetParent chain to the viewport
+        let offset = 0
+        let el: HTMLElement | null = planEl
+        while (el && el !== viewport) {
+          offset += el.offsetTop
+          el = el.offsetParent as HTMLElement | null
         }
-      })
+        viewport.scrollTop = offset
+      } else {
+        scrollToTail(viewport)
+      }
     })
 
+    // observe() delivers an initial callback, which pins the tail when
+    // streaming starts.
     observer.observe(viewport.firstElementChild)
-    return () => {
-      cancelAnimationFrame(rafId)
-      observer.disconnect()
-    }
+    return () => observer.disconnect()
   }, [isSending, isMobile])
 
-  // [Tier 4] Scroll management on streaming transitions.
-  // - Start: if user was at bottom, smooth-scroll to follow queued/approved execution.
-  //   If user scrolled up, respect their position — ResizeObserver live-tail stays disabled.
-  // - End: pin to actual bottom to catch late layout shifts from
-  //   streaming → final content reflow (double-rAF ≈ 33ms).
+  // [Tier 4] Pin to actual bottom when streaming ends, to catch late layout
+  // shifts from streaming → final content reflow (double-rAF ≈ 33ms).
+  // Streaming start needs no handler: the streaming ResizeObserver above pins
+  // the tail on its initial callback. A smooth scroll here raced those pins,
+  // flickered, and stopped short of the moving bottom.
   const wasSendingRef = useRef(false)
   useEffect(() => {
-    // Streaming just started.
-    if (!wasSendingRef.current && isSending) {
-      const viewport = scrollViewportRef.current
-      // Only follow if user was already at bottom. Otherwise leave them where they are —
-      // The composer's "Bottom" tab is the manual escape hatch.
-      if (
-        viewport &&
-        isFollowingTailRef.current &&
-        !isAutoScrollingRef.current
-      ) {
-        let cancelled = false
-        requestAnimationFrame(() => {
-          if (cancelled || !isFollowingTailRef.current) return
-          isAutoScrollingRef.current = true
-          viewport.scrollTo({
-            top: viewport.scrollHeight,
-            behavior: 'smooth',
-          })
-          const onEnd = () => {
-            isAutoScrollingRef.current = false
-            viewport.removeEventListener('scrollend', onEnd)
-            if (scrollTimeoutRef.current) {
-              clearTimeout(scrollTimeoutRef.current)
-              scrollTimeoutRef.current = null
-            }
-            // Correct any stale-scrollHeight undershoot from DOM changes mid-animation
-            const { scrollTop, scrollHeight, clientHeight } = viewport
-            if (
-              isFollowingTailRef.current &&
-              scrollHeight - scrollTop - clientHeight > 2
-            ) {
-              scrollToTail(viewport)
-            }
-            syncIsAtBottom(viewport)
-          }
-          viewport.addEventListener('scrollend', onEnd, { once: true })
-          scrollTimeoutRef.current = setTimeout(onEnd, 400)
-        })
-        wasSendingRef.current = !!isSending
-        return () => {
-          cancelled = true
-        }
-      }
-      wasSendingRef.current = !!isSending
-      return
-    }
-
     // Streaming just ended — pin to actual bottom
     if (wasSendingRef.current && !isSending && isFollowingTailRef.current) {
       let cancelled = false
@@ -717,7 +665,7 @@ export function useScrollManagement({
       }
     }
     wasSendingRef.current = !!isSending
-  }, [isSending, syncIsAtBottom])
+  }, [isSending])
 
   // Persist the previous session and prepare restore when the displayed session
   // changes (covers both tab switches and worktree switches).
