@@ -475,7 +475,7 @@ function ChecklistAwareThead({ children }: { children?: ReactNode }) {
         cloneRowWithLeadingCells(row, [CHECKLIST_THEAD_LEADING])
       )
     : children
-  return <thead className="bg-muted/50">{augmented}</thead>
+  return <thead className="bg-muted">{augmented}</thead>
 }
 
 function ChecklistAwareTbody({ children }: { children?: ReactNode }) {
@@ -694,10 +694,17 @@ function TableBlock({
 
   return (
     <div
-      className="my-5 scroll-mt-12 rounded-md"
+      className="group/table my-5 scroll-mt-12 rounded-md"
       data-table-key={tableKey ?? undefined}
     >
-      <div className="mb-2 flex items-center justify-end gap-0.5">
+      <div
+        className={cn(
+          'mb-2 flex items-center justify-end gap-0.5',
+          // Touch screens have no hover, so keep the toolbar visible there.
+          !isMobile &&
+            'opacity-0 transition-opacity group-focus-within/table:opacity-100 group-hover/table:opacity-100'
+        )}
+      >
         {promptRows && (
           <span className="mr-auto text-xs text-muted-foreground">
             {isMobile ? 'Tap' : 'Click'} a row to add it to the prompt
@@ -965,7 +972,7 @@ const components: Components = {
   // Spread props so PromptRow can add its click handler and row classes.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   tr: ({ children, className, node, ...props }) => (
-    <tr {...props} className={cn('border-b border-border', className)}>
+    <tr {...props} className={cn('border-b border-muted-foreground/30', className)}>
       {children}
     </tr>
   ),

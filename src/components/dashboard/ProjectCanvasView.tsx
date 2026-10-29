@@ -538,7 +538,6 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
   showDetails = false,
   compact = false,
   isSelected,
-  shortcutNumber,
   rowIndex = 0,
   onRowClick,
   onDiffClick,
@@ -555,7 +554,6 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
   /** Mobile layout: one status icon, title, time and a muted meta line. */
   compact?: boolean
   isSelected?: boolean
-  shortcutNumber?: number
   rowIndex?: number
   onRowClick?: (worktree: Worktree, rowIndex: number) => void
   onDiffClick?: (request: DiffRequest) => void
@@ -912,11 +910,6 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
       {compactContent || (
         <div className={cn(showDetails ? 'flex flex-col gap-1.5' : 'contents')}>
           <div className="flex min-w-0 flex-wrap items-center gap-2 sm:flex-nowrap">
-            {shortcutNumber !== undefined && (
-              <kbd className="hidden shrink-0 h-4 min-w-4 items-center justify-center rounded border border-border/50 bg-muted/50 px-0.5 font-mono text-2xs text-muted-foreground sm:inline-flex">
-                {formatShortcutDisplay(`mod+${shortcutNumber}`)}
-              </kbd>
-            )}
             {isVisible && (
               <TerminalStatusIndicator
                 worktreeId={worktree.id}
@@ -1201,13 +1194,6 @@ export function ProjectCanvasView({
     state =>
       (state.projectCanvasActiveFilters[projectId] ?? 'all') as CanvasFilterTab
   )
-  // Cmd/Ctrl+1-9 opens Recent sessions while the Recent list is visible (see
-  // isRecentSessionsShortcutActive), so hide the worktree shortcut hints then.
-  const leftSidebarVisible = useUIStore(state => state.leftSidebarVisible)
-  const recentTabActive = useProjectsStore(
-    state => state.sidebarActiveTab === 'recent'
-  )
-  const recentOwnsDigitShortcuts = leftSidebarVisible && recentTabActive
   const isMobile = useIsMobile()
   const canOpenEditor = canOpenInEditor()
   const canOpenTerminal = canOpenInTerminal()
@@ -3809,7 +3795,6 @@ export function ProjectCanvasView({
               onDragEnd={handleNativeCanvasDragEnd}
             >
               {(() => {
-                let shortcutNum = 0
                 let previousRowState: CanvasRowState | null = null
                 return worktreeSections.map(section => {
                   const currentIndex = cardIndex++
@@ -3861,10 +3846,6 @@ export function ProjectCanvasView({
                       </Fragment>
                     )
                   }
-                  const thisShortcut =
-                    ++shortcutNum <= 9 && !recentOwnsDigitShortcuts
-                      ? shortcutNum
-                      : undefined
                   return (
                     <Fragment key={section.worktree.id}>
                       {groupHeader}
@@ -3895,7 +3876,6 @@ export function ProjectCanvasView({
                             showDetails={true}
                             compact={isMobile}
                             isSelected={selectedIndex === currentIndex}
-                            shortcutNumber={thisShortcut}
                             rowIndex={currentIndex}
                             onRowClick={handleSectionRowClick}
                             onDiffClick={setCanvasDiffRequest}
