@@ -1089,11 +1089,8 @@ export const CompactMessageList = memo(
 
       if (messages.length === 0) return null
 
-      // The full history is mounted. content-visibility lets the browser skip
-      // layout and paint for rows outside the viewport; `auto` remembers each
-      // row's real height after it renders once.
       return (
-        <div className="flex flex-col w-full [&>*]:[content-visibility:auto] [&>*]:[contain-intrinsic-size:auto_200px]">
+        <div className="flex flex-col w-full">
           {renderItems.map(item => {
             if (item.kind === 'message') {
               const hasFollowUpMessage =
@@ -1282,6 +1279,17 @@ export const CompactMessageList = memo(
               !(latestTextIsRecap && latestRunHasPlan)
             const surfaceRecap = latestTextIsRecap && showLatestText
             const inlineQuestion = item.inlineQuestion
+            const latestTextMarkdown = (
+              <Markdown
+                streaming={false}
+                messageId={item.key}
+                sessionId={sessionId}
+              >
+                {latestTextIsRecap
+                  ? (item.latestText ?? '').replace(RECAP_HEADING_RE, '').trim()
+                  : (item.latestText ?? '')}
+              </Markdown>
+            )
             return (
               <div key={item.key}>
                 <CompactActivityRow
@@ -1294,19 +1302,11 @@ export const CompactMessageList = memo(
                 />
                 {showLatestText && (
                   <div className="pb-4">
-                    <ReplyBubble>
-                      <Markdown
-                        streaming={false}
-                        messageId={item.key}
-                        sessionId={sessionId}
-                      >
-                        {latestTextIsRecap
-                          ? (item.latestText ?? '')
-                              .replace(RECAP_HEADING_RE, '')
-                              .trim()
-                          : (item.latestText ?? '')}
-                      </Markdown>
-                    </ReplyBubble>
+                    {hideToolActivity ? (
+                      <ReplyBubble>{latestTextMarkdown}</ReplyBubble>
+                    ) : (
+                      latestTextMarkdown
+                    )}
                     {inlineQuestion && onSendAnswer && (
                       <InlineQuestionOptions
                         question={inlineQuestion.question}

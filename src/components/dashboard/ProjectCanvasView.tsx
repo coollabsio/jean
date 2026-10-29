@@ -917,6 +917,12 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
                 {formatShortcutDisplay(`mod+${shortcutNumber}`)}
               </kbd>
             )}
+            {isVisible && (
+              <TerminalStatusIndicator
+                worktreeId={worktree.id}
+                iconSize="h-3 w-3"
+              />
+            )}
             <span className="flex min-w-0 flex-1 flex-col gap-1 font-medium sm:flex-row sm:items-center sm:gap-1.5">
               <span className="flex min-w-0 items-center gap-1.5">
                 <span className="min-w-0 flex-1 truncate">
@@ -1088,13 +1094,6 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
               ))}
               {lastActivity && (
                 <span className="rounded px-2 py-0.5">{lastActivity}</span>
-              )}
-              {isVisible && (
-                <TerminalStatusIndicator
-                  worktreeId={worktree.id}
-                  iconSize="h-3 w-3"
-                  variant="summary"
-                />
               )}
               {onRowClick && (
                 <span className="ml-auto hidden text-2xs opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 sm:inline-flex">

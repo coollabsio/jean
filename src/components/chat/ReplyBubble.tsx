@@ -6,7 +6,7 @@ import { Markdown } from '@/components/ui/markdown'
  * Code uses bg-muted too, so it gets the page background to stand out.
  */
 export const PILL_BUBBLE_CLASS =
-  'min-w-0 break-words [overflow-wrap:anywhere] rounded-[22px] bg-muted/40 px-4 py-2.5 text-foreground [&_pre]:bg-background [&_:not(pre)>code]:bg-background'
+  'min-w-0 break-words [overflow-wrap:anywhere] rounded-[22px] bg-muted/60 px-4 py-2.5 text-foreground [&_pre]:bg-background [&_:not(pre)>code]:bg-background'
 
 /** Agent chat user prompt: a pill bubble in the agent's accent color. */
 export const USER_PILL_BUBBLE_CLASS = [
