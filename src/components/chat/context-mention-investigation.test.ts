@@ -110,4 +110,20 @@ describe('planInvestigationBatches', () => {
       { kind: 'pr-worktree', pr: pr(5).pr },
     ])
   })
+
+  it('runs only the first session batch in the empty session', () => {
+    const items = [issue(1), issue(2), pr(5)]
+    expect(planInvestigationBatches(items, true, 'empty')).toEqual([
+      { kind: 'session', items: [issue(1)], reuseSessionId: 'empty' },
+      { kind: 'session', items: [issue(2)] },
+      { kind: 'pr-worktree', pr: items[2]?.pr },
+    ])
+  })
+
+  it('does not reuse the empty session for PR worktrees', () => {
+    expect(planInvestigationBatches([pr(5), pr(6)], false, 'empty')).toEqual([
+      { kind: 'pr-worktree', pr: pr(5).pr },
+      { kind: 'pr-worktree', pr: pr(6).pr },
+    ])
+  })
 })

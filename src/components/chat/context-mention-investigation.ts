@@ -138,8 +138,9 @@ function investigationType(items: ContextMentionItem[]) {
 }
 
 /**
- * Create a new session in the worktree, load every item into its context,
- * and queue one investigation that covers all of them.
+ * Load every item into a session's context and queue one investigation that
+ * covers all of them. Uses `reuseSessionId` (an empty session) when given,
+ * else creates a new session in the worktree.
  */
 export async function investigateInNewSession({
   items,
@@ -148,6 +149,7 @@ export async function investigateInNewSession({
   projectId,
   templates,
   openSession,
+  reuseSessionId,
 }: {
   items: ContextMentionItem[]
   worktreeId: string
@@ -155,14 +157,19 @@ export async function investigateInNewSession({
   projectId: string | null | undefined
   templates: InvestigatePromptTemplates
   openSession: boolean
+  reuseSessionId?: string
 }): Promise<void> {
-  const session = await invoke<Session>('create_session', {
-    worktreeId,
-    worktreePath,
-  })
+  const sessionId =
+    reuseSessionId ??
+    (
+      await invoke<Session>('create_session', {
+        worktreeId,
+        worktreePath,
+      })
+    ).id
   await Promise.all(
     items.map(item =>
-      loadContextMentionItem(session.id, item, worktreePath, projectId)
+      loadContextMentionItem(sessionId, item, worktreePath, projectId)
     )
   )
   useChatStore.getState().registerWorktreePath(worktreeId, worktreePath)
@@ -175,7 +182,7 @@ export async function investigateInNewSession({
     null,
     queryClient,
     {
-      sessionId: session.id,
+      sessionId,
       prompt: buildInvestigatePrompt(items, templates),
       openSession,
     }
@@ -183,17 +190,20 @@ export async function investigateInNewSession({
 }
 
 export type InvestigationBatch =
-  | { kind: 'session'; items: ContextMentionItem[] }
+  | { kind: 'session'; items: ContextMentionItem[]; reuseSessionId?: string }
   | { kind: 'pr-worktree'; pr: GitHubPullRequest }
 
 /**
  * Split checked items into investigations. A PR is investigated on its own
  * branch, so each PR gets a new worktree. Other items share one new session
- * in the current worktree, or (separate) get one new session each.
+ * in the current worktree, or (separate) get one new session each. The first
+ * session batch runs in `emptySessionId` when given, so the empty session
+ * the user started from is not left unused.
  */
 export function planInvestigationBatches(
   items: ContextMentionItem[],
-  separate: boolean
+  separate: boolean,
+  emptySessionId?: string
 ): InvestigationBatch[] {
   const sessionItems = items.filter(item => !item.pr)
   const sessionGroups =
@@ -201,9 +211,12 @@ export function planInvestigationBatches(
       ? sessionItems.map(item => [item])
       : [sessionItems]
   return [
-    ...sessionGroups.map(group => ({
+    ...sessionGroups.map((group, index) => ({
       kind: 'session' as const,
       items: group,
+      ...(index === 0 && emptySessionId
+        ? { reuseSessionId: emptySessionId }
+        : {}),
     })),
     ...items.flatMap(({ pr }) =>
       pr ? [{ kind: 'pr-worktree' as const, pr }] : []

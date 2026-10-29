@@ -19,6 +19,7 @@ import type {
   SaveTextResponse,
   ReadTextResponse,
   ExecutionMode,
+  Session,
 } from '@/types/chat'
 import type { AppPreferences, CliBackend } from '@/types/preferences'
 import { preferencesQueryKeys, usePreferences } from '@/services/preferences'
@@ -29,6 +30,7 @@ import {
 import { queryClient } from '@/lib/query-client'
 import { parseServerResourceKey } from '@/lib/server-resource'
 import { fileQueryKeys } from '@/services/files'
+import { chatQueryKeys } from '@/services/chat'
 import { useCreateWorktree } from '@/services/projects'
 import { logger } from '@/lib/logger'
 import { reportBulkInvestigateResults } from '@/components/worktree/bulkInvestigateUtils'
@@ -1276,7 +1278,21 @@ export const ChatInput = memo(function ChatInput({
       setHashTriggerIndex(null)
       setContextMentionQuery('')
 
-      const batches = planInvestigationBatches(items, separate)
+      // Reuse the current session when it is still empty
+      const currentSession = activeSessionId
+        ? queryClient.getQueryData<Session>(
+            chatQueryKeys.session(activeSessionId)
+          )
+        : undefined
+      const reuseSessionId =
+        currentSession &&
+        currentSession.messages.length === 0 &&
+        !isSending &&
+        !valueRef.current.trim() &&
+        !useChatStore.getState().messageQueues[currentSession.id]?.length
+          ? currentSession.id
+          : undefined
+      const batches = planInvestigationBatches(items, separate, reuseSessionId)
       // Open the new session or worktree only when it is the only one
       const openResult = batches.length === 1
 
@@ -1295,6 +1311,7 @@ export const ChatInput = memo(function ChatInput({
               projectId: activeProjectId,
               templates: investigateTemplates,
               openSession: openResult,
+              reuseSessionId: batch.reuseSessionId,
             })
           }
           if (!activeProjectId) throw new Error('No active project')
@@ -1336,6 +1353,7 @@ export const ChatInput = memo(function ChatInput({
       createWorktreeAsync,
       inputRef,
       investigateTemplates,
+      isSending,
       resizeTextarea,
     ]
   )
