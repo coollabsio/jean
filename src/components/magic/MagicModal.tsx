@@ -7,16 +7,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
+import { RevertLastCommitDialog } from '@/components/shared/RevertLastCommitDialog'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 import { Input } from '@/components/ui/input'
@@ -2124,27 +2115,12 @@ ${resolveInstructions}`
         }
         codeRabbitPrAvailable={Boolean(worktree?.pr_number)}
       />
-      <AlertDialog open={revertConfirmOpen} onOpenChange={setRevertConfirmOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Revert last commit?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will undo the latest local commit on{' '}
-              <span className="font-medium text-foreground">
-                {worktree?.branch ?? worktree?.name ?? 'this worktree'}
-              </span>
-              . Your working tree changes from that commit will be restored, but
-              this action can be disruptive.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmRevertLastCommit}>
-              Revert last commit
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <RevertLastCommitDialog
+        open={revertConfirmOpen}
+        onOpenChange={setRevertConfirmOpen}
+        onConfirm={confirmRevertLastCommit}
+        branchName={worktree?.branch ?? worktree?.name}
+      />
       <Dialog open={magicModalOpen} onOpenChange={handleOpenChange}>
         <DialogContent
           ref={contentRef}

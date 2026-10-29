@@ -46,6 +46,102 @@ export function formatSize(bytes: number): string {
 }
 
 // =============================================================================
+// Shared row actions
+// =============================================================================
+
+const ACTION_BUTTON_CLASS =
+  'p-1 rounded focus:outline-none focus:ring-1 focus:ring-ring transition-colors'
+
+function ActionButton({
+  label,
+  onClick,
+  disabled,
+  destructive = false,
+  children,
+}: {
+  label: string
+  onClick: () => void
+  disabled: boolean
+  destructive?: boolean
+  children: React.ReactNode
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          onClick={onClick}
+          disabled={disabled}
+          className={cn(
+            ACTION_BUTTON_CLASS,
+            destructive ? 'hover:bg-destructive/10' : 'hover:bg-accent'
+          )}
+        >
+          {children}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  )
+}
+
+/** View, optional refresh, and remove buttons for a loaded context row */
+function ContextItemActions({
+  refreshLabel,
+  isLoading = false,
+  isRemoving,
+  onView,
+  onRefresh,
+  onRemove,
+}: {
+  refreshLabel?: string
+  isLoading?: boolean
+  isRemoving: boolean
+  onView: () => void
+  onRefresh?: () => void
+  onRemove: () => void
+}) {
+  const isDisabled = isLoading || isRemoving
+  const spinner = (
+    <Loader2 className="h-3.5 w-3.5 text-muted-foreground animate-spin" />
+  )
+
+  return (
+    <div className="flex items-center gap-1 flex-shrink-0">
+      <ActionButton label="View context" onClick={onView} disabled={isDisabled}>
+        <Eye className="h-3.5 w-3.5 text-muted-foreground" />
+      </ActionButton>
+      {onRefresh && refreshLabel && (
+        <ActionButton
+          label={refreshLabel}
+          onClick={onRefresh}
+          disabled={isDisabled}
+        >
+          {isLoading ? (
+            spinner
+          ) : (
+            <RefreshCw className="h-3.5 w-3.5 text-muted-foreground" />
+          )}
+        </ActionButton>
+      )}
+      <ActionButton
+        label="Remove from context"
+        onClick={onRemove}
+        disabled={isDisabled}
+        destructive
+      >
+        {isRemoving ? (
+          spinner
+        ) : (
+          <X className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
+        )}
+      </ActionButton>
+    </div>
+  )
+}
+
+// =============================================================================
 // Loaded Issue Item
 // =============================================================================
 
@@ -89,67 +185,14 @@ export function LoadedIssueItem({
           )}
         </div>
       </div>
-      <div className="flex items-center gap-1 flex-shrink-0">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              aria-label="View context"
-              onClick={onView}
-              disabled={isDisabled}
-              className={cn(
-                'p-1 rounded hover:bg-accent focus:outline-none focus:ring-1 focus:ring-ring',
-                'transition-colors'
-              )}
-            >
-              <Eye className="h-3.5 w-3.5 text-muted-foreground" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>View context</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              aria-label="Refresh issue"
-              onClick={onRefresh}
-              disabled={isDisabled}
-              className={cn(
-                'p-1 rounded hover:bg-accent focus:outline-none focus:ring-1 focus:ring-ring',
-                'transition-colors'
-              )}
-            >
-              {isLoading ? (
-                <Loader2 className="h-3.5 w-3.5 text-muted-foreground animate-spin" />
-              ) : (
-                <RefreshCw className="h-3.5 w-3.5 text-muted-foreground" />
-              )}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>Refresh issue</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              aria-label="Remove from context"
-              onClick={onRemove}
-              disabled={isDisabled}
-              className={cn(
-                'p-1 rounded hover:bg-destructive/10 focus:outline-none focus:ring-1 focus:ring-ring',
-                'transition-colors'
-              )}
-            >
-              {isRemoving ? (
-                <Loader2 className="h-3.5 w-3.5 text-muted-foreground animate-spin" />
-              ) : (
-                <X className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
-              )}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>Remove from context</TooltipContent>
-        </Tooltip>
-      </div>
+      <ContextItemActions
+        refreshLabel="Refresh issue"
+        isLoading={isLoading}
+        isRemoving={isRemoving}
+        onView={onView}
+        onRefresh={onRefresh}
+        onRemove={onRemove}
+      />
     </div>
   )
 }
@@ -198,67 +241,14 @@ export function LoadedPRItem({
           )}
         </div>
       </div>
-      <div className="flex items-center gap-1 flex-shrink-0">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              aria-label="View context"
-              onClick={onView}
-              disabled={isDisabled}
-              className={cn(
-                'p-1 rounded hover:bg-accent focus:outline-none focus:ring-1 focus:ring-ring',
-                'transition-colors'
-              )}
-            >
-              <Eye className="h-3.5 w-3.5 text-muted-foreground" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>View context</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              aria-label="Refresh PR"
-              onClick={onRefresh}
-              disabled={isDisabled}
-              className={cn(
-                'p-1 rounded hover:bg-accent focus:outline-none focus:ring-1 focus:ring-ring',
-                'transition-colors'
-              )}
-            >
-              {isLoading ? (
-                <Loader2 className="h-3.5 w-3.5 text-muted-foreground animate-spin" />
-              ) : (
-                <RefreshCw className="h-3.5 w-3.5 text-muted-foreground" />
-              )}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>Refresh PR</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              aria-label="Remove from context"
-              onClick={onRemove}
-              disabled={isDisabled}
-              className={cn(
-                'p-1 rounded hover:bg-destructive/10 focus:outline-none focus:ring-1 focus:ring-ring',
-                'transition-colors'
-              )}
-            >
-              {isRemoving ? (
-                <Loader2 className="h-3.5 w-3.5 text-muted-foreground animate-spin" />
-              ) : (
-                <X className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
-              )}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>Remove from context</TooltipContent>
-        </Tooltip>
-      </div>
+      <ContextItemActions
+        refreshLabel="Refresh PR"
+        isLoading={isLoading}
+        isRemoving={isRemoving}
+        onView={onView}
+        onRefresh={onRefresh}
+        onRemove={onRemove}
+      />
     </div>
   )
 }
@@ -305,67 +295,14 @@ export function LoadedSecurityItem({
           </span>
         </div>
       </div>
-      <div className="flex items-center gap-1 flex-shrink-0">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              aria-label="View context"
-              onClick={onView}
-              disabled={isDisabled}
-              className={cn(
-                'p-1 rounded hover:bg-accent focus:outline-none focus:ring-1 focus:ring-ring',
-                'transition-colors'
-              )}
-            >
-              <Eye className="h-3.5 w-3.5 text-muted-foreground" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>View context</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              aria-label="Refresh alert"
-              onClick={onRefresh}
-              disabled={isDisabled}
-              className={cn(
-                'p-1 rounded hover:bg-accent focus:outline-none focus:ring-1 focus:ring-ring',
-                'transition-colors'
-              )}
-            >
-              {isLoading ? (
-                <Loader2 className="h-3.5 w-3.5 text-muted-foreground animate-spin" />
-              ) : (
-                <RefreshCw className="h-3.5 w-3.5 text-muted-foreground" />
-              )}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>Refresh alert</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              aria-label="Remove from context"
-              onClick={onRemove}
-              disabled={isDisabled}
-              className={cn(
-                'p-1 rounded hover:bg-destructive/10 focus:outline-none focus:ring-1 focus:ring-ring',
-                'transition-colors'
-              )}
-            >
-              {isRemoving ? (
-                <Loader2 className="h-3.5 w-3.5 text-muted-foreground animate-spin" />
-              ) : (
-                <X className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
-              )}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>Remove from context</TooltipContent>
-        </Tooltip>
-      </div>
+      <ContextItemActions
+        refreshLabel="Refresh alert"
+        isLoading={isLoading}
+        isRemoving={isRemoving}
+        onView={onView}
+        onRefresh={onRefresh}
+        onRemove={onRemove}
+      />
     </div>
   )
 }
@@ -410,67 +347,14 @@ export function LoadedAdvisoryItem({
           </span>
         </div>
       </div>
-      <div className="flex items-center gap-1 flex-shrink-0">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              aria-label="View context"
-              onClick={onView}
-              disabled={isDisabled}
-              className={cn(
-                'p-1 rounded hover:bg-accent focus:outline-none focus:ring-1 focus:ring-ring',
-                'transition-colors'
-              )}
-            >
-              <Eye className="h-3.5 w-3.5 text-muted-foreground" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>View context</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              aria-label="Refresh advisory"
-              onClick={onRefresh}
-              disabled={isDisabled}
-              className={cn(
-                'p-1 rounded hover:bg-accent focus:outline-none focus:ring-1 focus:ring-ring',
-                'transition-colors'
-              )}
-            >
-              {isLoading ? (
-                <Loader2 className="h-3.5 w-3.5 text-muted-foreground animate-spin" />
-              ) : (
-                <RefreshCw className="h-3.5 w-3.5 text-muted-foreground" />
-              )}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>Refresh advisory</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              aria-label="Remove from context"
-              onClick={onRemove}
-              disabled={isDisabled}
-              className={cn(
-                'p-1 rounded hover:bg-destructive/10 focus:outline-none focus:ring-1 focus:ring-ring',
-                'transition-colors'
-              )}
-            >
-              {isRemoving ? (
-                <Loader2 className="h-3.5 w-3.5 text-muted-foreground animate-spin" />
-              ) : (
-                <X className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
-              )}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>Remove from context</TooltipContent>
-        </Tooltip>
-      </div>
+      <ContextItemActions
+        refreshLabel="Refresh advisory"
+        isLoading={isLoading}
+        isRemoving={isRemoving}
+        onView={onView}
+        onRefresh={onRefresh}
+        onRemove={onRemove}
+      />
     </div>
   )
 }
@@ -661,46 +545,11 @@ export function AttachedContextItem({
           </span>
         </div>
       </div>
-      <div className="flex items-center gap-1 flex-shrink-0">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              aria-label="View context"
-              onClick={onView}
-              disabled={isRemoving}
-              className={cn(
-                'p-1 rounded hover:bg-accent focus:outline-none focus:ring-1 focus:ring-ring',
-                'transition-colors'
-              )}
-            >
-              <Eye className="h-3.5 w-3.5 text-muted-foreground" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>View context</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              aria-label="Remove from context"
-              onClick={onRemove}
-              disabled={isRemoving}
-              className={cn(
-                'p-1 rounded hover:bg-destructive/10 focus:outline-none focus:ring-1 focus:ring-ring',
-                'transition-colors'
-              )}
-            >
-              {isRemoving ? (
-                <Loader2 className="h-3.5 w-3.5 text-muted-foreground animate-spin" />
-              ) : (
-                <X className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
-              )}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>Remove from context</TooltipContent>
-        </Tooltip>
-      </div>
+      <ContextItemActions
+        isRemoving={isRemoving}
+        onView={onView}
+        onRemove={onRemove}
+      />
     </div>
   )
 }

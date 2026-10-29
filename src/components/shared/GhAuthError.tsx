@@ -1,6 +1,6 @@
 import { LogIn, Download } from '@/components/icons/reicon'
-import { Button } from '@/components/ui/button'
 import { useUIStore } from '@/store/ui-store'
+import { IntegrationNotice } from './IntegrationNotice'
 
 interface GhAuthErrorProps {
   onLogin: () => void
@@ -16,41 +16,23 @@ export function GhAuthError({ onLogin, isGhInstalled }: GhAuthErrorProps) {
 
   if (!isGhInstalled) {
     return (
-      <div className="flex flex-col items-center justify-center py-8 px-4 text-center gap-3">
-        <Download className="h-5 w-5 text-muted-foreground" />
-        <div className="space-y-1">
-          <p className="text-sm font-medium text-foreground">
-            GitHub CLI not installed
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Install the GitHub CLI to access issues and pull requests
-          </p>
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => openPreferences(true)}
-        >
-          Open Settings
-        </Button>
-      </div>
+      <IntegrationNotice
+        icon={Download}
+        title="GitHub CLI not installed"
+        description="Install the GitHub CLI to access issues and pull requests"
+        actionLabel="Open Settings"
+        onAction={() => openPreferences(true)}
+      />
     )
   }
 
   return (
-    <div className="flex flex-col items-center justify-center py-8 px-4 text-center gap-3">
-      <LogIn className="h-5 w-5 text-muted-foreground" />
-      <div className="space-y-1">
-        <p className="text-sm font-medium text-foreground">
-          GitHub CLI not authenticated
-        </p>
-        <p className="text-xs text-muted-foreground">
-          Sign in to access issues and pull requests
-        </p>
-      </div>
-      <Button variant="outline" size="sm" onClick={onLogin}>
-        Sign in to GitHub
-      </Button>
-    </div>
+    <IntegrationNotice
+      icon={LogIn}
+      title="GitHub CLI not authenticated"
+      description="Sign in to access issues and pull requests"
+      actionLabel="Sign in to GitHub"
+      onAction={onLogin}
+    />
   )
 }

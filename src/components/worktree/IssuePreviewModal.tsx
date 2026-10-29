@@ -93,19 +93,26 @@ function Labels({ labels }: { labels: GitHubLabel[] }) {
   )
 }
 
-function CommentItem({ comment }: { comment: GitHubComment }) {
+/** Author header plus markdown body, for issue/PR descriptions and comments */
+function PostCard({
+  author,
+  action,
+  body,
+}: {
+  author: string
+  action: string
+  body: string | null | undefined
+}) {
   return (
     <div className="border border-border rounded-lg overflow-hidden">
       <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/50 border-b border-border">
-        <span className="text-sm font-medium">{comment.author.login}</span>
-        <span className="text-xs text-muted-foreground">
-          commented on {formatDate(getCreatedAt(comment))}
-        </span>
+        <span className="text-sm font-medium">{author}</span>
+        <span className="text-xs text-muted-foreground">{action}</span>
       </div>
       <div className="px-4 py-3">
-        {comment.body ? (
+        {body ? (
           <Markdown compact className="text-sm">
-            {comment.body}
+            {body}
           </Markdown>
         ) : (
           <p className="text-sm text-muted-foreground italic">
@@ -114,6 +121,16 @@ function CommentItem({ comment }: { comment: GitHubComment }) {
         )}
       </div>
     </div>
+  )
+}
+
+function CommentItem({ comment }: { comment: GitHubComment }) {
+  return (
+    <PostCard
+      author={comment.author.login}
+      action={`commented on ${formatDate(getCreatedAt(comment))}`}
+      body={comment.body}
+    />
   )
 }
 
@@ -199,25 +216,11 @@ function IssueContent({ detail }: { detail: GitHubIssueDetail }) {
       <Labels labels={detail.labels} />
 
       {/* Body */}
-      <div className="border border-border rounded-lg overflow-hidden">
-        <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/50 border-b border-border">
-          <span className="text-sm font-medium">{detail.author.login}</span>
-          <span className="text-xs text-muted-foreground">
-            opened this issue on {formatDate(getCreatedAt(detail))}
-          </span>
-        </div>
-        <div className="px-4 py-3">
-          {detail.body ? (
-            <Markdown compact className="text-sm">
-              {detail.body}
-            </Markdown>
-          ) : (
-            <p className="text-sm text-muted-foreground italic">
-              No description provided.
-            </p>
-          )}
-        </div>
-      </div>
+      <PostCard
+        author={detail.author.login}
+        action={`opened this issue on ${formatDate(getCreatedAt(detail))}`}
+        body={detail.body}
+      />
 
       {/* Comments */}
       {detail.comments.length > 0 && (
@@ -292,26 +295,11 @@ function PRContent({
       <Labels labels={detail.labels} />
 
       {/* Body */}
-      <div className="border border-border rounded-lg overflow-hidden">
-        <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/50 border-b border-border">
-          <span className="text-sm font-medium">{detail.author.login}</span>
-          <span className="text-xs text-muted-foreground">
-            opened this {itemLabel.toLowerCase()} on{' '}
-            {formatDate(getCreatedAt(detail))}
-          </span>
-        </div>
-        <div className="px-4 py-3">
-          {detail.body ? (
-            <Markdown compact className="text-sm">
-              {detail.body}
-            </Markdown>
-          ) : (
-            <p className="text-sm text-muted-foreground italic">
-              No description provided.
-            </p>
-          )}
-        </div>
-      </div>
+      <PostCard
+        author={detail.author.login}
+        action={`opened this ${itemLabel.toLowerCase()} on ${formatDate(getCreatedAt(detail))}`}
+        body={detail.body}
+      />
 
       {/* Reviews */}
       {detail.reviews.length > 0 && (

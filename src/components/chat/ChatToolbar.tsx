@@ -36,16 +36,7 @@ import { DockBurgerButton } from '@/components/chat/toolbar/DockBurgerButton'
 import { ExecutionModeDropdown } from '@/components/chat/toolbar/ExecutionModeDropdown'
 import { SendCancelButton } from '@/components/chat/toolbar/SendCancelButton'
 import { ContextViewerDialog } from '@/components/chat/toolbar/ContextViewerDialog'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
+import { RevertLastCommitDialog } from '@/components/shared/RevertLastCommitDialog'
 import {
   CODEX_MODEL_OPTIONS,
   EFFORT_LEVEL_OPTIONS,
@@ -456,24 +447,11 @@ export const ChatToolbar = memo(function ChatToolbar({
 
   return (
     <>
-      <AlertDialog open={revertConfirmOpen} onOpenChange={setRevertConfirmOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Revert last commit?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will undo the latest local commit on this worktree. Your
-              working tree changes from that commit will be restored, but this
-              action can be disruptive.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={executeRevertLastCommit}>
-              Revert last commit
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <RevertLastCommitDialog
+        open={revertConfirmOpen}
+        onOpenChange={setRevertConfirmOpen}
+        onConfirm={executeRevertLastCommit}
+      />
 
       <div className="@container flex px-4 py-2 md:px-6">
         <div className="flex w-full min-w-0 flex-nowrap items-center overflow-x-auto whitespace-nowrap bg-transparent scrollbar-hide">
