@@ -57,6 +57,7 @@ export const SteeredPromptGroup = memo(function SteeredPromptGroup({
                     <ImageLightbox
                       key={path}
                       src={path}
+                      serverId={serverId}
                       alt={`Attached image ${idx + 1}`}
                       thumbnailClassName="h-20 max-w-40 object-contain rounded border border-border/50 cursor-pointer hover:border-foreground/20 transition-colors"
                     />

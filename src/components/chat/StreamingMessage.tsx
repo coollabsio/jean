@@ -37,6 +37,7 @@ import { ToolCallsDisplay } from './ToolCallsDisplay'
 import { PlanDisplay } from './PlanFileDisplay'
 import { ThinkingBlock } from './ThinkingBlock'
 import { SteeredPromptGroup } from './SteeredPromptGroup'
+import { parseServerResourceKey } from '@/lib/server-resource'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { logger } from '@/lib/logger'
 import { MessageThreadContextMenu } from './message-thread-context-menu'
@@ -104,6 +105,7 @@ export const StreamingMessage = memo(function StreamingMessage({
   getSubmittedAnswers,
   areQuestionsSkipped,
 }: StreamingMessageProps) {
+  const serverId = parseServerResourceKey(sessionId)?.serverId
   const displayBlocks = useMemo(
     () => restoreOmittedStreamingPrefix(streamingContent, contentBlocks),
     [streamingContent, contentBlocks]
@@ -302,6 +304,7 @@ export const StreamingMessage = memo(function StreamingMessage({
                                       <SteeredPromptGroup
                                         texts={item.texts}
                                         worktreePath={worktreePath}
+                                        serverId={serverId}
                                       />
                                     )
                                   case 'task':

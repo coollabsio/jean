@@ -4,6 +4,12 @@ import { useChatStore } from '@/store/chat-store'
 import { StreamingMessage } from './StreamingMessage'
 import type { QuestionAnswer, Question } from '@/types/chat'
 
+vi.mock('@/lib/transport', async importOriginal => ({
+  ...(await importOriginal<object>()),
+  convertServerFileSrc: (serverId: string | undefined, path: string) =>
+    `${serverId ?? 'local'}:${path}`,
+}))
+
 describe('StreamingMessage', () => {
   const noopQuestionAnswer = (
     _toolCallId: string,
@@ -615,5 +621,25 @@ describe('StreamingMessage', () => {
 
     expect(screen.getByText('please also test this')).toBeVisible()
     expect(screen.getByText('Working…')).toBeVisible()
+  })
+
+  it('loads a steered prompt image from the session server', () => {
+    render(
+      <StreamingMessage
+        {...baseProps}
+        sessionId="srv-1:session-1"
+        contentBlocks={[
+          {
+            type: 'user_input',
+            text: 'look\n\n[Image attached: /data/pasted-images/a.png - Use the Read tool to view this image]',
+          },
+        ]}
+      />
+    )
+
+    expect(screen.getByAltText('Attached image 1')).toHaveAttribute(
+      'src',
+      'srv-1:/data/pasted-images/a.png'
+    )
   })
 })
