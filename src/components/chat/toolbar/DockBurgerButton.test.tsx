@@ -1,6 +1,7 @@
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@/test/test-utils'
+import { useUIStore } from '@/store/ui-store'
 import { DockBurgerButton } from './DockBurgerButton'
 
 const environment = vi.hoisted(() => ({
@@ -54,13 +55,16 @@ describe('DockBurgerButton', () => {
     expect(screen.queryByRole('menuitem', { name: /mcp servers/i })).toBeNull()
   })
 
-  it('hides MCP Servers on desktop', async () => {
+  it('shows MCP Servers on desktop and opens its settings pane', async () => {
     const user = userEvent.setup()
-    render(<DockBurgerButton />)
+    render(<DockBurgerButton activeMcpCount={2} />)
 
     await user.click(screen.getByRole('button', { name: /menu/i }))
+    const item = screen.getByRole('menuitem', { name: /mcp servers/i })
+    expect(item).toHaveTextContent('2')
 
-    expect(screen.queryByRole('menuitem', { name: /mcp servers/i })).toBeNull()
+    await user.click(item)
+    expect(useUIStore.getState().preferencesPane).toBe('mcp-servers')
   })
 
   it('shows plan name and reset countdowns for usage', async () => {

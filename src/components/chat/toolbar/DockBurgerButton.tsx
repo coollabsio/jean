@@ -3,6 +3,7 @@ import {
   BarChart3,
   Command,
   Menu,
+  Plug,
   Plus,
   Github,
   Heart,
@@ -33,11 +34,16 @@ import {
 } from '@/components/usage/usage-entries'
 
 interface DockBurgerButtonProps {
+  /** Number of enabled MCP servers; shown as a badge next to the MCP item. */
+  activeMcpCount?: number
   /** Extra classes merged onto the trigger button (e.g. responsive visibility). */
   className?: string
 }
 
-export function DockBurgerButton({ className }: DockBurgerButtonProps = {}) {
+export function DockBurgerButton({
+  activeMcpCount = 0,
+  className,
+}: DockBurgerButtonProps = {}) {
   const isMobile = useIsMobile()
   const { data: preferences } = usePreferences()
 
@@ -114,6 +120,24 @@ export function DockBurgerButton({ className }: DockBurgerButtonProps = {}) {
             </DropdownMenuShortcut>
           )}
         </DropdownMenuItem>
+        {!isMobile && (
+          <DropdownMenuItem
+            onClick={() =>
+              useUIStore.getState().openPreferencesPane('mcp-servers')
+            }
+          >
+            <Plug
+              className={cn(
+                'mr-2 h-4 w-4',
+                activeMcpCount > 0 && 'text-success'
+              )}
+            />
+            MCP Servers
+            {activeMcpCount > 0 && (
+              <DropdownMenuShortcut>{activeMcpCount}</DropdownMenuShortcut>
+            )}
+          </DropdownMenuItem>
+        )}
         {isMobile && (
           <>
             <DropdownMenuSeparator />

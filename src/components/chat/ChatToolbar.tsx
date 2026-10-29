@@ -509,7 +509,10 @@ export const ChatToolbar = memo(function ChatToolbar({
             />
           )}
           <div className={zenMode ? 'hidden' : 'contents'}>
-            <DockBurgerButton className="flex @xl:hidden" />
+            <DockBurgerButton
+              activeMcpCount={activeMcpCount}
+              className="flex @xl:hidden"
+            />
 
             {onOpenMagicModal && (
               <MobileToolbarMenu
@@ -644,6 +647,7 @@ export const ChatToolbar = memo(function ChatToolbar({
               activeWorktreePath={activeWorktreePath}
               availableMcpServers={availableMcpServers}
               enabledMcpServers={enabledMcpServers}
+              activeMcpCount={activeMcpCount}
               isHealthChecking={isHealthChecking}
               mcpStatuses={mcpStatuses}
               loadedIssueContexts={loadedIssueContexts}

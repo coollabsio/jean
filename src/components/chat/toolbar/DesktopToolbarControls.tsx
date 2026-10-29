@@ -111,6 +111,7 @@ interface DesktopToolbarControlsProps {
 
   availableMcpServers: McpServerInfo[]
   enabledMcpServers: string[]
+  activeMcpCount: number
   isHealthChecking: boolean
   mcpStatuses: Record<string, McpHealthStatus> | undefined
 
@@ -180,6 +181,7 @@ export function DesktopToolbarControls({
   activeWorktreePath,
   availableMcpServers: _availableMcpServers,
   enabledMcpServers: _enabledMcpServers,
+  activeMcpCount,
   isHealthChecking: _isHealthChecking,
   mcpStatuses: _mcpStatuses,
   loadedIssueContexts,
@@ -335,7 +337,10 @@ export function DesktopToolbarControls({
 
   return (
     <>
-      <DockBurgerButton className="hidden @xl:flex" />
+      <DockBurgerButton
+        activeMcpCount={activeMcpCount}
+        className="hidden @xl:flex"
+      />
 
       {onOpenMagicModal && (
         <Tooltip>
