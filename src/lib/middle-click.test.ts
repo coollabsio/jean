@@ -52,6 +52,18 @@ describe('middleClickClose', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
+  it('closes on a middle-click on a role="tab" label button inside the tab', () => {
+    const tab = document.createElement('div')
+    const label = document.createElement('button')
+    label.setAttribute('role', 'tab')
+    tab.appendChild(label)
+
+    const onClose = vi.fn()
+    middleClickClose(onClose).onAuxClick(auxClickEvent(label, tab, 1))
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
   it('does not close on right-click (button 2)', () => {
     const row = document.createElement('div')
     const label = document.createElement('span')

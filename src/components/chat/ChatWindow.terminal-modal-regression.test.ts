@@ -9,8 +9,9 @@ describe('terminal primary surface modal regression', () => {
   it('preserves model-catalog effort levels selected for Codex', () => {
     const source = readSource('src/components/chat/ChatWindow.tsx')
 
+    // Saved levels are kept when the model catalog lists them.
     expect(source).toContain(
-      'const selectedEffortLevel: EffortLevel = rawSelectedEffortLevel'
+      'const selectedEffortLevel = supportedReasoningLevel('
     )
     expect(source).not.toContain("rawSelectedEffortLevel === 'max'")
     expect(source).not.toContain("rawSelectedEffortLevel === 'ultracode'")

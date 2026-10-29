@@ -1305,7 +1305,11 @@ export const SessionChatModal = memo(function SessionChatModal({
                 viewportClassName="overflow-x-auto overflow-y-hidden overscroll-x-contain overscroll-y-none touch-pan-x scrollbar-hide [-webkit-overflow-scrolling:touch]"
                 viewportRef={modalTabScrollRef}
               >
-                <div className="flex min-w-max items-center gap-0 py-0 px-0">
+                <div
+                  role="tablist"
+                  aria-label="Sessions"
+                  className="flex min-w-max items-center gap-0 py-0 px-0"
+                >
                   {sortedCards.map((card, idx) => {
                     const session = card.session
                     const isActive = session.id === currentSessionId
@@ -1319,8 +1323,11 @@ export const SessionChatModal = memo(function SessionChatModal({
                     return (
                       <ContextMenu key={session.id}>
                         <ContextMenuTrigger asChild>
+                          {/* Mouse handlers catch events from the tab button
+                              and the empty space around it. */}
                           <div
                             data-session-id={session.id}
+                            role="presentation"
                             onClick={() => handleTabClick(session.id)}
                             onAuxClick={e => handleTabAuxClick(e, session)}
                             onDoubleClick={() =>
@@ -1371,13 +1378,18 @@ export const SessionChatModal = memo(function SessionChatModal({
                             ) : (
                               <Tooltip>
                                 <TooltipTrigger asChild>
-                                  <span className="flex max-w-48 items-center gap-1.5 truncate">
+                                  <button
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={isActive}
+                                    className="flex max-w-48 items-center gap-1.5 truncate rounded-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                  >
                                     <span className="truncate">
                                       {isGeneratingName
                                         ? 'Generating…'
                                         : session.name}
                                     </span>
-                                  </span>
+                                  </button>
                                 </TooltipTrigger>
                                 <TooltipContent side="bottom">
                                   {isGeneratingName

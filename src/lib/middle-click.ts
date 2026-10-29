@@ -20,11 +20,11 @@ export function middleClickClose(onClose: (e: MouseEvent) => void) {
       // (e.g. the expand chevron or pull/push badges inside a worktree row) so
       // only a middle-click on the row/tab body itself triggers the close. The
       // `!== currentTarget` check keeps this working when the element the helper
-      // is spread on is itself a <button> (the terminal tab), and the selector
-      // intentionally omits `[role="button"]` so the terminal tab's X span still
-      // closes on middle-click.
+      // is spread on is itself a <button>. A `role="tab"` button is the tab's
+      // own label, so a middle-click on it still closes the tab, and the
+      // selector omits `[role="button"]` so an X span still closes too.
       const interactive = (e.target as HTMLElement).closest(
-        'button, a, input, textarea, select'
+        'button:not([role="tab"]), a, input, textarea, select'
       )
       if (interactive && interactive !== e.currentTarget) return
       e.preventDefault()

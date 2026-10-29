@@ -277,6 +277,9 @@ export function ProjectTreeItem({
               ? 'bg-primary/10 text-foreground before:absolute before:left-0 before:top-0 before:h-full before:w-[3px] before:bg-primary'
               : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
           )}
+          // Mouse handlers catch events from the name button and the rest of
+          // the row.
+          role="presentation"
           onClick={handleClick}
           onDoubleClick={handleDoubleClick}
           data-testid={`project-row-${project.id}`}
@@ -313,7 +316,14 @@ export function ProjectTreeItem({
             />
           ) : (
             <span className="flex flex-1 items-center gap-0.5 truncate text-sm">
-              <span className="truncate">{project.name}</span>
+              <button
+                type="button"
+                aria-current={isSelected || undefined}
+                aria-disabled={isOffline || undefined}
+                className="truncate rounded-sm text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                {project.name}
+              </button>
               {isOffline && (
                 <span className="shrink-0 rounded bg-warning/10 px-1 py-0.5 text-2xs text-warning">
                   Offline

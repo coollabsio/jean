@@ -130,11 +130,15 @@ function openLocalFileLink(href: string | undefined): boolean {
   return openLocalFile(path)
 }
 
+function openFilePath(path: string) {
+  if (!openLocalFile(path)) toast.error('Cannot resolve file path')
+}
+
 function handleFilePathClick(event: React.MouseEvent<HTMLElement>) {
   // Keep drag-to-select usable: only a plain click opens the file.
   if (window.getSelection()?.toString().trim()) return
   const path = event.currentTarget.dataset.filePath
-  if (path && !openLocalFile(path)) toast.error('Cannot resolve file path')
+  if (path) openFilePath(path)
 }
 
 function CodeBlock({ children }: { children: ReactNode }) {
@@ -845,7 +849,16 @@ const components: Components = {
             'underline decoration-dotted underline-offset-2 hover:text-foreground'
         )}
         data-file-path={filePath ?? undefined}
-        onClick={filePath ? handleFilePathClick : undefined}
+        {...(filePath && {
+          role: 'button',
+          tabIndex: 0,
+          onClick: handleFilePathClick,
+          onKeyDown: (event: React.KeyboardEvent<HTMLElement>) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return
+            event.preventDefault()
+            openFilePath(filePath)
+          },
+        })}
       >
         {children}
       </code>

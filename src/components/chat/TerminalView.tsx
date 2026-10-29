@@ -512,7 +512,11 @@ export function TerminalView({
             MODAL_TERMINAL_SECONDARY_ROW_CLASS
           )}
         >
-          <div className="flex min-w-0 items-center overflow-x-auto">
+          <div
+            role="tablist"
+            aria-label="Terminals"
+            className="flex min-w-0 items-center overflow-x-auto"
+          >
             {terminals.map((terminal, index) => {
               const isActive = terminal.id === activeTerminalId
               const isRunning = runningTerminals.has(terminal.id)
@@ -520,8 +524,11 @@ export function TerminalView({
                 index < 9 ? formatShortcutDisplay(`mod+${index + 1}`) : null
 
               return (
+                // Mouse handlers catch events from the tab button and the
+                // empty space around it.
                 <div
                   key={terminal.id}
+                  role="presentation"
                   draggable
                   onDragStart={e => handleTerminalDragStart(e, terminal.id)}
                   onDragOver={handleTerminalDragOver}
@@ -543,9 +550,14 @@ export function TerminalView({
                   {isRunning && (
                     <span className="h-1.5 w-1.5 rounded-full bg-success" />
                   )}
-                  <span className="max-w-[100px] truncate">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={isActive}
+                    className="max-w-[100px] truncate rounded-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  >
                     {terminal.label}
-                  </span>
+                  </button>
                   {shortcutLabel && (
                     <Kbd
                       modHint
