@@ -229,10 +229,21 @@ export function RecentWorktreesList({
     if (workingShelf === 'collapsed') return EMPTY_RECENT_ROWS
     return workingRows.filter(row => row.session.id === selectedSessionId)
   }, [selectedSessionId, workingShelf, workingRows])
+  // Mobile shows the Working shelf at the top, between pinned and other rows.
+  const { pinnedCount, topRows, restRows } = useMemo(() => {
+    const count = isMobile
+      ? listRows.filter(row => pinned.has(row.session.id)).length
+      : listRows.length
+    return {
+      pinnedCount: count,
+      topRows: listRows.slice(0, count),
+      restRows: listRows.slice(count),
+    }
+  }, [isMobile, listRows, pinned])
   // Visual order, used by Cmd+Arrow navigation and Cmd+1-9 shortcuts.
   const displayedRows = useMemo(
-    () => [...listRows, ...visibleWorkingRows, ...snoozedRows],
-    [listRows, visibleWorkingRows, snoozedRows]
+    () => [...topRows, ...visibleWorkingRows, ...restRows, ...snoozedRows],
+    [topRows, visibleWorkingRows, restRows, snoozedRows]
   )
   const serverProjectIds = useMemo(
     () =>
@@ -539,6 +550,33 @@ export function RecentWorktreesList({
     )
   }
   const listClassName = '@container flex flex-col gap-2 px-2'
+  const workingShelfSection = workingRows.length > 0 && (
+    <section aria-label="Working sessions" className="pb-2">
+      <button
+        type="button"
+        aria-expanded={workingExpanded}
+        className="flex h-8 w-full items-center gap-1 px-3 text-2xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        onClick={() =>
+          setWorkingShelf(value =>
+            value === 'expanded' ? 'collapsed' : 'expanded'
+          )
+        }
+      >
+        <ChevronRight
+          className={`size-3 transition-transform ${workingExpanded ? 'rotate-90' : ''}`}
+        />
+        Working
+        <span className="ml-auto font-normal tabular-nums">
+          {workingRows.length}
+        </span>
+      </button>
+      <ul className={listClassName}>
+        {visibleWorkingRows.map((row, index) =>
+          renderRow(row, topRows.length + index)
+        )}
+      </ul>
+    </section>
+  )
 
   return (
     <div
@@ -555,40 +593,32 @@ export function RecentWorktreesList({
           aria-label="Recent sessions"
           className={`${listClassName} pt-2 pb-2`}
         >
-          {listRows.map((row, index) =>
-            renderRow(row, index, listRows[index - 1])
+          {topRows.map((row, index) =>
+            renderRow(row, index, topRows[index - 1])
           )}
         </ul>
+        {isMobile && workingShelfSection}
+        {restRows.length > 0 && (
+          <ul
+            aria-label="Other recent sessions"
+            className={`${listClassName} pb-2`}
+          >
+            {restRows.map((row, index) =>
+              renderRow(
+                row,
+                topRows.length + visibleWorkingRows.length + index,
+                // The Working shelf header already separates the groups.
+                workingShelfSection
+                  ? restRows[index - 1]
+                  : listRows[pinnedCount + index - 1]
+              )
+            )}
+          </ul>
+        )}
         {/* Shelves and paging actions sit at the bottom of a short list and
             scroll with a long one. */}
         <div className="mt-auto pb-[env(safe-area-inset-bottom)]">
-          {workingRows.length > 0 && (
-            <section aria-label="Working sessions" className="pb-2">
-              <button
-                type="button"
-                aria-expanded={workingExpanded}
-                className="flex h-8 w-full items-center gap-1 px-3 text-2xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                onClick={() =>
-                  setWorkingShelf(value =>
-                    value === 'expanded' ? 'collapsed' : 'expanded'
-                  )
-                }
-              >
-                <ChevronRight
-                  className={`size-3 transition-transform ${workingExpanded ? 'rotate-90' : ''}`}
-                />
-                Working
-                <span className="ml-auto font-normal tabular-nums">
-                  {workingRows.length}
-                </span>
-              </button>
-              <ul className={listClassName}>
-                {visibleWorkingRows.map((row, index) =>
-                  renderRow(row, listRows.length + index)
-                )}
-              </ul>
-            </section>
-          )}
+          {!isMobile && workingShelfSection}
           {snoozedRows.length > 0 && (
             <section aria-label="Snoozed sessions" className="pb-2">
               <div className="px-3 py-1 text-2xs font-medium text-muted-foreground">

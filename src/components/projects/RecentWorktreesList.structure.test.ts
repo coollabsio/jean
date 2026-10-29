@@ -27,8 +27,11 @@ describe('RecentWorktreesList structure', () => {
     expect(source).toContain('aria-label="Working sessions"')
     expect(source).toContain('aria-expanded={workingExpanded}')
     expect(source).toContain(
-      '() => [...listRows, ...visibleWorkingRows, ...snoozedRows]'
+      '() => [...topRows, ...visibleWorkingRows, ...restRows, ...snoozedRows]'
     )
+    // Mobile puts the shelf at the top, just below the pinned rows.
+    expect(source).toContain('{isMobile && workingShelfSection}')
+    expect(source).toContain('{!isMobile && workingShelfSection}')
   })
 
   it('shows session, project, worktree, and activity without Git diff information', () => {
