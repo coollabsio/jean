@@ -11,7 +11,7 @@ export function isLegacyConnectionCopy(project: Project): boolean {
 }
 
 /**
- * Servers for the Servers tab. Every Jean shows its own entries: its machine
+ * Servers for the Servers section of the Workspace view. Every Jean shows its own entries: its machine
  * (no SSH) and the SSH servers it stores. The native app lists them for all
  * connected Jeans; Web Access only gets its own Jean.
  * Order: this computer, other Jean machines, then SSH servers.

@@ -16,12 +16,12 @@ const VIEWS: {
   label: string
   Icon: ComponentType<{ className?: string }>
 }[] = [
-  { view: 'projects', label: 'Projects', Icon: Folder },
+  { view: 'projects', label: 'Workspace', Icon: Folder },
   { view: 'recent', label: 'Recent', Icon: History },
   { view: 'agents', label: 'Agents', Icon: AgentsIcon },
 ]
 
-// Projects/Recent live in the projects store, Agents in the UI store's
+// Workspace/Recent live in the projects store, Agents in the UI store's
 // rail section; both are persisted in the client view state.
 function selectView(view: SidebarView) {
   const ui = useUIStore.getState()
@@ -33,7 +33,7 @@ function selectView(view: SidebarView) {
   ui.setRailSection('workspace')
 }
 
-/** One tab strip for the left sidebar: Projects | Recent | Agents. */
+/** One tab strip for the left sidebar: Workspace | Recent | Agents. */
 export function SidebarTabs() {
   const agentsEnabled = useAgentsEnabled()
   const agentsSelected = useUIStore(state => state.railSection === 'agents')

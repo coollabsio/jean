@@ -34,8 +34,8 @@ describe('SidebarTabs', () => {
   it('joins Projects, Recent and Agents in one strip', () => {
     render(<SidebarTabs />)
 
-    expect(tabNames()).toEqual(['Projects', 'Recent', 'Agents'])
-    expect(selectedTab()).toBe('Projects')
+    expect(tabNames()).toEqual(['Workspace', 'Recent', 'Agents'])
+    expect(selectedTab()).toBe('Workspace')
   })
 
   it('hides Agents and falls back to the workspace tab when agents are off', () => {
@@ -44,7 +44,7 @@ describe('SidebarTabs', () => {
     useUIStore.setState({ railSection: 'agents' })
     render(<SidebarTabs />)
 
-    expect(tabNames()).toEqual(['Projects', 'Recent'])
+    expect(tabNames()).toEqual(['Workspace', 'Recent'])
     expect(selectedTab()).toBe('Recent')
   })
 
@@ -69,7 +69,7 @@ describe('SidebarTabs', () => {
 
   it('suppresses the webview context menu on the strip', () => {
     render(<SidebarTabs />)
-    const tab = screen.getByRole('tab', { name: 'Projects' })
+    const tab = screen.getByRole('tab', { name: 'Workspace' })
 
     expect(
       fireEvent.contextMenu(tab, { bubbles: true, cancelable: true })

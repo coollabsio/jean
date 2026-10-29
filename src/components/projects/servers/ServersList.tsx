@@ -41,14 +41,14 @@ function usesAdminUser(project: Project): boolean {
 interface ServersListProps {
   /** Server projects only, already sorted (see serverProjectsForView) */
   servers: Project[]
-  /** Shared search text of the Projects view */
+  /** Shared search text of the Workspace view */
   searchQuery: string
 }
 
 const iconButtonClass =
   'flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
 
-/** Servers section at the top of the Projects view. */
+/** Servers section at the top of the Workspace view. */
 export function ServersList({ servers, searchQuery }: ServersListProps) {
   const queryClient = useQueryClient()
   const isMobile = useIsMobile()
@@ -89,7 +89,7 @@ export function ServersList({ servers, searchQuery }: ServersListProps) {
 
   return (
     <>
-      {/* Nothing to show: the Add server action is in the Projects "+" menu */}
+      {/* Nothing to show: the Add server action is in the Workspace "+" menu */}
       {filteredServers.length > 0 && (
         <div className="py-1">
           <div className={SECTION_HEADER_CLASS}>

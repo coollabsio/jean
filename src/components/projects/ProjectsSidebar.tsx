@@ -59,7 +59,7 @@ import {
 const EMPTY_PROJECTS: Project[] = []
 
 /**
- * Each Jean shows its own machine in the Servers tab (no SSH). Create that
+ * Each Jean shows its own machine in the Servers section (no SSH). Create that
  * entry on this Jean, and in the native app on every connected jean-server.
  * Also delete old SSH copies of remote connections once: the jean-server's own
  * entry replaces them.

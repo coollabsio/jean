@@ -206,7 +206,7 @@ function parseClientViewState(value: unknown): ClientViewState {
     value.sidebar_active_tab === 'recent'
   )
     assign('sidebar_active_tab', value.sidebar_active_tab)
-  // The old Servers tab is now a section of the Projects view
+  // The old Servers tab is now a section of the Workspace view
   else if (value.sidebar_active_tab === 'servers')
     assign('sidebar_active_tab', 'projects')
   assign(
