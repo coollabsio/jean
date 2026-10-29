@@ -679,6 +679,12 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
     onSetLabels?.(worktree)
   }, [onSetLabels, worktree])
 
+  const [labelsExpanded, setLabelsExpanded] = useState(false)
+  const toggleLabelsExpanded = useCallback((e: React.SyntheticEvent) => {
+    e.stopPropagation()
+    setLabelsExpanded(expanded => !expanded)
+  }, [])
+
   const openDiff = useCallback(() => {
     onDiffClick?.(
       getCanvasDiffRequest(
@@ -794,20 +800,29 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
           <span className="min-w-0 truncate">
             {isBase ? 'Base Session' : worktree.name}
           </span>
-          {compactLabels.slice(0, 3).map(label => (
-            <span
-              key={label.name}
-              role="img"
-              aria-label={label.name}
-              title={label.name}
-              className="size-2 shrink-0 rounded-full"
-              style={{ backgroundColor: label.color }}
-            />
-          ))}
-          {compactLabels.length > 3 && (
-            <span className="shrink-0 text-2xs text-muted-foreground">
-              +{compactLabels.length - 3}
-            </span>
+          {compactLabels.length > 0 && !labelsExpanded && (
+            <button
+              type="button"
+              aria-label={`Show labels: ${compactLabels.map(l => l.name).join(', ')}`}
+              aria-expanded={false}
+              title={compactLabels.map(l => l.name).join(', ')}
+              className="-m-1.5 flex shrink-0 items-center gap-1.5 p-1.5"
+              onClick={toggleLabelsExpanded}
+              onKeyDown={e => e.stopPropagation()}
+            >
+              {compactLabels.slice(0, 3).map(label => (
+                <span
+                  key={label.name}
+                  className="size-2 shrink-0 rounded-full"
+                  style={{ backgroundColor: label.color }}
+                />
+              ))}
+              {compactLabels.length > 3 && (
+                <span className="text-2xs text-muted-foreground">
+                  +{compactLabels.length - 3}
+                </span>
+              )}
+            </button>
           )}
           <span className="ml-auto shrink-0 pl-2 text-xs tabular-nums text-muted-foreground">
             {lastActivity}
@@ -820,6 +835,29 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
             />
           )}
         </div>
+        {labelsExpanded && compactLabels.length > 0 && (
+          <button
+            type="button"
+            aria-label="Hide labels"
+            aria-expanded
+            className="flex flex-wrap items-center gap-1 py-0.5 text-left"
+            onClick={toggleLabelsExpanded}
+            onKeyDown={e => e.stopPropagation()}
+          >
+            {compactLabels.map(label => (
+              <span
+                key={label.name}
+                className="inline-flex items-center rounded-full px-2 py-0.5 text-2xs font-medium"
+                style={{
+                  backgroundColor: label.color,
+                  color: getLabelTextColor(label.color),
+                }}
+              >
+                {label.name}
+              </span>
+            ))}
+          </button>
+        )}
         {(displayBranch !== worktree.name && displayBranch && !isBase) ||
         stackedBaseBranch ||
         worktree.pr_number ||
