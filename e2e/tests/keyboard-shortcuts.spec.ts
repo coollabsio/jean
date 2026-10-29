@@ -6,7 +6,7 @@ test.describe('Keyboard shortcuts', () => {
       timeout: 5000,
     })
 
-    await mockPage.keyboard.press('Meta+k')
+    await mockPage.keyboard.press('ControlOrMeta+k')
 
     const input = mockPage.locator('[cmdk-input]')
     await expect(input).toBeVisible({ timeout: 3000 })
@@ -18,21 +18,21 @@ test.describe('Keyboard shortcuts', () => {
     })
 
     // Toggle sidebar on (may start hidden or visible depending on default)
-    await mockPage.keyboard.press('Meta+b')
+    await mockPage.keyboard.press('ControlOrMeta+b')
     await mockPage.waitForTimeout(300)
 
-    // Check if PROJECTS header appeared (sidebar panel open)
-    const projectsHeader = mockPage.getByText('PROJECTS')
+    // Check if the Workspace tab appeared (sidebar panel open)
+    const projectsHeader = mockPage.getByRole('tab', { name: 'Workspace' })
     const sidebarVisible = await projectsHeader.isVisible().catch(() => false)
 
     if (sidebarVisible) {
       // Sidebar opened — toggle it closed
-      await mockPage.keyboard.press('Meta+b')
+      await mockPage.keyboard.press('ControlOrMeta+b')
       await mockPage.waitForTimeout(300)
       await expect(projectsHeader).not.toBeVisible({ timeout: 2000 })
     } else {
       // Sidebar was already open and we closed it — toggle it back open
-      await mockPage.keyboard.press('Meta+b')
+      await mockPage.keyboard.press('ControlOrMeta+b')
       await mockPage.waitForTimeout(300)
       await expect(projectsHeader).toBeVisible({ timeout: 2000 })
     }
@@ -43,7 +43,7 @@ test.describe('Keyboard shortcuts', () => {
       timeout: 5000,
     })
 
-    await mockPage.keyboard.press('Meta+k')
+    await mockPage.keyboard.press('ControlOrMeta+k')
     const input = mockPage.locator('[cmdk-input]')
     await expect(input).toBeVisible({ timeout: 3000 })
 

@@ -8,9 +8,9 @@ test.describe('Navigation', () => {
     })
 
     // Open sidebar panel if not visible
-    const projectsHeader = mockPage.getByText('PROJECTS')
+    const projectsHeader = mockPage.getByRole('tab', { name: 'Workspace' })
     if (!(await projectsHeader.isVisible().catch(() => false))) {
-      await mockPage.keyboard.press('Meta+b')
+      await mockPage.keyboard.press('ControlOrMeta+b')
       await mockPage.waitForTimeout(500)
     }
 
@@ -30,9 +30,9 @@ test.describe('Navigation', () => {
     })
 
     // Open sidebar
-    const projectsHeader = mockPage.getByText('PROJECTS')
+    const projectsHeader = mockPage.getByRole('tab', { name: 'Workspace' })
     if (!(await projectsHeader.isVisible().catch(() => false))) {
-      await mockPage.keyboard.press('Meta+b')
+      await mockPage.keyboard.press('ControlOrMeta+b')
       await mockPage.waitForTimeout(500)
     }
 

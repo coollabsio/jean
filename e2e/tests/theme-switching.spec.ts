@@ -21,7 +21,7 @@ test.describe('Theme Switching', () => {
     })
 
     // Open settings
-    await mockPage.keyboard.press('Meta+,')
+    await mockPage.keyboard.press('ControlOrMeta+,')
     await mockPage.waitForTimeout(500)
 
     // Click Appearance tab
@@ -52,7 +52,7 @@ test.describe('Theme Switching', () => {
     })
 
     // Open settings
-    await mockPage.keyboard.press('Meta+,')
+    await mockPage.keyboard.press('ControlOrMeta+,')
     await mockPage.waitForTimeout(500)
 
     // Click Appearance tab

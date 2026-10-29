@@ -70,7 +70,7 @@ test.describe('Session Management', () => {
 
     // Clear and type new name (force click to bypass DnD sortable disabled state)
     await input.click({ force: true })
-    await mockPage.keyboard.press('Meta+a')
+    await mockPage.keyboard.press('ControlOrMeta+a')
     await mockPage.keyboard.type('My Renamed Session')
     await mockPage.keyboard.press('Enter')
     await mockPage.waitForTimeout(300)

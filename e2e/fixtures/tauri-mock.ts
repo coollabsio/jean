@@ -252,9 +252,9 @@ export async function activateWorktree(
   worktreeName: string
 ): Promise<void> {
   // Ensure sidebar is visible
-  const projectsHeader = page.getByText('PROJECTS')
+  const projectsHeader = page.getByRole('tab', { name: 'Workspace' })
   if (!(await projectsHeader.isVisible().catch(() => false))) {
-    await page.keyboard.press('Meta+b')
+    await page.keyboard.press('ControlOrMeta+b')
     await page.waitForTimeout(500)
   }
   await expect(projectsHeader).toBeVisible({ timeout: 3000 })

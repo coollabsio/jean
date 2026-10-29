@@ -69,7 +69,7 @@ test.describe('Worktree drag reorder', () => {
 
       await mockPage.keyboard.press('ArrowDown')
       await mockPage.waitForTimeout(100)
-      await mockPage.keyboard.press('Meta+ArrowDown')
+      await mockPage.keyboard.press('ControlOrMeta+ArrowDown')
 
       await expect
         .poll(async () =>
@@ -82,7 +82,7 @@ test.describe('Worktree drag reorder', () => {
         .toEqual([baseWorktree.id, worktree2.id, worktree1.id])
 
       await mockPage.waitForTimeout(100)
-      await mockPage.keyboard.press('Meta+ArrowUp')
+      await mockPage.keyboard.press('ControlOrMeta+ArrowUp')
 
       await expect
         .poll(async () =>
@@ -103,9 +103,9 @@ test.describe('Worktree drag reorder', () => {
       timeout: 5000,
     })
 
-    const projectsHeader = mockPage.getByText('PROJECTS')
+    const projectsHeader = mockPage.getByRole('tab', { name: 'Workspace' })
     if (!(await projectsHeader.isVisible().catch(() => false))) {
-      await mockPage.keyboard.press('Meta+b')
+      await mockPage.keyboard.press('ControlOrMeta+b')
       await mockPage.waitForTimeout(500)
     }
     await expect(projectsHeader).toBeVisible({ timeout: 3000 })
