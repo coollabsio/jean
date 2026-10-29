@@ -2770,7 +2770,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
                       >
                         <div className="mx-auto max-w-7xl px-4 pt-[calc(var(--chat-top-inset,0px)+1rem)] pb-[calc(var(--chat-composer-height,0px)+1.5rem)] md:px-6 min-w-0 w-full">
                           <div
-                            className="select-text space-y-4 font-mono text-sm min-w-0 break-words overflow-x-hidden"
+                            className="select-text space-y-4 font-mono text-sm min-w-0 break-words overflow-x-clip"
                             // Suppress browser default menu on empty thread chrome
                             // (gaps/padding). Message rows provide a custom menu.
                             // Leave native menus alone for form fields.

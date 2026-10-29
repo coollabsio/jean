@@ -602,8 +602,13 @@ function formatCodexWebSearchExpanded(
 
 // Single source of truth for tool call row layout. Bump min-h-9/px-2.5 here, all rows update.
 // min-h ensures consistent baseline regardless of inline-content height (pill vs no-pill).
-export const TOOL_CALL_ROW_CLASS =
-  'tool-call-row flex min-h-9 w-full items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-muted-foreground bg-muted/30 hover:bg-muted/50 select-none min-w-0'
+// When open, the row sticks to the top of the chat viewport so it can be
+// closed without scrolling back. It stays inside its own block, so it scrolls
+// away with the expanded content. Opaque bg: content must not show through.
+const TOOL_CALL_ROW_STICKY_OPEN_CLASS =
+  'data-[state=open]:sticky data-[state=open]:top-[var(--chat-top-inset,0px)] data-[state=open]:z-10 data-[state=open]:bg-[color-mix(in_oklab,var(--muted)_30%,var(--background))] data-[state=open]:hover:bg-[color-mix(in_oklab,var(--muted)_50%,var(--background))]'
+
+export const TOOL_CALL_ROW_CLASS = `tool-call-row flex min-h-9 w-full items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-muted-foreground bg-muted/30 hover:bg-muted/50 select-none min-w-0 ${TOOL_CALL_ROW_STICKY_OPEN_CLASS}`
 
 export const TOOL_CALL_SUB_ROW_CLASS =
   'tool-call-row flex min-h-7 w-full items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground/80 hover:bg-muted/30 select-none min-w-0'
