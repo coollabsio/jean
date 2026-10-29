@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useAutoResize } from '@/hooks/use-auto-resize'
 import { invoke } from '@/lib/transport'
@@ -29,11 +29,17 @@ import {
 import { queryClient } from '@/lib/query-client'
 import { parseServerResourceKey } from '@/lib/server-resource'
 import { fileQueryKeys } from '@/services/files'
+import { useCreateWorktree } from '@/services/projects'
 import { logger } from '@/lib/logger'
 import { reportBulkInvestigateResults } from '@/components/worktree/bulkInvestigateUtils'
 import {
+  buildInvestigatePrompt,
   investigateInNewSession,
+  investigatePRInNewWorktree,
+  isInvestigableContextItem,
   loadContextMentionItem,
+  planInvestigationBatches,
+  type InvestigatePromptTemplates,
 } from './context-mention-investigation'
 import type { WorktreeFile } from '@/types/chat'
 import { SlashPopover, type SlashPopoverHandle } from './SlashPopover'
@@ -63,10 +69,6 @@ import {
 } from '@/lib/backend-auto-steer'
 import { isNativeApp } from '@/lib/environment'
 import { applyYoloInvestigationFixDirective } from '@/lib/investigation-prompt'
-import {
-  DEFAULT_INVESTIGATE_ISSUE_PROMPT,
-  DEFAULT_INVESTIGATE_PR_PROMPT,
-} from '@/types/preferences'
 
 /** Threshold for saving pasted text as file (2000 chars) */
 const TEXT_PASTE_THRESHOLD = 2000
@@ -1130,26 +1132,17 @@ export const ChatInput = memo(function ChatInput({
     [activeSessionId, atTriggerIndex, inputRef, resizeTextarea]
   )
 
-  const contextMentionToken = useCallback((item: ContextMentionItem) => {
-    switch (item.type) {
-      case 'issue':
-        return item.issue ? `#${item.issue.number}` : item.label
-      case 'pr':
-        return item.pr ? `PR#${item.pr.number}` : item.label.replace(/\s+/g, '')
-      case 'discussion':
-        return item.discussion
-          ? `Discussion#${item.discussion.number}`
-          : item.label.replace(/\s+/g, '')
-      case 'security':
-        return item.securityAlert
-          ? `Security#${item.securityAlert.number}`
-          : item.label.replace(/\s+/g, '')
-      case 'advisory':
-        return item.advisory?.ghsaId ?? item.label
-      case 'linear':
-        return item.linearIssue?.identifier ?? item.label
-    }
-  }, [])
+  const { mutateAsync: createWorktreeAsync } = useCreateWorktree()
+
+  const investigateTemplates = useMemo<InvestigatePromptTemplates>(
+    () => ({
+      issue: investigateIssuePrompt,
+      pr: investigatePRPrompt,
+      securityAlert: preferences?.magic_prompts?.investigate_security_alert,
+      advisory: preferences?.magic_prompts?.investigate_advisory,
+    }),
+    [investigateIssuePrompt, investigatePRPrompt, preferences?.magic_prompts]
+  )
 
   const handleContextSelect = useCallback(
     async (item: ContextMentionItem, investigate = false) => {
@@ -1198,20 +1191,10 @@ export const ChatInput = memo(function ChatInput({
         setContextMentionQuery('')
       }
 
-      let investigatePrompt = ''
-      if (investigate && item.type === 'issue') {
-        investigatePrompt = (
-          investigateIssuePrompt?.trim() || DEFAULT_INVESTIGATE_ISSUE_PROMPT
-        )
-          .replace(/\{issueWord\}/g, 'issue')
-          .replace(/\{issueRefs\}/g, contextMentionToken(item))
-      } else if (investigate && item.type === 'pr') {
-        investigatePrompt = (
-          investigatePRPrompt?.trim() || DEFAULT_INVESTIGATE_PR_PROMPT
-        )
-          .replace(/\{prWord\}/g, 'PR')
-          .replace(/\{prRefs\}/g, `#${item.pr?.number}`)
-      }
+      let investigatePrompt =
+        investigate && isInvestigableContextItem(item)
+          ? buildInvestigatePrompt([item], investigateTemplates)
+          : ''
       if (investigatePrompt) {
         investigatePrompt = applyYoloInvestigationFixDirective(
           investigatePrompt,
@@ -1258,12 +1241,10 @@ export const ChatInput = memo(function ChatInput({
       activeProjectId,
       activeSessionId,
       activeWorktreePath,
-      contextMentionToken,
       executionMode,
       hashTriggerIndex,
       inputRef,
-      investigateIssuePrompt,
-      investigatePRPrompt,
+      investigateTemplates,
       onSubmit,
       resizeTextarea,
     ]
@@ -1295,50 +1276,45 @@ export const ChatInput = memo(function ChatInput({
       setHashTriggerIndex(null)
       setContextMentionQuery('')
 
-      const investigate = (batch: ContextMentionItem[], openSession: boolean) =>
-        investigateInNewSession({
-          items: batch,
-          worktreeId: activeWorktreeId,
-          worktreePath: activeWorktreePath,
-          projectId: activeProjectId,
-          issueTemplate: investigateIssuePrompt,
-          prTemplate: investigatePRPrompt,
-          openSession,
-        })
+      const batches = planInvestigationBatches(items, separate)
+      // Open the new session or worktree only when it is the only one
+      const openResult = batches.length === 1
 
-      if (!separate) {
-        const toastId = toast.loading(
-          `Starting investigation of ${items.length} items in a new session...`
-        )
-        try {
-          await investigate(items, true)
-          toast.success(
-            `Investigating ${items.length} items in a new session`,
-            { id: toastId }
-          )
-        } catch (error) {
-          toast.error(`Failed to start investigation: ${error}`, {
-            id: toastId,
-          })
-        }
-        return
-      }
-
-      // One background session per item, started in parallel. The backend
-      // serializes session index writes per worktree.
       const toastId = toast.loading(
-        `Starting ${items.length} investigations in new sessions...`
+        `Starting investigation of ${items.length} ${items.length === 1 ? 'item' : 'items'}...`
       )
+      // Started in parallel. The backend serializes session index writes
+      // per worktree.
       const results = await Promise.allSettled(
-        items.map(item => investigate([item], false))
+        batches.map(async batch => {
+          if (batch.kind === 'session') {
+            return investigateInNewSession({
+              items: batch.items,
+              worktreeId: activeWorktreeId,
+              worktreePath: activeWorktreePath,
+              projectId: activeProjectId,
+              templates: investigateTemplates,
+              openSession: openResult,
+            })
+          }
+          if (!activeProjectId) throw new Error('No active project')
+          return investigatePRInNewWorktree({
+            pr: batch.pr,
+            projectId: activeProjectId,
+            projectPath: activeWorktreePath,
+            createWorktree: createWorktreeAsync,
+            background: !openResult,
+          })
+        })
       )
       let succeeded = 0
       results.forEach((result, index) => {
+        const batch = batches[index]
         if (result.status === 'fulfilled') {
-          succeeded += 1
+          succeeded += batch?.kind === 'session' ? batch.items.length : 1
         } else {
           logger.error('Context investigation failed', {
-            item: items[index]?.id,
+            batch,
             error: result.reason,
           })
         }
@@ -1357,9 +1333,9 @@ export const ChatInput = memo(function ChatInput({
       activeWorktreeId,
       activeWorktreePath,
       hashTriggerIndex,
+      createWorktreeAsync,
       inputRef,
-      investigateIssuePrompt,
-      investigatePRPrompt,
+      investigateTemplates,
       resizeTextarea,
     ]
   )

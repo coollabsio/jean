@@ -199,7 +199,6 @@ export function useContextMentionData({
   const prState = includeClosed ? 'all' : 'open'
   const discussionState = includeClosed ? 'all' : 'open'
   const securityState = includeClosed ? 'all' : 'open'
-  const advisoryState = includeClosed ? 'all' : 'published'
 
   const { data: issueResult, isFetching: isFetchingIssues } = useGitHubIssues(
     enabledProjectPath,
@@ -222,7 +221,7 @@ export function useContextMentionData({
   const { data: alerts = [], isFetching: isFetchingAlerts } =
     useDependabotAlerts(enabledProjectPath, securityState, { enabled: open })
   const { data: advisories = [], isFetching: isFetchingAdvisories } =
-    useRepositoryAdvisories(enabledProjectPath, advisoryState, {
+    useRepositoryAdvisories(enabledProjectPath, undefined, {
       enabled: open,
     })
   const { data: linearResult, isFetching: isFetchingLinear } = useLinearIssues(

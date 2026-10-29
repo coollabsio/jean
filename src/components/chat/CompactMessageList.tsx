@@ -44,6 +44,13 @@ import { ReplyBubbles } from './ReplyBubble'
 import { getProviderChangeBeforeMessage } from './message-settings-labels'
 import { ProviderChangeSeparator } from './ProviderChangeSeparator'
 import { AskUserQuestion } from './AskUserQuestion'
+import { SecretRequestCard } from './SecretRequestCard'
+import { SecretListCard } from './SecretListCard'
+import {
+  isSecretListTool,
+  isSecretRequestTool,
+  secretRequest,
+} from './secret-request'
 import { SteeredPromptGroup } from './SteeredPromptGroup'
 import {
   assistantTextParts,
@@ -164,7 +171,11 @@ function messageContainsPlan(message: ChatMessage): boolean {
 }
 
 function messageContainsQuestion(message: ChatMessage): boolean {
-  return Boolean(message.tool_calls?.some(isAskUserQuestion))
+  return Boolean(
+    message.tool_calls?.some(
+      tc => isAskUserQuestion(tc) || secretRequest(tc) || isSecretListTool(tc)
+    )
+  )
 }
 
 type SteerSegment =
@@ -301,14 +312,16 @@ function findLatestAssistantText(
 }
 
 /**
- * Returns a clone of `message` with all AskUserQuestion tool calls / blocks
- * removed so {@link MessageItem} can render the surrounding timeline without
+ * Returns a clone of `message` with all AskUserQuestion and `request_secret`
+ * tool calls / blocks removed so {@link MessageItem} can render the surrounding timeline without
  * duplicating the question UI we render separately.
  */
 function stripQuestionsFromMessage(message: ChatMessage): ChatMessage {
   const questionIds = new Set(
     (message.tool_calls ?? []).flatMap(tc =>
-      isAskUserQuestion(tc) ? [tc.id] : []
+      isAskUserQuestion(tc) || isSecretRequestTool(tc) || isSecretListTool(tc)
+        ? [tc.id]
+        : []
     )
   )
   if (questionIds.size === 0) return message
@@ -567,6 +580,8 @@ interface CompactQuestionMessageProps {
   hasFollowUpFor: (globalIndex: number) => boolean
   durationFor: (globalIndex: number, message: ChatMessage) => number | null
   hideToolActivity: boolean
+  isSending: boolean
+  onSendAnswer?: (text: string) => void
 }
 
 /**
@@ -592,6 +607,8 @@ function CompactQuestionMessage({
   hasFollowUpFor,
   durationFor,
   hideToolActivity,
+  isSending,
+  onSendAnswer,
 }: CompactQuestionMessageProps) {
   const stripped = useMemo(() => stripQuestionsFromMessage(message), [message])
 
@@ -602,6 +619,20 @@ function CompactQuestionMessage({
       item.type === 'askUserQuestion' ? [item] : []
     )
   }, [message])
+
+  const secretRequests = useMemo(
+    () =>
+      (message.tool_calls ?? []).flatMap(tool => {
+        const request = secretRequest(tool)
+        return request ? [{ id: tool.id, request }] : []
+      }),
+    [message]
+  )
+
+  const showsSecretList = useMemo(
+    () => (message.tool_calls ?? []).some(isSecretListTool),
+    [message]
+  )
 
   const hasNonQuestionContent = useMemo(() => {
     if (stripped.tool_calls && stripped.tool_calls.length > 0) return true
@@ -680,6 +711,18 @@ function CompactQuestionMessage({
           />
         )
       })}
+      {secretRequests.map(({ id, request }) => (
+        <SecretRequestCard
+          key={id}
+          sessionId={sessionId}
+          toolCallId={id}
+          request={request}
+          answered={hasFollowUpMessage}
+          disabled={isSending}
+          onSend={onSendAnswer}
+        />
+      ))}
+      {showsSecretList && <SecretListCard sessionId={sessionId} />}
       {durationMs != null && durationMs > 0 && (
         <span className="mt-1 block min-h-4 text-xs leading-4 text-muted-foreground/40 tabular-nums font-mono">
           <MessageTiming
@@ -1201,6 +1244,8 @@ export const CompactMessageList = memo(
                     hasFollowUpFor={hasFollowUpFor}
                     durationFor={durationFor}
                     hideToolActivity={hideToolActivity}
+                    isSending={isSending}
+                    onSendAnswer={onSendAnswer}
                   />
                 </div>
               )

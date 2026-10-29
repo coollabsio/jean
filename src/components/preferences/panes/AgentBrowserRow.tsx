@@ -172,6 +172,21 @@ export const AgentBrowserRow: React.FC = () => {
           </Badge>
         )
       }
+      iconAction={
+        !enabled ? undefined : checking && !installing ? (
+          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+        ) : (
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label="Refresh Agent Browser status"
+            onClick={() => void refetch()}
+            disabled={busy}
+          >
+            <RefreshCw className="h-4 w-4" />
+          </Button>
+        )
+      }
       actions={
         !enabled ? (
           <Button
@@ -187,19 +202,8 @@ export const AgentBrowserRow: React.FC = () => {
             )}
             Install
           </Button>
-        ) : checking && !installing ? (
-          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-        ) : (
+        ) : checking && !installing ? null : (
           <>
-            <Button
-              variant="ghost"
-              size="sm"
-              aria-label="Refresh Agent Browser status"
-              onClick={() => void refetch()}
-              disabled={busy}
-            >
-              <RefreshCw className="h-4 w-4" />
-            </Button>
             <Button
               variant={status?.installed ? 'outline' : 'default'}
               size="sm"

@@ -173,6 +173,27 @@ describe('SendCancelButton', () => {
     expect(onSteer).toHaveBeenCalledOnce()
   })
 
+  it('offers a separate Queue action when auto-steer is on in mobile view', () => {
+    runtime.isMobile = true
+    const onQueue = vi.fn()
+
+    render(
+      <SendCancelButton
+        isSending
+        canSend
+        canSteer
+        willSteer
+        onCancel={vi.fn()}
+        onSteer={vi.fn()}
+        onQueue={onQueue}
+      />
+    )
+
+    expect(screen.getByRole('button', { name: /^steer$/i })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /^queue$/i }))
+    expect(onQueue).toHaveBeenCalledOnce()
+  })
+
   it('offers separate Queue and Steer actions in mobile view', () => {
     runtime.isMobile = true
 

@@ -3122,6 +3122,52 @@ pub async fn dispatch_command(
             Ok(Value::Null)
         }
 
+        "save_secret_request" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let tool_call_id: String = field(&args, "toolCallId", "tool_call_id")?;
+            let label: String = from_field(&args, "label")?;
+            let secret: String = from_field(&args, "secret")?;
+            let retention: crate::chat::secrets::SecretRetention = from_field(&args, "retention")?;
+            let saved = crate::chat::secrets::save_secret_request(
+                app.clone(),
+                session_id,
+                tool_call_id,
+                label,
+                secret,
+                retention,
+            )?;
+            emit_cache_invalidation(app, &["secret-request"]);
+            to_value(saved)
+        }
+
+        "secret_request_status" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let tool_call_id: String = field(&args, "toolCallId", "tool_call_id")?;
+            to_value(crate::chat::secrets::secret_request_status(
+                app.clone(),
+                session_id,
+                tool_call_id,
+            )?)
+        }
+
+        // Clients pass `sessionId` only to route to the server that owns it.
+        "list_secrets" => to_value(crate::chat::secrets::list_secrets(app.clone())?),
+
+        "delete_secret" => {
+            let id: String = from_field(&args, "id")?;
+            crate::chat::secrets::delete_secret(app.clone(), id)?;
+            emit_cache_invalidation(app, &["secret-request"]);
+            Ok(Value::Null)
+        }
+
+        "forget_secret_request" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let tool_call_id: String = field(&args, "toolCallId", "tool_call_id")?;
+            crate::chat::secrets::forget_secret_request(app.clone(), session_id, tool_call_id)?;
+            emit_cache_invalidation(app, &["secret-request"]);
+            Ok(Value::Null)
+        }
+
         "respond_claude_permission" => {
             let session_id: String = field(&args, "sessionId", "session_id")?;
             let rpc_id: u64 = field(&args, "rpcId", "rpc_id")?;

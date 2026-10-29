@@ -1837,6 +1837,11 @@ const ChatWindowContent = memo(function ChatWindowContent({
     [handleSubmit]
   )
 
+  const handleQueue = useCallback(
+    () => handleSubmit(undefined, { forceQueue: true }),
+    [handleSubmit]
+  )
+
   const handleCheckGitHubIssues = useCallback(() => {
     if (
       routeCurrentSessionMagicPrompt(
@@ -3523,6 +3528,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                     }
                                     onCancel={handleCancel}
                                     onSteer={handleSteer}
+                                    onQueue={handleQueue}
                                   />
                                 </div>
                               ) : (
@@ -3668,6 +3674,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                       preferences
                                     )}
                                     onSteer={handleSteer}
+                                    onQueue={handleQueue}
                                     queuedMessageCount={
                                       currentQueuedMessages.length
                                     }

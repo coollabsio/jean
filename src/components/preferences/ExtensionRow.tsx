@@ -39,6 +39,8 @@ interface ExtensionRowProps {
   name: string
   /** Status badge next to the name. */
   status?: React.ReactNode
+  /** Small icon button kept on the name line (for example, refresh). */
+  iconAction?: React.ReactNode
   /** Buttons on the right side of the row. */
   actions?: React.ReactNode
   anchorId?: string
@@ -50,6 +52,7 @@ interface ExtensionRowProps {
 export function ExtensionRow({
   name,
   status,
+  iconAction,
   actions,
   anchorId,
   children,
@@ -58,20 +61,25 @@ export function ExtensionRow({
   return (
     <Collapsible id={anchorId} open={open} onOpenChange={setOpen}>
       <div className="flex min-h-10 min-w-0 max-w-full flex-col gap-2 rounded-md px-2 py-1.5 hover:bg-muted/40 sm:flex-row sm:items-center">
-        <CollapsibleTrigger className="flex min-w-0 w-full flex-1 items-center gap-2 overflow-hidden text-left">
-          <ChevronRight
-            className={cn(
-              'h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform',
-              open && 'rotate-90'
-            )}
-          />
-          <span className="max-w-[46%] shrink-0 overflow-hidden text-sm font-medium text-foreground sm:w-36 sm:max-w-none">
-            <span className="block truncate">{name}</span>
-          </span>
-          <span className="flex min-w-0 flex-1 items-center overflow-hidden">
-            {status}
-          </span>
-        </CollapsibleTrigger>
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <CollapsibleTrigger className="flex min-w-0 w-full flex-1 items-center gap-2 overflow-hidden text-left">
+            <ChevronRight
+              className={cn(
+                'h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform',
+                open && 'rotate-90'
+              )}
+            />
+            <span className="max-w-[46%] shrink-0 overflow-hidden text-sm font-medium text-foreground sm:w-36 sm:max-w-none">
+              <span className="block truncate">{name}</span>
+            </span>
+            <span className="flex min-w-0 flex-1 items-center overflow-hidden">
+              {status}
+            </span>
+          </CollapsibleTrigger>
+          {iconAction && (
+            <span className="flex shrink-0 items-center">{iconAction}</span>
+          )}
+        </div>
         {actions && (
           <span className="flex w-full min-w-0 flex-wrap items-center justify-end gap-2 sm:w-auto sm:shrink-0 sm:flex-nowrap">
             {actions}

@@ -333,6 +333,8 @@ fn tool_registry_session() -> Value {
         {"name":"get_worktree_changes","description":"Get a bounded summary of a worktree's git changes: porcelain status, ahead/behind counts, diff stats, and changed files. Does not return full diffs.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"maxFiles":{"type":"integer","minimum":1,"maximum":500,"default":100}},"required":["worktreeId"],"additionalProperties":false}},
         {"name":"get_worktree_diff","description":"Get a bounded unified git diff for a worktree. diffType is uncommitted (HEAD vs working tree) or branch (origin/base...HEAD). Optional path limits to one pathspec; maxBytes is capped.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"diffType":{"type":"string","enum":["uncommitted","branch"],"default":"uncommitted"},"path":{"type":"string"},"maxBytes":{"type":"integer","minimum":1,"maximum":200000,"default":60000}},"required":["worktreeId"],"additionalProperties":false}},
         {"name":"get_current_context","description":"Return the calling session's context: sessionId, worktreeId, projectId, projectPath, projectName. Use this so the agent knows what 'this project' refers to without guessing.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
+        {"name":"request_secret","description":"Ask the user for a secret (API key, token, auth key) in a private card in this chat. You never see the value. Never ask for secrets in chat text and never invent one. End your turn after the call. When the user saves, the next user message gives a private file path that holds only the value. Read it only inside a shell command, for example TOKEN=\"$(cat '<path>')\" mycli login. Do not print, echo, or copy the value. The user picks how long the file is kept (until they forget it, or 24 hours) and can delete it at any time. If the file is gone, call request_secret again.","inputSchema":{"type":"object","properties":{"label":{"type":"string","maxLength":80,"description":"Card title, for example 'Tailscale auth key'."},"reason":{"type":"string","maxLength":500,"description":"What the secret is for and where the user can create it."},"placeholder":{"type":"string","maxLength":80,"description":"Optional input placeholder, for example 'tskey-auth-...'."}},"required":["label","reason"],"additionalProperties":false}},
+        {"name":"list_secrets","description":"Show the user all secrets saved from request_secret cards, in a card in this chat with a Delete button for each. Use it when the user asks to see, manage, or delete saved secrets. Returns labels, retention, and save time only; never values or file paths. You cannot delete secrets: the user deletes them on the card. End your turn after the call.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
         {"name":"get_run_environments","description":"List Jean Run-command / panel-command dev environments. Returns whether each is running, worktree/base-session identity, startup command, listening/configured ports, and http URL when a port is known. Optional worktreeId or projectId filters. Does not include full-screen CLI session terminals.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string","description":"Optional worktree id to filter to one worktree or base session."},"projectId":{"type":"string","description":"Optional project id to filter to that project's worktrees."}},"additionalProperties":false}}
         ,{"name":"start_run_environment","description":"Start or reuse a Jean-managed Run environment for a worktree using a run command configured in jean.json. When command is omitted, uses the first configured run command. Returns the environment identity, command, running state, ports, and URL when detected.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string","description":"Worktree whose configured Run environment should start."},"command":{"type":"string","description":"Optional exact jean.json run command to start. Must be one of the configured run commands."}},"required":["worktreeId"],"additionalProperties":false}}
     ])
@@ -1838,6 +1840,42 @@ async fn run_tool(
             Ok(
                 json!({ "sessionId": source, "worktreeId": worktree_id, "worktreePath": worktree_path, "projectId": project_id, "projectName": project_name, "projectPath": project_path }),
             )
+        }
+        "request_secret" => {
+            if source == "anon" {
+                return Err(ToolError::invalid_params(
+                    "request_secret works only in a Jean chat session.",
+                ));
+            }
+            for (key, max) in [("label", 80), ("reason", 500)] {
+                if require_nonempty_str(&args, key)?.chars().count() > max {
+                    return Err(ToolError::invalid_params(format!(
+                        "{key} must be at most {max} characters"
+                    )));
+                }
+            }
+            Ok(json!({
+                "status": "shown",
+                "note": "The user sees the secret card. End your turn now. When the user saves, the next user message gives the file path. Read the file only inside a shell command and never print the value.",
+            }))
+        }
+        "list_secrets" => {
+            if source == "anon" {
+                return Err(ToolError::invalid_params(
+                    "list_secrets works only in a Jean chat session.",
+                ));
+            }
+            let secrets =
+                crate::chat::secrets::list_secrets(app.clone()).map_err(ToolError::internal)?;
+            let secrets: Vec<Value> = secrets
+                .iter()
+                .map(|s| json!({ "label": s.label, "retention": s.retention, "savedAt": s.saved_at }))
+                .collect();
+            Ok(json!({
+                "count": secrets.len(),
+                "secrets": secrets,
+                "note": "The user sees these secrets in a card with Delete buttons. End your turn now.",
+            }))
         }
         CLAUDE_PERMISSION_PROMPT_TOOL => Ok(claude_permission_prompt(app, source, &args).await),
         // Boxed: keeps this large function's stack frame small.

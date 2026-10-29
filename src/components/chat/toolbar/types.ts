@@ -129,6 +129,7 @@ export interface ChatToolbarProps {
   actionWithModifier?: boolean
   canSteer?: boolean
   onSteer?: () => void
+  onQueue?: () => void
   queuedMessageCount?: number
 
   availableMcpServers: McpServerInfo[]

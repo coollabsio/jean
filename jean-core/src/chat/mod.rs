@@ -28,6 +28,7 @@ pub(crate) mod pi;
 pub mod registry;
 pub mod run_log;
 pub mod search;
+pub mod secrets;
 pub mod storage;
 pub mod tail;
 pub mod types;

@@ -1,6 +1,6 @@
 import { getModifierSymbol, isClientMacOS } from '@/lib/platform'
 import { isNativeApp } from '@/lib/environment'
-import { edgePrimary, raised } from '@/components/ui/button'
+import { edgeNeutral, edgePrimary, raised } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { Kbd } from '@/components/ui/kbd'
 import {
@@ -22,6 +22,7 @@ interface SendCancelButtonProps {
   queuedMessageCount?: number
   onCancel: () => void
   onSteer?: () => void
+  onQueue?: () => void
 }
 
 export function SendCancelButton({
@@ -33,6 +34,7 @@ export function SendCancelButton({
   queuedMessageCount,
   onCancel,
   onSteer,
+  onQueue,
 }: SendCancelButtonProps) {
   const isMobile = useIsMobile()
 
@@ -44,9 +46,8 @@ export function SendCancelButton({
             type="button"
             onClick={onCancel}
             className={cn(
-              'flex h-8 items-center justify-center gap-1.5 px-3 text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90',
-              raised,
-              edgePrimary
+              'flex h-8 items-center justify-center gap-1.5 px-3 text-xs font-medium bg-destructive text-white hover:bg-destructive/90 [--btn-edge:color-mix(in_oklab,var(--destructive)_55%,black)]',
+              raised
             )}
           >
             <span>{queuedMessageCount ? 'Skip to Next' : 'Cancel'}</span>
@@ -61,8 +62,10 @@ export function SendCancelButton({
     )
 
     if (canSend) {
-      const showSeparateSteer =
-        canSteer && !willSteer && (isMobile || !isNativeApp())
+      // Without a held modifier (mobile, web), offer the opposite of the
+      // main action as a separate button.
+      const showAlternate = canSteer && (isMobile || !isNativeApp())
+      const alternateLabel = willSteer ? 'Queue' : 'Steer'
       const actionLabel = willSteer ? 'Steer' : 'Queue'
       const actionShortcut = actionWithModifier
         ? isClientMacOS
@@ -78,19 +81,25 @@ export function SendCancelButton({
           : `Queue message (${actionShortcut})`
 
       return (
-        <div className="flex items-center">
+        <div className="flex items-center gap-1.5">
           {cancelButton}
-          <div className="h-4 w-px shrink-0 bg-border/50" />
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type="submit"
                 aria-label={actionLabel}
-                className="flex h-8 items-center justify-center gap-1.5 px-2.5 text-xs font-medium transition-colors text-muted-foreground hover:bg-muted/80 hover:text-foreground"
+                className={cn(
+                  'flex h-8 items-center justify-center gap-1.5 px-2.5 text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90',
+                  raised,
+                  edgePrimary
+                )}
               >
                 <span>{actionLabel}</span>
                 {!isMobile && (
-                  <Kbd modHint={actionWithModifier} className="h-4 text-2xs">
+                  <Kbd
+                    modHint={actionWithModifier}
+                    className="h-4 bg-primary-foreground/15 text-2xs text-primary-foreground"
+                  >
                     {actionShortcut}
                   </Kbd>
                 )}
@@ -98,21 +107,26 @@ export function SendCancelButton({
             </TooltipTrigger>
             <TooltipContent>{actionTooltip}</TooltipContent>
           </Tooltip>
-          {showSeparateSteer && (
+          {showAlternate && (
             <>
-              <div className="h-4 w-px shrink-0 bg-border/50" />
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
                     type="button"
-                    aria-label="Steer"
-                    onClick={onSteer}
-                    className="flex h-8 items-center justify-center px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground"
+                    aria-label={alternateLabel}
+                    onClick={willSteer ? onQueue : onSteer}
+                    className={cn(
+                      'flex h-8 items-center justify-center px-2.5 text-xs font-medium bg-muted text-foreground hover:bg-muted/80',
+                      raised,
+                      edgeNeutral
+                    )}
                   >
-                    Steer
+                    {alternateLabel}
                   </button>
                 </TooltipTrigger>
-                <TooltipContent>Steer into running turn</TooltipContent>
+                <TooltipContent>
+                  {willSteer ? 'Queue message' : 'Steer into running turn'}
+                </TooltipContent>
               </Tooltip>
             </>
           )}

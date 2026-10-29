@@ -239,6 +239,8 @@ interface UIState {
   featureTourOpen: boolean
   /** Whether the one-time Jean MCP introduction dialog is open */
   jeanMcpIntroOpen: boolean
+  /** Whether the MCP servers overview dialog is open */
+  mcpServersModalOpen: boolean
   /** Whether UI state has been restored from persisted storage */
   uiStateInitialized: boolean
   /** Pending app update that user skipped — shown as indicator in title bar */
@@ -384,6 +386,7 @@ interface UIState {
   setContextViewerOpen: (open: boolean) => void
   setFeatureTourOpen: (open: boolean) => void
   setJeanMcpIntroOpen: (open: boolean) => void
+  setMcpServersModalOpen: (open: boolean) => void
   setUIStateInitialized: (initialized: boolean) => void
   setPendingUpdateVersion: (version: string | null) => void
   setUpdateModalVersion: (version: string | null) => void
@@ -508,6 +511,7 @@ export const useUIStore = create<UIState>()(
       contextViewerOpen: false,
       featureTourOpen: false,
       jeanMcpIntroOpen: false,
+      mcpServersModalOpen: false,
       uiStateInitialized: false,
       pendingUpdateVersion: null,
       updateModalVersion: null,
@@ -1619,6 +1623,16 @@ export const useUIStore = create<UIState>()(
               : { jeanMcpIntroOpen: open },
           undefined,
           'setJeanMcpIntroOpen'
+        ),
+
+      setMcpServersModalOpen: (open: boolean) =>
+        set(
+          state =>
+            state.mcpServersModalOpen === open
+              ? state
+              : { mcpServersModalOpen: open },
+          undefined,
+          'setMcpServersModalOpen'
         ),
 
       setUIStateInitialized: (initialized: boolean) =>

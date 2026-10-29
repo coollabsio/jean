@@ -1,9 +1,16 @@
 import { createRef } from 'react'
 import type { ComponentProps } from 'react'
 import { describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, within } from '@/test/test-utils'
+import { fireEvent, render, screen, waitFor, within } from '@/test/test-utils'
+import type * as transport from '@/lib/transport'
+import { invoke } from '@/lib/transport'
 import { CompactMessageList } from './CompactMessageList'
 import { formatLocalTime } from './time-utils'
+
+vi.mock('@/lib/transport', async importOriginal => ({
+  ...(await importOriginal<typeof transport>()),
+  invoke: vi.fn(),
+}))
 import type {
   ChatMessage,
   Question,
@@ -686,5 +693,161 @@ describe('CompactMessageList', () => {
         isIt.compareDocumentPosition(activity) &
           Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
+  })
+})
+
+describe('CompactMessageList request_secret', () => {
+  const secretMessages = [
+    message('user-1', 'user', 100, 'join the tailnet'),
+    message('assistant-1', 'assistant', 104, '', {
+      tool_calls: [
+        {
+          id: 'tool-1',
+          name: 'mcp__jean__request_secret',
+          input: { label: 'Tailscale auth key', reason: 'Create it in admin.' },
+        },
+      ],
+      content_blocks: [{ type: 'tool_use', tool_call_id: 'tool-1' }],
+    }),
+  ]
+
+  const mockSecretCommands = (saved: unknown) =>
+    vi.mocked(invoke).mockImplementation((async (command: string) => {
+      if (command === 'secret_request_status') return saved
+      if (command === 'save_secret_request')
+        return { path: '/data/secrets/abc-24h', retention: 'day' }
+      return null
+    }) as typeof invoke)
+
+  it('saves the value with the chosen retention and sends only the path', async () => {
+    mockSecretCommands(null)
+    const onSendAnswer = vi.fn()
+    renderCompact(secretMessages, { onSendAnswer })
+
+    fireEvent.change(screen.getByLabelText('Tailscale auth key'), {
+      target: { value: 'tskey-auth-123' },
+    })
+    fireEvent.click(screen.getByRole('radio', { name: '24 hours' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save securely' }))
+
+    expect(
+      await screen.findByText(
+        'Tailscale auth key · saved, deleted after 24 hours'
+      )
+    ).toBeVisible()
+    expect(invoke).toHaveBeenCalledWith('save_secret_request', {
+      sessionId: 'session-1',
+      toolCallId: 'tool-1',
+      label: 'Tailscale auth key',
+      secret: 'tskey-auth-123',
+      retention: 'day',
+    })
+    expect(onSendAnswer).toHaveBeenCalledTimes(1)
+    const sent = onSendAnswer.mock.calls[0]?.[0] as string
+    expect(sent).toContain('/data/secrets/abc-24h')
+    expect(sent).not.toContain('tskey-auth-123')
+  })
+
+  it('keeps secrets until forgotten by default', async () => {
+    mockSecretCommands(null)
+    renderCompact(secretMessages, { onSendAnswer: vi.fn() })
+    fireEvent.change(screen.getByLabelText('Tailscale auth key'), {
+      target: { value: 'tskey-auth-123' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save securely' }))
+    await screen.findByRole('button', { name: 'Forget' })
+    expect(invoke).toHaveBeenCalledWith(
+      'save_secret_request',
+      expect.objectContaining({ retention: 'forever' })
+    )
+  })
+
+  it('forgets a saved secret of an answered request', async () => {
+    mockSecretCommands({ path: '/data/secrets/abc', retention: 'forever' })
+    renderCompact([...secretMessages, message('user-2', 'user', 110, 'ok')])
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Forget' }))
+
+    expect(
+      await screen.findByText('Tailscale auth key · not saved')
+    ).toBeVisible()
+    expect(invoke).toHaveBeenCalledWith('forget_secret_request', {
+      sessionId: 'session-1',
+      toolCallId: 'tool-1',
+    })
+  })
+
+  it('closes the card once a user message follows it', async () => {
+    mockSecretCommands(null)
+    renderCompact([
+      ...secretMessages,
+      message('user-2', 'user', 110, 'skip that'),
+    ])
+    expect(
+      await screen.findByText('Tailscale auth key · not saved')
+    ).toBeVisible()
+    expect(
+      screen.queryByRole('button', { name: 'Save securely' })
+    ).not.toBeInTheDocument()
+  })
+})
+
+describe('CompactMessageList list_secrets', () => {
+  it('lists saved secrets without values and deletes one', async () => {
+    let secrets = [
+      {
+        id: 'a'.repeat(32),
+        label: 'Tailscale auth key',
+        sessionId: 's1',
+        toolCallId: 't1',
+        retention: 'forever',
+        savedAt: 1_700_000_000,
+      },
+      {
+        id: 'b'.repeat(32),
+        label: 'Cloudflare token',
+        sessionId: 's2',
+        toolCallId: 't2',
+        retention: 'day',
+        savedAt: 1_700_000_100,
+      },
+    ]
+    vi.mocked(invoke).mockImplementation((async (
+      command: string,
+      args?: Record<string, unknown>
+    ) => {
+      if (command === 'list_secrets') return secrets
+      if (command === 'delete_secret') {
+        secrets = secrets.filter(entry => entry.id !== args?.id)
+      }
+      return null
+    }) as typeof invoke)
+
+    renderCompact([
+      message('user-1', 'user', 100, 'show my secrets'),
+      message('assistant-1', 'assistant', 104, '', {
+        tool_calls: [
+          { id: 'tool-1', name: 'mcp__jean__list_secrets', input: {} },
+        ],
+        content_blocks: [{ type: 'tool_use', tool_call_id: 'tool-1' }],
+      }),
+    ])
+
+    const card = await screen.findByRole('region', { name: 'Saved secrets' })
+    expect(await within(card).findByText('Tailscale auth key')).toBeVisible()
+    expect(within(card).getByText('Cloudflare token')).toBeVisible()
+
+    fireEvent.click(
+      within(card).getByRole('button', { name: 'Delete Cloudflare token' })
+    )
+
+    await waitFor(() =>
+      expect(within(card).queryByText('Cloudflare token')).toBeNull()
+    )
+    expect(invoke).toHaveBeenCalledWith('delete_secret', {
+      sessionId: 'session-1',
+      id: 'b'.repeat(32),
+    })
+    expect(within(card).getByText('Tailscale auth key')).toBeVisible()
   })
 })

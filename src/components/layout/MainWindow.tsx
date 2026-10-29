@@ -90,6 +90,11 @@ const CliLoginModal = lazy(() =>
     default: mod.CliLoginModal,
   }))
 )
+const McpServersModal = lazy(() =>
+  import('@/components/mcp/McpServersModal').then(mod => ({
+    default: mod.McpServersModal,
+  }))
+)
 const OpenInModal = lazy(() =>
   import('@/components/open-in/OpenInModal').then(mod => ({
     default: mod.OpenInModal,
@@ -265,6 +270,7 @@ export function MainWindow() {
   const onboardingOpen = useUIStore(state => state.onboardingOpen)
   const featureTourOpen = useUIStore(state => state.featureTourOpen)
   const openInModalOpen = useUIStore(state => state.openInModalOpen)
+  const mcpServersModalOpen = useUIStore(state => state.mcpServersModalOpen)
   const remotePickerOpen = useUIStore(state => state.remotePickerOpen)
   const resolveConflictsDialogOpen = useUIStore(
     state => state.resolveConflictsDialogOpen
@@ -523,6 +529,7 @@ export function MainWindow() {
   )
   const shouldRenderCliLoginModal = useRetainedMount(cliLoginModalOpen)
   const shouldRenderOpenInModal = useRetainedMount(openInModalOpen)
+  const shouldRenderMcpServersModal = useRetainedMount(mcpServersModalOpen)
   const shouldRenderRemotePickerModal = useRetainedMount(remotePickerOpen)
   const shouldRenderUpdatePrDialog = useRetainedMount(updatePrModalOpen)
   const shouldRenderReviewCommentsDialog = useRetainedMount(
@@ -788,6 +795,11 @@ export function MainWindow() {
       {shouldRenderOpenInModal && (
         <Suspense fallback={null}>
           <OpenInModal />
+        </Suspense>
+      )}
+      {shouldRenderMcpServersModal && (
+        <Suspense fallback={null}>
+          <McpServersModal />
         </Suspense>
       )}
       {shouldRenderWorkflowRunsModal && (

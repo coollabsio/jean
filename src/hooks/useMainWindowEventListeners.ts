@@ -304,6 +304,9 @@ export function applyCacheInvalidationKeys(
           queryKey: ['saved-contexts'],
         })
         break
+      case 'secret-request':
+        queryClient.invalidateQueries({ queryKey: ['secret-request'] })
+        break
     }
   }
 }

@@ -8,6 +8,7 @@ import {
   Download,
   Pencil,
   RotateCcw,
+  Plug,
 } from '@/components/icons/reicon'
 import type { AppCommand } from './types'
 import { requestImportExistingWorktree } from '@/lib/import-existing-worktree'
@@ -49,6 +50,30 @@ export const projectCommands: AppCommand[] = [
 
     execute: context => {
       context.openProjectSettings()
+    },
+  },
+
+  {
+    id: 'mcp-servers',
+    label: 'MCP Servers',
+    description: 'View all MCP servers, check status, and sign in',
+    icon: Plug,
+    group: 'settings',
+    keywords: [
+      'mcp',
+      'servers',
+      'login',
+      'sign in',
+      'auth',
+      'oauth',
+      'connect',
+      'tools',
+    ],
+
+    isAvailable: context => context.hasInstalledBackend(),
+
+    execute: () => {
+      useUIStore.getState().setMcpServersModalOpen(true)
     },
   },
 

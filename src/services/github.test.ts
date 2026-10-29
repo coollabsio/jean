@@ -21,8 +21,13 @@ import {
   mergeWithSearchResults,
   prependExactMatches,
   sessionReferenceSlug,
+  sortAdvisoriesByState,
 } from './github'
-import type { GitHubDiscussion, GitHubIssue } from '@/types/github'
+import type {
+  GitHubDiscussion,
+  GitHubIssue,
+  RepositoryAdvisory,
+} from '@/types/github'
 
 describe('GitHub issue search', () => {
   const issues: GitHubIssue[] = [
@@ -205,5 +210,29 @@ describe('session reference injection', () => {
       projectName: 'jean',
       worktreeName: 'issue-596',
     })
+  })
+})
+
+describe('sortAdvisoriesByState', () => {
+  const advisory = (ghsaId: string, state: string) =>
+    ({ ghsaId, state }) as RepositoryAdvisory
+
+  it('orders triage, draft, published, closed and keeps order inside a state', () => {
+    const sorted = sortAdvisoriesByState([
+      advisory('p1', 'published'),
+      advisory('c1', 'closed'),
+      advisory('d1', 'draft'),
+      advisory('t1', 'triage'),
+      advisory('p2', 'published'),
+      advisory('t2', 'triage'),
+    ])
+    expect(sorted.map(a => a.ghsaId)).toEqual([
+      't1',
+      't2',
+      'd1',
+      'p1',
+      'p2',
+      'c1',
+    ])
   })
 })

@@ -4,7 +4,11 @@ import { toast } from 'sonner'
 import { useUIStore, type InvestigationOverride } from '@/store/ui-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { useChatStore } from '@/store/chat-store'
-import { getGitHubDiscussion, githubQueryKeys } from '@/services/github'
+import {
+  fetchPullRequestContext,
+  getGitHubDiscussion,
+  githubQueryKeys,
+} from '@/services/github'
 import { projectsQueryKeys } from '@/services/projects'
 import type {
   GitHubIssue,
@@ -13,7 +17,6 @@ import type {
   RepositoryAdvisory,
   GitHubDiscussion,
   IssueContext,
-  PullRequestContext,
   SecurityAlertContext,
   AdvisoryContext,
 } from '@/types/github'
@@ -599,57 +602,7 @@ export function useNewWorktreeHandlers(
 
       const results = await Promise.allSettled(
         prs.map(async pr => {
-          const prDetail = await invoke<
-            GitHubPullRequest & {
-              comments: {
-                body: string
-                author: { login: string }
-                created_at: string
-              }[]
-              reviews: {
-                body: string
-                state: string
-                author: { login: string }
-                submittedAt?: string
-              }[]
-            }
-          >('get_github_pr', {
-            projectPath,
-            prNumber: pr.number,
-            ...githubRepoArgs(pr.repo),
-          })
-
-          const prContext: PullRequestContext = {
-            number: prDetail.number,
-            title: prDetail.title,
-            body: prDetail.body,
-            headRefName: prDetail.headRefName,
-            baseRefName: prDetail.baseRefName,
-            comments: (prDetail.comments ?? []).flatMap(c =>
-              c && c.created_at && c.author
-                ? [
-                    {
-                      body: c.body ?? '',
-                      author: { login: c.author.login ?? '' },
-                      createdAt: c.created_at,
-                    },
-                  ]
-                : []
-            ),
-            reviews: (prDetail.reviews ?? []).flatMap(r =>
-              r && r.author
-                ? [
-                    {
-                      body: r.body ?? '',
-                      state: r.state,
-                      author: { login: r.author.login ?? '' },
-                      submittedAt: r.submittedAt,
-                    },
-                  ]
-                : []
-            ),
-            ...githubRepoArgs(pr.repo),
-          }
+          const prContext = await fetchPullRequestContext(projectPath, pr)
 
           useUIStore.getState().incrementPendingBackgroundCreations()
           const worktree = await createWorktree.mutateAsync({
@@ -906,57 +859,7 @@ export function useNewWorktreeHandlers(
       setCreatingFromRepo(pr.repo ?? null)
 
       try {
-        const prDetail = await invoke<
-          GitHubPullRequest & {
-            comments: {
-              body: string
-              author: { login: string }
-              created_at: string
-            }[]
-            reviews: {
-              body: string
-              state: string
-              author: { login: string }
-              submittedAt?: string
-            }[]
-          }
-        >('get_github_pr', {
-          projectPath,
-          prNumber: pr.number,
-          ...githubRepoArgs(pr.repo),
-        })
-
-        const prContext: PullRequestContext = {
-          number: prDetail.number,
-          title: prDetail.title,
-          body: prDetail.body,
-          headRefName: prDetail.headRefName,
-          baseRefName: prDetail.baseRefName,
-          comments: (prDetail.comments ?? []).flatMap(c =>
-            c && c.created_at && c.author
-              ? [
-                  {
-                    body: c.body ?? '',
-                    author: { login: c.author.login ?? '' },
-                    createdAt: c.created_at,
-                  },
-                ]
-              : []
-          ),
-          reviews: (prDetail.reviews ?? []).flatMap(r =>
-            r && r.author
-              ? [
-                  {
-                    body: r.body ?? '',
-                    state: r.state,
-                    author: { login: r.author.login ?? '' },
-                    submittedAt: r.submittedAt,
-                  },
-                ]
-              : []
-          ),
-          ...githubRepoArgs(pr.repo),
-        }
+        const prContext = await fetchPullRequestContext(projectPath, pr)
 
         if (background)
           useUIStore.getState().incrementPendingBackgroundCreations()
@@ -1006,57 +909,7 @@ export function useNewWorktreeHandlers(
       setCreatingFromRepo(pr.repo ?? null)
 
       try {
-        const prDetail = await invoke<
-          GitHubPullRequest & {
-            comments: {
-              body: string
-              author: { login: string }
-              created_at: string
-            }[]
-            reviews: {
-              body: string
-              state: string
-              author: { login: string }
-              submittedAt?: string
-            }[]
-          }
-        >('get_github_pr', {
-          projectPath,
-          prNumber: pr.number,
-          ...githubRepoArgs(pr.repo),
-        })
-
-        const prContext: PullRequestContext = {
-          number: prDetail.number,
-          title: prDetail.title,
-          body: prDetail.body,
-          headRefName: prDetail.headRefName,
-          baseRefName: prDetail.baseRefName,
-          comments: (prDetail.comments ?? []).flatMap(c =>
-            c && c.created_at && c.author
-              ? [
-                  {
-                    body: c.body ?? '',
-                    author: { login: c.author.login ?? '' },
-                    createdAt: c.created_at,
-                  },
-                ]
-              : []
-          ),
-          reviews: (prDetail.reviews ?? []).flatMap(r =>
-            r && r.author
-              ? [
-                  {
-                    body: r.body ?? '',
-                    state: r.state,
-                    author: { login: r.author.login ?? '' },
-                    submittedAt: r.submittedAt,
-                  },
-                ]
-              : []
-          ),
-          ...githubRepoArgs(pr.repo),
-        }
+        const prContext = await fetchPullRequestContext(projectPath, pr)
 
         if (background)
           useUIStore.getState().incrementPendingBackgroundCreations()

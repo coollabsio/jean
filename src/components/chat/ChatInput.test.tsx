@@ -145,6 +145,23 @@ vi.mock('./ContextMentionPopover', () => ({
         >
           Add selected PR
         </button>
+        <button
+          type="button"
+          onClick={() =>
+            onSelectContext(
+              {
+                id: 'advisory:GHSA-abcd',
+                type: 'advisory',
+                label: 'GHSA-abcd',
+                title: 'RCE in webhook',
+                advisory: { ghsaId: 'GHSA-abcd', severity: 'high' },
+              },
+              true
+            )
+          }
+        >
+          Investigate selected advisory
+        </button>
       </>
     ) : null,
 }))
@@ -393,6 +410,27 @@ describe('ChatInput attachments', () => {
     expect(invokeMock).toHaveBeenCalledWith('load_pr_context', {
       sessionId: 'session-1',
       prNumber: 45,
+      projectPath: '/tmp/worktree',
+    })
+  })
+
+  it('sends the advisory investigation prompt after the context loads', async () => {
+    invokeMock.mockResolvedValue(undefined)
+    const onSubmit = vi.fn()
+    const textarea = renderInput('session-1', undefined, undefined, onSubmit)
+
+    fireEvent.change(textarea, { target: { value: '#' } })
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Investigate selected advisory' })
+    )
+
+    expect(textarea.value).toContain(
+      'Investigate the loaded security advisory (GHSA-abcd (high))'
+    )
+    await onSubmit.mock.calls[0]?.[1].beforeSend()
+    expect(invokeMock).toHaveBeenCalledWith('load_advisory_context', {
+      sessionId: 'session-1',
+      ghsaId: 'GHSA-abcd',
       projectPath: '/tmp/worktree',
     })
   })

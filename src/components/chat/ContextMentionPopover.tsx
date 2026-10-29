@@ -53,6 +53,7 @@ import {
 } from './hooks/useContextMentionData'
 import { Badge } from '@/components/ui/badge'
 import { COMPOSER_SURFACE_CLASS } from './composer-surface'
+import { isInvestigableContextItem } from './context-mention-investigation'
 
 const githubContextQueries = new Set([
   'issues',
@@ -140,6 +141,34 @@ function isTextInput(target: EventTarget) {
   )
 }
 
+/**
+ * Bulk button labels. PRs always get one new worktree each; other items
+ * share one new session, or (separate) get one session each.
+ */
+export function getInvestigateLabels(items: ContextMentionItem[]): {
+  action: string
+  separate?: string
+} {
+  const prs = items.filter(item => item.type === 'pr').length
+  const others = items.length - prs
+  const worktrees = `${prs} new ${prs === 1 ? 'worktree' : 'worktrees'}`
+  if (others === 0) return { action: `Investigate in ${worktrees}` }
+  if (prs === 0) {
+    return {
+      action: `Investigate ${others} in new session`,
+      separate:
+        others > 1 ? `Investigate in ${others} new sessions` : undefined,
+    }
+  }
+  return {
+    action: `Investigate in 1 new session + ${worktrees}`,
+    separate:
+      others > 1
+        ? `Investigate in ${others} new sessions + ${worktrees}`
+        : undefined,
+  }
+}
+
 export interface ContextMentionPopoverHandle {
   moveUp: () => void
   moveDown: () => void
@@ -157,8 +186,9 @@ interface ContextMentionPopoverProps {
   onOpenChange: (open: boolean) => void
   onSelectContext: (item: ContextMentionItem, investigate?: boolean) => void
   /**
-   * Enables multi-select of issues/PRs. `separate` starts one new session per
-   * item; otherwise one new session investigates all of them.
+   * Enables multi-select of issues, PRs, security alerts, and advisories.
+   * Each PR gets its own new worktree. For other items, `separate` starts one
+   * new session per item; otherwise one new session investigates all of them.
    */
   onInvestigateInNewSession?: (
     items: ContextMentionItem[],
@@ -273,6 +303,14 @@ export function ContextMentionPopover({
     Math.max(0, flatItems.length - 1)
   )
 
+  // A PR is investigated on its own branch, in a new worktree
+  const investigatesInNewWorktree = (item: ContextMentionItem) =>
+    item.type === 'pr' && Boolean(onInvestigateInNewSession)
+  const investigateRowLabel = (item: ContextMentionItem) =>
+    investigatesInNewWorktree(item)
+      ? `Investigate ${item.label} in a new worktree`
+      : `Add ${item.label} and start investigating`
+
   const handleSelect = useCallback(
     (item: ContextMentionItem, investigate = false) => {
       onOpenChange(false)
@@ -286,9 +324,19 @@ export function ContextMentionPopover({
         )
         return
       }
+      if (investigate && item.type === 'pr' && onInvestigateInNewSession) {
+        onInvestigateInNewSession([item], false)
+        return
+      }
       onSelectContext(item, investigate)
     },
-    [currentWorktreeId, getMatches, onOpenChange, onSelectContext]
+    [
+      currentWorktreeId,
+      getMatches,
+      onInvestigateInNewSession,
+      onOpenChange,
+      onSelectContext,
+    ]
   )
 
   const handleRefresh = useCallback(async () => {
@@ -338,8 +386,7 @@ export function ContextMentionPopover({
   const resetListPosition = useCallback(() => setSelectedIndex(0), [])
 
   const isCheckable = (item: ContextMentionItem) =>
-    Boolean(onInvestigateInNewSession) &&
-    (item.type === 'issue' || item.type === 'pr')
+    Boolean(onInvestigateInNewSession) && isInvestigableContextItem(item)
 
   const toggleChecked = useCallback(
     (item: ContextMentionItem, checked: boolean) => {
@@ -374,6 +421,8 @@ export function ContextMentionPopover({
     },
     [checkedItems, getMatches, onInvestigateInNewSession, onOpenChange]
   )
+
+  const investigateLabels = getInvestigateLabels([...checkedItems.values()])
 
   // Mod+Enter: one new session; Mod+Shift+Enter: one session per item
   const investigateChecked = useCallback(
@@ -698,7 +747,7 @@ export function ContextMentionPopover({
                             </TooltipContent>
                           </Tooltip>
                         )}
-                        {(item.type === 'issue' || item.type === 'pr') && (
+                        {isInvestigableContextItem(item) && (
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <button
@@ -706,7 +755,7 @@ export function ContextMentionPopover({
                                 aria-label={
                                   existing
                                     ? `Open existing investigation of ${item.label}`
-                                    : `Add ${item.label} and start investigating`
+                                    : investigateRowLabel(item)
                                 }
                                 className={actionButtonClass}
                                 onClick={event => {
@@ -724,7 +773,7 @@ export function ContextMentionPopover({
                             <TooltipContent className="flex items-center gap-2">
                               {existing
                                 ? `Open ${contextLinkMatchLabel(existing, currentWorktreeId)}`
-                                : `Add ${item.label} and start investigating`}
+                                : investigateRowLabel(item)}
                               {showKeyboardHints && isSelected && (
                                 <Kbd>Shift+Enter</Kbd>
                               )}
@@ -755,13 +804,9 @@ export function ContextMentionPopover({
         {onInvestigateInNewSession && checkedItems.size > 0 && (
           <BulkInvestigateBar
             count={checkedItems.size}
-            actionLabel={`Investigate ${checkedItems.size} in new session`}
+            actionLabel={investigateLabels.action}
             onClear={() => setCheckedItems(new Map())}
-            secondaryActionLabel={
-              checkedItems.size > 1
-                ? `Investigate in ${checkedItems.size} new sessions`
-                : undefined
-            }
+            secondaryActionLabel={investigateLabels.separate}
             onSecondaryAction={() => handleInvestigateChecked(true)}
             actionKbd={
               showKeyboardHints ? `${getModifierSymbol()}+Enter` : undefined

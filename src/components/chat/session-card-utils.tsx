@@ -2,6 +2,7 @@ import type {
   IndicatorShape,
   IndicatorStatus,
 } from '@/components/ui/status-indicator'
+import { secretRequest } from './secret-request'
 import {
   isAskUserQuestion,
   isPlanToolCall,
@@ -516,7 +517,9 @@ export function computeSessionCardData(
         hasPendingQuestion =
           !hasFollowUpUserMessage &&
           msg.tool_calls.some(
-            tc => isAskUserQuestion(tc) && !answeredSet?.has(tc.id)
+            tc =>
+              (isAskUserQuestion(tc) || secretRequest(tc) !== null) &&
+              !answeredSet?.has(tc.id)
           )
         // Check for unanswered plan approval
         const hasExitPlan = msg.tool_calls.some(isPlanToolCall)

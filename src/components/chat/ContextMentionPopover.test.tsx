@@ -2,7 +2,10 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@/test/test-utils'
 import { render as renderWithoutProviders } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { ContextMentionPopover } from './ContextMentionPopover'
+import {
+  ContextMentionPopover,
+  getInvestigateLabels,
+} from './ContextMentionPopover'
 import type { ContextMentionItem } from './hooks/useContextMentionData'
 import type { GitHubIssue } from '@/types/github'
 import { toast } from 'sonner'
@@ -277,6 +280,31 @@ describe('ContextMentionPopover', () => {
       })
     )
     expect(onSelectContext).toHaveBeenCalledWith(items[1], true)
+  })
+
+  it('investigates a PR row in a new worktree, not the current session', () => {
+    const onSelectContext = vi.fn()
+    const onInvestigateInNewSession = vi.fn()
+    render(
+      <ContextMentionPopover
+        projectPath="/tmp/repo"
+        projectId="project-1"
+        open
+        onOpenChange={vi.fn()}
+        onSelectContext={onSelectContext}
+        onInvestigateInNewSession={onInvestigateInNewSession}
+        searchQuery=""
+        anchorPosition={{ top: 0, left: 0 }}
+      />
+    )
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Investigate PR #45 in a new worktree',
+      })
+    )
+    expect(onInvestigateInNewSession).toHaveBeenCalledWith([items[1]], false)
+    expect(onSelectContext).not.toHaveBeenCalled()
   })
 
   it('uses Shift+Enter to investigate the selected issue', () => {
@@ -607,7 +635,9 @@ describe('ContextMentionPopover', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: 'Select PR #45' }))
     expect(onSelectContext).not.toHaveBeenCalled()
     fireEvent.click(
-      screen.getByRole('button', { name: 'Investigate 3 in new session' })
+      screen.getByRole('button', {
+        name: 'Investigate in 1 new session + 1 new worktree',
+      })
     )
 
     expect(onInvestigateInNewSession).toHaveBeenCalledWith(
@@ -616,7 +646,9 @@ describe('ContextMentionPopover', () => {
     )
 
     fireEvent.click(
-      screen.getByRole('button', { name: 'Investigate in 3 new sessions' })
+      screen.getByRole('button', {
+        name: 'Investigate in 2 new sessions + 1 new worktree',
+      })
     )
     expect(onInvestigateInNewSession).toHaveBeenLastCalledWith(
       [items[0], items[1]],
@@ -856,5 +888,23 @@ describe('ContextMentionPopover', () => {
     await waitFor(() => expect(refresh).not.toBeDisabled())
     if (expected) expect(toastError).toHaveBeenCalledWith(expected)
     else expect(toastError).not.toHaveBeenCalled()
+  })
+})
+
+describe('getInvestigateLabels', () => {
+  const [issueItem, prItem] = items
+  it('offers only new worktrees when only PRs are checked', () => {
+    expect(getInvestigateLabels([prItem, { ...prItem, id: 'pr:46' }])).toEqual({
+      action: 'Investigate in 2 new worktrees',
+    })
+  })
+
+  it('keeps the session labels when no PR is checked', () => {
+    expect(
+      getInvestigateLabels([issueItem, { ...issueItem, id: 'issue:124' }])
+    ).toEqual({
+      action: 'Investigate 2 in new session',
+      separate: 'Investigate in 2 new sessions',
+    })
   })
 })

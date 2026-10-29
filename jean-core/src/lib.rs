@@ -444,8 +444,8 @@ pub struct AppPreferences {
     pub jean_mcp_max_depth: u32, // Max recursive spawn depth via Jean MCP (default 3)
     #[serde(default = "default_jean_mcp_rate_limit")]
     pub jean_mcp_rate_limit_per_minute: u32, // Per-source rate limit for session-spawning tools (default 20)
-    #[serde(default)]
-    pub agent_browser_enabled: bool, // Install agent-browser and add its MCP server to CLI configs (default false)
+    #[serde(default = "default_agent_browser_enabled")]
+    pub agent_browser_enabled: bool, // Install agent-browser and add its MCP server to CLI configs (default true)
     /// Hostname for new browser tabs and port open buttons when a jean.json
     /// port omits `host`. Unset means localhost. Every client attached to this
     /// server uses the same value. Jean MCP is unrelated and stays enabled.
@@ -458,6 +458,10 @@ fn default_finished_session_animation_enabled() -> bool {
 }
 
 fn default_jean_mcp_enabled() -> bool {
+    true
+}
+
+fn default_agent_browser_enabled() -> bool {
     true
 }
 
@@ -1076,9 +1080,25 @@ mod tests {
     }
 
     #[test]
+    fn agent_browser_defaults_on_but_keeps_saved_off() {
+        let mut json = serde_json::to_value(AppPreferences::default()).unwrap();
+        let obj = json.as_object_mut().unwrap();
+        obj.remove("agent_browser_enabled");
+        let missing: AppPreferences = serde_json::from_value(json.clone()).unwrap();
+        assert!(missing.agent_browser_enabled);
+
+        json["agent_browser_enabled"] = false.into();
+        let saved_off: AppPreferences = serde_json::from_value(json).unwrap();
+        assert!(!saved_off.agent_browser_enabled);
+    }
+
+    #[test]
     fn agent_browser_prompt_lines_follow_preference() {
         let prompt = default_global_system_prompt();
-        let mut prefs = AppPreferences::default();
+        let mut prefs = AppPreferences {
+            agent_browser_enabled: false,
+            ..AppPreferences::default()
+        };
 
         let off = crate::apply_agent_browser_preference(prompt.clone(), Some(&prefs));
         assert!(!off.to_ascii_lowercase().contains("agent browser"));
@@ -3391,7 +3411,7 @@ impl Default for AppPreferences {
             jean_mcp_enabled: default_jean_mcp_enabled(),
             jean_mcp_max_depth: default_jean_mcp_max_depth(),
             jean_mcp_rate_limit_per_minute: default_jean_mcp_rate_limit(),
-            agent_browser_enabled: false,
+            agent_browser_enabled: default_agent_browser_enabled(),
             browser_default_host: None,
         }
     }
@@ -5379,6 +5399,15 @@ pub fn initialize_runtime(context: &RuntimeContext) -> Result<(), String> {
         }
     });
 
+    // request_secret files live 24h. Sweep at startup and then hourly.
+    let secrets_context = context.clone();
+    async_runtime::spawn(async move {
+        loop {
+            chat::secrets::sweep_expired_secrets(&secrets_context);
+            tokio::time::sleep(std::time::Duration::from_secs(60 * 60)).await;
+        }
+    });
+
     let cleanup_context = context.clone();
     async_runtime::spawn_blocking(move || {
         opencode_server::cleanup_orphaned_server(&cleanup_context);
@@ -5427,7 +5456,7 @@ pub async fn start_runtime_services(context: RuntimeContext) -> Result<(), Strin
             log::info!("Removed {pruned} old agent-browser screenshots");
         }
 
-        // Agent Browser is opt-in. When it is off, remove the MCP entries that
+        // Agent Browser is on by default. When the user turns it off, remove the MCP entries that
         // Jean wrote, so CLIs do not start it.
         if !agent_browser_enabled {
             match async_runtime::spawn_blocking(agent_browser::remove_agent_browser_mcp_sync).await

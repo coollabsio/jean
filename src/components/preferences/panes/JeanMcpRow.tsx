@@ -232,20 +232,24 @@ export const JeanMcpRow: React.FC<JeanMcpRowProps> = ({ mcpServers }) => {
           </Badge>
         )
       }
-      actions={
+      iconAction={
         checkingServer ? (
           <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
         ) : (
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label="Refresh Jean MCP status"
+            onClick={() => void refreshSnippet()}
+            disabled={installState === 'installing'}
+          >
+            <RefreshCw className="h-4 w-4" />
+          </Button>
+        )
+      }
+      actions={
+        checkingServer ? null : (
           <>
-            <Button
-              variant="ghost"
-              size="sm"
-              aria-label="Refresh Jean MCP status"
-              onClick={() => void refreshSnippet()}
-              disabled={installState === 'installing'}
-            >
-              <RefreshCw className="h-4 w-4" />
-            </Button>
             <Button
               size="sm"
               variant="outline"

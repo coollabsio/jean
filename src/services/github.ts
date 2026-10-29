@@ -10,6 +10,7 @@ import type {
   GitHubPullRequestDetail,
   LoadedIssueContext,
   LoadedPullRequestContext,
+  PullRequestContext,
   DependabotAlert,
   LoadedSecurityAlertContext,
   RepositoryAdvisory,
@@ -79,7 +80,13 @@ export const githubQueryKeys = {
   issues: (projectPath: string, state: string) =>
     [...githubQueryKeys.all, 'issues', projectPath, state] as const,
   issue: (projectPath: string, issueNumber: number, repo?: string) =>
-    [...githubQueryKeys.all, 'issue', projectPath, issueNumber, repo ?? ''] as const,
+    [
+      ...githubQueryKeys.all,
+      'issue',
+      projectPath,
+      issueNumber,
+      repo ?? '',
+    ] as const,
   loadedContexts: (sessionId: string, worktreeId?: string | null) =>
     worktreeId
       ? ([
@@ -657,6 +664,63 @@ export function useLoadedPRContexts(
     staleTime: 1000 * 60, // 1 minute
     gcTime: 1000 * 60 * 5, // 5 minutes
   })
+}
+
+/**
+ * Fetch a PR with its comments and reviews as the context for a new worktree
+ */
+export async function fetchPullRequestContext(
+  projectPath: string,
+  pr: Pick<GitHubPullRequest, 'number' | 'repo'>
+): Promise<PullRequestContext> {
+  const repoArgs = pr.repo ? { repo: pr.repo } : {}
+  const prDetail = await invoke<
+    GitHubPullRequest & {
+      comments: {
+        body: string
+        author: { login: string }
+        created_at: string
+      }[]
+      reviews: {
+        body: string
+        state: string
+        author: { login: string }
+        submittedAt?: string
+      }[]
+    }
+  >('get_github_pr', { projectPath, prNumber: pr.number, ...repoArgs })
+
+  return {
+    number: prDetail.number,
+    title: prDetail.title,
+    body: prDetail.body,
+    headRefName: prDetail.headRefName,
+    baseRefName: prDetail.baseRefName,
+    comments: (prDetail.comments ?? []).flatMap(c =>
+      c && c.created_at && c.author
+        ? [
+            {
+              body: c.body ?? '',
+              author: { login: c.author.login ?? '' },
+              createdAt: c.created_at,
+            },
+          ]
+        : []
+    ),
+    reviews: (prDetail.reviews ?? []).flatMap(r =>
+      r && r.author
+        ? [
+            {
+              body: r.body ?? '',
+              state: r.state,
+              author: { login: r.author.login ?? '' },
+              submittedAt: r.submittedAt,
+            },
+          ]
+        : []
+    ),
+    ...repoArgs,
+  }
 }
 
 /**
@@ -1463,6 +1527,22 @@ export function filterSecurityAlerts(
 // Repository Security Advisory Hooks and Functions
 // =============================================================================
 
+const ADVISORY_STATE_ORDER = ['triage', 'draft', 'published', 'closed']
+
+/**
+ * Sort advisories by workflow state: triage, draft, published, closed.
+ * Keeps GitHub's order (newest first) inside each state.
+ */
+export function sortAdvisoriesByState(
+  advisories: RepositoryAdvisory[]
+): RepositoryAdvisory[] {
+  const rank = (a: RepositoryAdvisory) => {
+    const i = ADVISORY_STATE_ORDER.indexOf(a.state.toLowerCase())
+    return i === -1 ? ADVISORY_STATE_ORDER.length : i
+  }
+  return [...advisories].sort((a, b) => rank(a) - rank(b))
+}
+
 /**
  * Hook to list repository security advisories for a project
  *
@@ -1493,7 +1573,7 @@ export function useRepositoryAdvisories(
         logger.info('Repository advisories loaded', {
           count: advisories.length,
         })
-        return advisories
+        return sortAdvisoriesByState(advisories)
       } catch (error) {
         // Auth errors should propagate so GhAuthError UI is shown
         if (isGhAuthError(error)) throw error
