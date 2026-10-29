@@ -923,7 +923,7 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
                   {label.name}
                 </span>
               ))}
-              <span className="inline-flex justify-end sm:min-w-16">
+              <span className="hidden justify-end md:inline-flex md:min-w-16">
                 <WorktreePrChip worktree={worktree} isVisible={isVisible} />
               </span>
               <span className="inline-flex justify-end font-normal sm:min-w-24">
