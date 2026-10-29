@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -209,38 +209,47 @@ describe('McpServersPane Jean MCP install', () => {
     consoleErrorSpy.mockRestore()
   })
 
-  it('keeps Jean MCP open and collapses optional Devin MCP by default', async () => {
+  it('shows MCP servers as collapsed rows and expands details on click', async () => {
     const user = userEvent.setup()
     renderPane()
 
     expect(await screen.findByText(/required · automatic/i)).toBeVisible()
-    expect(
-      screen.getByRole('heading', { name: 'Jean MCP Server' })
-    ).toBeVisible()
     expect(screen.getByRole('button', { name: /repair config/i })).toBeVisible()
+    expect(screen.queryByLabelText('Max recursion depth')).toBeNull()
 
-    const devinHeading = screen.getByRole('heading', {
-      name: 'Devin and DeepWiki MCP (optional)',
-    })
-    const toggle = within(devinHeading).getByRole('button')
-    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    const devinToggle = screen.getByRole('button', { name: /^devin/i })
+    expect(devinToggle).toHaveAttribute('aria-expanded', 'false')
+    expect(
+      screen.queryByRole('textbox', { name: 'Devin MCP template' })
+    ).toBeNull()
 
-    const instructions = screen.queryByText(/merge the selected template/i)
-    if (instructions) expect(instructions).not.toBeVisible()
-    const template = screen.queryByRole('textbox', {
-      name: 'Devin MCP template',
-    })
-    if (template) expect(template).not.toBeVisible()
+    await user.click(devinToggle)
 
-    await user.click(toggle)
-
-    expect(toggle).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByText(/merge the selected template/i)).toBeVisible()
+    expect(devinToggle).toHaveAttribute('aria-expanded', 'true')
     expect(
       screen.getByRole('textbox', { name: 'Devin MCP template' })
     ).toBeVisible()
-    expect(screen.getByText(/required · automatic/i)).toBeVisible()
-    expect(screen.getByRole('button', { name: /repair config/i })).toBeVisible()
+    expect(
+      screen.queryByRole('textbox', { name: 'DeepWiki MCP template' })
+    ).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: /^jean mcp/i }))
+    expect(screen.getByLabelText('Max recursion depth')).toBeVisible()
+  })
+
+  it('lists default MCP servers before the recommended servers', async () => {
+    renderPane()
+
+    const defaults = await screen.findByRole('heading', {
+      name: 'Default MCP Servers',
+    })
+    const recommended = screen.getByRole('heading', {
+      name: 'Recommended MCP Servers',
+    })
+    expect(
+      defaults.compareDocumentPosition(recommended) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
   })
 
   it('shows Jean MCP as required without an off switch', async () => {
@@ -248,11 +257,7 @@ describe('McpServersPane Jean MCP install', () => {
     renderPane()
 
     expect(await screen.findByText(/required · automatic/i)).toBeInTheDocument()
-    // The only switch on this pane belongs to Agent Browser.
-    expect(screen.getAllByRole('switch')).toHaveLength(1)
-    expect(
-      screen.getByRole('switch', { name: /enable agent browser/i })
-    ).toBeInTheDocument()
+    expect(screen.queryAllByRole('switch')).toHaveLength(0)
     expect(mocks.patchPreferencesMutate).not.toHaveBeenCalledWith(
       expect.objectContaining({ jean_mcp_enabled: false })
     )

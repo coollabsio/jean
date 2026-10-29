@@ -2,10 +2,12 @@ import React, { useCallback, useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   CheckCircle,
+  Download,
   Loader2,
-  PlugZap,
+  RefreshCw,
   XCircle,
 } from '@/components/icons/reicon'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -16,7 +18,7 @@ import { invalidateAllMcpServers } from '@/services/mcp'
 import { usePatchPreferences, usePreferences } from '@/services/preferences'
 import type { McpServerInfo } from '@/types/chat'
 import type { CliBackend } from '@/types/preferences'
-import { SettingsSection } from '../SettingsSection'
+import { ExtensionDetail, ExtensionRow } from '../ExtensionRow'
 
 interface JeanMcpSnippet {
   enabled: boolean
@@ -96,13 +98,11 @@ function installButtonContent(state: InstallState, message: string) {
   }
 }
 
-interface JeanMcpSectionProps {
+interface JeanMcpRowProps {
   mcpServers: McpServerInfo[]
 }
 
-export const JeanMcpSection: React.FC<JeanMcpSectionProps> = ({
-  mcpServers,
-}) => {
+export const JeanMcpRow: React.FC<JeanMcpRowProps> = ({ mcpServers }) => {
   const { data: preferences } = usePreferences()
   const patchPreferences = usePatchPreferences()
   const { installedBackends } = useInstalledBackends()
@@ -205,107 +205,137 @@ export const JeanMcpSection: React.FC<JeanMcpSectionProps> = ({
 
   const transientButton = installButtonContent(installState, installMessage)
 
+  const activeLabel = configuredBackends
+    .map(backend => BACKEND_LABELS[backend])
+    .join(', ')
+
   return (
-    <>
-      <SettingsSection title="Jean MCP Server" anchorId="pref-mcp-section-jean">
-        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
-          <div className="flex min-w-0 flex-1 items-center gap-2 text-sm font-medium">
-            <CheckCircle className="size-4 text-success" />
-            Required · Automatic
-          </div>
-          {checkingServer && (
-            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Loader2 className="size-3.5 shrink-0 animate-spin" />
-              Checking MCP socket…
-            </span>
-          )}
-          {!checkingServer && !serverRunning && (
-            <span className="flex items-center gap-1.5 text-xs text-warning">
-              <PlugZap className="size-3.5 shrink-0" />
-              MCP socket not running
-            </span>
-          )}
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          {configuredBackends.length > 0 && (
-            <span>
-              Active in{' '}
-              {configuredBackends
-                .map(backend => BACKEND_LABELS[backend])
-                .join(', ')}
-            </span>
-          )}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => handleInstall()}
-            disabled={
-              installState === 'installing' ||
-              installState === 'success' ||
-              !serverRunning ||
-              installableBackends.length === 0
-            }
-            className={cn(
-              'h-7',
-              installState === 'success' &&
-                'border-success bg-success text-success-foreground hover:bg-success/90'
-            )}
-            aria-live="polite"
-            title={installMessage}
+    <ExtensionRow
+      name="Jean MCP"
+      anchorId="pref-mcp-section-jean"
+      status={
+        checkingServer ? null : !serverRunning ? (
+          <Badge variant="warning" className="max-w-full shrink">
+            <span className="truncate">MCP socket not running</span>
+          </Badge>
+        ) : (
+          <Badge
+            variant="success"
+            title={activeLabel ? `Active in ${activeLabel}` : undefined}
+            className="w-auto min-w-0 max-w-full shrink justify-start overflow-hidden"
           >
-            {transientButton ?? <span>Repair config</span>}
-          </Button>
+            <span className="min-w-0 truncate">
+              {activeLabel
+                ? `Active in ${activeLabel}`
+                : 'Required · Automatic'}
+            </span>
+          </Badge>
+        )
+      }
+      actions={
+        checkingServer ? (
+          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+        ) : (
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label="Refresh Jean MCP status"
+              onClick={() => void refreshSnippet()}
+              disabled={installState === 'installing'}
+            >
+              <RefreshCw className="h-4 w-4" />
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => handleInstall()}
+              disabled={
+                installState === 'installing' ||
+                installState === 'success' ||
+                !serverRunning ||
+                installableBackends.length === 0
+              }
+              className={cn(
+                'flex-1 sm:flex-none',
+                installState === 'success' &&
+                  'border-success bg-success text-success-foreground hover:bg-success/90'
+              )}
+              aria-live="polite"
+              title={installMessage}
+            >
+              {transientButton ?? (
+                <>
+                  <Download className="h-4 w-4" />
+                  <span>Repair config</span>
+                </>
+              )}
+            </Button>
+          </>
+        )
+      }
+    >
+      <div className="space-y-1 pt-1">
+        <div className="text-2xs text-muted-foreground">
+          Applies to:{' '}
+          <span className="text-foreground/70">
+            {installableBackends.length > 0
+              ? installableBackends
+                  .map(backend => BACKEND_LABELS[backend])
+                  .join(', ')
+              : 'No supported CLI installed'}
+          </span>
         </div>
-
-        <details>
-          <summary className="cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground">
-            Advanced limits
-          </summary>
-          <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="jean-mcp-max-depth" className="text-xs">
-                Max recursion depth
-              </Label>
-              <Input
-                id="jean-mcp-max-depth"
-                type="number"
-                min={0}
-                max={10}
-                value={preferences?.jean_mcp_max_depth ?? 3}
-                onChange={e =>
-                  patchPreferences.mutate({
-                    jean_mcp_max_depth: Math.max(
-                      0,
-                      Math.min(10, Number(e.target.value) || 0)
-                    ),
-                  })
-                }
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="jean-mcp-rate-limit" className="text-xs">
-                Spawn rate limit (per minute)
-              </Label>
-              <Input
-                id="jean-mcp-rate-limit"
-                type="number"
-                min={0}
-                max={1000}
-                value={preferences?.jean_mcp_rate_limit_per_minute ?? 20}
-                onChange={e =>
-                  patchPreferences.mutate({
-                    jean_mcp_rate_limit_per_minute: Math.max(
-                      0,
-                      Math.min(1000, Number(e.target.value) || 0)
-                    ),
-                  })
-                }
-              />
-            </div>
+        <p className="text-xs text-muted-foreground">
+          Required. Lets agents manage Jean projects, worktrees, and sessions.
+          Jean adds it to every supported CLI automatically. Use Repair config
+          if a CLI does not show the server.
+        </p>
+      </div>
+      <ExtensionDetail title="Advanced limits">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="jean-mcp-max-depth" className="text-xs">
+              Max recursion depth
+            </Label>
+            <Input
+              id="jean-mcp-max-depth"
+              type="number"
+              min={0}
+              max={10}
+              value={preferences?.jean_mcp_max_depth ?? 3}
+              onChange={e =>
+                patchPreferences.mutate({
+                  jean_mcp_max_depth: Math.max(
+                    0,
+                    Math.min(10, Number(e.target.value) || 0)
+                  ),
+                })
+              }
+            />
           </div>
-        </details>
-      </SettingsSection>
-    </>
+          <div className="space-y-1.5">
+            <Label htmlFor="jean-mcp-rate-limit" className="text-xs">
+              Spawn rate limit (per minute)
+            </Label>
+            <Input
+              id="jean-mcp-rate-limit"
+              type="number"
+              min={0}
+              max={1000}
+              value={preferences?.jean_mcp_rate_limit_per_minute ?? 20}
+              onChange={e =>
+                patchPreferences.mutate({
+                  jean_mcp_rate_limit_per_minute: Math.max(
+                    0,
+                    Math.min(1000, Number(e.target.value) || 0)
+                  ),
+                })
+              }
+            />
+          </div>
+        </div>
+      </ExtensionDetail>
+    </ExtensionRow>
   )
 }

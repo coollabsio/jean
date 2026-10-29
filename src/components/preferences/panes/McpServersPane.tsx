@@ -35,9 +35,10 @@ import { McpSignInButton } from '@/components/mcp/McpSignInButton'
 import type { McpHealthStatus } from '@/types/chat'
 import type { CliBackend } from '@/types/preferences'
 import { SettingsSection } from '../SettingsSection'
-import { AgentBrowserSection } from './AgentBrowserSection'
-import { JeanMcpSection } from './JeanMcpSection'
-import { DevinMcpSection } from './DevinMcpSection'
+import { ExtensionGroup } from '../ExtensionRow'
+import { AgentBrowserRow } from './AgentBrowserRow'
+import { JeanMcpRow } from './JeanMcpRow'
+import { DevinMcpRows } from './DevinMcpRows'
 
 function mcpAuthHint(backend: CliBackend): string {
   switch (backend) {
@@ -238,9 +239,6 @@ export const McpServersPane: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <JeanMcpSection mcpServers={mcpServers ?? []} />
-      <AgentBrowserSection />
-      <DevinMcpSection />
       <SettingsSection
         title="Default MCP Servers"
         description="Defaults for new sessions. Change a session from its toolbar."
@@ -329,6 +327,21 @@ export const McpServersPane: React.FC = () => {
             ))}
           </div>
         )}
+      </SettingsSection>
+      <SettingsSection
+        title="Recommended MCP Servers"
+        description="MCP servers that Jean manages or recommends for its AI backends."
+        anchorId="pref-mcp-section-recommended"
+      >
+        <div className="space-y-4">
+          <ExtensionGroup id="mcp-servers-managed" title="Managed by Jean">
+            <JeanMcpRow mcpServers={mcpServers ?? []} />
+            <AgentBrowserRow />
+          </ExtensionGroup>
+          <ExtensionGroup id="mcp-servers-manual" title="Manual setup">
+            <DevinMcpRows />
+          </ExtensionGroup>
+        </div>
       </SettingsSection>
     </div>
   )

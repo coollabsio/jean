@@ -909,6 +909,17 @@ const sectionEntries: PreferenceSearchEntry[] = [
     fallbackAnchorId: 'pref-pane-usage',
   },
   {
+    id: 'mcp-recommended',
+    pane: 'mcp-servers',
+    paneTitle: 'MCP Servers',
+    type: 'section',
+    title: 'Recommended MCP Servers',
+    sectionTitle: 'MCP Servers',
+    keywords: ['recommended mcp', 'managed mcp', 'built-in mcp'],
+    anchorId: 'pref-mcp-section-recommended',
+    fallbackAnchorId: 'pref-pane-mcp-servers',
+  },
+  {
     id: 'mcp-jean',
     pane: 'mcp-servers',
     paneTitle: 'MCP Servers',

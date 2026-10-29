@@ -1,16 +1,15 @@
 import React, { useCallback, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle, Loader2, XCircle } from '@/components/icons/reicon'
+import { Download, Loader2, RefreshCw, Square } from '@/components/icons/reicon'
 import { toast } from 'sonner'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
 import { invoke } from '@/lib/transport'
 import { useInstalledBackends } from '@/hooks/useInstalledBackends'
 import { invalidateAllMcpServers } from '@/services/mcp'
 import { usePatchPreferences, usePreferences } from '@/services/preferences'
 import type { CliBackend } from '@/types/preferences'
-import { SettingsSection } from '../SettingsSection'
+import { ExtensionLink, ExtensionRow } from '../ExtensionRow'
 
 interface AgentBrowserStatus {
   installed: boolean
@@ -43,9 +42,20 @@ const INSTALLABLE_BACKENDS = [
   'antigravity',
 ] as const satisfies readonly CliBackend[]
 
+const BACKEND_LABELS: Record<(typeof INSTALLABLE_BACKENDS)[number], string> = {
+  claude: 'Claude',
+  codex: 'Codex',
+  opencode: 'OpenCode',
+  cursor: 'Cursor',
+  grok: 'Grok',
+  kimi: 'Kimi',
+  devin: 'Devin',
+  antigravity: 'Antigravity',
+}
+
 type BinaryInstallState = 'idle' | 'installing' | 'success' | 'error'
 
-export const AgentBrowserSection: React.FC = () => {
+export const AgentBrowserRow: React.FC = () => {
   const queryClient = useQueryClient()
   const { data: preferences } = usePreferences()
   const patchPreferences = usePatchPreferences()
@@ -133,91 +143,123 @@ export const AgentBrowserSection: React.FC = () => {
     [handleInstallBinary, patchPreferences]
   )
 
+  const installing = binaryInstallState === 'installing'
+  const checking = enabled && (isLoading || isFetching)
+  const busy = installing || patchPreferences.isPending
+
   return (
-    <SettingsSection
-      title="Agent Browser"
+    <ExtensionRow
+      name="Agent Browser"
       anchorId="pref-mcp-section-agent-browser"
-    >
-      <div className="flex items-center justify-between gap-4">
-        <div className="space-y-0.5">
-          <Label htmlFor="agent-browser-enabled" className="text-sm">
-            Enable Agent Browser
-          </Label>
-          <p className="text-xs text-muted-foreground">
-            Give agents managed Chromium access through MCP. Jean installs
-            agent-browser and Chromium when you turn this on.
-          </p>
-        </div>
-        <Switch
-          id="agent-browser-enabled"
-          checked={enabled}
-          disabled={
-            patchPreferences.isPending || binaryInstallState === 'installing'
-          }
-          onCheckedChange={checked => void handleToggle(checked)}
-        />
-      </div>
-
-      {enabled && (
-        <div className="space-y-2">
-          {isLoading || isFetching ? (
-            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Loader2 className="size-3.5 animate-spin" />
-              Checking agent-browser…
-            </span>
-          ) : (
-            <>
-              <div className="flex flex-wrap items-center gap-3 text-sm">
-                {status?.installed ? (
-                  <span className="flex items-center gap-1.5 text-success">
-                    <CheckCircle className="size-3.5" />
-                    Installed{status.version ? ` · ${status.version}` : ''}
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-1.5 text-warning">
-                    <XCircle className="size-3.5" />
-                    Agent browser setup is not complete
-                  </span>
-                )}
-              </div>
-            </>
-          )}
-
-          <div className="flex flex-wrap gap-2">
+      status={
+        !enabled ? (
+          <Badge variant="subtle" className="max-w-full shrink">
+            <span className="truncate">Not installed</span>
+          </Badge>
+        ) : checking ? null : status?.installed ? (
+          <Badge
+            variant="success"
+            className="w-auto min-w-0 max-w-full shrink justify-start gap-1 overflow-hidden"
+          >
+            <span className="shrink-0">Installed</span>
+            {status.version && (
+              <span className="min-w-0 truncate">({status.version})</span>
+            )}
+          </Badge>
+        ) : (
+          <Badge variant="warning" className="max-w-full shrink">
+            <span className="truncate">Setup incomplete</span>
+          </Badge>
+        )
+      }
+      actions={
+        !enabled ? (
+          <Button
+            size="sm"
+            onClick={() => void handleToggle(true)}
+            disabled={busy}
+            className="w-full sm:w-auto"
+          >
+            {busy ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4" />
+            )}
+            Install
+          </Button>
+        ) : checking && !installing ? (
+          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+        ) : (
+          <>
             <Button
-              type="button"
+              variant="ghost"
               size="sm"
-              variant="outline"
-              className="h-7"
-              onClick={() => void handleInstallBinary()}
-              disabled={binaryInstallState === 'installing'}
+              aria-label="Refresh Agent Browser status"
+              onClick={() => void refetch()}
+              disabled={busy}
             >
-              {binaryInstallState === 'installing' ? (
-                <>
-                  <Loader2 className="size-3.5 animate-spin" />
-                  Installing agent-browser…
-                </>
-              ) : status?.installed ? (
-                'Update / repair'
-              ) : (
-                'Retry setup'
-              )}
+              <RefreshCw className="h-4 w-4" />
             </Button>
-          </div>
-
-          {binaryInstallMessage && (
-            <p
-              className={
-                binaryInstallState === 'error'
-                  ? 'text-xs text-destructive'
-                  : 'text-xs text-muted-foreground'
-              }
+            <Button
+              variant={status?.installed ? 'outline' : 'default'}
+              size="sm"
+              onClick={() => void handleInstallBinary()}
+              disabled={busy}
+              className="flex-1 sm:flex-none"
             >
-              {binaryInstallMessage}
-            </p>
-          )}
+              {installing ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4" />
+              )}
+              {status?.installed ? 'Update / repair' : 'Retry setup'}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void handleToggle(false)}
+              disabled={busy}
+              className="flex-1 sm:flex-none"
+            >
+              <Square className="h-4 w-4" />
+              Turn off
+            </Button>
+          </>
+        )
+      }
+    >
+      <div className="space-y-1 pt-1">
+        <div className="text-2xs text-muted-foreground">
+          Applies to:{' '}
+          <span className="text-foreground/70">
+            {installableBackends.length > 0
+              ? installableBackends.map(b => BACKEND_LABELS[b]).join(', ')
+              : 'No supported CLI installed'}
+          </span>
         </div>
-      )}
-    </SettingsSection>
+        <p className="text-xs text-muted-foreground">
+          Give agents managed Chromium access through MCP. Install sets up
+          agent-browser and Chromium and adds the MCP server to your CLIs. Turn
+          off removes the MCP server from your CLIs.
+        </p>
+        {binaryInstallMessage && (
+          <p
+            className={
+              binaryInstallState === 'error'
+                ? 'text-xs text-destructive'
+                : 'text-xs text-muted-foreground'
+            }
+          >
+            {binaryInstallMessage}
+          </p>
+        )}
+        <div className="flex flex-wrap items-center gap-3">
+          <ExtensionLink
+            url="https://github.com/vercel-labs/agent-browser"
+            label="GitHub"
+          />
+        </div>
+      </div>
+    </ExtensionRow>
   )
 }

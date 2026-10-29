@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { invoke } from '@/lib/transport'
-import { AgentBrowserSection } from './AgentBrowserSection'
+import { AgentBrowserRow } from './AgentBrowserRow'
 
 vi.mock('@/lib/transport', () => ({ invoke: vi.fn() }))
 vi.mock('@/lib/clipboard', () => ({ copyToClipboard: vi.fn() }))
@@ -47,12 +47,12 @@ function renderSection() {
   })
   return render(
     <QueryClientProvider client={queryClient}>
-      <AgentBrowserSection />
+      <AgentBrowserRow />
     </QueryClientProvider>
   )
 }
 
-describe('AgentBrowserSection', () => {
+describe('AgentBrowserRow', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     prefs.data = { agent_browser_enabled: false }
@@ -70,7 +70,7 @@ describe('AgentBrowserSection', () => {
   it('is off by default and does not check the install status', () => {
     renderSection()
 
-    expect(screen.getByRole('switch')).not.toBeChecked()
+    expect(screen.getByText('Not installed')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /retry setup/i })).toBeNull()
     expect(invoke).not.toHaveBeenCalled()
   })
@@ -79,7 +79,7 @@ describe('AgentBrowserSection', () => {
     const user = userEvent.setup()
     renderSection()
 
-    await user.click(screen.getByRole('switch'))
+    await user.click(screen.getByRole('button', { name: /^install$/i }))
 
     expect(prefs.mutateAsync).toHaveBeenCalledWith({
       agent_browser_enabled: true,
@@ -96,7 +96,7 @@ describe('AgentBrowserSection', () => {
     const user = userEvent.setup()
     renderSection()
 
-    await user.click(screen.getByRole('switch'))
+    await user.click(await screen.findByRole('button', { name: /turn off/i }))
 
     expect(prefs.mutateAsync).toHaveBeenCalledWith({
       agent_browser_enabled: false,

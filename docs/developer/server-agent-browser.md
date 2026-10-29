@@ -146,11 +146,11 @@ MCP entry shape (Claude):
 
 ## UI
 
-Settings → **MCP Servers** → **Agent Browser** (`AgentBrowserSection.tsx`):
+Settings → **MCP Servers** → **Recommended MCP Servers** → **Agent Browser** row (`AgentBrowserRow.tsx`, plugin-style row from `ExtensionRow.tsx`):
 
-- Status (installed / missing binary; Jean-managed vs PATH)
-- **Install agent-browser** (npm into app data + Chromium download + MCP setup for installed backends)
-- Copy Claude / Codex snippets
+- Status badge (not installed / installed with version / setup incomplete)
+- **Install** (npm into app data + Chromium download + MCP setup for installed backends)
+- **Update / repair** and **Turn off** (removes the MCP server from the CLIs)
 - Operator fallback: `npm install -g agent-browser && agent-browser install`
 
 ## Manual-login flows

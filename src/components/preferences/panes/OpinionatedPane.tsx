@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { invoke } from '@/lib/transport'
 import { openExternal } from '@/lib/platform'
 import { useUIStore } from '@/store/ui-store'
-import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import {
   Tooltip,
@@ -10,13 +9,11 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { Badge } from '@/components/ui/badge'
-import { Separator } from '@/components/ui/separator'
 import {
   ExternalLink,
   Download,
   Loader2,
   RefreshCw,
-  ChevronRight,
   Trash2,
   Play,
   Square,
@@ -24,6 +21,7 @@ import {
 } from '@/components/icons/reicon'
 import { toast } from 'sonner'
 import { SettingsSection } from '../SettingsSection'
+import { ExtensionGroup, ExtensionLink, ExtensionRow } from '../ExtensionRow'
 
 interface UsageStep {
   label?: string
@@ -299,7 +297,6 @@ function PluginCard({
   const [installing, setInstalling] = useState(false)
   const [uninstalling, setUninstalling] = useState(false)
   const [controlling, setControlling] = useState(false)
-  const [expanded, setExpanded] = useState(false)
   const [loggingIn, setLoggingIn] = useState<'claude' | 'codex' | null>(null)
   const loginPending = useRef(false)
   const openCliLoginModal = useUIStore(state => state.openCliLoginModal)
@@ -478,300 +475,261 @@ function PluginCard({
   }, [plugin.id, plugin.name, checkStatus])
 
   return (
-    <div>
-      <div className="flex min-h-10 min-w-0 max-w-full flex-col gap-2 rounded-md px-2 py-1.5 hover:bg-muted/40 sm:flex-row sm:items-center">
-        <button
-          type="button"
-          onClick={() => setExpanded(e => !e)}
-          aria-expanded={expanded}
-          className="flex min-w-0 w-full flex-1 items-center gap-2 overflow-hidden text-left cursor-pointer"
-        >
-          <ChevronRight
-            className={`h-3.5 w-3.5 text-muted-foreground shrink-0 transition-transform ${
-              expanded ? 'rotate-90' : ''
-            }`}
-          />
-          <Label className="max-w-[46%] shrink-0 cursor-pointer overflow-hidden text-sm font-medium text-foreground sm:w-36 sm:max-w-none">
-            <span className="block truncate">{plugin.name}</span>
-          </Label>
-          {!checking && status?.installed && (
-            <span className="flex min-w-0 flex-1 items-center overflow-hidden">
-              <Badge
-                variant="success"
-                title={`${statusLabel}${versionText ?? ''}`}
-                className="w-auto min-w-0 max-w-full shrink justify-start gap-1 overflow-hidden"
-              >
-                <span className="shrink-0">{statusLabel}</span>
-                {versionText && (
-                  <span className="min-w-0 truncate">{versionText}</span>
-                )}
-              </Badge>
+    <ExtensionRow
+      name={plugin.name}
+      status={
+        checking ? null : status?.installed ? (
+          <Badge
+            variant="success"
+            title={`${statusLabel}${versionText ?? ''}`}
+            className="w-auto min-w-0 max-w-full shrink justify-start gap-1 overflow-hidden"
+          >
+            <span className="shrink-0">{statusLabel}</span>
+            {versionText && (
+              <span className="min-w-0 truncate">{versionText}</span>
+            )}
+          </Badge>
+        ) : (
+          <Badge variant="subtle" className="max-w-full shrink">
+            <span className="truncate">
+              {installUnsupported ? 'Unsupported' : 'Not installed'}
             </span>
-          )}
-          {!checking && !status?.installed && (
-            <span className="flex min-w-0 flex-1 items-center overflow-hidden">
-              <Badge variant="subtle" className="max-w-full shrink">
-                <span className="truncate">
-                  {installUnsupported ? 'Unsupported' : 'Not installed'}
-                </span>
-              </Badge>
-            </span>
-          )}
-        </button>
-        <span className="flex w-full min-w-0 flex-wrap items-center justify-end gap-2 sm:w-auto sm:shrink-0 sm:flex-nowrap">
-          {checking ? (
-            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-          ) : status?.installed ? (
-            <>
+          </Badge>
+        )
+      }
+      actions={
+        checking ? (
+          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+        ) : status?.installed ? (
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label={`Refresh ${plugin.name} status`}
+              onClick={checkStatus}
+              disabled={busy}
+            >
+              <RefreshCw className="h-4 w-4" />
+            </Button>
+            {supervises && (
               <Button
-                variant="ghost"
+                variant="outline"
                 size="sm"
-                aria-label={`Refresh ${plugin.name} status`}
-                onClick={checkStatus}
+                onClick={() =>
+                  handleControl(status?.running ? 'stop' : 'start')
+                }
                 disabled={busy}
+                className="flex-1 sm:flex-none"
               >
-                <RefreshCw className="h-4 w-4" />
+                {controlling ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : status?.running ? (
+                  <Square className="h-4 w-4" />
+                ) : (
+                  <Play className="h-4 w-4" />
+                )}
+                {status?.running ? 'Stop' : 'Start'}
               </Button>
-              {supervises && (
+            )}
+            {plugin.scope === 'ai-backends' && (
+              <Button
+                variant={hasMissingBackend ? 'default' : 'outline'}
+                size="sm"
+                onClick={handleInstall}
+                disabled={busy}
+                className="flex-1 sm:flex-none"
+              >
+                {installing ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4" />
+                )}
+                {hasMissingBackend ? 'Reinstall' : 'Install again'}
+              </Button>
+            )}
+            {canUninstall && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleUninstall}
+                disabled={busy}
+                className="flex-1 sm:flex-none"
+              >
+                {uninstalling ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4" />
+                )}
+                Uninstall
+              </Button>
+            )}
+          </>
+        ) : installUnsupported && status?.unsupported_reason ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex w-full cursor-not-allowed sm:w-auto">
                 <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    handleControl(status?.running ? 'stop' : 'start')
-                  }
-                  disabled={busy}
-                  className="flex-1 sm:flex-none"
-                >
-                  {controlling ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : status?.running ? (
-                    <Square className="h-4 w-4" />
-                  ) : (
-                    <Play className="h-4 w-4" />
-                  )}
-                  {status?.running ? 'Stop' : 'Start'}
-                </Button>
-              )}
-              {plugin.scope === 'ai-backends' && (
-                <Button
-                  variant={hasMissingBackend ? 'default' : 'outline'}
                   size="sm"
                   onClick={handleInstall}
-                  disabled={busy}
-                  className="flex-1 sm:flex-none"
+                  disabled
+                  className="pointer-events-none w-full sm:w-auto"
                 >
-                  {installing ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Download className="h-4 w-4" />
-                  )}
-                  {hasMissingBackend ? 'Reinstall' : 'Install again'}
+                  Unsupported
                 </Button>
-              )}
-              {canUninstall && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleUninstall}
-                  disabled={busy}
-                  className="flex-1 sm:flex-none"
-                >
-                  {uninstalling ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Trash2 className="h-4 w-4" />
-                  )}
-                  Uninstall
-                </Button>
-              )}
-            </>
-          ) : installUnsupported && status?.unsupported_reason ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="inline-flex w-full cursor-not-allowed sm:w-auto">
-                  <Button
-                    size="sm"
-                    onClick={handleInstall}
-                    disabled
-                    className="pointer-events-none w-full sm:w-auto"
-                  >
-                    Unsupported
-                  </Button>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent className="max-w-72">
-                {status.unsupported_reason}
-              </TooltipContent>
-            </Tooltip>
-          ) : (
-            <Button
-              size="sm"
-              onClick={handleInstall}
-              disabled={busy || installUnsupported}
-              className="w-full sm:w-auto"
-            >
-              {installUnsupported ? null : installing ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Download className="h-4 w-4" />
-              )}
-              {installUnsupported ? 'Unsupported' : 'Install'}
-            </Button>
-          )}
-        </span>
-      </div>
-      {expanded && (
-        <div className="pl-7 pr-2 pb-3 space-y-3">
-          <div className="pt-1 space-y-1">
-            <div className="text-2xs text-muted-foreground">
-              Applies to:{' '}
-              <span className="text-foreground/70">
-                {plugin.backends.join(', ')}
               </span>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-72">
+              {status.unsupported_reason}
+            </TooltipContent>
+          </Tooltip>
+        ) : (
+          <Button
+            size="sm"
+            onClick={handleInstall}
+            disabled={busy || installUnsupported}
+            className="w-full sm:w-auto"
+          >
+            {installUnsupported ? null : installing ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4" />
+            )}
+            {installUnsupported ? 'Unsupported' : 'Install'}
+          </Button>
+        )
+      }
+    >
+      <div className="pt-1 space-y-1">
+        <div className="text-2xs text-muted-foreground">
+          Applies to:{' '}
+          <span className="text-foreground/70">
+            {plugin.backends.join(', ')}
+          </span>
+        </div>
+        <p className="text-xs text-muted-foreground">{plugin.description}</p>
+        {status?.unsupported_reason && (
+          <p className="text-xs text-destructive">
+            {status.unsupported_reason}
+          </p>
+        )}
+        <div className="flex flex-wrap items-center gap-3">
+          <ExtensionLink url={plugin.githubUrl} label="GitHub" />
+          {plugin.links?.map(link => (
+            <ExtensionLink key={link.url} url={link.url} label={link.label} />
+          ))}
+        </div>
+        {supervises && status?.installed && (
+          <div className="space-y-2 pt-1">
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => handleAccountLogin('claude')}
+                disabled={busy}
+              >
+                {loggingIn === 'claude' ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <LogIn className="h-4 w-4" />
+                )}
+                Add Claude account
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => handleAccountLogin('codex')}
+                disabled={busy}
+              >
+                {loggingIn === 'codex' ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <LogIn className="h-4 w-4" />
+                )}
+                Add Codex account
+              </Button>
+              {status.management_url && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={handleOpenManagement}
+                  disabled={busy}
+                >
+                  <ExternalLink className="h-4 w-4" />
+                  Open management
+                </Button>
+              )}
             </div>
             <p className="text-xs text-muted-foreground">
-              {plugin.description}
+              {typeof status.auth_file_count === 'number'
+                ? `${status.auth_file_count} OAuth file${
+                    status.auth_file_count === 1 ? '' : 's'
+                  } in CLIProxyAPI. `
+                : ''}
+              Jean does not read or copy those files.
             </p>
-            {status?.unsupported_reason && (
-              <p className="text-xs text-destructive">
-                {status.unsupported_reason}
-              </p>
-            )}
-            <div className="flex flex-wrap items-center gap-3">
-              <button
-                type="button"
-                onClick={() => openExternal(plugin.githubUrl)}
-                className="inline-flex items-center gap-1 text-xs text-primary hover:underline underline-offset-2 cursor-pointer"
-              >
-                <ExternalLink className="h-3 w-3" />
-                GitHub
-              </button>
-              {plugin.links?.map(link => (
-                <button
-                  key={link.url}
-                  type="button"
-                  onClick={() => openExternal(link.url)}
-                  className="inline-flex items-center gap-1 text-xs text-primary hover:underline underline-offset-2 cursor-pointer"
-                >
-                  <ExternalLink className="h-3 w-3" />
-                  {link.label}
-                </button>
-              ))}
-            </div>
-            {supervises && status?.installed && (
-              <div className="space-y-2 pt-1">
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleAccountLogin('claude')}
-                    disabled={busy}
-                  >
-                    {loggingIn === 'claude' ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <LogIn className="h-4 w-4" />
-                    )}
-                    Add Claude account
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleAccountLogin('codex')}
-                    disabled={busy}
-                  >
-                    {loggingIn === 'codex' ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <LogIn className="h-4 w-4" />
-                    )}
-                    Add Codex account
-                  </Button>
-                  {status.management_url && (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={handleOpenManagement}
-                      disabled={busy}
-                    >
-                      <ExternalLink className="h-4 w-4" />
-                      Open management
-                    </Button>
-                  )}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {typeof status.auth_file_count === 'number'
-                    ? `${status.auth_file_count} OAuth file${
-                        status.auth_file_count === 1 ? '' : 's'
-                      } in CLIProxyAPI. `
-                    : ''}
-                  Jean does not read or copy those files.
-                </p>
-              </div>
-            )}
-            {status?.lan_exposed && (
-              <p className="text-xs text-destructive">
-                This config is not bound to localhost. Jean will not widen the
-                bind; edit config.yaml only if you intend to expose the proxy.
-              </p>
-            )}
           </div>
+        )}
+        {status?.lan_exposed && (
+          <p className="text-xs text-destructive">
+            This config is not bound to localhost. Jean will not widen the bind;
+            edit config.yaml only if you intend to expose the proxy.
+          </p>
+        )}
+      </div>
 
-          {plugin.scope === 'ai-backends' && status?.backends && (
-            <div className="border-t pt-3 space-y-2">
-              <div className="text-xs font-medium text-foreground/80">
-                Backend status
+      {plugin.scope === 'ai-backends' && status?.backends && (
+        <div className="border-t pt-3 space-y-2">
+          <div className="text-xs font-medium text-foreground/80">
+            Backend status
+          </div>
+          <div className="grid gap-1.5">
+            {status.backends.map(backend => (
+              <div
+                key={backend.id}
+                className="flex items-center justify-between rounded-md bg-muted/40 px-2 py-1.5 text-xs"
+              >
+                <span className="text-foreground/80">{backend.label}</span>
+                <Badge
+                  variant={backend.installed ? 'secondary' : 'outline'}
+                  className="text-xs"
+                >
+                  {backend.installed ? 'Installed' : 'Not installed'}
+                </Badge>
               </div>
-              <div className="grid gap-1.5">
-                {status.backends.map(backend => (
-                  <div
-                    key={backend.id}
-                    className="flex items-center justify-between rounded-md bg-muted/40 px-2 py-1.5 text-xs"
-                  >
-                    <span className="text-foreground/80">{backend.label}</span>
-                    <Badge
-                      variant={backend.installed ? 'secondary' : 'outline'}
-                      className="text-xs"
-                    >
-                      {backend.installed ? 'Installed' : 'Not installed'}
-                    </Badge>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {plugin.usage.length > 0 && (
-            <div className="border-t pt-3 space-y-2">
-              <div className="text-xs font-medium text-foreground/80">
-                How to use
-              </div>
-              <ul className="space-y-1.5">
-                {plugin.usage.map(step => (
-                  <li
-                    key={step.command ?? step.label ?? step.note}
-                    className="text-xs text-muted-foreground space-y-1"
-                  >
-                    {step.note && <div>{step.note}</div>}
-                    {step.label && (
-                      <div className="text-foreground/70">{step.label}:</div>
-                    )}
-                    {step.command && (
-                      <code className="block rounded bg-muted px-2 py-1 font-mono text-2xs text-foreground">
-                        {step.command}
-                      </code>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+            ))}
+          </div>
         </div>
       )}
-    </div>
+
+      {plugin.usage.length > 0 && (
+        <div className="border-t pt-3 space-y-2">
+          <div className="text-xs font-medium text-foreground/80">
+            How to use
+          </div>
+          <ul className="space-y-1.5">
+            {plugin.usage.map(step => (
+              <li
+                key={step.command ?? step.label ?? step.note}
+                className="text-xs text-muted-foreground space-y-1"
+              >
+                {step.note && <div>{step.note}</div>}
+                {step.label && (
+                  <div className="text-foreground/70">{step.label}:</div>
+                )}
+                {step.command && (
+                  <code className="block rounded bg-muted px-2 py-1 font-mono text-2xs text-foreground">
+                    {step.command}
+                  </code>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </ExtensionRow>
   )
 }
 
@@ -812,30 +770,19 @@ export const OpinionatedPane: React.FC = () => {
       >
         <div className="space-y-4">
           {sections.map(section => (
-            <section
+            <ExtensionGroup
               key={section.scope}
-              aria-labelledby={`opinionated-plugins-${section.scope}`}
-              className="min-w-0 space-y-1"
+              id={`opinionated-plugins-${section.scope}`}
+              title={section.title}
             >
-              <div className="flex items-center gap-2 px-2">
-                <h4
-                  id={`opinionated-plugins-${section.scope}`}
-                  className="shrink-0 text-xs font-medium text-muted-foreground"
-                >
-                  {section.title}
-                </h4>
-                <Separator className="flex-1" />
-              </div>
-              <div>
-                {section.plugins.map(plugin => (
-                  <PluginCard
-                    key={plugin.id}
-                    plugin={plugin}
-                    onInstalledChange={handleInstalledChange}
-                  />
-                ))}
-              </div>
-            </section>
+              {section.plugins.map(plugin => (
+                <PluginCard
+                  key={plugin.id}
+                  plugin={plugin}
+                  onInstalledChange={handleInstalledChange}
+                />
+              ))}
+            </ExtensionGroup>
           ))}
         </div>
       </SettingsSection>
