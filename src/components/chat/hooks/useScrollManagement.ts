@@ -569,17 +569,17 @@ export function useScrollManagement({
     const viewport = scrollViewportRef.current
     if (!viewport) return
 
-    let rafId = 0
-    const syncViewportSize = () => {
+    const rafId = requestAnimationFrame(() => {
+      onViewportSizeChange()
+    })
+
+    // Pin inside the observer callback (after layout, before paint). A pin
+    // deferred to rAF paints the old position first, so a collapsible's
+    // expand animation wiggles the chat on every frame.
+    const observer = new ResizeObserver(() => {
       cancelAnimationFrame(rafId)
-      rafId = requestAnimationFrame(() => {
-        onViewportSizeChange()
-      })
-    }
-
-    syncViewportSize()
-
-    const observer = new ResizeObserver(syncViewportSize)
+      onViewportSizeChange()
+    })
     observer.observe(viewport)
     if (viewport.firstElementChild) {
       observer.observe(viewport.firstElementChild)

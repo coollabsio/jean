@@ -438,6 +438,24 @@ describe('useScrollManagement streaming auto-scroll', () => {
     expect(getByTestId('is-at-bottom')).toHaveTextContent('true')
   })
 
+  it('pins the idle tail in the resize callback, before the next frame', () => {
+    const { viewport, setScrollHeight } = setupHook({ isSending: false })
+    viewport.scrollTop = 1600
+    fireEvent.scroll(viewport)
+    // Frames never run: a pin deferred to rAF paints the old position on each
+    // frame of a collapsible expand animation, so the chat wiggles.
+    vi.mocked(window.requestAnimationFrame).mockImplementation(() => 1)
+
+    setScrollHeight(2100)
+    act(() => {
+      for (const callback of resizeObserverCallbacks) {
+        callback([], {} as ResizeObserver)
+      }
+    })
+
+    expect(viewport.scrollTop).toBe(2100)
+  })
+
   it('hides the bottom action after a smooth scroll that overlapped a resize', async () => {
     const { getByTestId, viewport, setScrollHeight } = setupHook({
       isSending: false,

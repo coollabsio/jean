@@ -5,7 +5,7 @@ import type { SVGProps } from 'react'
  * Bubble fills the user's prompt bubbles (white text); shades match Grok's palette.
  */
 export const AGENT_ICON_COLORS = {
-  jean: ['#FFD21F', '#8A6500', '#915BFC'],
+  jean: ['#FFD21F', '#8A6500', '#F79410'],
   yellow: ['#FFD21F', '#8A6500', '#F79410'],
   blue: ['#4DA6FF', '#1A4F99', '#1784FC'],
   green: ['#3DDC84', '#16733F', '#14C370'],
