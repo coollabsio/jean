@@ -474,6 +474,16 @@ function getSessionMetrics(cards: SessionCardData[]) {
   const waitingCount = cards.filter(c =>
     isActionableWaitingStatus(c.status)
   ).length
+  // Keep review-ready and completed countable together for metrics, but
+  // cancelled/crashed are not "ready for review".
+  const reviewCount = cards.filter(
+    c => c.status === 'review' || c.status === 'completed'
+  ).length
+  const planningCount = cards.filter(
+    c => c.status === 'planning' || c.status === 'scheduled'
+  ).length
+  const buildingCount = cards.filter(c => c.status === 'vibing').length
+  const yoloCount = cards.filter(c => c.status === 'yoloing').length
   const runningCount = cards.filter(
     c =>
       c.status === 'planning' || c.status === 'vibing' || c.status === 'yoloing'
@@ -486,6 +496,10 @@ function getSessionMetrics(cards: SessionCardData[]) {
 
   return {
     waitingCount,
+    reviewCount,
+    planningCount,
+    buildingCount,
+    yoloCount,
     runningCount,
     latestActivityAt,
   }
@@ -513,49 +527,6 @@ function createStableSectionCardsCache(): (
     cache.set(worktreeId, cards)
     return cards
   }
-}
-
-function WorktreePrChip({
-  worktree,
-  isVisible,
-}: {
-  worktree: Worktree
-  isVisible: boolean
-}) {
-  const { data: prStatus } = usePrStatus(isVisible ? worktree.id : null)
-  if (!worktree.pr_number) return null
-  const prUrl = worktree.pr_url
-  const status =
-    prStatus?.display_status ??
-    (worktree.cached_pr_status as PrDisplayStatus | undefined)
-  const checkStatus =
-    prStatus?.check_status ??
-    (worktree.cached_check_status as CheckStatus | undefined)
-  const display = status ? getPrStatusDisplay(status) : null
-  const checks = checkStatus ? getCheckStatusDisplay(checkStatus) : null
-  const title = [`PR #${worktree.pr_number}`, display?.label, checks?.label]
-    .filter(Boolean)
-    .join(' · ')
-
-  return (
-    <button
-      type="button"
-      aria-label={title}
-      disabled={!prUrl}
-      onClick={e => {
-        e.stopPropagation()
-        if (prUrl) void openExternal(prUrl)
-      }}
-      className={cn(
-        'inline-flex shrink-0 items-center gap-1 text-xs tabular-nums leading-none transition-opacity enabled:cursor-pointer enabled:hover:opacity-70',
-        display?.className ?? 'text-muted-foreground'
-      )}
-    >
-      <span>#{worktree.pr_number}</span>
-      {display && <span>· {display.label}</span>}
-      {checks && <span className={checks.className}>· {checks.label}</span>}
-    </button>
-  )
 }
 
 const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
@@ -727,6 +698,7 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
     displayBranch,
     worktreeName: worktree.name,
     stackedBaseBranch,
+    prNumber: worktree.pr_number,
     securityAlertNumber: worktree.security_alert_number,
     advisoryGhsaId: worktree.advisory_ghsa_id,
   })
@@ -742,12 +714,6 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
       worktree.last_opened_at,
       worktree.created_at,
     ])
-  // Secondary details show on hover, focus or keyboard selection. Touch
-  // devices have no hover, so they keep the details visible.
-  const revealClass = cn(
-    'transition-opacity pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100 pointer-fine:group-focus-within:opacity-100',
-    isSelected && 'pointer-fine:opacity-100'
-  )
 
   const { data: prStatus } = usePrStatus(
     compact && isVisible && worktree.pr_number ? worktree.id : null
@@ -907,14 +873,16 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
       className={cn(
         'group relative border border-transparent transition-colors',
         showDetails
-          ? 'mb-0.5 rounded-md px-3 py-1.5'
+          ? compact
+            ? 'mb-0.5 rounded-md px-3 py-1.5'
+            : 'mb-1 rounded-md px-3 py-2'
           : 'mb-0.5 flex items-center gap-2',
         onRowClick &&
           (showDetails
             ? 'cursor-pointer hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60'
             : 'cursor-pointer px-2 -mx-2 py-1 hover:bg-muted/50'),
         isSelected && onRowClick && 'border-border/40 bg-muted/35',
-        showDetails &&
+        compact &&
           isStale &&
           !isSelected &&
           'opacity-55 hover:opacity-100 focus-within:opacity-100',
@@ -945,29 +913,15 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
         <div className={cn(showDetails ? 'flex flex-col gap-1.5' : 'contents')}>
           <div className="flex min-w-0 flex-wrap items-center gap-2 sm:flex-nowrap">
             {shortcutNumber !== undefined && (
-              <kbd
-                data-mod-hint
-                className="hidden shrink-0 h-4 min-w-4 items-center justify-center rounded border border-border/50 bg-muted/50 px-0.5 font-mono text-2xs text-muted-foreground sm:inline-flex"
-              >
+              <kbd className="hidden shrink-0 h-4 min-w-4 items-center justify-center rounded border border-border/50 bg-muted/50 px-0.5 font-mono text-2xs text-muted-foreground sm:inline-flex">
                 {formatShortcutDisplay(`mod+${shortcutNumber}`)}
               </kbd>
             )}
-            <span className="flex min-w-0 flex-1 flex-col gap-1 sm:flex-row sm:items-center sm:gap-1.5">
+            <span className="flex min-w-0 flex-1 flex-col gap-1 font-medium sm:flex-row sm:items-center sm:gap-1.5">
               <span className="flex min-w-0 items-center gap-1.5">
                 <span className="min-w-0 flex-1 truncate">
                   {isBase ? 'Base Session' : worktree.name}
                 </span>
-                {waitingCount > 0 && (
-                  <span
-                    role="img"
-                    aria-label={`${waitingCount} waiting`}
-                    title={`${waitingCount} waiting`}
-                    className="size-1.5 shrink-0 rounded-full bg-warning"
-                  />
-                )}
-                {runningCount > 0 && (
-                  <WorkingWaveform label={`${runningCount} running`} />
-                )}
                 {showBranchBadge && (
                   <span className="hidden items-center gap-1 rounded border border-border/50 px-1.5 py-0.5 text-2xs font-normal text-muted-foreground sm:inline-flex">
                     <GitBranch className="h-2.5 w-2.5" />
@@ -985,6 +939,13 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
                             {stackedOnPR.number}
                           </>
                         )}
+                      </>
+                    )}
+                    {worktree.pr_number && (
+                      <>
+                        <span className="text-border">·</span>
+                        <GitPullRequestArrow className="h-2.5 w-2.5" />#
+                        {worktree.pr_number}
                       </>
                     )}
                     {worktree.security_alert_number && (
@@ -1005,6 +966,19 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
                     )}
                   </span>
                 )}
+                <span
+                  className="inline-flex items-center font-normal hover:bg-muted/50 rounded px-1.5 py-0.5"
+                  onClick={e => e.stopPropagation()}
+                >
+                  <GitStatusBadges
+                    behindCount={behindCount}
+                    unpushedCount={unpushedCount}
+                    diffAdded={diffAdded}
+                    diffRemoved={diffRemoved}
+                    onSync={handleSync}
+                    onDiffClick={handleDiffClick}
+                  />
+                </span>
               </span>
               {showBranchBadge && (
                 <span className="inline-flex max-w-full items-center gap-1 self-start rounded border border-border/50 px-1.5 py-0.5 text-2xs font-normal text-muted-foreground sm:hidden">
@@ -1023,6 +997,13 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
                           #{stackedOnPR.number}
                         </>
                       )}
+                    </>
+                  )}
+                  {worktree.pr_number && (
+                    <>
+                      <span className="text-border">·</span>
+                      <GitPullRequestArrow className="h-2.5 w-2.5 shrink-0" />#
+                      {worktree.pr_number}
                     </>
                   )}
                   {worktree.security_alert_number && (
@@ -1045,12 +1026,7 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
               )}
             </span>
             {worktreeLabels.length > 0 && (
-              <span
-                className={cn(
-                  getWorktreeLabelContainerClassName(),
-                  revealClass
-                )}
-              >
+              <span className={getWorktreeLabelContainerClassName()}>
                 {worktreeLabels.slice(0, 3).map(label => (
                   <span
                     key={label.name}
@@ -1070,46 +1046,63 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
                 )}
               </span>
             )}
-            {showDetails && (
-              <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-3 text-xs text-muted-foreground">
-                {uniqueSessionLabels.map(label => (
-                  <span
-                    key={label.name}
-                    className="rounded px-2 py-0.5 text-2xs font-medium"
-                    style={{
-                      backgroundColor: label.color,
-                      color: getLabelTextColor(label.color),
-                    }}
-                  >
-                    {label.name}
-                  </span>
-                ))}
-                <span className="hidden justify-end md:inline-flex md:min-w-16">
-                  <WorktreePrChip worktree={worktree} isVisible={isVisible} />
-                </span>
-                <span className="inline-flex justify-end font-normal sm:min-w-24">
-                  <GitStatusBadges
-                    behindCount={behindCount}
-                    unpushedCount={unpushedCount}
-                    diffAdded={diffAdded}
-                    diffRemoved={diffRemoved}
-                    onSync={handleSync}
-                    onDiffClick={handleDiffClick}
-                  />
-                </span>
-                <span className="text-right tabular-nums sm:min-w-14">
-                  {lastActivity}
-                </span>
-                {isVisible && (
-                  <TerminalStatusIndicator
-                    worktreeId={worktree.id}
-                    iconSize="h-3 w-3"
-                    variant="summary"
-                  />
-                )}
-              </div>
-            )}
           </div>
+          {showDetails && sessionMetrics && (
+            <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+              {sessionMetrics.waitingCount > 0 && (
+                <span className="rounded bg-warning px-2 py-0.5 text-warning-foreground">
+                  {sessionMetrics.waitingCount} waiting
+                </span>
+              )}
+              {sessionMetrics.planningCount > 0 && (
+                <span className="rounded bg-info/10 px-2 py-0.5 text-info">
+                  {sessionMetrics.planningCount} planning
+                </span>
+              )}
+              {sessionMetrics.buildingCount > 0 && (
+                <span className="rounded bg-info/10 px-2 py-0.5 text-info">
+                  {sessionMetrics.buildingCount} building
+                </span>
+              )}
+              {sessionMetrics.yoloCount > 0 && (
+                <span className="rounded bg-destructive/10 px-2 py-0.5 text-destructive">
+                  {sessionMetrics.yoloCount} full access
+                </span>
+              )}
+              {sessionMetrics.reviewCount > 0 && (
+                <span className="rounded bg-success/10 px-2 py-0.5 text-success">
+                  {sessionMetrics.reviewCount} review
+                </span>
+              )}
+              {uniqueSessionLabels.map(label => (
+                <span
+                  key={label.name}
+                  className="rounded px-2 py-0.5 text-2xs font-medium"
+                  style={{
+                    backgroundColor: label.color,
+                    color: getLabelTextColor(label.color),
+                  }}
+                >
+                  {label.name}
+                </span>
+              ))}
+              {lastActivity && (
+                <span className="rounded px-2 py-0.5">{lastActivity}</span>
+              )}
+              {isVisible && (
+                <TerminalStatusIndicator
+                  worktreeId={worktree.id}
+                  iconSize="h-3 w-3"
+                  variant="summary"
+                />
+              )}
+              {onRowClick && (
+                <span className="ml-auto hidden text-2xs opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 sm:inline-flex">
+                  Press Enter to open
+                </span>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
