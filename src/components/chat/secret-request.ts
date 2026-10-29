@@ -51,6 +51,10 @@ export interface SecretEntry {
   label: string
   sessionId: string
   toolCallId: string
+  /** `project:<id>` or `agent:<id>`; empty for secrets saved before scope */
+  ownerId: string
+  /** Project or agent name */
+  ownerName: string
   retention: SecretRetention
   /** Unix seconds */
   savedAt: number

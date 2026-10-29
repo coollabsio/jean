@@ -793,32 +793,33 @@ describe('CompactMessageList request_secret', () => {
 })
 
 describe('CompactMessageList list_secrets', () => {
-  it('lists saved secrets without values and deletes one', async () => {
+  const entry = (id: string, label: string, ownerId: string) => ({
+    id: id.repeat(32),
+    label,
+    sessionId: 's1',
+    toolCallId: 't1',
+    ownerId,
+    ownerName: ownerId === 'agent:a1' ? 'Ops' : 'jean',
+    retention: 'forever',
+    savedAt: 1_700_000_000,
+  })
+
+  it('lists this owner by default, all owners on demand, and deletes', async () => {
     let secrets = [
-      {
-        id: 'a'.repeat(32),
-        label: 'Tailscale auth key',
-        sessionId: 's1',
-        toolCallId: 't1',
-        retention: 'forever',
-        savedAt: 1_700_000_000,
-      },
-      {
-        id: 'b'.repeat(32),
-        label: 'Cloudflare token',
-        sessionId: 's2',
-        toolCallId: 't2',
-        retention: 'day',
-        savedAt: 1_700_000_100,
-      },
+      entry('a', 'Tailscale auth key', 'project:jean'),
+      entry('b', 'Cloudflare token', 'project:jean'),
+      entry('c', 'Hetzner token', 'agent:a1'),
     ]
     vi.mocked(invoke).mockImplementation((async (
       command: string,
       args?: Record<string, unknown>
     ) => {
-      if (command === 'list_secrets') return secrets
+      if (command === 'list_secrets')
+        return args?.allOwners
+          ? secrets
+          : secrets.filter(item => item.ownerId === 'project:jean')
       if (command === 'delete_secret') {
-        secrets = secrets.filter(entry => entry.id !== args?.id)
+        secrets = secrets.filter(item => item.id !== args?.id)
       }
       return null
     }) as typeof invoke)
@@ -835,12 +836,19 @@ describe('CompactMessageList list_secrets', () => {
 
     const card = await screen.findByRole('region', { name: 'Saved secrets' })
     expect(await within(card).findByText('Tailscale auth key')).toBeVisible()
-    expect(within(card).getByText('Cloudflare token')).toBeVisible()
+    expect(within(card).queryByText('Hetzner token')).toBeNull()
+    expect(invoke).toHaveBeenCalledWith('list_secrets', {
+      sessionId: 'session-1',
+      allOwners: false,
+    })
+
+    fireEvent.click(within(card).getByRole('radio', { name: 'All' }))
+    expect(await within(card).findByText('Hetzner token')).toBeVisible()
+    expect(within(card).getByText(/^Agent Ops · Saved/)).toBeVisible()
 
     fireEvent.click(
       within(card).getByRole('button', { name: 'Delete Cloudflare token' })
     )
-
     await waitFor(() =>
       expect(within(card).queryByText('Cloudflare token')).toBeNull()
     )
@@ -848,6 +856,5 @@ describe('CompactMessageList list_secrets', () => {
       sessionId: 'session-1',
       id: 'b'.repeat(32),
     })
-    expect(within(card).getByText('Tailscale auth key')).toBeVisible()
   })
 })

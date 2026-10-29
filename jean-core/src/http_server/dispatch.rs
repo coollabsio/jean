@@ -3150,8 +3150,15 @@ pub async fn dispatch_command(
             )?)
         }
 
-        // Clients pass `sessionId` only to route to the server that owns it.
-        "list_secrets" => to_value(crate::chat::secrets::list_secrets(app.clone())?),
+        "list_secrets" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let all_owners: Option<bool> = field_opt(&args, "allOwners", "all_owners")?;
+            to_value(crate::chat::secrets::list_secrets(
+                app.clone(),
+                session_id,
+                all_owners.unwrap_or(false),
+            )?)
+        }
 
         "delete_secret" => {
             let id: String = from_field(&args, "id")?;

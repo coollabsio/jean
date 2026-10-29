@@ -10,6 +10,14 @@
 //! retention: kept until forgotten (periodic tasks need this) or 24 hours.
 //! A `<stem>.json` file beside each value holds its label and ids, so the
 //! `list_secrets` card can list and delete secrets without reading values.
+//!
+//! Secrets are scoped to an owner: the project of a worktree session, or the
+//! agent of an agent chat, its task sessions, and its subagents (agent
+//! sessions live in virtual `__agent_*__` worktrees outside any project).
+//! Sessions list and reuse (`get_secret`) only their owner's secrets, so a
+//! scheduled task in a new session can find a key saved earlier. This is not
+//! a security wall: every agent runs as the same OS user and can read the
+//! folder.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -47,9 +55,36 @@ pub struct SecretEntry {
     pub label: String,
     pub session_id: String,
     pub tool_call_id: String,
+    /// `project:<id>` or `agent:<id>`. Empty for secrets saved before scope.
+    #[serde(default, alias = "projectId")]
+    pub owner_id: String,
+    /// Project or agent name; project names refresh when listed.
+    #[serde(default, alias = "projectName")]
+    pub owner_name: String,
     pub retention: SecretRetention,
     /// Unix seconds.
     pub saved_at: u64,
+}
+
+const PROJECT_OWNER: &str = "project:";
+const AGENT_OWNER: &str = "agent:";
+
+/// Owner (id, name) of a session: its agent, else its worktree's project.
+fn session_owner(app: &tauri::AppHandle, session_id: &str) -> Result<(String, String), String> {
+    if let Some(agent) = crate::agents::agent_for_session(app, session_id) {
+        return Ok((format!("{AGENT_OWNER}{}", agent.id), agent.name));
+    }
+    let metadata = super::storage::load_mcp_session_metadata(app, session_id)?
+        .ok_or_else(|| format!("Unknown session: {session_id}"))?;
+    let data = crate::projects::storage::load_projects_data(app)?;
+    let project = data
+        .find_worktree(&metadata.worktree_id)
+        .and_then(|worktree| data.find_project(&worktree.project_id))
+        .ok_or_else(|| "The session has no project or agent".to_string())?;
+    Ok((
+        format!("{PROJECT_OWNER}{}", project.id),
+        project.name.clone(),
+    ))
 }
 
 fn secrets_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -99,6 +134,7 @@ pub fn save_secret_request(
     secret: String,
     retention: SecretRetention,
 ) -> Result<SavedSecret, String> {
+    let (owner_id, owner_name) = session_owner(&app, &session_id)?;
     let dir = secrets_dir(&app)?;
     sweep_expired(&dir);
     let stem = file_stem(&session_id, &tool_call_id);
@@ -111,6 +147,8 @@ pub fn save_secret_request(
         label: label.trim().chars().take(80).collect(),
         session_id,
         tool_call_id,
+        owner_id,
+        owner_name,
         retention,
         saved_at,
     };
@@ -122,10 +160,63 @@ pub fn save_secret_request(
 }
 
 /// All saved secrets, newest first. Labels and ids only, never values.
-pub fn list_secrets(app: tauri::AppHandle) -> Result<Vec<SecretEntry>, String> {
+/// Only the secrets of the session's owner, unless `all_owners`.
+pub fn list_secrets(
+    app: tauri::AppHandle,
+    session_id: String,
+    all_owners: bool,
+) -> Result<Vec<SecretEntry>, String> {
     let dir = secrets_dir(&app)?;
     sweep_expired(&dir);
-    Ok(list_entries(&dir))
+    let mut entries = list_entries(&dir);
+    if !all_owners {
+        let (owner_id, _) = session_owner(&app, &session_id)?;
+        entries.retain(|entry| entry.owner_id == owner_id);
+    }
+    if let Ok(data) = crate::projects::storage::load_projects_data(&app) {
+        for entry in &mut entries {
+            let project = entry.owner_id.strip_prefix(PROJECT_OWNER);
+            if let Some(project) = project.and_then(|id| data.find_project(id)) {
+                entry.owner_name = project.name.clone();
+            }
+        }
+    }
+    Ok(entries)
+}
+
+/// Saved secret of the session's owner with this label (newest wins).
+pub fn get_secret(
+    app: tauri::AppHandle,
+    session_id: String,
+    label: String,
+) -> Result<SavedSecret, String> {
+    let (owner_id, _) = session_owner(&app, &session_id)?;
+    let dir = secrets_dir(&app)?;
+    sweep_expired(&dir);
+    find_by_label(&dir, &owner_id, &label)
+}
+
+fn find_by_label(dir: &Path, owner_id: &str, label: &str) -> Result<SavedSecret, String> {
+    let entries: Vec<SecretEntry> = list_entries(dir)
+        .into_iter()
+        .filter(|entry| entry.owner_id == owner_id)
+        .collect();
+    let wanted = label.trim().to_lowercase();
+    entries
+        .iter()
+        .find(|entry| entry.label.trim().to_lowercase() == wanted)
+        .and_then(|entry| find_saved(dir, &entry.id))
+        .ok_or_else(|| {
+            let labels: Vec<&str> = entries.iter().map(|entry| entry.label.as_str()).collect();
+            if labels.is_empty() {
+                "No saved secrets in this project or agent. Ask the user with request_secret.".to_string()
+            } else {
+                format!(
+                    "No saved secret with that label in this project or agent. Saved labels: {}. Or ask the user with request_secret.",
+                    labels.join(", ")
+                )
+            }
+        })
 }
 
 /// Delete a saved secret by its id from `list_secrets`.
@@ -251,6 +342,10 @@ fn list_entries(dir: &Path) -> Vec<SecretEntry> {
             let bytes = std::fs::read(file.path()).ok()?;
             let mut entry: SecretEntry = serde_json::from_slice(&bytes).ok()?;
             entry.id = stem;
+            // Info files from before owner scope hold a bare project id
+            if !entry.owner_id.is_empty() && !entry.owner_id.contains(':') {
+                entry.owner_id = format!("{PROJECT_OWNER}{}", entry.owner_id);
+            }
             Some(entry)
         })
         .collect();
@@ -379,6 +474,8 @@ mod tests {
             label: label.to_string(),
             session_id: "s1".to_string(),
             tool_call_id: "t".to_string(),
+            owner_id: "project:p1".to_string(),
+            owner_name: String::new(),
             retention: SecretRetention::Forever,
             saved_at,
         }
@@ -422,6 +519,48 @@ mod tests {
 
         forget(tmp.path(), &new).unwrap();
         assert_eq!(list_entries(tmp.path()), vec![entry(&old, "Old key", 10)]);
+    }
+
+    #[test]
+    fn finds_secret_by_label_only_for_its_owner() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (mine, other) = (file_stem("s1", "a"), file_stem("s2", "b"));
+        let saved = write_secret_file(tmp.path(), &mine, "v1", SecretRetention::Forever).unwrap();
+        write_meta(tmp.path(), &mine, &entry(&mine, "Deploy token", 10)).unwrap();
+        write_secret_file(tmp.path(), &other, "v2", SecretRetention::Forever).unwrap();
+        let mut foreign = entry(&other, "Other token", 20);
+        foreign.owner_id = "agent:a1".to_string();
+        write_meta(tmp.path(), &other, &foreign).unwrap();
+
+        let found = find_by_label(tmp.path(), "project:p1", "  deploy TOKEN ").unwrap();
+        assert_eq!(found.path, saved.path);
+
+        let err = find_by_label(tmp.path(), "project:p1", "Other token").unwrap_err();
+        assert!(err.contains("Saved labels: Deploy token"), "{err}");
+        assert!(
+            !err.contains("Other token"),
+            "other owner labels stay hidden"
+        );
+        assert!(find_by_label(tmp.path(), "agent:a1", "Other token").is_ok());
+        assert!(find_by_label(tmp.path(), "project:p3", "Deploy token")
+            .unwrap_err()
+            .contains("No saved secrets"));
+    }
+
+    #[test]
+    fn reads_info_files_from_before_owner_scope() {
+        let tmp = tempfile::tempdir().unwrap();
+        let stem = file_stem("s1", "a");
+        write_secret_file(tmp.path(), &stem, "v", SecretRetention::Forever).unwrap();
+        std::fs::write(
+            meta_path(tmp.path(), &stem),
+            r#"{"label":"Old","sessionId":"s1","toolCallId":"a","projectId":"p1","projectName":"Jean","retention":"forever","savedAt":1}"#,
+        )
+        .unwrap();
+
+        let listed = list_entries(tmp.path());
+        assert_eq!(listed[0].owner_id, "project:p1");
+        assert_eq!(listed[0].owner_name, "Jean");
     }
 
     #[test]
