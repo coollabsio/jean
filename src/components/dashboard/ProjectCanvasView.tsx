@@ -538,31 +538,6 @@ function WorktreePrChip({
   )
 }
 
-function WorktreeStatusGlyph({
-  runningCount,
-  waitingCount,
-}: {
-  runningCount: number
-  waitingCount: number
-}) {
-  return (
-    <span className="inline-flex w-4 shrink-0 items-center justify-center">
-      {runningCount > 0 ? (
-        <WorkingWaveform label={`${runningCount} running`} />
-      ) : waitingCount > 0 ? (
-        <span
-          role="img"
-          aria-label={`${waitingCount} waiting`}
-          title={`${waitingCount} waiting`}
-          className="size-1.5 rounded-full bg-warning"
-        />
-      ) : (
-        <span className="size-1 rounded-full bg-muted-foreground/30" />
-      )}
-    </span>
-  )
-}
-
 const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
   worktree,
   projectId,
@@ -788,18 +763,12 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
               {formatShortcutDisplay(`mod+${shortcutNumber}`)}
             </kbd>
           )}
-          {showDetails && (
-            <WorktreeStatusGlyph
-              runningCount={runningCount}
-              waitingCount={waitingCount}
-            />
-          )}
           <span className="flex min-w-0 flex-1 flex-col gap-1 sm:flex-row sm:items-center sm:gap-1.5">
             <span className="flex min-w-0 items-center gap-1.5">
               <span className="min-w-0 flex-1 truncate">
                 {isBase ? 'Base Session' : worktree.name}
               </span>
-              {!showDetails && waitingCount > 0 && (
+              {waitingCount > 0 && (
                 <span
                   role="img"
                   aria-label={`${waitingCount} waiting`}
@@ -807,7 +776,7 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
                   className="size-1.5 shrink-0 rounded-full bg-warning"
                 />
               )}
-              {!showDetails && runningCount > 0 && (
+              {runningCount > 0 && (
                 <WorkingWaveform label={`${runningCount} running`} />
               )}
               {showBranchBadge && (
