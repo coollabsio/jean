@@ -627,6 +627,71 @@ describe('ContextMentionPopover', () => {
     )
   })
 
+  it('moves and checks items with arrows and Space outside text fields', () => {
+    const onInvestigateInNewSession = vi.fn()
+    const onSelectContext = vi.fn()
+    render(
+      <ContextMentionPopover
+        projectPath="/tmp/repo"
+        projectId="project-1"
+        open
+        onOpenChange={vi.fn()}
+        onSelectContext={onSelectContext}
+        onInvestigateInNewSession={onInvestigateInNewSession}
+        searchQuery=""
+        anchorPosition={{ top: 0, left: 0 }}
+      />
+    )
+
+    const issueCheckbox = screen.getByRole('checkbox', { name: 'Select #123' })
+    const prCheckbox = screen.getByRole('checkbox', { name: 'Select PR #45' })
+    fireEvent.click(issueCheckbox)
+    expect(issueCheckbox).toBeChecked()
+
+    // Focus stays on the clicked checkbox; keys act on the highlighted row
+    fireEvent.keyDown(issueCheckbox, { key: 'ArrowUp' })
+    fireEvent.keyDown(issueCheckbox, { key: ' ' })
+    expect(prCheckbox).toBeChecked()
+    expect(issueCheckbox).toBeChecked()
+    fireEvent.keyDown(issueCheckbox, { key: 'ArrowDown' })
+    fireEvent.keyDown(issueCheckbox, { key: ' ' })
+    expect(issueCheckbox).not.toBeChecked()
+
+    // Space in the search field types; it does not toggle
+    const search = screen.getByRole('combobox')
+    fireEvent.keyDown(search, { key: ' ' })
+    expect(issueCheckbox).not.toBeChecked()
+
+    fireEvent.keyDown(issueCheckbox, { key: ' ' })
+    fireEvent.keyDown(search, { key: 'Enter', ctrlKey: true, shiftKey: true })
+    expect(onInvestigateInNewSession).toHaveBeenCalledWith(
+      [items[1], items[0]],
+      true
+    )
+    expect(onSelectContext).not.toHaveBeenCalled()
+  })
+
+  it('investigates checked items in one session with Mod+Enter', () => {
+    const onInvestigateInNewSession = vi.fn()
+    render(
+      <ContextMentionPopover
+        projectPath="/tmp/repo"
+        projectId="project-1"
+        open
+        onOpenChange={vi.fn()}
+        onSelectContext={vi.fn()}
+        onInvestigateInNewSession={onInvestigateInNewSession}
+        searchQuery=""
+        anchorPosition={{ top: 0, left: 0 }}
+      />
+    )
+
+    const checkbox = screen.getByRole('checkbox', { name: 'Select #123' })
+    fireEvent.click(checkbox)
+    fireEvent.keyDown(checkbox, { key: 'Enter', metaKey: true })
+    expect(onInvestigateInNewSession).toHaveBeenCalledWith([items[0]], false)
+  })
+
   it('opens the existing session from its badge', () => {
     const match = {
       worktreeId: 'wt-1',

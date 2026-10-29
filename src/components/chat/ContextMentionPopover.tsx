@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/tooltip'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { isNativeApp } from '@/lib/environment'
+import { getModifierSymbol } from '@/lib/platform'
 import {
   Command,
   CommandEmpty,
@@ -130,10 +131,21 @@ function getLinkRef(item: ContextMentionItem): ContextLinkRef | null {
   return null
 }
 
+function isTextInput(target: EventTarget) {
+  return (
+    target instanceof HTMLElement &&
+    (target.tagName === 'INPUT' ||
+      target.tagName === 'TEXTAREA' ||
+      target.isContentEditable)
+  )
+}
+
 export interface ContextMentionPopoverHandle {
   moveUp: () => void
   moveDown: () => void
   selectCurrent: (investigate?: boolean) => void
+  /** Investigates the checked items; returns false when none are checked */
+  investigateChecked: (separate: boolean) => boolean
 }
 
 interface ContextMentionPopoverProps {
@@ -325,6 +337,10 @@ export function ContextMentionPopover({
 
   const resetListPosition = useCallback(() => setSelectedIndex(0), [])
 
+  const isCheckable = (item: ContextMentionItem) =>
+    Boolean(onInvestigateInNewSession) &&
+    (item.type === 'issue' || item.type === 'pr')
+
   const toggleChecked = useCallback(
     (item: ContextMentionItem, checked: boolean) => {
       setCheckedItems(prev => {
@@ -359,21 +375,73 @@ export function ContextMentionPopover({
     [checkedItems, getMatches, onInvestigateInNewSession, onOpenChange]
   )
 
+  // Mod+Enter: one new session; Mod+Shift+Enter: one session per item
+  const investigateChecked = useCallback(
+    (separate: boolean) => {
+      if (!onInvestigateInNewSession || checkedItems.size === 0) return false
+      handleInvestigateChecked(separate && checkedItems.size > 1)
+      return true
+    },
+    [checkedItems.size, handleInvestigateChecked, onInvestigateInNewSession]
+  )
+
+  const moveUp = useCallback(
+    () =>
+      setSelectedIndex(i => Math.min(i + 1, Math.max(0, flatItems.length - 1))),
+    [flatItems.length]
+  )
+  const moveDown = useCallback(
+    () => setSelectedIndex(i => Math.max(i - 1, 0)),
+    []
+  )
+
+  // Keys while focus is inside the menu but not in a text field (for example
+  // after a checkbox click). Capture phase: row checkboxes stop propagation.
+  const handleMenuKeyDownCapture = (event: React.KeyboardEvent) => {
+    if (isTextInput(event.target)) return
+    const item = flatItems[clampedSelectedIndex]
+    switch (event.key) {
+      case 'ArrowUp':
+        moveUp()
+        break
+      case 'ArrowDown':
+        moveDown()
+        break
+      case ' ':
+        if (!item || !isCheckable(item)) return
+        toggleChecked(item, !checkedItems.has(item.id))
+        break
+      case 'Enter':
+        if (!(event.metaKey || event.ctrlKey)) return
+        if (!investigateChecked(event.shiftKey)) return
+        break
+      default:
+        return
+    }
+    event.preventDefault()
+    event.stopPropagation()
+  }
+
   useImperativeHandle(
     handleRef,
     () => ({
       // List renders bottom-up: ArrowUp moves to the next (worse) match.
-      moveUp: () =>
-        setSelectedIndex(i =>
-          Math.min(i + 1, Math.max(0, flatItems.length - 1))
-        ),
-      moveDown: () => setSelectedIndex(i => Math.max(i - 1, 0)),
+      moveUp,
+      moveDown,
       selectCurrent: (investigate = false) => {
         const item = flatItems[clampedSelectedIndex]
         if (item) handleSelect(item, investigate)
       },
+      investigateChecked,
     }),
-    [clampedSelectedIndex, flatItems, handleSelect]
+    [
+      clampedSelectedIndex,
+      flatItems,
+      handleSelect,
+      investigateChecked,
+      moveDown,
+      moveUp,
+    ]
   )
 
   useEffect(() => {
@@ -411,6 +479,7 @@ export function ContextMentionPopover({
         side="top"
         sideOffset={20}
         onOpenAutoFocus={e => e.preventDefault()}
+        onKeyDownCapture={handleMenuKeyDownCapture}
         onCloseAutoFocus={e => e.preventDefault()}
         // Keep the list open while the preview modal is on top of it
         onInteractOutside={e => {
@@ -510,16 +579,19 @@ export function ContextMentionPopover({
               switch (event.key) {
                 case 'ArrowUp':
                   event.preventDefault()
-                  setSelectedIndex(index =>
-                    Math.min(index + 1, Math.max(0, flatItems.length - 1))
-                  )
+                  moveUp()
                   break
                 case 'ArrowDown':
                   event.preventDefault()
-                  setSelectedIndex(index => Math.max(index - 1, 0))
+                  moveDown()
                   break
                 case 'Enter': {
                   event.preventDefault()
+                  if (
+                    (event.metaKey || event.ctrlKey) &&
+                    investigateChecked(event.shiftKey)
+                  )
+                    break
                   const item = flatItems[clampedSelectedIndex]
                   if (item) handleSelect(item, event.shiftKey)
                   break
@@ -572,18 +644,18 @@ export function ContextMentionPopover({
                           isSelected && '!bg-accent !text-accent-foreground'
                         )}
                       >
-                        {onInvestigateInNewSession &&
-                          (item.type === 'issue' || item.type === 'pr') && (
-                            <div className="self-center">
-                              <ItemSelectCheckbox
-                                checked={checkedItems.has(item.id)}
-                                ariaLabel={`Select ${item.label}`}
-                                onCheckedChange={checked =>
-                                  toggleChecked(item, checked)
-                                }
-                              />
-                            </div>
-                          )}
+                        {isCheckable(item) && (
+                          <div className="self-center">
+                            <ItemSelectCheckbox
+                              checked={checkedItems.has(item.id)}
+                              ariaLabel={`Select ${item.label}`}
+                              onCheckedChange={checked => {
+                                toggleChecked(item, checked)
+                                setSelectedIndex(itemIndex)
+                              }}
+                            />
+                          </div>
+                        )}
                         <div className="min-w-0 flex-1 self-center line-clamp-2 break-words text-sm">
                           <span className="mr-2 font-mono text-xs text-muted-foreground">
                             {item.label}
@@ -691,6 +763,14 @@ export function ContextMentionPopover({
                 : undefined
             }
             onSecondaryAction={() => handleInvestigateChecked(true)}
+            actionKbd={
+              showKeyboardHints ? `${getModifierSymbol()}+Enter` : undefined
+            }
+            secondaryActionKbd={
+              showKeyboardHints
+                ? `${getModifierSymbol()}+Shift+Enter`
+                : undefined
+            }
             onInvestigate={() => handleInvestigateChecked(false)}
             className="pb-2.5"
           />

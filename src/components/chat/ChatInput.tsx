@@ -614,6 +614,12 @@ export const ChatInput = memo(function ChatInput({
           case 'Enter':
           case 'Tab':
             e.preventDefault()
+            if (
+              e.key === 'Enter' &&
+              (e.metaKey || e.ctrlKey) &&
+              contextMentionHandleRef.current?.investigateChecked(e.shiftKey)
+            )
+              return
             contextMentionHandleRef.current?.selectCurrent(
               e.key === 'Enter' && e.shiftKey
             )

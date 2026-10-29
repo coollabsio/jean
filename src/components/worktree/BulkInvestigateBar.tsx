@@ -1,5 +1,6 @@
 import { Loader2, Wand2 } from '@/components/icons/reicon'
 import { Button } from '@/components/ui/button'
+import { Kbd } from '@/components/ui/kbd'
 import { cn } from '@/lib/utils'
 
 export interface BulkInvestigateBarProps {
@@ -11,6 +12,9 @@ export interface BulkInvestigateBarProps {
   /** Optional second action shown before the main button */
   secondaryActionLabel?: string
   onSecondaryAction?: () => void
+  /** Keyboard shortcut hints shown inside the action buttons */
+  actionKbd?: string
+  secondaryActionKbd?: string
   onClear: () => void
   onInvestigate: () => void
   className?: string
@@ -24,6 +28,8 @@ export function BulkInvestigateBar({
   actionLabel,
   secondaryActionLabel,
   onSecondaryAction,
+  actionKbd,
+  secondaryActionKbd,
   onClear,
   onInvestigate,
   className,
@@ -58,6 +64,7 @@ export function BulkInvestigateBar({
           onClick={onSecondaryAction}
         >
           {secondaryActionLabel}
+          {secondaryActionKbd && <Kbd>{secondaryActionKbd}</Kbd>}
         </Button>
       )}
       <Button
@@ -77,6 +84,11 @@ export function BulkInvestigateBar({
         {isLoading
           ? 'Starting…'
           : (actionLabel ?? `Investigate ${count} ${noun} in background`)}
+        {actionKbd && !isLoading && (
+          <Kbd className="bg-primary-foreground/15 text-current">
+            {actionKbd}
+          </Kbd>
+        )}
       </Button>
     </div>
   )
