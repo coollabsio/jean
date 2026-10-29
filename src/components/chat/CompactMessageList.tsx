@@ -1383,7 +1383,11 @@ export const CompactMessageList = memo(
                         messageId={item.key}
                         sessionId={sessionId}
                       >
-                        {item.latestText ?? ''}
+                        {latestTextIsRecap
+                          ? (item.latestText ?? '')
+                              .replace(RECAP_HEADING_RE, '')
+                              .trim()
+                          : (item.latestText ?? '')}
                       </Markdown>
                     </ReplyBubble>
                     {inlineQuestion && onSendAnswer && (
