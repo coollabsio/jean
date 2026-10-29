@@ -25,6 +25,8 @@ import type { ComponentProps } from 'react'
 type StreamingMessageProps = ComponentProps<typeof StreamingMessage>
 type CompactStreamingTickerProps = StreamingMessageProps & {
   showLoadingIndicator?: boolean
+  /** Agent chat: steered prompts use the pill bubble style */
+  bubble?: boolean
 }
 
 /**
@@ -212,6 +214,7 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
     streamingContent,
     worktreePath,
     showLoadingIndicator = true,
+    bubble = false,
   } = props
   const [isOpen, setIsOpen] = useState(false)
 
@@ -351,6 +354,7 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
               <SteeredPromptGroup
                 key={key}
                 texts={segment.texts}
+                bubble={bubble}
                 worktreePath={worktreePath}
               />
             ) : (
@@ -384,7 +388,11 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
   if (hasPlan && !hasActivity) {
     return (
       <div className="space-y-3">
-        <SteeredPromptGroup texts={steeredTexts} worktreePath={worktreePath} />
+        <SteeredPromptGroup
+          texts={steeredTexts}
+          bubble={bubble}
+          worktreePath={worktreePath}
+        />
         <StreamingMessage
           {...props}
           contentBlocks={planBlocks}
@@ -404,7 +412,11 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
 
   return (
     <div className="space-y-3">
-      <SteeredPromptGroup texts={steeredTexts} worktreePath={worktreePath} />
+      <SteeredPromptGroup
+        texts={steeredTexts}
+        bubble={bubble}
+        worktreePath={worktreePath}
+      />
       <Collapsible open={isOpen} onOpenChange={setIsOpen} className="min-w-0">
         <div className="min-w-0">
           <CollapsibleTrigger className={TOOL_CALL_ROW_CLASS}>

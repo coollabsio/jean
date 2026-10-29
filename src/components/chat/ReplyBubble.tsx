@@ -8,6 +8,20 @@ import { Markdown } from '@/components/ui/markdown'
 export const PILL_BUBBLE_CLASS =
   'min-w-0 break-words [overflow-wrap:anywhere] rounded-[22px] bg-muted/60 px-4 py-2.5 text-foreground [&_pre]:bg-background [&_:not(pre)>code]:bg-background'
 
+/** Agent chat user prompt: a pill bubble in the agent's accent color. */
+export const USER_PILL_BUBBLE_CLASS = [
+  PILL_BUBBLE_CLASS,
+  '[--bubble-bg:var(--agent-accent,var(--muted))] bg-(--bubble-bg)',
+  // Agent-colored bubbles are strong shades: use white text
+  '[--bubble-fg:var(--agent-accent-fg,var(--foreground))] text-(--bubble-fg) [&_a]:text-inherit',
+  // Attachments: the bubble color, a bit darker
+  '[&_[data-attachments]>*]:border-transparent [&_[data-attachments]>*]:bg-[color-mix(in_oklab,var(--bubble-bg)_80%,black)]',
+].join(' ')
+
+/** Chat user prompt: a subtle bordered card. */
+export const USER_CARD_BUBBLE_CLASS =
+  'min-w-0 break-words [overflow-wrap:anywhere] rounded-lg border border-border/20 bg-muted/20 px-3 py-2 text-foreground'
+
 /** Agent chat reply: a pill bubble, aligned left. */
 export function ReplyBubble({ children }: { children: ReactNode }) {
   return (

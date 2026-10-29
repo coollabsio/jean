@@ -3,7 +3,11 @@ import { AgentMessageFromRow } from '@/components/agents/AgentMessageLink'
 import { parseAgentSentMessage } from '@/components/agents/agent-messages'
 import { Copy } from '@/components/icons/reicon'
 import { toast } from 'sonner'
-import { PILL_BUBBLE_CLASS, ReplyBubble } from './ReplyBubble'
+import {
+  ReplyBubble,
+  USER_CARD_BUBBLE_CLASS,
+  USER_PILL_BUBBLE_CLASS,
+} from './ReplyBubble'
 import { ChatContinuedNotice } from './ChatContinuedNotice'
 import {
   parseInlineNumberedQuestion,
@@ -741,6 +745,7 @@ export const MessageItem = memo(function MessageItem({
                             return (
                               <SteeredPromptGroup
                                 texts={item.texts}
+                                bubble={hideSettingsBadges}
                                 worktreePath={worktreePath}
                                 serverId={
                                   messageServerId === 'local'
@@ -1045,15 +1050,8 @@ export const MessageItem = memo(function MessageItem({
             className={cn(
               'max-w-full',
               hideSettingsBadges
-                ? cn(
-                    PILL_BUBBLE_CLASS,
-                    '[--bubble-bg:var(--agent-accent,var(--muted))] bg-(--bubble-bg)',
-                    // Agent-colored bubbles are strong shades: use white text
-                    '[--bubble-fg:var(--agent-accent-fg,var(--foreground))] text-(--bubble-fg) [&_a]:text-inherit',
-                    // Attachments: the bubble color, a bit darker
-                    '[&_[data-attachments]>*]:border-transparent [&_[data-attachments]>*]:bg-[color-mix(in_oklab,var(--bubble-bg)_80%,black)]'
-                  )
-                : 'min-w-0 break-words [overflow-wrap:anywhere] rounded-lg border border-border/20 bg-muted/20 px-3 py-2 text-foreground'
+                ? USER_PILL_BUBBLE_CLASS
+                : USER_CARD_BUBBLE_CLASS
             )}
           >
             {messageBoxContent}

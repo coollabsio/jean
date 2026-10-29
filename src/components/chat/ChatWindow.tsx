@@ -2939,6 +2939,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                     currentToolCalls.some(needsUserInput)) && (
                                     <CompactStreamingTicker
                                       sessionId={activeSessionId}
+                                      bubble={Boolean(workingLabel)}
                                       contentBlocks={
                                         currentStreamingContentBlocks
                                       }

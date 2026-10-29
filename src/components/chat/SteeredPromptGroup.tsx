@@ -1,5 +1,7 @@
 import { memo } from 'react'
 import { normalizePath } from '@/lib/path-utils'
+import { cn } from '@/lib/utils'
+import { USER_CARD_BUBBLE_CLASS, USER_PILL_BUBBLE_CLASS } from './ReplyBubble'
 import { ImageLightbox } from './ImageLightbox'
 import { TextFileLightbox } from './TextFileLightbox'
 import { FileMentionBadge } from './FileMentionBadge'
@@ -17,20 +19,30 @@ import {
  * Right-aligned card grouping one or more user prompts that were steered
  * into a running turn (Codex `turn/steer`). Consecutive steered prompts
  * render as connected rows in a single bubble so they read as one batch.
+ * `bubble` uses the agent chat pill style, like other user prompts there.
  */
 export const SteeredPromptGroup = memo(function SteeredPromptGroup({
   texts,
+  bubble = false,
   worktreePath,
   serverId,
 }: {
   texts: string[]
+  bubble?: boolean
   worktreePath?: string
   serverId?: string
 }) {
   if (texts.length === 0) return null
   return (
     <div className="flex justify-end">
-      <div className="max-w-[85%] min-w-0 sm:max-w-[70%] rounded-lg border border-border bg-muted/20 divide-y divide-border/60">
+      <div
+        className={cn(
+          'max-w-[85%] sm:max-w-[70%] divide-y',
+          bubble
+            ? cn(USER_PILL_BUBBLE_CLASS, 'divide-(--bubble-fg)/20 p-0')
+            : cn(USER_CARD_BUBBLE_CLASS, 'divide-border/20 p-0')
+        )}
+      >
         {texts.map((text, textIndex) => {
           const imagePaths = extractImagePaths(text)
           const textFilePaths = extractTextFilePaths(text)
@@ -49,7 +61,10 @@ export const SteeredPromptGroup = memo(function SteeredPromptGroup({
           return (
             <div
               key={textKey}
-              className="min-w-0 px-3 py-2 text-foreground break-words [overflow-wrap:anywhere]"
+              className={cn(
+                'min-w-0 break-words [overflow-wrap:anywhere]',
+                bubble ? 'px-4 py-2.5' : 'px-3 py-2'
+              )}
             >
               {imagePaths.length > 0 && (
                 <div className="flex flex-wrap gap-2 mb-2">

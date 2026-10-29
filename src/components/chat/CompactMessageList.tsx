@@ -1256,6 +1256,7 @@ export const CompactMessageList = memo(
                 <div key={item.key} className="pb-4">
                   <SteeredPromptGroup
                     texts={item.texts}
+                    bubble={hideToolActivity}
                     worktreePath={worktreePath}
                   />
                 </div>
