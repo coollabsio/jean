@@ -48,6 +48,8 @@ function formatRelativeTime(timestamp: number): string {
   return `${Math.floor(diffMs / dayMs)}d ago`
 }
 
+const UNREAD_LIST_QUERY_KEY = ['all-sessions', 'unread']
+
 interface UnreadItem {
   session: Session
   projectId: string
@@ -174,8 +176,13 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
   const { data: preferences } = usePreferences()
   const animationEnabled =
     preferences?.finished_session_animation_enabled ?? true
-  // Unread-only query: staleTime 0 refetches on open, cached rows show meanwhile.
-  const { data: allSessions, isLoading, isFetching } = useUnreadSessions(open)
+  // Keep the unread list warm while the badge shows, so opening the popover
+  // renders rows at once instead of waiting for every server to answer.
+  const {
+    data: allSessions,
+    isLoading,
+    isFetching,
+  } = useUnreadSessions(open || unreadCount > 0)
   const sendingSessionIds = useChatStore(state => state.sendingSessionIds)
   // Listen for command palette event to open the popover
   useEffect(() => {
@@ -185,16 +192,30 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
       window.removeEventListener('command:open-unread-sessions', handler)
   }, [])
 
-  // Refresh the count each time popover opens. The unread list refetches by
-  // itself on enable; invalidating it too would cancel and restart that fetch.
+  // Refresh the count and the list each time the popover opens. Cached rows
+  // show meanwhile; cancelRefetch: false keeps an in-flight fetch going.
   useEffect(() => {
     if (open) {
       queryClient.invalidateQueries({
         queryKey: chatQueryKeys.unreadSessionCount(),
       })
+      void queryClient.refetchQueries(
+        { queryKey: UNREAD_LIST_QUERY_KEY },
+        { cancelRefetch: false }
+      )
       setFocusedIndex(0)
     }
   }, [open, queryClient])
+
+  // The badge count polls every server; refresh the warm list when it changes.
+  useEffect(() => {
+    if (unreadCount > 0) {
+      void queryClient.refetchQueries(
+        { queryKey: UNREAD_LIST_QUERY_KEY },
+        { cancelRefetch: false }
+      )
+    }
+  }, [unreadCount, queryClient])
 
   // Invalidate when any session is opened (so the count stays fresh)
   useEffect(() => {

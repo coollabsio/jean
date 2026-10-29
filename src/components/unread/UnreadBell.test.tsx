@@ -18,6 +18,7 @@ let allSessions: AllSessionsResponse | undefined
 let allSessionsLoading = false
 let allSessionsFetching = false
 let unreadCount = 2
+let unreadSessionsEnabled: boolean | undefined
 let sendingSessionIds: Record<string, boolean> = {}
 
 vi.mock('@/lib/transport', () => ({
@@ -29,11 +30,14 @@ vi.mock('@/services/chat', () => ({
   chatQueryKeys: {
     unreadSessionCount: () => ['unread-session-count'],
   },
-  useUnreadSessions: () => ({
-    data: allSessions,
-    isLoading: allSessionsLoading,
-    isFetching: allSessionsFetching,
-  }),
+  useUnreadSessions: (enabled: boolean) => {
+    unreadSessionsEnabled = enabled
+    return {
+      data: allSessions,
+      isLoading: allSessionsLoading,
+      isFetching: allSessionsFetching,
+    }
+  },
 }))
 
 let finishedSessionAnimationEnabled = true
@@ -191,6 +195,17 @@ describe('UnreadBell', () => {
     }
     invokeMock.mockResolvedValue(undefined)
     invokeForServerMock.mockResolvedValue(undefined)
+  })
+
+  it('loads the unread list before the popover opens while sessions are unread', () => {
+    renderWithQueryClient(<UnreadBell title="Jean" />)
+    expect(unreadSessionsEnabled).toBe(true)
+  })
+
+  it('does not load the unread list when nothing is unread', () => {
+    unreadCount = 0
+    renderWithQueryClient(<UnreadBell title="Jean" />)
+    expect(unreadSessionsEnabled).toBe(false)
   })
 
   it('shows sessions that finish loading after the shortcut opens the popover', async () => {

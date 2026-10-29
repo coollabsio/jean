@@ -126,7 +126,8 @@ export function useConsolidatedUnreadSessions(enabled = true) {
           )
         : invoke<AllSessionsResponse>('list_unread_sessions'),
     enabled,
-    // Always refresh on open; cached rows render while the fetch runs.
+    // The bell refetches on open and on count changes; cached rows render
+    // while the fetch runs.
     staleTime: 0,
     gcTime: 120_000,
   })
