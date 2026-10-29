@@ -367,7 +367,7 @@ const SECURITY_ALERT_STATE_COLORS: Record<string, string> = {
   auto_dismissed: 'text-muted-foreground',
 }
 
-const ADVISORY_STATE_COLORS: Record<string, string> = {
+export const ADVISORY_STATE_COLORS: Record<string, string> = {
   published: 'text-warning',
   closed: 'text-success',
   draft: 'text-muted-foreground',

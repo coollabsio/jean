@@ -36,7 +36,10 @@ import { Popover, PopoverContent, PopoverAnchor } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
 import { BOTTOM_UP_LIST_CLASS } from './mention-list'
 import { isLinearAuthError } from '@/services/linear'
-import { IssuePreviewModal } from '@/components/worktree/IssuePreviewModal'
+import {
+  ADVISORY_STATE_COLORS,
+  IssuePreviewModal,
+} from '@/components/worktree/IssuePreviewModal'
 import { ContextLinkBadge } from '@/components/worktree/ContextLinkBadge'
 import { BulkInvestigateBar } from '@/components/worktree/BulkInvestigateBar'
 import { ItemSelectCheckbox } from '@/components/worktree/ItemSelectCheckbox'
@@ -719,6 +722,17 @@ export function ContextMentionPopover({
                             openContextLinkMatch(match)
                           }}
                         />
+                        {item.advisory && (
+                          <span
+                            className={cn(
+                              'self-center text-2xs font-medium capitalize',
+                              ADVISORY_STATE_COLORS[item.advisory.state] ??
+                                'text-muted-foreground'
+                            )}
+                          >
+                            {item.advisory.state}
+                          </span>
+                        )}
                         {item.badge && (
                           <Badge
                             variant="subtle"
