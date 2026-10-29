@@ -52,6 +52,7 @@ import {
   secretRequest,
 } from './secret-request'
 import { SteeredPromptGroup } from './SteeredPromptGroup'
+import { parseServerResourceKey } from '@/lib/server-resource'
 import {
   assistantTextParts,
   buildTimeline,
@@ -1258,6 +1259,9 @@ export const CompactMessageList = memo(
                     texts={item.texts}
                     bubble={hideToolActivity}
                     worktreePath={worktreePath}
+                    serverId={
+                      parseServerResourceKey(worktreeId ?? sessionId)?.serverId
+                    }
                   />
                 </div>
               )

@@ -15,6 +15,7 @@ import {
 } from './ToolCallInline'
 import { StreamingMessage } from './StreamingMessage'
 import { SteeredPromptGroup } from './SteeredPromptGroup'
+import { parseServerResourceKey } from '@/lib/server-resource'
 import {
   coalesceContentBlocks,
   isDuplicatePlanTextBlock,
@@ -213,9 +214,11 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
     toolCalls,
     streamingContent,
     worktreePath,
+    sessionId,
     showLoadingIndicator = true,
     bubble = false,
   } = props
+  const serverId = parseServerResourceKey(sessionId)?.serverId
   const [isOpen, setIsOpen] = useState(false)
 
   // Keyed on toolCalls only so these keep a stable identity across
@@ -356,6 +359,7 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
                 texts={segment.texts}
                 bubble={bubble}
                 worktreePath={worktreePath}
+                serverId={serverId}
               />
             ) : (
               <CompactStreamingTicker
@@ -392,6 +396,7 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
           texts={steeredTexts}
           bubble={bubble}
           worktreePath={worktreePath}
+          serverId={serverId}
         />
         <StreamingMessage
           {...props}
@@ -416,6 +421,7 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
         texts={steeredTexts}
         bubble={bubble}
         worktreePath={worktreePath}
+        serverId={serverId}
       />
       <Collapsible open={isOpen} onOpenChange={setIsOpen} className="min-w-0">
         <div className="min-w-0">
