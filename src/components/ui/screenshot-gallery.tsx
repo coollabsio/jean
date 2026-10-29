@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import { useImageSrc } from './use-image-src'
+import { ZoomableImage } from './zoomable-image'
 
 /** Thumbnails shown inline; the last one shows "+N" for the rest. */
 const MAX_TILES = 3
@@ -130,12 +131,16 @@ export function ScreenshotGallery({
           </VisuallyHidden>
           {openIndex !== null && (
             <div className="flex h-full flex-col items-center justify-center gap-3 p-4 sm:p-0">
-              <Screenshot
+              <ZoomableImage
                 key={paths[openIndex]}
-                path={paths[openIndex] ?? ''}
-                serverId={serverId}
-                className="max-h-[calc(90vh-6rem)] min-h-40 max-w-full rounded-md object-contain"
-              />
+                className="min-h-0 w-full flex-1 sm:flex-none"
+              >
+                <Screenshot
+                  path={paths[openIndex] ?? ''}
+                  serverId={serverId}
+                  className="max-h-[calc(90vh-6rem)] min-h-40 max-w-full rounded-md object-contain"
+                />
+              </ZoomableImage>
               <div className="flex items-center gap-3 text-sm text-muted-foreground">
                 {paths.length > 1 && (
                   <button
