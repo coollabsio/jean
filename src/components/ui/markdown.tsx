@@ -475,7 +475,7 @@ function ChecklistAwareThead({ children }: { children?: ReactNode }) {
         cloneRowWithLeadingCells(row, [CHECKLIST_THEAD_LEADING])
       )
     : children
-  return <thead className="bg-muted">{augmented}</thead>
+  return <thead className="bg-muted/30">{augmented}</thead>
 }
 
 function ChecklistAwareTbody({ children }: { children?: ReactNode }) {
@@ -972,7 +972,7 @@ const components: Components = {
   // Spread props so PromptRow can add its click handler and row classes.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   tr: ({ children, className, node, ...props }) => (
-    <tr {...props} className={cn('border-b border-muted-foreground/30', className)}>
+    <tr {...props} className={cn('border-b border-border/20', className)}>
       {children}
     </tr>
   ),
