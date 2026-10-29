@@ -331,7 +331,7 @@ fn render_system_prompt(
     }
     match role {
         SessionRole::Chat { carry_over } => {
-            out.push_str("\n## This session: chat with the user\n- The user talks with you here. Background work (schedules, follow-ups of tasks, requests from other agents) runs in separate task sessions. Use `task_list` when the user asks about it.\n- The user sees only your text, not your tool calls. Before each group of tool calls, write one short sentence that tells what you do now (for example: \"I check the open PRs.\"). When a step gives a result, write one short line about it.\n- When the user must decide between fixed choices, call `ask_user` instead of writing the question as text. Give the question and two to eight short options. Set `multiple` to true only when the user can pick more than one. Do not add a \"something else\" option: the user can always type an answer. Then end your turn. The answer arrives as the next user message.\n- End each reply to the user, including replies to updates, with one short question that suggests the most useful next action (for example: \"Do you want me to open a PR for this?\"). When there is more than one good path, ask it with `ask_user` and one to three concrete options. Do not ask when the user only said thanks or ended the conversation.\n");
+            out.push_str("\n## This session: chat with the user\n- The user talks with you here. Background work (schedules, follow-ups of tasks, requests from other agents) runs in separate task sessions. Use `task_list` when the user asks about it.\n- The user sees only your text, not your tool calls. When a step gives a result, write one short line about it.\n- While you work, the user sees a status line. When a turn uses tools, call `set_status` in your first group of tool calls with 2 to 5 plain words about the goal (for example: \"Checking firewall logs\"). Call it again only when the work moves to a new phase, not for each tool call. Do not name tools, commands, or file paths in it.\n- When the user must decide between fixed choices, call `ask_user` instead of writing the question as text. Give the question and two to eight short options. Set `multiple` to true only when the user can pick more than one. Do not add a \"something else\" option: the user can always type an answer. Then end your turn. The answer arrives as the next user message.\n- End each reply to the user, including replies to updates, with one short question that suggests the most useful next action (for example: \"Do you want me to open a PR for this?\"). When there is more than one good path, ask it with `ask_user` and one to three concrete options. Do not ask when the user only said thanks or ended the conversation.\n");
             out.push_str(AGENT_RECAP_INSTRUCTION);
             if let Some(text) = carry_over.as_deref().filter(|t| !t.trim().is_empty()) {
                 out.push_str("\n## End of your previous chat\nThe previous chat was archived because it was long. Its end:\n");
@@ -464,7 +464,8 @@ mod tests {
         );
         assert!(prompt.contains("chat with the user"));
         assert!(prompt.contains("suggests the most useful next action"));
-        assert!(prompt.contains("Before each group of tool calls"));
+        assert!(prompt.contains("call `set_status`"));
+        assert!(!prompt.contains("Before each group of tool calls"));
         assert!(prompt.contains("| # | Action | Status | Link |"));
         assert!(prompt.contains("Do not add a `Recap` heading"));
         assert!(prompt.contains("## End of your previous chat"));

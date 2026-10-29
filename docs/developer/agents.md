@@ -274,7 +274,10 @@ When a chat rotates (40 messages and 10 minutes idle), the end is still saved as
 
 Agent-only tools: `schedule_create/update/list/cancel`, `memory_save/search/update/forget/supersede`, `journal_add/search`,
 `message_agent`, `notify_user` (emits `agents:notification` for the toast),
-`task_list`. The caller is identified by `JEAN_MCP_SESSION`. Codex threads
+`set_status`, `task_list`. `set_status` returns only `shown`: the agent chat
+reads the latest call from the streamed tool calls and shows its 2-5 word text
+in the status line (`agent-status.ts`). A Jean-tool allowlist cannot
+block it. The caller is identified by `JEAN_MCP_SESSION`. Codex threads
 get it per thread through a config override
 (`jean_mcp_config::codex_session_config_override`), because the persistent
 `~/.codex/config.toml` entry only has a fixed label.

@@ -180,7 +180,7 @@ import { useShowTableInChat } from './hooks/useShowTableInChat'
 import type { ApprovalModelOverride } from './ApprovalModelSubmenu'
 import { resolveApprovalLabel } from './approval-label-utils'
 import { CompactStreamingTicker } from './CompactStreamingTicker'
-import { describeAgentActivity } from './agent-activity-hint'
+import { latestAgentStatus } from './agent-status'
 import { CompactMessageList } from './CompactMessageList'
 import {
   getCurrentPromptStartIndex,
@@ -1175,12 +1175,9 @@ const ChatWindowContent = memo(function ChatWindowContent({
         : EMPTY_TEXT_PARTS,
     [workingLabel, currentStreamingContentBlocks, streamingContent]
   )
-  const agentActivityHint = useMemo(
-    () =>
-      workingLabel
-        ? describeAgentActivity(currentStreamingContentBlocks, currentToolCalls)
-        : undefined,
-    [workingLabel, currentStreamingContentBlocks, currentToolCalls]
+  const agentStatus = useMemo(
+    () => (workingLabel ? latestAgentStatus(currentToolCalls) : undefined),
+    [workingLabel, currentToolCalls]
   )
   // Per-session input - check if there's any input for submit button state
   // PERFORMANCE: Track hasValue via callback from ChatInput instead of store subscription
@@ -2979,7 +2976,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                   )}
                                 <StreamingStatusBar
                                   workingLabel={workingLabel}
-                                  activityHint={agentActivityHint}
+                                  activityHint={agentStatus}
                                   isSending={isSending}
                                   sendStartedAt={sendStartedAt}
                                   restoredRunStatus={

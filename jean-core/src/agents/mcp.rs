@@ -31,6 +31,7 @@ const AGENT_TOOLS: &[&str] = &[
     "journal_search",
     "message_agent",
     "notify_user",
+    "set_status",
     "ask_user",
     "task_list",
     "list_connectors",
@@ -66,6 +67,7 @@ const READ_ONLY_SUBAGENT_TOOLS: &[&str] = &[
     "memory_search",
     "subagent_type_list",
     "notify_user",
+    "set_status",
     "list_connectors",
 ];
 /// Source used when the user already approved a tool and it is run again.
@@ -73,6 +75,7 @@ pub const APPROVED_REPLAY_SOURCE: &str = "agent-approval";
 
 const MIN_EVERY_MINUTES: i64 = 5;
 const MAX_QUESTION_OPTIONS: usize = 8;
+const MAX_STATUS_CHARS: usize = 60;
 const MAX_MINUTES: i64 = 60 * 24 * 30;
 
 pub fn is_agent_tool(name: &str) -> bool {
@@ -225,6 +228,7 @@ fn base_tool_definitions() -> Value {
         {"name":"journal_search","description":"Agent sessions only. Recall your journal by text and/or date, including chats that were archived. from/to are unix seconds on occurred_at. Other agents' journals are not included.","inputSchema":{"type":"object","properties":{"query":{"type":"string"},"from":{"type":"integer"},"to":{"type":"integer"},"limit":{"type":"integer","minimum":1,"maximum":50}},"additionalProperties":false}},
         {"name":"message_agent","description":"Agent sessions only. Send a request to another agent. Its answer arrives automatically as an update message; end your turn after sending.","inputSchema":{"type":"object","properties":{"agentId":{"type":"string"},"message":{"type":"string"}},"required":["agentId","message"],"additionalProperties":false}},
         {"name":"notify_user","description":"Agent sessions only. Tell the user something they must know: a result of a goal, a question, a failure, or a needed decision (level 'action'). Shows on the agent page and as a notification. Not for routine progress.","inputSchema":{"type":"object","properties":{"message":{"type":"string","maxLength":2000},"level":{"type":"string","enum":["info","action","error"]}},"required":["message"],"additionalProperties":false}},
+        {"name":"set_status","description":"Agent sessions only. Show the user a short status of what you do now, in 2 to 5 plain words (for example: 'Checking firewall logs'). Do not name tools, commands, or file paths. It shows only while your turn runs.","inputSchema":{"type":"object","properties":{"text":{"type":"string","maxLength":60}},"required":["text"],"additionalProperties":false}},
         {"name":"ask_user","description":"Agent chat sessions only. Ask the user a question that needs a decision. The chat shows it with the options as buttons. multiple false: the user picks one option and it is sent at once. multiple true: the user picks one or more and sends them. The answer arrives as the next user message. End your turn after calling it.","inputSchema":{"type":"object","properties":{"question":{"type":"string","maxLength":500},"options":{"type":"array","items":{"type":"string","maxLength":200},"minItems":2,"maxItems":MAX_QUESTION_OPTIONS},"multiple":{"type":"boolean","description":"Default false."}},"required":["question","options"],"additionalProperties":false}},
         {"name":"task_list","description":"Agent sessions only. List your recent background tasks (schedule runs, follow-ups, agent requests) with status and one-line result.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":50}},"additionalProperties":false}},
         {"name":"list_connectors","description":"Agent sessions only. Read-only. List the MCP connectors saved for this agent, whether a limit is saved, and whether this session's backend can apply that limit. Does not change the limit or sign in.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}}
@@ -653,6 +657,15 @@ pub async fn run(app: &AppHandle, name: &str, args: &Value, source: &str) -> Res
                 }),
             );
             json!({ "notificationId": notification.id, "status": "sent" })
+        }
+        "set_status" => {
+            let text = required_str(args, "text")?;
+            if text.chars().count() > MAX_STATUS_CHARS {
+                return Err(format!(
+                    "Status is too long. Use 2 to 5 words (at most {MAX_STATUS_CHARS} characters)."
+                ));
+            }
+            json!({ "status": "shown" })
         }
         "ask_user" => {
             let is_task = super::with_db(app, |conn| db::task_by_session(conn, source))?.is_some();

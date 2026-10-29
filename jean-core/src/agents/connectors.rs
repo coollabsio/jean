@@ -265,9 +265,10 @@ pub async fn apply_agent_mcp_allowlist(
 }
 
 /// `None` allows every Jean tool. `claude_permission_prompt` stays available
-/// so Claude's permission hook still works when a list is saved.
+/// so Claude's permission hook still works when a list is saved, and
+/// `set_status` only changes the chat's status line.
 pub fn jean_tool_allowed(allowlist: Option<&[String]>, tool: &str) -> bool {
-    if tool == crate::jean_mcp_core::CLAUDE_PERMISSION_PROMPT_TOOL {
+    if tool == crate::jean_mcp_core::CLAUDE_PERMISSION_PROMPT_TOOL || tool == "set_status" {
         return true;
     }
     match allowlist {
@@ -699,6 +700,7 @@ mod tests {
             Some(&[]),
             crate::jean_mcp_core::CLAUDE_PERMISSION_PROMPT_TOOL
         ));
+        assert!(jean_tool_allowed(Some(&[]), "set_status"));
     }
 
     #[test]
