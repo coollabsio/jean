@@ -197,7 +197,6 @@ export function TitleBar({
           }
         >
           <div className="flex items-center gap-2">
-            <UnreadBell title={title} hideTitle={hideTitle} />
             {native && (
               <Badge
                 variant="subtle"
@@ -207,6 +206,7 @@ export function TitleBar({
                 {serverLabel}
               </Badge>
             )}
+            <UnreadBell title={title} hideTitle={hideTitle} />
           </div>
         </div>
       )}
