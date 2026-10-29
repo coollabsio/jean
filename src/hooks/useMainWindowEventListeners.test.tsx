@@ -985,6 +985,32 @@ describe('close shortcut on the Agents page', () => {
     window.removeEventListener('close-session-or-worktree', onClose)
   })
 
+  it.each([
+    ['new session', { key: 't', code: 'KeyT', shiftKey: false }],
+    ['new session picker', { key: 'T', code: 'KeyT', shiftKey: true }],
+  ])('blocks the %s shortcut while an agent page is open', (_, keys) => {
+    const queryClient = new QueryClient()
+    queryClient.setQueryData(['preferences'], { agents_enabled: true })
+    useUIStore.setState({ railSection: 'agents' })
+    const onCreate = vi.fn()
+    window.addEventListener('create-new-session', onCreate)
+    const { unmount } = renderListeners(queryClient)
+
+    const event = new KeyboardEvent('keydown', {
+      ...keys,
+      metaKey: true,
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    document.body.dispatchEvent(event)
+
+    expect(onCreate).not.toHaveBeenCalled()
+    expect(event.defaultPrevented).toBe(true)
+    unmount()
+    window.removeEventListener('create-new-session', onCreate)
+  })
+
   it('still closes the session or worktree in the projects view', () => {
     const queryClient = new QueryClient()
     queryClient.setQueryData(['preferences'], { agents_enabled: true })

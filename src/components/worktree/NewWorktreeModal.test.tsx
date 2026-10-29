@@ -175,6 +175,23 @@ describe('NewWorktreeModal investigation selector', () => {
   })
 })
 
+describe('NewWorktreeModal background hint', () => {
+  it('shows the modifier hint on desktop', () => {
+    render(<NewWorktreeModal />)
+
+    const hint = screen.getByText(/to open in background/i)
+    expect(hint).toHaveTextContent('Hold Ctrl to open in background')
+    expect(hint.querySelector('[data-slot="kbd"]')).toHaveTextContent('Ctrl')
+  })
+
+  it('hides the hint on mobile', () => {
+    mocks.isMobile = true
+    render(<NewWorktreeModal />)
+
+    expect(screen.queryByText(/to open in background/i)).toBeNull()
+  })
+})
+
 describe('NewWorktreeModal for servers', () => {
   it('closes without rendering when the selected project is a server', () => {
     mocks.projects = [{ id: 'srv', server: { host: 'example.com' } }]

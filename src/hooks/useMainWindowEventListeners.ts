@@ -178,8 +178,8 @@ export function findKeybindingAction(
 
 /**
  * The Agents page is open (section selected and Agents on for a server, the
- * same rule as useShowAgents). It has no closable session or worktree, so
- * the close shortcut must not reach the project close handlers.
+ * same rule as useShowAgents). It has one fixed session and no worktree, so
+ * the new-session and close shortcuts must not reach the project handlers.
  */
 export function isAgentsViewActive(queryClient: QueryClient): boolean {
   if (useUIStore.getState().railSection !== 'agents') return false
@@ -1078,7 +1078,9 @@ export function useMainWindowEventListeners() {
       }
 
       if (
-        matchedAction === 'close_session_or_worktree' &&
+        (matchedAction === 'close_session_or_worktree' ||
+          matchedAction === 'new_session' ||
+          matchedAction === 'open_new_session_modal') &&
         isAgentsViewActive(queryClient)
       ) {
         e.preventDefault()

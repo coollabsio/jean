@@ -2,16 +2,16 @@ import type { SVGProps } from 'react'
 
 /**
  * Agent colors: [head, shadow, bubble]. `jean` is the crowned boss.
- * Bubble is a vivid shade that fills the user's prompt bubbles (white text).
+ * Bubble fills the user's prompt bubbles (white text); shades match Grok's palette.
  */
 export const AGENT_ICON_COLORS = {
-  jean: ['#FFD21F', '#8A6500', '#EB9500'],
-  yellow: ['#FFD21F', '#8A6500', '#EB9500'],
-  blue: ['#4DA6FF', '#1A4F99', '#2B7FFF'],
-  green: ['#3DDC84', '#16733F', '#00B248'],
-  pink: ['#FF6EB4', '#99285E', '#F6339A'],
-  purple: ['#A57BFF', '#4B2A99', '#8E51FF'],
-  orange: ['#FF9A3D', '#994400', '#FF6A00'],
+  jean: ['#FFD21F', '#8A6500', '#915BFC'],
+  yellow: ['#FFD21F', '#8A6500', '#F79410'],
+  blue: ['#4DA6FF', '#1A4F99', '#1784FC'],
+  green: ['#3DDC84', '#16733F', '#14C370'],
+  pink: ['#FF6EB4', '#99285E', '#FB3399'],
+  purple: ['#A57BFF', '#4B2A99', '#915BFC'],
+  orange: ['#FF9A3D', '#994400', '#FA6710'],
 } as const
 
 export type AgentIconKey = keyof typeof AGENT_ICON_COLORS

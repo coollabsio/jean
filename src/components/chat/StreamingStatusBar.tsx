@@ -11,6 +11,8 @@ interface StreamingStatusBarProps {
   completedDurationMs?: number | null
   /** Quiet chats: "<agent> is working" next to the timer */
   workingLabel?: string
+  /** Quiet chats: what the agent does now; replaces workingLabel when set */
+  activityHint?: string
 }
 
 export function shouldShowRestoredRun({
@@ -43,6 +45,7 @@ export const StreamingStatusBar = memo(function StreamingStatusBar({
   restoredExecutionMode,
   completedDurationMs,
   workingLabel,
+  activityHint,
 }: StreamingStatusBarProps) {
   const elapsed = useElapsedTime(isSending ? sendStartedAt : null)
 
@@ -58,11 +61,13 @@ export const StreamingStatusBar = memo(function StreamingStatusBar({
   if (workingLabel) {
     return (
       <div
-        className="mt-1 inline-flex min-h-5 items-center gap-2 text-sm text-muted-foreground select-none"
+        className="mt-1 inline-flex min-h-5 max-w-full items-center gap-2 text-sm text-muted-foreground select-none"
         role="status"
       >
         <WorkingWaveform />
-        <span>{workingLabel}</span>
+        <span className="min-w-0 truncate">
+          {(isSending && activityHint) || workingLabel}
+        </span>
         <span className="font-mono text-xs tabular-nums text-muted-foreground/60">
           {showRestored ? '…' : (elapsed ?? '0s')}
         </span>

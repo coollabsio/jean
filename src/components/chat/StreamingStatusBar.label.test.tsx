@@ -22,6 +22,20 @@ describe('StreamingStatusBar', () => {
     expect(status).toHaveTextContent(/\d+s/)
   })
 
+  it('shows the activity hint instead of the working label', () => {
+    render(
+      <StreamingStatusBar
+        isSending
+        sendStartedAt={Date.now()}
+        workingLabel="Release Manager is working"
+        activityHint="Querying Cloudflare firewall logs"
+      />
+    )
+    const status = screen.getByRole('status')
+    expect(status).toHaveTextContent('Querying Cloudflare firewall logs')
+    expect(status).not.toHaveTextContent('Release Manager is working')
+  })
+
   it('renders nothing when no turn runs', () => {
     const { container } = render(
       <StreamingStatusBar

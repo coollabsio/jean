@@ -301,6 +301,19 @@ describe('OpenInModal', () => {
     )
   })
 
+  it('opens a port with its plain number key, without Cmd/Ctrl', async () => {
+    openInState.ports = [
+      { port: 3000, label: 'API' },
+      { port: 1420, label: 'App' },
+    ]
+
+    render(<OpenInModal />)
+
+    await screen.findByText('App (localhost:1420)')
+    await userEvent.keyboard('2')
+    expect(mocks.openExternal).toHaveBeenCalledWith('http://localhost:1420')
+  })
+
   it('shows worktree and loaded security/advisory context URLs', async () => {
     render(<OpenInModal />)
 

@@ -20,6 +20,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Kbd } from '@/components/ui/kbd'
+import { useIsMobile } from '@/hooks/use-mobile'
+import { getModifierSymbol } from '@/lib/platform'
 import { useUIStore } from '@/store/ui-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { parseServerResourceKey } from '@/lib/server-resource'
@@ -66,6 +69,7 @@ function NewWorktreeModalContent() {
   const { newWorktreeModalOpen } = useUIStore()
 
   // Local state
+  const isMobile = useIsMobile()
   const [activeTab, setActiveTab] = useState<TabId>('quick')
   const [searchQuery, setSearchQuery] = useState('')
   const [includeClosed, setIncludeClosed] = useState(false)
@@ -618,6 +622,16 @@ function NewWorktreeModalContent() {
               />
             )}
           </div>
+
+          {activeTab !== 'quick' && !isMobile && (
+            <div className="shrink-0 border-t border-border px-3 py-1.5 text-xs text-muted-foreground">
+              Hold{' '}
+              <Kbd data-web-visible className="mx-0.5 text-2xs">
+                {getModifierSymbol()}
+              </Kbd>{' '}
+              to open in background
+            </div>
+          )}
         </DialogContent>
       </Dialog>
       {previewItem && data.selectedProject && (

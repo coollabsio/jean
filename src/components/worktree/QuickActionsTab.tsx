@@ -442,7 +442,7 @@ export function QuickActionsTab({
             {/* New Worktree button */}
             <div
               className={cn(
-                'relative flex flex-col items-center justify-center gap-3 sm:gap-4 sm:aspect-square p-4 sm:p-8 rounded-xl text-sm transition-colors',
+                'relative flex flex-col items-center justify-center gap-3 sm:gap-4 sm:h-full p-4 sm:p-8 rounded-xl text-sm transition-colors',
                 'border border-border bg-card'
               )}
             >

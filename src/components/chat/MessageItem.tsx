@@ -214,7 +214,7 @@ interface MessageItemProps {
   hideCancelledIndicator?: boolean
   /** Duration of this assistant message in ms (computed from user→assistant timestamp delta) */
   durationMs?: number | null
-  /** Render the assistant reply in a bubble (agent chat) */
+  /** Render the assistant reply in a bubble */
   bubble?: boolean
   /** Agent chat: hide backend, model, mode, and effort under the user prompt and show it as a pill */
   hideSettingsBadges?: boolean

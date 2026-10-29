@@ -40,7 +40,7 @@ import {
   normalizeQuestionMultipleField,
 } from '@/types/chat'
 import { MessageItem } from './MessageItem'
-import { ReplyBubbles } from './ReplyBubble'
+import { ReplyBubble, ReplyBubbles } from './ReplyBubble'
 import { getProviderChangeBeforeMessage } from './message-settings-labels'
 import { ProviderChangeSeparator } from './ProviderChangeSeparator'
 import { AskUserQuestion } from './AskUserQuestion'
@@ -1288,7 +1288,7 @@ export const CompactMessageList = memo(
                 >
                   {renderMessageItem(singleMessage, {
                     hasFollowUpMessage,
-                    bubble: hideToolActivity,
+                    bubble: true,
                     onSendAnswer,
                     durationMs: durationFor(
                       singleMessage.globalIndex,
@@ -1377,13 +1377,15 @@ export const CompactMessageList = memo(
                 />
                 {showLatestText && (
                   <div className="pb-4">
-                    <Markdown
-                      streaming={false}
-                      messageId={item.key}
-                      sessionId={sessionId}
-                    >
-                      {item.latestText ?? ''}
-                    </Markdown>
+                    <ReplyBubble>
+                      <Markdown
+                        streaming={false}
+                        messageId={item.key}
+                        sessionId={sessionId}
+                      >
+                        {item.latestText ?? ''}
+                      </Markdown>
+                    </ReplyBubble>
                     {inlineQuestion && onSendAnswer && (
                       <InlineQuestionOptions
                         question={inlineQuestion.question}

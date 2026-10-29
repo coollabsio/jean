@@ -76,7 +76,6 @@ interface ModalOption {
   label: string
   icon: ComponentType<{ className?: string }>
   key?: string
-  metaKey?: boolean
   url?: string
 }
 
@@ -374,7 +373,6 @@ export function OpenInModal() {
       label: `${p.label} (${resolvePortHost(p, preferences?.browser_default_host)}:${p.port})`,
       icon: Globe,
       key: i < 9 ? String(i + 1) : undefined,
-      metaKey: true,
       url: resolvePortUrl(p, preferences?.browser_default_host),
     }))
   }, [ports, preferences?.browser_default_host])
@@ -501,12 +499,9 @@ export function OpenInModal() {
       const allIds = allOptions.map(opt => opt.id)
       const hasMeta = e.metaKey || e.ctrlKey
 
-      // Quick select with shortcut keys (metaKey options require Cmd/Ctrl)
+      // Quick select with shortcut keys
       const matchedOption = allOptions.find(
-        opt =>
-          opt.key &&
-          opt.key.toLowerCase() === key &&
-          (opt.metaKey ? hasMeta : !hasMeta)
+        opt => !hasMeta && opt.key && opt.key.toLowerCase() === key
       )
       if (matchedOption) {
         e.preventDefault()
@@ -558,11 +553,7 @@ export function OpenInModal() {
           <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
           <span className="truncate">{option.label}</span>
         </div>
-        {option.key && (
-          <Kbd modHint={option.metaKey} className="ml-2 shrink-0">
-            {option.metaKey ? `⌘${option.key}` : option.key}
-          </Kbd>
-        )}
+        {option.key && <Kbd className="ml-2 shrink-0">{option.key}</Kbd>}
       </button>
     )
   }

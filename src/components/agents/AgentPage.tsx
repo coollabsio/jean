@@ -168,7 +168,7 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
         {
           // Fills the user's prompt bubbles with this agent's strong color
           '--agent-accent': (AGENT_ICON_COLORS[agent.icon as AgentIconKey] ??
-            AGENT_ICON_COLORS.yellow)[2],
+            AGENT_ICON_COLORS.jean)[2],
           '--agent-accent-fg': '#ffffff',
           '--chat-top-inset': `${headerHeight}px`,
         } as CSSProperties
