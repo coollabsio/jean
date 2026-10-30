@@ -3051,6 +3051,11 @@ pub async fn create_worktree_from_existing_branch(
         .ok_or_else(|| format!("Project not found: {project_id}"))?
         .clone();
 
+    // `origin/next` checks out a local `next`, so name and store that branch.
+    let checkout = git::plan_existing_branch_checkout(&project.path, &branch_name);
+    let (base_branch, base_remote) = checkout.base();
+    let branch_name = checkout.local_branch().to_string();
+
     // Use the branch name as the worktree name
     let name = branch_name.clone();
 
@@ -3094,8 +3099,8 @@ pub async fn create_worktree_from_existing_branch(
         name: name.clone(),
         path: worktree_path_str.clone(),
         branch: name.clone(),
-        base_branch: Some(branch_name.clone()),
-        base_remote: None,
+        base_branch: Some(base_branch.clone()),
+        base_remote: base_remote.clone(),
         created_at,
         setup_output: None,
         setup_script: None,
@@ -3208,7 +3213,7 @@ pub async fn create_worktree_from_existing_branch(
             if let Err(e) = git::create_worktree_from_existing_branch(
                 &project_path,
                 &worktree_path_clone,
-                &branch_name_clone,
+                &checkout,
             ) {
                 log::error!("Background: Failed to create worktree: {e}");
                 let error_event = WorktreeCreateErrorEvent {
@@ -3492,8 +3497,8 @@ pub async fn create_worktree_from_existing_branch(
                     name: name_clone.clone(),
                     path: worktree_path_clone.clone(),
                     branch: branch_name_clone.clone(),
-                    base_branch: Some(branch_name_clone),
-                    base_remote: None,
+                    base_branch: Some(base_branch),
+                    base_remote,
                     created_at,
                     setup_output,
                     setup_script,

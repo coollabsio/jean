@@ -1545,21 +1545,57 @@ pub enum ExistingBranchCheckout {
     /// `git worktree add --track -b <local_branch> <path> <start_point>`
     TrackRemote {
         local_branch: String,
-        start_point: String,
+        remote: String,
+        /// Branch name on `remote`, without the remote prefix.
+        remote_branch: String,
     },
+}
+
+impl ExistingBranchCheckout {
+    /// Local branch the worktree has checked out.
+    pub fn local_branch(&self) -> &str {
+        match self {
+            Self::Local { branch } => branch,
+            Self::TrackRemote { local_branch, .. } => local_branch,
+        }
+    }
+
+    /// `(base_branch, base_remote)` to store on the worktree, so pull and
+    /// status read `<remote>/<branch>` and not `origin/<remote>/<branch>`.
+    pub fn base(&self) -> (String, Option<String>) {
+        match self {
+            Self::Local { branch } => (branch.clone(), None),
+            Self::TrackRemote {
+                remote,
+                remote_branch,
+                ..
+            } => (remote_branch.clone(), Some(remote.clone())),
+        }
+    }
 }
 
 /// Choose a checkout that follows the requested remote when the ref is qualified.
 ///
 /// Plain names (`main`, `feature/login`) keep the historical local/origin path.
+/// `origin/next` checks out a local `next`; a local branch named `origin/next`
+/// would push to a new `origin/next` branch on the remote.
 /// `fork/feature` creates a local branch of that same name tracking `fork/feature`,
 /// so it stays distinct from a local `feature` that tracks a different remote.
 pub fn plan_existing_branch_checkout(repo_path: &str, requested: &str) -> ExistingBranchCheckout {
     if let Some((remote, name)) = split_remote_qualified_base(repo_path, requested) {
         if remote_tracking_branch_exists(repo_path, &remote, &name) {
+            if remote == "origin" && branch_exists(repo_path, &name) {
+                return ExistingBranchCheckout::Local { branch: name };
+            }
+            let local_branch = if remote == "origin" {
+                name.clone()
+            } else {
+                requested.to_string()
+            };
             return ExistingBranchCheckout::TrackRemote {
-                local_branch: requested.to_string(),
-                start_point: format!("{remote}/{name}"),
+                local_branch,
+                remote,
+                remote_branch: name,
             };
         }
     }
@@ -1613,12 +1649,13 @@ pub fn create_worktree(
 /// # Arguments
 /// * `repo_path` - Path to the main repository
 /// * `worktree_path` - Path where the worktree will be created
-/// * `existing_branch` - Name of the existing branch to checkout
+/// * `checkout` - Plan from `plan_existing_branch_checkout`
 pub fn create_worktree_from_existing_branch(
     repo_path: &str,
     worktree_path: &str,
-    existing_branch: &str,
+    checkout: &ExistingBranchCheckout,
 ) -> Result<(), String> {
+    let existing_branch = checkout.local_branch();
     log::trace!("Creating worktree at {worktree_path} using existing branch {existing_branch}");
 
     // Ensure parent directory exists
@@ -1628,10 +1665,11 @@ pub fn create_worktree_from_existing_branch(
             .map_err(|e| format!("Failed to create parent directory: {e}"))?;
     }
 
-    match plan_existing_branch_checkout(repo_path, existing_branch) {
+    match checkout {
         ExistingBranchCheckout::TrackRemote {
             local_branch,
-            start_point,
+            remote,
+            remote_branch,
         } => {
             run_git_worktree_add_with_retry(
                 repo_path,
@@ -1640,16 +1678,16 @@ pub fn create_worktree_from_existing_branch(
                     "add",
                     "--track",
                     "-b",
-                    &local_branch,
+                    local_branch,
                     worktree_path,
-                    &start_point,
+                    &format!("{remote}/{remote_branch}"),
                 ],
             )?;
         }
         ExistingBranchCheckout::Local { branch } => {
             run_git_worktree_add_with_retry(
                 repo_path,
-                &["worktree", "add", worktree_path, &branch],
+                &["worktree", "add", worktree_path, branch],
             )?;
         }
     }
@@ -3624,7 +3662,8 @@ mod tests {
             plan_existing_branch_checkout(path, "fork/feature-x"),
             ExistingBranchCheckout::TrackRemote {
                 local_branch: "fork/feature-x".to_string(),
-                start_point: "fork/feature-x".to_string(),
+                remote: "fork".to_string(),
+                remote_branch: "feature-x".to_string(),
             }
         );
 
@@ -3633,6 +3672,43 @@ mod tests {
             plan_existing_branch_checkout(path, "fork/feature-x"),
             ExistingBranchCheckout::Local {
                 branch: "fork/feature-x".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn test_existing_origin_branch_checks_out_plain_local_name() {
+        let dir = repo_with_fork_remote();
+        let path = dir.path().to_str().unwrap();
+        run_git(
+            dir.path(),
+            &["remote", "add", "origin", "https://example.com/origin.git"],
+        );
+        run_git(
+            dir.path(),
+            &["update-ref", "refs/remotes/origin/next", "HEAD"],
+        );
+
+        let plan = plan_existing_branch_checkout(path, "origin/next");
+        assert_eq!(plan.local_branch(), "next");
+        assert_eq!(
+            plan.base(),
+            ("next".to_string(), Some("origin".to_string()))
+        );
+
+        let worktree = dir.path().join("wt-next");
+        create_worktree_from_existing_branch(path, worktree.to_str().unwrap(), &plan).unwrap();
+        assert_eq!(
+            get_current_branch(worktree.to_str().unwrap()).unwrap(),
+            "next"
+        );
+        assert!(!branch_exists(path, "origin/next"));
+
+        // A local `next` already exists now, so it is reused.
+        assert_eq!(
+            plan_existing_branch_checkout(path, "origin/next"),
+            ExistingBranchCheckout::Local {
+                branch: "next".to_string(),
             }
         );
     }
