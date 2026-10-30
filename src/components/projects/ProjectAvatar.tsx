@@ -23,27 +23,26 @@ export function ProjectAvatar({
   // Keyed by URL so a new avatar gets a fresh load attempt
   const [failedUrl, setFailedUrl] = useState<string | null>(null)
 
-  if (url && failedUrl !== url) {
-    return (
-      <img
-        src={url}
-        alt={project.name}
-        className={cn('shrink-0 object-cover', className)}
-        onError={() => setFailedUrl(url)}
-      />
-    )
-  }
-
+  // Image and letter share one tile, so icons with transparent padding keep the same footprint
   return (
     <div
       className={cn(
-        'flex shrink-0 items-center justify-center bg-muted-foreground/20',
+        'flex shrink-0 items-center justify-center overflow-hidden bg-muted-foreground/20',
         className
       )}
     >
-      <span className={cn('font-medium uppercase', letterClassName)}>
-        {project.name[0]}
-      </span>
+      {url && failedUrl !== url ? (
+        <img
+          src={url}
+          alt={project.name}
+          className="size-full object-cover"
+          onError={() => setFailedUrl(url)}
+        />
+      ) : (
+        <span className={cn('font-medium uppercase', letterClassName)}>
+          {project.name[0]}
+        </span>
+      )}
     </div>
   )
 }
