@@ -194,9 +194,6 @@ export function RecentWorktreesList({
   })
   const rows = query.data?.items ?? EMPTY_RECENT_ROWS
   const pageSize = query.data?.pageSize ?? limit
-  const snoozedBoundaryLoaded = rows
-    .slice(0, pageSize)
-    .some(row => isSnoozedSession(row.lastActivityAt))
   const pinned = useMemo(() => new Set(pinnedSessionIds), [pinnedSessionIds])
   // Unpinned running sessions move to a collapsible Working shelf, and
   // unpinned snoozed sessions to a collapsible Snoozed shelf below it.
@@ -388,28 +385,8 @@ export function RecentWorktreesList({
   const loadMore = () => setLimit(pageSize + RECENT_PAGE_SIZE)
   // Unloaded rows are all snoozed: the page holds every active session.
   const snoozedCount = snoozedRows.length + hiddenCount
-  const footerButtonClass =
-    'flex h-5 items-center justify-center gap-1 rounded-md px-2 text-xs text-muted-foreground hover:bg-muted/50 hover:text-foreground'
-  const footerActions = (
-    <>
-      {hiddenCount > 0 && !snoozedBoundaryLoaded && (
-        <button type="button" className={footerButtonClass} onClick={loadMore}>
-          <Plus className="size-3.5" /> Show{' '}
-          {Math.min(hiddenCount, RECENT_PAGE_SIZE)} more
-        </button>
-      )}
-      {snoozedExpanded && hiddenCount > 0 && (
-        <button type="button" className={footerButtonClass} onClick={loadMore}>
-          <Plus className="size-3.5" /> Show{' '}
-          {Math.min(hiddenCount, RECENT_PAGE_SIZE)} more
-        </button>
-      )}
-    </>
-  )
-  // Older pages only load while the Snoozed shelf is open: every row past
-  // the snooze boundary is snoozed.
-  const hasFooterActions =
-    hiddenCount > 0 && (!snoozedBoundaryLoaded || snoozedExpanded)
+  // Older snoozed pages load only while the Snoozed shelf is open.
+  const showLoadMore = snoozedExpanded && hiddenCount > 0
   const renderRow = (
     row: RecentWorktreeItem,
     index: number,
@@ -638,8 +615,17 @@ export function RecentWorktreesList({
               </ul>
             </section>
           )}
-          {hasFooterActions && (
-            <div className="flex justify-center px-2 pb-2">{footerActions}</div>
+          {showLoadMore && (
+            <div className="flex justify-center px-2 pb-2">
+              <button
+                type="button"
+                className="flex h-5 items-center justify-center gap-1 rounded-md px-2 text-xs text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                onClick={loadMore}
+              >
+                <Plus className="size-3.5" /> Show{' '}
+                {Math.min(hiddenCount, RECENT_PAGE_SIZE)} more
+              </button>
+            </div>
           )}
         </div>
       </div>

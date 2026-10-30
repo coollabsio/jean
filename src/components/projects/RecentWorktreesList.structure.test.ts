@@ -14,7 +14,7 @@ describe('RecentWorktreesList structure', () => {
     expect(source).toContain('setLimit(pageSize + RECENT_PAGE_SIZE)')
     // Paging actions scroll with the list instead of a fixed sidebar footer.
     expect(source).not.toContain('createPortal')
-    expect(source).toContain('{hasFooterActions && (')
+    expect(source).toContain('const showLoadMore = snoozedExpanded && hiddenCount > 0')
     expect(source).toContain('aria-label="Snoozed sessions"')
     expect(source).toContain('aria-expanded={snoozedExpanded}')
     expect(source).toContain('isSnoozedSession(row.lastActivityAt)')
