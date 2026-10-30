@@ -95,12 +95,16 @@ export function SwipeActionRow({
   }
 
   return (
-    <div ref={rowRef} className="relative overflow-hidden rounded-md">
+    <div
+      ref={rowRef}
+      // Clip only while moved, so row parts that stick out (pin button) show
+      className={cn('relative rounded-md', offset < 0 && 'overflow-hidden')}
+    >
       <div
         className={cn(
           // The action button sits right of the row and moves with it, so it
           // takes the row height, not the gap below the row
-          'relative touch-pan-y bg-background',
+          'relative touch-pan-y',
           !dragging && 'transition-transform duration-200 ease-out'
         )}
         style={{ transform: `translateX(${offset}px)` }}

@@ -38,15 +38,27 @@ import { mergeSessionIntoWorktreeSessions } from '@/components/chat/session-tab-
 import { useChatStore } from '@/store/chat-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
-import { chatQueryKeys } from '@/services/chat'
-import { fetchRecentWorktrees } from '@/services/projects'
+import { chatQueryKeys, useCloseSession } from '@/services/chat'
+import {
+  fetchRecentWorktrees,
+  useCloseBaseSessionClean,
+  useDeleteWorktree,
+} from '@/services/projects'
+import { invoke } from '@/lib/transport'
+import { SwipeActionRow } from '@/components/ui/swipe-action-row'
+import { CloseWorktreeDialog } from '@/components/chat/CloseWorktreeDialog'
+import { decideSessionRowClose } from './worktree-close-decision'
 import { sessionRowTitle } from '@/lib/session-title'
 import {
   setRecentSessionPinned,
   useRecentSessionPins,
 } from '@/services/recent-session-pins'
 import type { WorktreeSessions } from '@/types/chat'
-import type { Project, RecentWorktreeItem } from '@/types/projects'
+import {
+  isBaseSession,
+  type Project,
+  type RecentWorktreeItem,
+} from '@/types/projects'
 import { isUnreadSession } from '@/components/unread/unread-utils'
 import { ProjectAvatar } from './ProjectAvatar'
 import { getRecentSessionStatus } from './recent-session-status'
@@ -295,6 +307,64 @@ export function RecentWorktreesList({
     [isMobile, queryClient, selectProject, selectWorktree]
   )
 
+  // Mobile swipe close follows the CMD+W session row rules
+  const { mutate: closeSession } = useCloseSession()
+  const deleteWorktree = useDeleteWorktree()
+  const closeBaseSessionClean = useCloseBaseSessionClean()
+  const [closeTarget, setCloseTarget] = useState<{
+    row: RecentWorktreeItem
+    mode: 'session' | 'worktree'
+  } | null>(null)
+  const refreshRecent = useCallback(
+    () =>
+      void queryClient.invalidateQueries({ queryKey: ['recent-worktrees'] }),
+    [queryClient]
+  )
+  const closeRow = useCallback(
+    (row: RecentWorktreeItem, mode: 'session' | 'worktree') => {
+      if (mode === 'session') {
+        closeSession(
+          {
+            worktreeId: row.worktree.id,
+            worktreePath: row.worktree.path,
+            sessionId: row.session.id,
+          },
+          { onSuccess: refreshRecent }
+        )
+        return
+      }
+      const close = isBaseSession(row.worktree)
+        ? closeBaseSessionClean
+        : deleteWorktree
+      close.mutate(
+        { worktreeId: row.worktree.id, projectId: row.projectId },
+        { onSuccess: refreshRecent }
+      )
+    },
+    [closeSession, closeBaseSessionClean, deleteWorktree, refreshRecent]
+  )
+  const requestCloseRow = useCallback(
+    async (row: RecentWorktreeItem) => {
+      const { sessions } = await invoke<WorktreeSessions>('get_sessions', {
+        worktreeId: row.worktree.id,
+        worktreePath: row.worktree.path,
+        includeMessageCounts: false,
+      })
+      const decision = decideSessionRowClose(
+        row.session,
+        sessions,
+        useChatStore.getState().inputDrafts
+      )
+      if (decision === 'close-session') closeRow(row, 'session')
+      else
+        setCloseTarget({
+          row,
+          mode: decision === 'confirm-session' ? 'session' : 'worktree',
+        })
+    },
+    [closeRow]
+  )
+
   // next/previous_recent_session are matched in useMainWindowEventListeners,
   // which dispatches this event only while the Recent list is visible.
   // Effect Event: reads the latest rows/selection without re-subscribing the
@@ -432,97 +502,108 @@ export function RecentWorktreesList({
             className="mx-1 mb-2 border-t border-border/20"
           />
         )}
-        {/* react-doctor-disable-next-line react-doctor/no-static-element-interactions -- enlarges the hit area; the nested labelled row <button> bubbles its keyboard click here */}
-        <div
-          className={`relative flex w-full cursor-pointer flex-col gap-y-1 rounded-lg py-2.5 pl-3 pr-3 text-left transition-[background-color,box-shadow,color] hover:bg-muted/30 hover:text-foreground has-[:focus-visible]:ring-1 has-[:focus-visible]:ring-ring ${isCurrent ? 'bg-muted/50 text-foreground shadow' : 'bg-transparent text-muted-foreground'}`}
-          onClick={() => handleOpen(row)}
+        <SwipeActionRow
+          enabled={isMobile && !isServer}
+          actionLabel="Close"
+          onAction={() => void requestCloseRow(row)}
         >
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                aria-label={isPinned ? 'Unpin session' : 'Pin session'}
-                className={`absolute -left-1.5 -top-1.5 z-10 flex size-5 items-center justify-center transition-opacity hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring md:opacity-0 md:focus-visible:opacity-100 md:group-hover:opacity-100 md:group-focus-within:opacity-100 ${isPinned ? 'text-foreground' : 'text-muted-foreground'}`}
-                onClick={event => {
-                  event.stopPropagation()
-                  void setRecentSessionPinned(
-                    queryClient,
-                    row.session.id,
-                    !isPinned
-                  )
-                }}
-              >
-                <Thumbtack size={11} weight={isPinned ? 'Filled' : 'Outline'} />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {isPinned ? 'Unpin session' : 'Pin session'}
-            </TooltipContent>
-          </Tooltip>
-          <button
-            ref={element => {
-              if (element) rowRefs.current.set(row.session.id, element)
-              else rowRefs.current.delete(row.session.id)
-            }}
-            type="button"
-            aria-current={isCurrent ? 'page' : undefined}
-            aria-label={`${title}, ${isServer ? 'server ' : ''}${row.projectName}, ${row.worktree.name}, ${status.label}${isUnread ? ', unread' : ''}, ${activityLabel}`}
-            className="flex w-full flex-col gap-y-1 text-left focus-visible:outline-none"
+          {/* react-doctor-disable-next-line react-doctor/no-static-element-interactions -- enlarges the hit area; the nested labelled row <button> bubbles its keyboard click here */}
+          <div
+            className={`relative flex w-full cursor-pointer flex-col gap-y-1 rounded-lg py-2.5 pl-3 pr-3 text-left transition-[background-color,box-shadow,color] hover:bg-muted/30 hover:text-foreground has-[:focus-visible]:ring-1 has-[:focus-visible]:ring-ring ${isCurrent ? 'bg-muted/50 text-foreground shadow' : 'bg-transparent text-muted-foreground'}`}
+            onClick={() => handleOpen(row)}
           >
-            <span className="flex items-center gap-2">
-              {project && <ProjectAvatar project={project} />}
-              <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
-                {namingSessionIds[row.session.id] ? 'Generating…' : title}
-              </span>
-              <span className="flex shrink-0 items-center justify-end gap-1.5 text-2xs empty:hidden">
-                {isUnread && (
-                  <BellDot
-                    aria-label="Unread session"
-                    className="size-3.5 shrink-0 text-warning"
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={isPinned ? 'Unpin session' : 'Pin session'}
+                  className={`absolute -left-1.5 -top-1.5 z-10 flex size-5 items-center justify-center transition-opacity hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring md:opacity-0 md:focus-visible:opacity-100 md:group-hover:opacity-100 md:group-focus-within:opacity-100 ${isPinned ? 'text-foreground' : 'text-muted-foreground'}`}
+                  onClick={event => {
+                    event.stopPropagation()
+                    void setRecentSessionPinned(
+                      queryClient,
+                      row.session.id,
+                      !isPinned
+                    )
+                  }}
+                >
+                  <Thumbtack
+                    size={11}
+                    weight={isPinned ? 'Filled' : 'Outline'}
                   />
-                )}
-                {isWorking ? (
-                  <WorkingWaveform />
-                ) : (
-                  status.tone !== 'completed' && (
-                    <span className={`font-medium ${statusClassName}`}>
-                      {status.label}
-                    </span>
-                  )
-                )}
-              </span>
-            </span>
-            <span className="flex items-center gap-2">
-              <span className="flex min-w-0 flex-1 items-center gap-1.5 text-2xs">
-                {isServer && (
-                  <span
-                    aria-hidden="true"
-                    className="flex shrink-0 items-center gap-0.5 rounded bg-muted px-1 py-px text-2xs font-medium text-muted-foreground"
-                  >
-                    <Server className="size-2.5" />
-                    Server
-                  </span>
-                )}
-                <span className="min-w-0 truncate">
-                  {row.projectName} · {row.worktree.name}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {isPinned ? 'Unpin session' : 'Pin session'}
+              </TooltipContent>
+            </Tooltip>
+            <button
+              ref={element => {
+                if (element) rowRefs.current.set(row.session.id, element)
+                else rowRefs.current.delete(row.session.id)
+              }}
+              type="button"
+              aria-current={isCurrent ? 'page' : undefined}
+              aria-label={`${title}, ${isServer ? 'server ' : ''}${row.projectName}, ${row.worktree.name}, ${status.label}${isUnread ? ', unread' : ''}, ${activityLabel}`}
+              className="flex w-full flex-col gap-y-1 text-left focus-visible:outline-none"
+            >
+              <span className="flex items-center gap-2">
+                {project && <ProjectAvatar project={project} />}
+                <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
+                  {namingSessionIds[row.session.id] ? 'Generating…' : title}
+                </span>
+                <span className="flex shrink-0 items-center justify-end gap-1.5 text-2xs empty:hidden">
+                  {isUnread && (
+                    <BellDot
+                      aria-label="Unread session"
+                      className="size-3.5 shrink-0 text-warning"
+                    />
+                  )}
+                  {isWorking ? (
+                    <WorkingWaveform />
+                  ) : (
+                    status.tone !== 'completed' && (
+                      <span className={`font-medium ${statusClassName}`}>
+                        {status.label}
+                      </span>
+                    )
+                  )}
                 </span>
               </span>
-              <span className="flex shrink-0 items-center justify-end text-2xs tabular-nums">
-                {showShortcutHints && index < MAX_RECENT_SHORTCUTS ? (
-                  <Kbd className="h-4 px-1 text-2xs">
-                    {formatShortcutDisplay(`mod+${index + 1}`)}
-                  </Kbd>
-                ) : (
-                  <time
-                    dateTime={new Date(row.lastActivityAt * 1000).toISOString()}
-                  >
-                    {activity}
-                  </time>
-                )}
+              <span className="flex items-center gap-2">
+                <span className="flex min-w-0 flex-1 items-center gap-1.5 text-2xs">
+                  {isServer && (
+                    <span
+                      aria-hidden="true"
+                      className="flex shrink-0 items-center gap-0.5 rounded bg-muted px-1 py-px text-2xs font-medium text-muted-foreground"
+                    >
+                      <Server className="size-2.5" />
+                      Server
+                    </span>
+                  )}
+                  <span className="min-w-0 truncate">
+                    {row.projectName} · {row.worktree.name}
+                  </span>
+                </span>
+                <span className="flex shrink-0 items-center justify-end text-2xs tabular-nums">
+                  {showShortcutHints && index < MAX_RECENT_SHORTCUTS ? (
+                    <Kbd className="h-4 px-1 text-2xs">
+                      {formatShortcutDisplay(`mod+${index + 1}`)}
+                    </Kbd>
+                  ) : (
+                    <time
+                      dateTime={new Date(
+                        row.lastActivityAt * 1000
+                      ).toISOString()}
+                    >
+                      {activity}
+                    </time>
+                  )}
+                </span>
               </span>
-            </span>
-          </button>
-        </div>
+            </button>
+          </div>
+        </SwipeActionRow>
       </li>
     )
   }
@@ -619,6 +700,23 @@ export function RecentWorktreesList({
           )}
         </div>
       </div>
+      <CloseWorktreeDialog
+        open={!!closeTarget}
+        onOpenChange={open => {
+          if (!open) setCloseTarget(null)
+        }}
+        onConfirm={() => {
+          if (closeTarget) closeRow(closeTarget.row, closeTarget.mode)
+          setCloseTarget(null)
+        }}
+        mode={closeTarget?.mode}
+        branchName={closeTarget?.row.worktree.branch}
+        worktree={
+          closeTarget?.mode === 'worktree'
+            ? closeTarget.row.worktree
+            : undefined
+        }
+      />
       {failedCount > 0 && (
         <div className="shrink-0 border-t border-border/20 p-2">
           <div
