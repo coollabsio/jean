@@ -113,6 +113,7 @@ import { RemoteConnectionRecovery } from './components/remote/RemoteConnectionRe
 import { getStartupOnboardingAction } from './lib/startup-onboarding'
 import { dismissTransientUi } from './lib/dismiss-transient-ui'
 import { JeanLoadingScreen } from './components/shared/JeanLoadingScreen'
+import { NetworkOfflineScreen } from './components/shared/NetworkOfflineScreen'
 import { relaunchAfterUIStateSave } from './lib/ui-state-relaunch'
 
 interface AutoFixStoppedEvent {
@@ -1612,7 +1613,12 @@ function App() {
   // app underneath and covering it with an overlay. Native remote clients keep
   // the overlay: their local UI stays usable while a remote is unreachable.
   if (webBackend && wsAuthError && !getActiveRemoteConnection()) {
-    return <WsAuthErrorOverlay />
+    return (
+      <>
+        <WsAuthErrorOverlay />
+        <NetworkOfflineScreen />
+      </>
+    )
   }
 
   if (isPreloading || blockOnWs) {
@@ -1620,6 +1626,7 @@ function App() {
       <>
         <JeanLoadingScreen />
         {webBackend && <WsAuthErrorOverlay />}
+        <NetworkOfflineScreen />
         {isNativeApp() && <QuitConfirmationDialog />}
       </>
     )
@@ -1633,6 +1640,7 @@ function App() {
           <JeanLoadingScreen message="Checking connection to Jean..." onTop />
         )}
         {webBackend && <WsAuthErrorOverlay />}
+        <NetworkOfflineScreen />
         {/* App-level dialog so quit confirmation wins over loading overlay
             even if MainWindow's copy is covered / not yet mounted. */}
         {isNativeApp() && <QuitConfirmationDialog />}
