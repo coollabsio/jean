@@ -3,6 +3,7 @@ import { renderHook } from '@testing-library/react'
 import { useChatStore } from '@/store/chat-store'
 import { useTerminalStore } from '@/store/terminal-store'
 import { useUIStore } from '@/store/ui-store'
+import { useProjectsStore } from '@/store/projects-store'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
   addTerminalTabForShortcut,
@@ -1343,5 +1344,89 @@ describe('toggleBrowserKeybinding', () => {
     expect(useTerminalStore.getState().modalTerminalOpen['canvas-wt']).toBe(
       false
     )
+  })
+})
+
+describe('Recent session navigation shortcuts', () => {
+  function pressArrow(key: 'ArrowUp' | 'ArrowDown', shiftKey: boolean) {
+    const event = new KeyboardEvent('keydown', {
+      key,
+      code: key,
+      metaKey: true,
+      ctrlKey: true,
+      shiftKey,
+      bubbles: true,
+      cancelable: true,
+    })
+    document.body.dispatchEvent(event)
+    return event
+  }
+
+  function renderListeners() {
+    const queryClient = new QueryClient()
+    return renderHook(() => useMainWindowEventListeners(), {
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={queryClient}>
+          {children}
+        </QueryClientProvider>
+      ),
+    })
+  }
+
+  beforeEach(() => {
+    document.body.innerHTML = ''
+    useUIStore.setState({
+      leftSidebarVisible: true,
+      sessionChatModalOpen: false,
+      commandPaletteOpen: false,
+      preferencesOpen: false,
+      magicModalOpen: false,
+    })
+    useProjectsStore.setState({ sidebarActiveTab: 'recent' })
+  })
+
+  it('opens the adjacent Recent session with Cmd/Ctrl+Shift+Arrow', () => {
+    const onAdjacent = vi.fn()
+    window.addEventListener('open-adjacent-recent-session', onAdjacent)
+    const { unmount } = renderListeners()
+
+    expect(pressArrow('ArrowDown', true).defaultPrevented).toBe(true)
+    expect(pressArrow('ArrowUp', true).defaultPrevented).toBe(true)
+
+    expect(
+      onAdjacent.mock.calls.map(([e]) => (e as CustomEvent).detail.direction)
+    ).toEqual([1, -1])
+    unmount()
+    window.removeEventListener('open-adjacent-recent-session', onAdjacent)
+  })
+
+  it('scrolls the chat with Cmd/Ctrl+Arrow while Recent is visible', () => {
+    const onAdjacent = vi.fn()
+    const onScroll = vi.fn()
+    window.addEventListener('open-adjacent-recent-session', onAdjacent)
+    window.addEventListener('scroll-chat', onScroll)
+    const { unmount } = renderListeners()
+
+    pressArrow('ArrowDown', false)
+
+    expect(onAdjacent).not.toHaveBeenCalled()
+    expect((onScroll.mock.calls[0]?.[0] as CustomEvent).detail).toEqual({
+      direction: 'down',
+    })
+    unmount()
+    window.removeEventListener('open-adjacent-recent-session', onAdjacent)
+    window.removeEventListener('scroll-chat', onScroll)
+  })
+
+  it('leaves Cmd/Ctrl+Shift+Arrow alone when Recent is hidden', () => {
+    useProjectsStore.setState({ sidebarActiveTab: 'projects' })
+    const onAdjacent = vi.fn()
+    window.addEventListener('open-adjacent-recent-session', onAdjacent)
+    const { unmount } = renderListeners()
+
+    expect(pressArrow('ArrowDown', true).defaultPrevented).toBe(false)
+    expect(onAdjacent).not.toHaveBeenCalled()
+    unmount()
+    window.removeEventListener('open-adjacent-recent-session', onAdjacent)
   })
 })

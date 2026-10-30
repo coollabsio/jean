@@ -301,16 +301,18 @@ export function RecentWorktreesList({
     [isMobile, queryClient, selectProject, selectWorktree]
   )
 
+  // next/previous_recent_session are matched in useMainWindowEventListeners,
+  // which dispatches this event only while the Recent list is visible.
   // Effect Event: reads the latest rows/selection without re-subscribing the
   // window listener every time the list or session status changes.
-  const onRecentKeyDown = useEffectEvent((event: KeyboardEvent) => {
-    if (!event.metaKey || !['ArrowUp', 'ArrowDown'].includes(event.key)) return
-    event.preventDefault()
-    event.stopPropagation()
+  const onOpenAdjacent = useEffectEvent((event: Event) => {
+    const direction = (event as CustomEvent<{ direction: 1 | -1 }>).detail
+      ?.direction
+    if (!direction) return
     const row = getAdjacentRecentRow(
       displayedRows,
       selectedSessionId,
-      event.key === 'ArrowDown' ? 1 : -1
+      direction
     )
     if (!row) return
     handleOpen(row)
@@ -320,10 +322,10 @@ export function RecentWorktreesList({
   })
 
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => onRecentKeyDown(event)
-    window.addEventListener('keydown', onKeyDown, { capture: true })
+    const listener = (event: Event) => onOpenAdjacent(event)
+    window.addEventListener('open-adjacent-recent-session', listener)
     return () =>
-      window.removeEventListener('keydown', onKeyDown, { capture: true })
+      window.removeEventListener('open-adjacent-recent-session', listener)
   }, [])
 
   // Cmd/Ctrl+1-9 is matched in useMainWindowEventListeners, which dispatches

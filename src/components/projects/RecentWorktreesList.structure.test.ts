@@ -83,13 +83,11 @@ describe('RecentWorktreesList structure', () => {
   })
 
   it('keeps current-row, keyboard, partial failure, and accessibility behavior', () => {
-    expect(source).toContain('event.metaKey')
-    expect(source).toContain("['ArrowUp', 'ArrowDown']")
+    expect(source).toContain("'open-adjacent-recent-session'")
+    expect(source).not.toContain("addEventListener('keydown'")
     expect(source).toContain('getAdjacentRecentRow(')
     expect(source).toContain('displayedRows,')
     expect(source).not.toContain('ignoresNavigationShortcut')
-    expect(source).toContain('event.stopPropagation()')
-    expect(source).toContain('{ capture: true }')
     expect(source).toContain("aria-current={isCurrent ? 'page' : undefined}")
     expect(source).toContain('aria-label="Recent sessions"')
     expect(source).toContain('Some recent sessions could')

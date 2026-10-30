@@ -218,6 +218,8 @@ const KEYBINDING_ACTIONS_ALLOWING_REPEAT = new Set<KeybindingAction>([
   'scroll_chat_down_small',
   'next_session',
   'previous_session',
+  'next_recent_session',
+  'previous_recent_session',
 ])
 
 /** Whether OS key-repeat should re-execute this keybinding action. */
@@ -806,6 +808,14 @@ function executeKeybindingAction(
         new CustomEvent('switch-session', { detail: { direction: 'previous' } })
       )
       break
+    case 'next_recent_session':
+    case 'previous_recent_session':
+      window.dispatchEvent(
+        new CustomEvent('open-adjacent-recent-session', {
+          detail: { direction: action === 'next_recent_session' ? 1 : -1 },
+        })
+      )
+      break
     case 'close_session_or_worktree': {
       // When terminal is focused, CMD+W should close the active terminal tab.
       if (closeActiveTerminalTabForShortcut()) break
@@ -1240,6 +1250,15 @@ export function useMainWindowEventListeners() {
             action,
             useUIStore.getState().planDialogOpen
           )
+        ) {
+          return
+        }
+        // Recent navigation applies only while the Recent list is visible.
+        // Elsewhere the keys keep their normal behavior (text selection).
+        if (
+          (action === 'next_recent_session' ||
+            action === 'previous_recent_session') &&
+          !isRecentSessionsShortcutActive()
         ) {
           return
         }
