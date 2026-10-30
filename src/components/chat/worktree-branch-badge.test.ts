@@ -124,6 +124,17 @@ describe('shouldShowWorktreeBranchBadge', () => {
     ).toBe(false)
   })
 
+  it('hides the default branch, which carries no information', () => {
+    expect(
+      shouldShowWorktreeBranchBadge({
+        displayBranch: 'main',
+        worktreeName: 'Base Session',
+        defaultBranch: 'main',
+        stackedBaseBranch: null,
+      })
+    ).toBe(false)
+  })
+
   it('shows meaningful source branch metadata', () => {
     expect(
       shouldShowWorktreeBranchBadge({

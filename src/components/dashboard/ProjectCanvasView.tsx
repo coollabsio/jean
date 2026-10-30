@@ -745,6 +745,7 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
     shouldShowWorktreeBranchBadge({
       displayBranch,
       worktreeName: rowTitle,
+      defaultBranch,
       stackedBaseBranch,
       prNumber: worktree.pr_number,
       securityAlertNumber: worktree.security_alert_number,

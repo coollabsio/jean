@@ -44,7 +44,7 @@ export function resolveStackedOnPr(
 
   // base may be remote-qualified in the badge ("fork/main") — PR heads are not.
   const baseHead = stackedBaseBranch.includes('/')
-    ? (stackedBaseBranch.split('/').slice(1).join('/') || stackedBaseBranch)
+    ? stackedBaseBranch.split('/').slice(1).join('/') || stackedBaseBranch
     : stackedBaseBranch
 
   if (defaultBranch && baseHead === defaultBranch) return undefined
@@ -71,6 +71,7 @@ export function resolveStackedOnPr(
 interface WorktreeBranchBadgeContext {
   displayBranch: string | undefined
   worktreeName: string
+  defaultBranch?: string
   stackedBaseBranch: string | null
   prNumber?: number
   securityAlertNumber?: number
@@ -80,6 +81,7 @@ interface WorktreeBranchBadgeContext {
 export function shouldShowWorktreeBranchBadge({
   displayBranch,
   worktreeName,
+  defaultBranch,
   stackedBaseBranch,
   prNumber,
   securityAlertNumber,
@@ -87,7 +89,7 @@ export function shouldShowWorktreeBranchBadge({
 }: WorktreeBranchBadgeContext): boolean {
   return Boolean(
     displayBranch &&
-    (displayBranch !== worktreeName ||
+    ((displayBranch !== worktreeName && displayBranch !== defaultBranch) ||
       stackedBaseBranch ||
       prNumber ||
       securityAlertNumber ||
