@@ -113,7 +113,11 @@ import {
   projectsQueryKeys,
   type PackageScript,
 } from '@/services/projects'
-import { chatQueryKeys, cancelChatMessage } from '@/services/chat'
+import {
+  chatQueryKeys,
+  cancelChatMessage,
+  useCloseSession,
+} from '@/services/chat'
 import {
   useDependabotAlerts,
   useGitHubIssues,
@@ -192,6 +196,7 @@ import {
   toMilliseconds,
 } from './worktree-row-status'
 import { CloseWorktreeDialog } from '@/components/chat/CloseWorktreeDialog'
+import { decideSessionRowClose } from '@/components/projects/worktree-close-decision'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { hasBackendTransport } from '@/lib/environment'
 import { consumeWebReloadState } from '@/lib/web-reload-state'
@@ -1989,6 +1994,12 @@ export function ProjectCanvasView({
     worktreeId: string
     branchName?: string
   } | null>(null)
+  // Session close confirmation (CMD+W on a session row)
+  const [closeSessionTarget, setCloseSessionTarget] = useState<{
+    worktreeId: string
+    worktreePath: string
+    sessionId: string
+  } | null>(null)
 
   // Git diff modal (CMD+G on canvas)
   const [canvasDiffRequest, setCanvasDiffRequest] =
@@ -2061,6 +2072,13 @@ export function ProjectCanvasView({
       closeWorktreeDirectlyRef.current(modal.worktreeId)
     }
   }, [closeWorktreeDirectlyRef, selectedWorktreeModalLatestRef])
+
+  const { mutate: closeSession } = useCloseSession()
+  const handleConfirmCloseSession = useCallback(() => {
+    if (!closeSessionTarget) return
+    closeSession(closeSessionTarget)
+    setCloseSessionTarget(null)
+  }, [closeSessionTarget, closeSession])
 
   const handleConfirmCloseWorktree = useCallback(() => {
     if (!closeWorktreeTarget) return
@@ -3139,6 +3157,28 @@ export function ProjectCanvasView({
         const section = worktreeSections.find(
           s => s.worktree.id === item.worktreeId
         )
+        // Session rows close one session, not the whole worktree
+        if (sessionRows) {
+          const target = {
+            worktreeId: item.worktreeId,
+            worktreePath: item.worktreePath,
+            sessionId: item.card.session.id,
+          }
+          const decision = decideSessionRowClose(
+            item.card.session,
+            sessionsByWorktreeIdRef.current.get(item.worktreeId)?.sessions ??
+              [],
+            useChatStore.getState().inputDrafts
+          )
+          if (decision === 'close-session') {
+            closeSession(target)
+            return
+          }
+          if (decision === 'confirm-session') {
+            setCloseSessionTarget(target)
+            return
+          }
+        }
         setCloseWorktreeTarget({
           worktreeId: item.worktreeId,
           branchName: section?.worktree.branch,
@@ -3159,7 +3199,14 @@ export function ProjectCanvasView({
         handleCloseSessionOrWorktree,
         { capture: true }
       )
-  }, [selectedWorktreeModal, selectedIndex, flatCards, worktreeSections])
+  }, [
+    selectedWorktreeModal,
+    selectedIndex,
+    flatCards,
+    worktreeSections,
+    sessionRows,
+    closeSession,
+  ])
 
   // Listen for create-new-session event to handle CMD+T / picker shortcut
   useEffect(() => {
@@ -4119,6 +4166,14 @@ export function ProjectCanvasView({
         worktree={visibleWorktrees.find(
           w => w.id === closeWorktreeTarget?.worktreeId
         )}
+      />
+      <CloseWorktreeDialog
+        open={!!closeSessionTarget}
+        onOpenChange={open => {
+          if (!open) setCloseSessionTarget(null)
+        }}
+        onConfirm={handleConfirmCloseSession}
+        mode="session"
       />
 
       {/* Linked Projects modal (triggered from MagicModal on canvas) */}

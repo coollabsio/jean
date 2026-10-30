@@ -10,3 +10,25 @@ export function isSessionEmpty(
 ): boolean {
   return !session.message_count && !inputDrafts[session.id]?.trim()
 }
+
+export type SessionRowCloseAction =
+  | 'close-session'
+  | 'confirm-session'
+  | 'confirm-worktree'
+
+/**
+ * CMD+W on a session row of the single session view list. Closing the last
+ * open session asks to delete the whole worktree. Other sessions follow the
+ * tab rules: empty ones close at once, the rest confirm first.
+ */
+export function decideSessionRowClose(
+  session: { id: string; message_count?: number },
+  worktreeSessions: { id: string; archived_at?: number | null }[],
+  inputDrafts: Record<string, string>
+): SessionRowCloseAction {
+  const openSessions = worktreeSessions.filter(s => !s.archived_at)
+  if (openSessions.every(s => s.id === session.id)) return 'confirm-worktree'
+  return isSessionEmpty(session, inputDrafts)
+    ? 'close-session'
+    : 'confirm-session'
+}
