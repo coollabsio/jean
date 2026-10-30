@@ -8,7 +8,6 @@ import { invoke } from '@/lib/transport'
 import { queryClient } from '@/lib/query-client'
 import { preferencesQueryKeys } from '@/services/preferences'
 import { chatQueryKeys } from '@/services/chat'
-import { LOCAL_SERVER_ID } from '@/types/server-resource'
 import {
   clearClientPreferencesForTests,
   updateClientPreferences,
@@ -1164,7 +1163,7 @@ describe('ChatInput IME composition (issue #584)', () => {
     })
   })
 
-  describe('single session view', () => {
+  describe('Mod+Enter background send', () => {
     const pressModEnter = (textarea: HTMLTextAreaElement) =>
       fireEvent.keyDown(textarea, {
         key: 'Enter',
@@ -1195,10 +1194,17 @@ describe('ChatInput IME composition (issue #584)', () => {
       })
     })
 
-    it.each([0, 2])(
-      'sends in the background and opens a new session on Mod+Enter (%i messages)',
-      async messageCount => {
-        updateClientPreferences({ single_session_view_enabled: true })
+    it.each([
+      [false, 0],
+      [false, 2],
+      [true, 0],
+      [true, 2],
+    ])(
+      'sends in the background and opens a new session (single view %s, %i messages)',
+      async (singleSessionView, messageCount) => {
+        updateClientPreferences({
+          single_session_view_enabled: singleSessionView,
+        })
         setMessageCount(messageCount)
         const { created, stop } = captureCreatedSessions()
         const { textarea, onSubmit } = renderWithSubmit()
@@ -1214,7 +1220,6 @@ describe('ChatInput IME composition (issue #584)', () => {
     )
 
     it('keeps the running-turn behavior on Mod+Enter while sending', () => {
-      updateClientPreferences({ single_session_view_enabled: true })
       setMessageCount(2)
       const { textarea, onSubmit } = renderWithSubmit({ isSending: true })
       fireEvent.change(textarea, { target: { value: 'follow-up' } })
@@ -1224,29 +1229,12 @@ describe('ChatInput IME composition (issue #584)', () => {
       expect(onSubmit.mock.calls[0]?.[1]?.beforeSend).toBeUndefined()
     })
 
-    it('ignores the server preference, since the view is a client setting', () => {
-      queryClient.setQueryData(
-        preferencesQueryKeys.preferences(LOCAL_SERVER_ID),
-        { single_session_view_enabled: true }
-      )
+    it('sends normally on plain Enter', () => {
       setMessageCount(0)
       const { textarea, onSubmit } = renderWithSubmit()
-      fireEvent.change(textarea, { target: { value: 'first prompt' } })
+      fireEvent.change(textarea, { target: { value: 'prompt' } })
 
-      pressModEnter(textarea)
-
-      queryClient.removeQueries({
-        queryKey: preferencesQueryKeys.preferences(LOCAL_SERVER_ID),
-      })
-      expect(onSubmit).toHaveBeenCalledWith(expect.anything(), undefined)
-    })
-
-    it('sends normally on Mod+Enter when the view is off', () => {
-      setMessageCount(0)
-      const { textarea, onSubmit } = renderWithSubmit()
-      fireEvent.change(textarea, { target: { value: 'first prompt' } })
-
-      pressModEnter(textarea)
+      fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', keyCode: 13 })
 
       expect(onSubmit).toHaveBeenCalledWith(expect.anything(), undefined)
     })

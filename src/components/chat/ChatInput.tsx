@@ -29,7 +29,6 @@ import {
 } from './FileMentionPopover'
 import { queryClient } from '@/lib/query-client'
 import { parseServerResourceKey } from '@/lib/server-resource'
-import { readClientPreferences } from '@/lib/client-preferences'
 import { fileQueryKeys } from '@/services/files'
 import { chatQueryKeys } from '@/services/chat'
 import { useCreateWorktree } from '@/services/projects'
@@ -702,14 +701,11 @@ export const ChatInput = memo(function ChatInput({
             .getState()
             .setInputDraft(activeSessionId, valueRef.current)
         }
-        // Single session view: Mod+Enter on an idle session sends the prompt
-        // in the background and opens a new session in this worktree. The
-        // send stays bound to this session.
+        // Mod+Enter on an idle session sends the prompt in the background and
+        // opens a new session in this worktree. The send stays bound to this
+        // session.
         const sendInBackground =
-          (e.metaKey || e.ctrlKey) &&
-          !isSending &&
-          !!activeSessionId &&
-          readClientPreferences().single_session_view_enabled === true
+          (e.metaKey || e.ctrlKey) && !isSending && !!activeSessionId
         onSubmit(
           e,
           sendInBackground

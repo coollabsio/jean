@@ -4077,7 +4077,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               id="pref-general-single-session-view"
               label="Single session view"
               description="Hide the session tabs. The worktree list and Recent show every session, also empty ones"
-              help="Cmd/Ctrl+Enter on an idle session sends the prompt in the background and opens a new session in the same worktree."
             >
               <Switch
                 checked={preferences?.single_session_view_enabled ?? false}
