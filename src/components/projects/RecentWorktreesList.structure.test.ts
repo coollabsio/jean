@@ -11,12 +11,12 @@ describe('RecentWorktreesList structure', () => {
     expect(source).toContain('const INITIAL_RECENT_LIMIT = 10')
     expect(source).toContain('const RECENT_PAGE_SIZE = 25')
     expect(source).toContain('{Math.min(hiddenCount, RECENT_PAGE_SIZE)} more')
-    expect(source).toContain('setLimit(value => value + RECENT_PAGE_SIZE)')
-    expect(source).toContain('Show snoozed sessions')
+    expect(source).toContain('setLimit(pageSize + RECENT_PAGE_SIZE)')
     // Paging actions scroll with the list instead of a fixed sidebar footer.
     expect(source).not.toContain('createPortal')
     expect(source).toContain('{hasFooterActions && (')
-    expect(source).toContain('Snoozed · inactive for 24 hours')
+    expect(source).toContain('aria-label="Snoozed sessions"')
+    expect(source).toContain('aria-expanded={snoozedExpanded}')
     expect(source).toContain('isSnoozedSession(row.lastActivityAt)')
   })
 
@@ -26,8 +26,8 @@ describe('RecentWorktreesList structure', () => {
     )
     expect(source).toContain('aria-label="Working sessions"')
     expect(source).toContain('aria-expanded={workingExpanded}')
-    expect(source).toContain(
-      '() => [...topRows, ...visibleWorkingRows, ...restRows, ...snoozedRows]'
+    expect(source).toMatch(
+      /\[\s*\.\.\.topRows,\s*\.\.\.visibleWorkingRows,\s*\.\.\.restRows,\s*\.\.\.visibleSnoozedRows,\s*\]/
     )
     // Mobile puts the shelf at the top, just below the pinned rows.
     expect(source).toContain('{isMobile && workingShelfSection}')
@@ -108,11 +108,11 @@ describe('RecentWorktreesList structure', () => {
   })
 
   it('fetches pinned sessions without creating a list for each selected session', () => {
-    expect(source).toContain(
-      "queryKey: ['recent-worktrees', projectKey, limit, pinnedSessionIds]"
+    expect(source).toMatch(
+      /queryKey: \[\s*'recent-worktrees',\s*projectKey,\s*limit,\s*pinnedSessionIds,\s*includeEmpty,\s*\]/
     )
-    expect(source).toContain(
-      'fetchRecentWorktrees(projects, limit, pinnedSessionIds)'
+    expect(source).toMatch(
+      /fetchRecentWorktrees\(\s*projects,\s*limit,\s*pinnedSessionIds,\s*includeEmpty,/
     )
     expect(source).not.toContain(
       "queryKey: ['recent-worktrees', projectKey, limit, selectedSessionId]"

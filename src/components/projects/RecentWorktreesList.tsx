@@ -20,6 +20,7 @@ import {
   Thumbtack,
 } from '@/components/icons/reicon'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { useClientPreferences } from '@/hooks/useClientPreferences'
 import {
   isModOnlyHeld,
   useModifierHintsVisible,
@@ -136,8 +137,12 @@ export function RecentWorktreesList({
   )
   const namingSessionIds = useChatStore(state => state.namingSessionIds)
   const pinnedSessionIds = useRecentSessionPins(projects)
+  // Single session view opens sessions only from here, so new empty sessions
+  // must be listed too.
+  const includeEmpty =
+    useClientPreferences().preferences.single_session_view_enabled ?? false
   const [limit, setLimit] = useState(INITIAL_RECENT_LIMIT)
-  const [showSnoozed, setShowSnoozed] = useState(false)
+  const [snoozedExpanded, setSnoozedExpanded] = useState(false)
   const [workingExpanded, setWorkingExpanded] = useState(false)
   const shortcutsEnabled = isNativeApp() && !isMobile
   const showShortcutHints = useModifierHintsVisible(
@@ -160,38 +165,50 @@ export function RecentWorktreesList({
   if (prevProjectKey !== projectKey) {
     setPrevProjectKey(projectKey)
     setLimit(INITIAL_RECENT_LIMIT)
-    setShowSnoozed(false)
+    setSnoozedExpanded(false)
   }
 
   const query = useQuery({
     // Selection only changes the highlighted row. Keep it out of the query so
     // switching sessions cannot swap between cached list variants with
     // different ordering.
-    queryKey: ['recent-worktrees', projectKey, limit, pinnedSessionIds],
-    queryFn: () => fetchRecentWorktrees(projects, limit, pinnedSessionIds),
+    queryKey: [
+      'recent-worktrees',
+      projectKey,
+      limit,
+      pinnedSessionIds,
+      includeEmpty,
+    ],
+    // Every non-snoozed session loads at once; only snoozed ones page.
+    queryFn: () =>
+      fetchRecentWorktrees(
+        projects,
+        limit,
+        pinnedSessionIds,
+        includeEmpty,
+        Math.floor(Date.now() / 1000) - SNOOZE_AFTER_SECONDS
+      ),
     enabled: projects.length > 0,
     placeholderData: keepPreviousData,
     staleTime: 30_000,
   })
   const rows = query.data?.items ?? EMPTY_RECENT_ROWS
+  const pageSize = query.data?.pageSize ?? limit
   const snoozedBoundaryLoaded = rows
-    .slice(0, limit)
+    .slice(0, pageSize)
     .some(row => isSnoozedSession(row.lastActivityAt))
   const pinned = useMemo(() => new Set(pinnedSessionIds), [pinnedSessionIds])
-  // Unpinned running sessions move to their own Working shelf, and snoozed
-  // sessions go below it. Pinned sessions stay in the pinned group.
+  // Unpinned running sessions move to a collapsible Working shelf, and
+  // unpinned snoozed sessions to a collapsible Snoozed shelf below it.
+  // Pinned sessions stay in the pinned group.
   const { listRows, workingRows, snoozedRows } = useMemo(() => {
-    const visibleRows = rows.filter(
-      row =>
-        (showSnoozed ||
-          pinned.has(row.session.id) ||
-          !isSnoozedSession(row.lastActivityAt)) &&
-        matchesSidebarSearch(
-          searchQuery,
-          row.session.name,
-          row.projectName,
-          row.worktree.name
-        )
+    const visibleRows = rows.filter(row =>
+      matchesSidebarSearch(
+        searchQuery,
+        row.session.name,
+        row.projectName,
+        row.worktree.name
+      )
     )
     const isRunning = (row: RecentWorktreeItem) =>
       getRecentSessionStatus(row.session, {
@@ -211,15 +228,9 @@ export function RecentWorktreesList({
       else groups.listRows.push(row)
     }
     return groups
-  }, [
-    pinned,
-    rows,
-    searchQuery,
-    showSnoozed,
-    sendingSessionIds,
-    waitingForInputSessionIds,
-  ])
+  }, [pinned, rows, searchQuery, sendingSessionIds, waitingForInputSessionIds])
   const visibleWorkingRows = workingExpanded ? workingRows : EMPTY_RECENT_ROWS
+  const visibleSnoozedRows = snoozedExpanded ? snoozedRows : EMPTY_RECENT_ROWS
   // Mobile shows the Working shelf at the top, between pinned and other rows.
   const { pinnedCount, topRows, restRows } = useMemo(() => {
     const count = isMobile
@@ -233,8 +244,13 @@ export function RecentWorktreesList({
   }, [isMobile, listRows, pinned])
   // Visual order, used by Cmd+Arrow navigation and Cmd+1-9 shortcuts.
   const displayedRows = useMemo(
-    () => [...topRows, ...visibleWorkingRows, ...restRows, ...snoozedRows],
-    [topRows, visibleWorkingRows, restRows, snoozedRows]
+    () => [
+      ...topRows,
+      ...visibleWorkingRows,
+      ...restRows,
+      ...visibleSnoozedRows,
+    ],
+    [topRows, visibleWorkingRows, restRows, visibleSnoozedRows]
   )
   const projectsById = useMemo(
     () => new Map(projects.map(project => [project.id, project])),
@@ -359,7 +375,7 @@ export function RecentWorktreesList({
   if (rows.length === 0) {
     return (
       <div className="px-3 py-6 text-center text-xs text-muted-foreground">
-        No prompted sessions yet
+        {includeEmpty ? 'No sessions yet' : 'No prompted sessions yet'}
       </div>
     )
   }
@@ -367,47 +383,33 @@ export function RecentWorktreesList({
   const failedCount =
     (query.data?.failedServerIds.length ?? 0) +
     (query.data?.failedWorktreeIds.length ?? 0)
-  const hiddenCount = Math.max(0, (query.data?.total ?? rows.length) - limit)
+  const hiddenCount = Math.max(0, (query.data?.total ?? rows.length) - pageSize)
+  // The page can be larger than the limit, so grow from the loaded size.
+  const loadMore = () => setLimit(pageSize + RECENT_PAGE_SIZE)
+  // Unloaded rows are all snoozed: the page holds every active session.
+  const snoozedCount = snoozedRows.length + hiddenCount
   const footerButtonClass =
     'flex h-5 items-center justify-center gap-1 rounded-md px-2 text-xs text-muted-foreground hover:bg-muted/50 hover:text-foreground'
   const footerActions = (
     <>
       {hiddenCount > 0 && !snoozedBoundaryLoaded && (
-        <button
-          type="button"
-          className={footerButtonClass}
-          onClick={() => setLimit(value => value + RECENT_PAGE_SIZE)}
-        >
+        <button type="button" className={footerButtonClass} onClick={loadMore}>
           <Plus className="size-3.5" /> Show{' '}
           {Math.min(hiddenCount, RECENT_PAGE_SIZE)} more
         </button>
       )}
-      {snoozedBoundaryLoaded && !showSnoozed && (
-        <button
-          type="button"
-          className={footerButtonClass}
-          onClick={() => {
-            setShowSnoozed(true)
-            setLimit(value => value + RECENT_PAGE_SIZE)
-          }}
-        >
-          Show snoozed sessions
-        </button>
-      )}
-      {showSnoozed && hiddenCount > 0 && (
-        <button
-          type="button"
-          className={footerButtonClass}
-          onClick={() => setLimit(value => value + RECENT_PAGE_SIZE)}
-        >
+      {snoozedExpanded && hiddenCount > 0 && (
+        <button type="button" className={footerButtonClass} onClick={loadMore}>
           <Plus className="size-3.5" /> Show{' '}
           {Math.min(hiddenCount, RECENT_PAGE_SIZE)} more
         </button>
       )}
     </>
   )
+  // Older pages only load while the Snoozed shelf is open: every row past
+  // the snooze boundary is snoozed.
   const hasFooterActions =
-    hiddenCount > 0 || (snoozedBoundaryLoaded && !showSnoozed)
+    hiddenCount > 0 && (!snoozedBoundaryLoaded || snoozedExpanded)
   const renderRow = (
     row: RecentWorktreeItem,
     index: number,
@@ -570,7 +572,7 @@ export function RecentWorktreesList({
       data-testid="recent-worktrees-list"
     >
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-        {displayedRows.length === 0 && (
+        {displayedRows.length === 0 && snoozedCount === 0 && (
           <div className="px-3 py-6 text-center text-xs text-muted-foreground">
             {searchQuery.trim() ? 'No matching sessions' : 'No recent sessions'}
           </div>
@@ -605,13 +607,28 @@ export function RecentWorktreesList({
             scroll with a long one. */}
         <div className="mt-auto pb-[env(safe-area-inset-bottom)]">
           {!isMobile && workingShelfSection}
-          {snoozedRows.length > 0 && (
+          {snoozedCount > 0 && (
             <section aria-label="Snoozed sessions" className="pb-2">
-              <div className="px-3 py-1 text-2xs font-medium text-muted-foreground">
-                Snoozed · inactive for 24 hours
-              </div>
+              <button
+                type="button"
+                aria-expanded={snoozedExpanded}
+                title="Inactive for 24 hours"
+                className="flex h-8 w-full items-center gap-1 px-3 text-2xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                onClick={() => {
+                  if (!snoozedExpanded && snoozedRows.length === 0) loadMore()
+                  setSnoozedExpanded(value => !value)
+                }}
+              >
+                <ChevronRight
+                  className={`size-3 transition-transform ${snoozedExpanded ? 'rotate-90' : ''}`}
+                />
+                Snoozed
+                <span className="ml-auto font-normal tabular-nums">
+                  {snoozedCount}
+                </span>
+              </button>
               <ul className={listClassName}>
-                {snoozedRows.map((row, index) =>
+                {visibleSnoozedRows.map((row, index) =>
                   renderRow(
                     row,
                     listRows.length + visibleWorkingRows.length + index

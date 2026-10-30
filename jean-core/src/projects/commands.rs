@@ -1128,7 +1128,7 @@ pub struct ProjectBootstrap {
     pub running_sessions: Vec<String>,
 }
 
-/// One recent prompted session with its owning worktree metadata.
+/// One recent session with its owning worktree metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecentWorktreeItem {
@@ -1149,7 +1149,9 @@ pub struct RecentWorktreesResponse {
     pub failed_worktree_ids: Vec<String>,
 }
 
-/// Return a sorted page of recently prompted sessions in one round-trip.
+/// Return a sorted page of recent sessions in one round-trip. Sessions with
+/// no messages are skipped unless `include_empty` is set. The page grows past
+/// `limit` to include every session active after `active_since`.
 /// A corrupt session file does not hide rows from other worktrees.
 pub async fn get_recent_worktrees(
     app: AppHandle,
@@ -1157,6 +1159,8 @@ pub async fn get_recent_worktrees(
     offset: Option<usize>,
     limit: Option<usize>,
     include_session_ids: Option<Vec<String>>,
+    include_empty: bool,
+    active_since: Option<u64>,
 ) -> Result<RecentWorktreesResponse, String> {
     let data = load_projects_data(&app)?;
     let project_filter =
@@ -1192,9 +1196,10 @@ pub async fn get_recent_worktrees(
                 continue;
             }
         };
-        let prompted_sessions = sessions.sessions.into_iter().filter(|session| {
+        let recent_sessions = sessions.sessions.into_iter().filter(|session| {
             session.archived_at.is_none()
-                && (session.last_message_at.is_some()
+                && (include_empty
+                    || session.last_message_at.is_some()
                     || session
                         .message_count
                         .unwrap_or(session.messages.len() as u32)
@@ -1216,7 +1221,7 @@ pub async fn get_recent_worktrees(
             } else {
                 worktree.cached_branch_diff_removed.unwrap_or(0)
             };
-        items.extend(prompted_sessions.map(|session| RecentWorktreeItem {
+        items.extend(recent_sessions.map(|session| RecentWorktreeItem {
             project_id: worktree.project_id.clone(),
             project_name: project_names[&worktree.project_id].clone(),
             worktree: worktree.clone(),
@@ -1235,7 +1240,13 @@ pub async fn get_recent_worktrees(
     });
     let total = items.len();
     let offset = offset.unwrap_or(0).min(total);
-    let limit = limit.unwrap_or(10).clamp(1, 100);
+    let active_count = active_since.map_or(0, |since| {
+        items
+            .iter()
+            .take_while(|item| item.last_activity_at > since)
+            .count()
+    });
+    let limit = limit.unwrap_or(10).clamp(1, 100).max(active_count);
     let mut page = items[offset..total.min(offset + limit)].to_vec();
     if let Some(include_ids) = include_session_ids {
         let include_ids: std::collections::HashSet<_> = include_ids.into_iter().collect();

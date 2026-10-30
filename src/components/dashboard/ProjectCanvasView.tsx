@@ -180,6 +180,7 @@ import {
 } from '@/services/projects'
 import { TerminalStatusIndicator } from '@/hooks/useWorktreeTerminalStatus'
 import { usePreferences } from '@/services/preferences'
+import { useClientPreferences } from '@/hooks/useClientPreferences'
 import { DEFAULT_KEYBINDINGS, formatShortcutDisplay } from '@/types/keybindings'
 import type { CheckStatus, PrDisplayStatus } from '@/types/pr-status'
 import { usePrStatus } from '@/services/pr-status'
@@ -419,6 +420,34 @@ interface CanvasHighlight {
   sessionId?: string
 }
 
+// Stable one-card arrays so memoized session rows skip unchanged renders.
+const singleCardLists = new WeakMap<SessionCardData, SessionCardData[]>()
+function singleCardList(card: SessionCardData): SessionCardData[] {
+  let list = singleCardLists.get(card)
+  if (!list) {
+    list = [card]
+    singleCardLists.set(card, list)
+  }
+  return list
+}
+
+/** Exact session row first, else the worktree's first row. */
+export function findCanvasHighlightIndex(
+  cards: Pick<FlatCard, 'worktreeId' | 'card'>[],
+  highlighted: CanvasHighlight
+): number {
+  const exact = highlighted.sessionId
+    ? cards.findIndex(
+        fc =>
+          fc.worktreeId === highlighted.worktreeId &&
+          fc.card?.session.id === highlighted.sessionId
+      )
+    : -1
+  return exact !== -1
+    ? exact
+    : cards.findIndex(fc => fc.worktreeId === highlighted.worktreeId)
+}
+
 export function getCanvasHighlight(
   item: Pick<FlatCard, 'worktreeId' | 'card'>
 ): CanvasHighlight {
@@ -535,6 +564,7 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
   defaultBranch,
   openPRs,
   cards,
+  title,
   showDetails = false,
   compact = false,
   isSelected,
@@ -550,6 +580,8 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
   defaultBranch: string
   openPRs?: { number: number; headRefName: string }[]
   cards?: SessionCardData[]
+  /** Replaces the worktree name, e.g. with a session name. */
+  title?: string
   showDetails?: boolean
   /** Mobile layout: one status icon, title, time and a muted meta line. */
   compact?: boolean
@@ -574,6 +606,7 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
     defaultBranch
   )
   const isBase = isBaseSession(worktree)
+  const rowTitle = title ?? (isBase ? 'Base Session' : worktree.name)
   const { data: gitStatus } = useGitStatus(isVisible ? worktree.id : null)
 
   const behindCount =
@@ -694,7 +727,7 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
   const displayBranch = gitStatus?.current_branch ?? worktree.branch
   const showBranchBadge = shouldShowWorktreeBranchBadge({
     displayBranch,
-    worktreeName: worktree.name,
+    worktreeName: rowTitle,
     stackedBaseBranch,
     prNumber: worktree.pr_number,
     securityAlertNumber: worktree.security_alert_number,
@@ -761,9 +794,7 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
       </span>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <div className="flex min-w-0 items-center gap-1.5">
-          <span className="min-w-0 truncate">
-            {isBase ? 'Base Session' : worktree.name}
-          </span>
+          <span className="min-w-0 truncate">{rowTitle}</span>
           {compactLabels.length > 0 && !labelsExpanded && (
             <button
               type="button"
@@ -822,13 +853,13 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
             ))}
           </button>
         )}
-        {(displayBranch !== worktree.name && displayBranch && !isBase) ||
+        {(displayBranch !== rowTitle && displayBranch && !isBase) ||
         stackedBaseBranch ||
         worktree.pr_number ||
         worktree.security_alert_number ||
         worktree.advisory_ghsa_id ? (
           <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-            {displayBranch && displayBranch !== worktree.name && !isBase && (
+            {displayBranch && displayBranch !== rowTitle && !isBase && (
               <span className="min-w-0 truncate">{displayBranch}</span>
             )}
             {stackedBaseBranch && (
@@ -897,11 +928,7 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
       }}
       role={onRowClick ? 'button' : undefined}
       tabIndex={onRowClick ? 0 : undefined}
-      aria-label={
-        onRowClick
-          ? `Open ${isBase ? 'Base Session' : worktree.name}`
-          : undefined
-      }
+      aria-label={onRowClick ? `Open ${rowTitle}` : undefined}
     >
       {showDetails && isSelected && onRowClick && (
         <span className="absolute top-2 bottom-2 left-0 w-0.5 rounded-full bg-primary" />
@@ -918,9 +945,7 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
             )}
             <span className="flex min-w-0 flex-1 flex-col gap-1 font-medium sm:flex-row sm:items-center sm:gap-1.5">
               <span className="flex min-w-0 items-center gap-1.5">
-                <span className="min-w-0 flex-1 truncate">
-                  {isBase ? 'Base Session' : worktree.name}
-                </span>
+                <span className="min-w-0 flex-1 truncate">{rowTitle}</span>
                 {showBranchBadge && (
                   <span className="hidden items-center gap-1 rounded border border-border/50 px-1.5 py-0.5 text-2xs font-normal text-muted-foreground sm:inline-flex">
                     <GitBranch className="h-2.5 w-2.5" />
@@ -1194,6 +1219,11 @@ export function ProjectCanvasView({
     state =>
       (state.projectCanvasActiveFilters[projectId] ?? 'all') as CanvasFilterTab
   )
+  // Single session view hides session tabs, so the list shows one row per
+  // session instead of one per worktree. Auto-fix rows keep their progress UI.
+  const sessionRows =
+    (useClientPreferences().preferences.single_session_view_enabled ?? false) &&
+    activeFilterTab !== 'auto_fix'
   const isMobile = useIsMobile()
   const canOpenEditor = canOpenInEditor()
   const canOpenTerminal = canOpenInTerminal()
@@ -1885,6 +1915,18 @@ export function ProjectCanvasView({
     const result: FlatCard[] = []
     let globalIndex = 0
     for (const section of worktreeSections) {
+      if (sessionRows && !section.isPending && section.cards.length > 0) {
+        for (const card of section.cards) {
+          result.push({
+            worktreeId: section.worktree.id,
+            worktreePath: section.worktree.path,
+            card,
+            globalIndex,
+          })
+          globalIndex++
+        }
+        continue
+      }
       // One entry per worktree
       result.push({
         worktreeId: section.worktree.id,
@@ -1896,7 +1938,7 @@ export function ProjectCanvasView({
       globalIndex++
     }
     return result
-  }, [worktreeSections])
+  }, [worktreeSections, sessionRows])
 
   // Selection state
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
@@ -2152,13 +2194,14 @@ export function ProjectCanvasView({
 
   // Re-sync selectedIndex when flatCards reorders (status changes, etc.)
   useEffect(() => {
-    const highlighted = selectedWorktreeModal
-      ? { worktreeId: selectedWorktreeModal.worktreeId }
+    const highlighted: CanvasHighlight | null = selectedWorktreeModal
+      ? {
+          worktreeId: selectedWorktreeModal.worktreeId,
+          sessionId: activeSessionIdForModal ?? undefined,
+        }
       : highlightedCardRef.current
     if (!highlighted) return
-    const cardIndex = flatCards.findIndex(
-      fc => fc.worktreeId === highlighted.worktreeId
-    )
+    const cardIndex = findCanvasHighlightIndex(flatCards, highlighted)
     if (cardIndex !== -1 && cardIndex !== selectedIndex) {
       setSelectedIndex(cardIndex)
       return
@@ -2173,7 +2216,13 @@ export function ProjectCanvasView({
           }
         : null
     }
-  }, [selectedWorktreeModal, flatCards, selectedIndex, activeFilterTab])
+  }, [
+    selectedWorktreeModal,
+    activeSessionIdForModal,
+    flatCards,
+    selectedIndex,
+    activeFilterTab,
+  ])
 
   // Keep a valid selection when the selected item disappears (delete/close).
   // In list layout this prefers the previous row, matching expected canvas behavior.
@@ -2454,30 +2503,33 @@ export function ProjectCanvasView({
     [openWorktreeModal, projectId]
   )
 
-  // Stable row-click handler for memoized section headers. Reads the latest
-  // selection/open handlers through a ref so it never changes identity.
-  const sectionRowClickRef = useLatestRef(
-    (worktree: Worktree, rowIndex: number) => {
-      handleSelectedIndexChange(rowIndex)
-      handleWorktreeClick(worktree.id, worktree.path)
-    }
-  )
-  const handleSectionRowClick = useCallback(
-    (worktree: Worktree, rowIndex: number) => {
-      sectionRowClickRef.current(worktree, rowIndex)
-    },
-    [sectionRowClickRef]
-  )
-
   // Handle selection from keyboard nav
   const handleSelect = useCallback(
     (index: number) => {
       const item = flatCards[index]
       if (item && !item.isPending) {
+        if (sessionRows && item.card) {
+          useChatStore
+            .getState()
+            .setActiveSession(item.worktreeId, item.card.session.id)
+        }
         handleWorktreeClick(item.worktreeId, item.worktreePath)
       }
     },
-    [flatCards, handleWorktreeClick]
+    [flatCards, handleWorktreeClick, sessionRows]
+  )
+
+  // Stable row-click handler for memoized section headers. Reads the latest
+  // selection/open handlers through a ref so it never changes identity.
+  const sectionRowClickRef = useLatestRef((rowIndex: number) => {
+    handleSelectedIndexChange(rowIndex)
+    handleSelect(rowIndex)
+  })
+  const handleSectionRowClick = useCallback(
+    (_worktree: Worktree, rowIndex: number) => {
+      sectionRowClickRef.current(rowIndex)
+    },
+    [sectionRowClickRef]
   )
 
   const moveSelectedWorktreeByKeyboard = useCallback(
@@ -3798,7 +3850,14 @@ export function ProjectCanvasView({
               {(() => {
                 let previousRowState: CanvasRowState | null = null
                 return worktreeSections.map(section => {
-                  const currentIndex = cardIndex++
+                  // Must match the flatCards order: one row per session in
+                  // session mode, else one row per worktree.
+                  const rowCards =
+                    sessionRows && !section.isPending && section.cards.length
+                      ? section.cards
+                      : null
+                  const currentIndex = cardIndex
+                  cardIndex += rowCards?.length ?? 1
                   const rowState = isMobile ? getSectionRowState(section) : null
                   const groupHeader =
                     rowState && rowState !== previousRowState ? (
@@ -3813,6 +3872,7 @@ export function ProjectCanvasView({
                   const isReorderDisabled =
                     !canvasReorderEnabled ||
                     reorderWorktrees.isPending ||
+                    sessionRows ||
                     !canManuallyReorderWorktree(section.worktree)
 
                   if (section.isPending) {
@@ -3863,51 +3923,92 @@ export function ProjectCanvasView({
                         }
                         projectId={projectId}
                       >
-                        <div
-                          ref={el => {
-                            cardRefs.current[currentIndex] = el
-                          }}
-                        >
-                          <WorktreeSectionHeader
-                            worktree={section.worktree}
-                            projectId={projectId}
-                            defaultBranch={project.default_branch}
-                            openPRs={openPRs}
-                            cards={section.cards}
-                            showDetails={true}
-                            compact={isMobile}
-                            isSelected={selectedIndex === currentIndex}
-                            rowIndex={currentIndex}
-                            onRowClick={handleSectionRowClick}
-                            onDiffClick={setCanvasDiffRequest}
-                            onSetLabels={
-                              showWorktreeLabelContextMenu
-                                ? openWorktreeLabelModal
-                                : undefined
-                            }
-                            onResolveConflicts={handleCanvasResolveConflicts}
-                            disableTextSelection={disableWorktreeTextSelection}
-                          />
-                          {activeFilterTab === 'auto_fix' && (
-                            <MrRobotProgress
-                              row={
-                                robotRows.find(
-                                  row => row.worktree.id === section.worktree.id
-                                ) ?? section
-                              }
-                              onOpen={(worktree, card) => {
-                                if (card)
-                                  useChatStore
-                                    .getState()
-                                    .setActiveSession(
-                                      worktree.id,
-                                      card.session.id
-                                    )
-                                openWorktreeModal(worktree.id, worktree.path)
+                        {rowCards?.map((card, offset) => {
+                          const rowIndex = currentIndex + offset
+                          return (
+                            <div
+                              key={card.session.id}
+                              ref={el => {
+                                cardRefs.current[rowIndex] = el
                               }}
+                            >
+                              <WorktreeSectionHeader
+                                worktree={section.worktree}
+                                projectId={projectId}
+                                defaultBranch={project.default_branch}
+                                openPRs={openPRs}
+                                cards={singleCardList(card)}
+                                title={card.session.name || 'Untitled'}
+                                showDetails={true}
+                                compact={isMobile}
+                                isSelected={selectedIndex === rowIndex}
+                                rowIndex={rowIndex}
+                                onRowClick={handleSectionRowClick}
+                                onDiffClick={setCanvasDiffRequest}
+                                onSetLabels={
+                                  showWorktreeLabelContextMenu
+                                    ? openWorktreeLabelModal
+                                    : undefined
+                                }
+                                onResolveConflicts={
+                                  handleCanvasResolveConflicts
+                                }
+                                disableTextSelection={
+                                  disableWorktreeTextSelection
+                                }
+                              />
+                            </div>
+                          )
+                        }) ?? (
+                          <div
+                            ref={el => {
+                              cardRefs.current[currentIndex] = el
+                            }}
+                          >
+                            <WorktreeSectionHeader
+                              worktree={section.worktree}
+                              projectId={projectId}
+                              defaultBranch={project.default_branch}
+                              openPRs={openPRs}
+                              cards={section.cards}
+                              showDetails={true}
+                              compact={isMobile}
+                              isSelected={selectedIndex === currentIndex}
+                              rowIndex={currentIndex}
+                              onRowClick={handleSectionRowClick}
+                              onDiffClick={setCanvasDiffRequest}
+                              onSetLabels={
+                                showWorktreeLabelContextMenu
+                                  ? openWorktreeLabelModal
+                                  : undefined
+                              }
+                              onResolveConflicts={handleCanvasResolveConflicts}
+                              disableTextSelection={
+                                disableWorktreeTextSelection
+                              }
                             />
-                          )}
-                        </div>
+                            {activeFilterTab === 'auto_fix' && (
+                              <MrRobotProgress
+                                row={
+                                  robotRows.find(
+                                    row =>
+                                      row.worktree.id === section.worktree.id
+                                  ) ?? section
+                                }
+                                onOpen={(worktree, card) => {
+                                  if (card)
+                                    useChatStore
+                                      .getState()
+                                      .setActiveSession(
+                                        worktree.id,
+                                        card.session.id
+                                      )
+                                  openWorktreeModal(worktree.id, worktree.path)
+                                }}
+                              />
+                            )}
+                          </div>
+                        )}
                       </SortableCanvasWorktreeSection>
                     </Fragment>
                   )

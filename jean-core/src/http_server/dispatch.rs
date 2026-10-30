@@ -220,12 +220,16 @@ pub async fn dispatch_command(
             let limit: Option<usize> = from_field_opt(&args, "limit")?;
             let include_session_ids: Option<Vec<String>> =
                 field_opt(&args, "includeSessionIds", "include_session_ids")?;
+            let include_empty: Option<bool> = field_opt(&args, "includeEmpty", "include_empty")?;
+            let active_since: Option<u64> = field_opt(&args, "activeSince", "active_since")?;
             let result = crate::projects::get_recent_worktrees(
                 app.clone(),
                 project_ids,
                 offset,
                 limit,
                 include_session_ids,
+                include_empty.unwrap_or(false),
+                active_since,
             )
             .await?;
             to_value(result)

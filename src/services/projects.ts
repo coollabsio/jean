@@ -151,6 +151,8 @@ export function invalidateProjectLists(
 
 export interface RecentWorktreesData {
   items: RecentWorktreeItem[]
+  /** Rows in the activity-ordered page, before pinned extras. */
+  pageSize: number
   total: number
   failedServerIds: string[]
   failedWorktreeIds: string[]
@@ -160,7 +162,10 @@ export interface RecentWorktreesData {
 export async function fetchRecentWorktrees(
   projects: Project[],
   limit: number,
-  includeSessionIds: string[]
+  includeSessionIds: string[],
+  includeEmpty = false,
+  /** Unix seconds. The page grows to hold every session active after it. */
+  activeSince?: number
 ): Promise<RecentWorktreesData> {
   const projectsByServer = new Map<string, Project[]>()
   for (const project of projects.filter(
@@ -190,6 +195,8 @@ export async function fetchRecentWorktrees(
           offset: 0,
           limit,
           includeSessionIds: serverSessionIds,
+          includeEmpty,
+          activeSince,
         }
       )
       return { serverId, response }
@@ -210,7 +217,15 @@ export async function fetchRecentWorktrees(
         b.worktree.created_at - a.worktree.created_at ||
         a.worktree.id.localeCompare(b.worktree.id)
     )
-  const visibleItems = items.slice(0, limit)
+  const activeCount =
+    activeSince === undefined
+      ? 0
+      : items.findIndex(item => item.lastActivityAt <= activeSince)
+  const pageSize = Math.max(
+    limit,
+    activeCount === -1 ? items.length : activeCount
+  )
+  const visibleItems = items.slice(0, pageSize)
   const visibleIds = new Set(visibleItems.map(item => item.session.id))
   const pinnedIds = new Set(includeSessionIds)
   for (const item of items) {
@@ -221,6 +236,7 @@ export async function fetchRecentWorktrees(
   }
   return {
     items: visibleItems,
+    pageSize,
     total: successful.reduce((sum, result) => sum + result.response.total, 0),
     failedServerIds: results.flatMap((result, index) => {
       const serverId = serverEntries[index]?.[0]

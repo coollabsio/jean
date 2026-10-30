@@ -4076,7 +4076,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             <InlineField
               id="pref-general-single-session-view"
               label="Single session view"
-              description="Hide the session tabs and switch sessions from the Recent list"
+              description="Hide the session tabs. The worktree list and Recent show every session, also empty ones"
               help="Cmd/Ctrl+Enter on the first prompt sends it in the background and opens a new session."
             >
               <Switch
