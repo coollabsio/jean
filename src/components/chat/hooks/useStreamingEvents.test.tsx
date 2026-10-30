@@ -1141,7 +1141,12 @@ describe('useStreamingEvents cancellation sanitization', () => {
         content: 'Actual partial response.',
       })
     )
-    expect(useChatStore.getState().isSessionReviewing('session-1')).toBe(true)
+    // A cancelled run must show as cancelled, not as ready for review.
+    expect(useChatStore.getState().isSessionReviewing('session-1')).toBe(false)
+    expect(mockInvoke).toHaveBeenCalledWith(
+      'update_session_state',
+      expect.objectContaining({ sessionId: 'session-1', isReviewing: false })
+    )
 
     registeredListeners.get('chat:chunk')?.({
       payload: {
@@ -1247,7 +1252,7 @@ describe('useStreamingEvents cancellation sanitization', () => {
       'save_cancelled_message',
       expect.objectContaining({ sessionId: 'session-1' })
     )
-    expect(useChatStore.getState().isSessionReviewing('session-1')).toBe(true)
+    expect(useChatStore.getState().isSessionReviewing('session-1')).toBe(false)
   })
 
   it('keeps the sent prompt on chat:error after tool calls without text', async () => {
@@ -1722,7 +1727,7 @@ describe('useStreamingEvents cancellation sanitization', () => {
     expect(useChatStore.getState().lastSentMessages['session-1']).toBe(
       undefined
     )
-    expect(useChatStore.getState().isSessionReviewing('session-1')).toBe(true)
+    expect(useChatStore.getState().isSessionReviewing('session-1')).toBe(false)
     expect(mockInvoke).not.toHaveBeenCalledWith(
       'get_session',
       expect.anything()

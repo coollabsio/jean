@@ -2197,16 +2197,9 @@ export default function useStreamingEvents({
         // legitimate next run starts for the session.
         cancelledUntaggedSessionIds.add(session_id)
 
-        // Override reviewing state based on whether visible messages remain.
-        const updatedSession = queryClient.getQueryData<Session>(
-          chatQueryKeys.session(session_id)
-        )
-        useChatStore
-          .getState()
-          .setSessionReviewing(
-            session_id,
-            (updatedSession?.messages.length ?? 0) > 0
-          )
+        // A cancelled run is not a review: clear the flag so status views show
+        // the cancelled run instead of "Review".
+        useChatStore.getState().setSessionReviewing(session_id, false)
 
         // Persist cancel state to disk BEFORE invalidating queries
         // This prevents a race where invalidation refetches stale waiting_for_input: true from disk
@@ -2272,18 +2265,13 @@ export default function useStreamingEvents({
         }
 
         if (resolvedWorktreeId && wtPath) {
-          const isNowReviewing =
-            (queryClient.getQueryData<Session>(
-              chatQueryKeys.session(session_id)
-            )?.messages.length ?? 0) > 0
-
           invoke('update_session_state', {
             worktreeId: resolvedWorktreeId,
             worktreePath: wtPath,
             sessionId: session_id,
             waitingForInput: false,
             waitingForInputType: null,
-            isReviewing: isNowReviewing,
+            isReviewing: false,
           })
             .catch(err =>
               console.debug(
