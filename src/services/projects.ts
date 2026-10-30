@@ -2165,7 +2165,7 @@ export function useCloseBaseSession() {
         clearActiveWorktree()
       }
 
-      toast.success('Session closed')
+      toast.success('Base session closed')
     },
     onError: error => {
       const message =
@@ -2216,7 +2216,7 @@ export function useCloseBaseSessionClean() {
         clearActiveWorktree()
       }
 
-      toast.success('Session closed')
+      toast.success('Base session closed')
     },
     onError: error => {
       const message =

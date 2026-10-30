@@ -81,6 +81,8 @@ interface WorktreeDropdownMenuProps {
   onRunPackageScript?: (script: PackageScript) => void
   /** Server project (Servers tab): no git, GitHub, browser or project settings */
   serverProject?: Project | null
+  /** Closes the open chat session (not the worktree) */
+  onCloseSession?: () => void
 }
 
 const BADGE_STALE_TIME = 5 * 60 * 1000
@@ -100,6 +102,7 @@ export function WorktreeDropdownMenu({
   packageScripts = [],
   onRunPackageScript,
   serverProject,
+  onCloseSession,
 }: WorktreeDropdownMenuProps) {
   const server = serverProject?.server
   const isServer = !!server
@@ -522,10 +525,17 @@ export function WorktreeDropdownMenu({
 
           <DropdownMenuSeparator />
 
+          {onCloseSession && (
+            <DropdownMenuItem onClick={onCloseSession}>
+              <X className="mr-2 h-4 w-4" />
+              Close Session
+            </DropdownMenuItem>
+          )}
+
           {isBase ? (
             <DropdownMenuItem onClick={handleClose}>
               <X className="mr-2 h-4 w-4" />
-              Close Session
+              Close Base Session
             </DropdownMenuItem>
           ) : (
             <DropdownMenuItem onClick={() => setShowDeleteConfirm(true)}>

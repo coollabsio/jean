@@ -197,6 +197,8 @@ import {
 } from './worktree-row-status'
 import { CloseWorktreeDialog } from '@/components/chat/CloseWorktreeDialog'
 import { decideSessionRowClose } from '@/components/projects/worktree-close-decision'
+import { sessionRowTitle } from '@/lib/session-title'
+import { SwipeActionRow } from '@/components/ui/swipe-action-row'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { hasBackendTransport } from '@/lib/environment'
 import { consumeWebReloadState } from '@/lib/web-reload-state'
@@ -2080,6 +2082,31 @@ export function ProjectCanvasView({
     setCloseSessionTarget(null)
   }, [closeSessionTarget, closeSession])
 
+  // Session rows close one session, not the whole worktree. Only the last
+  // empty session closes its worktree (after confirmation).
+  const requestCloseSessionRow = useCallback(
+    (worktree: Worktree, session: Session) => {
+      const target = {
+        worktreeId: worktree.id,
+        worktreePath: worktree.path,
+        sessionId: session.id,
+      }
+      const decision = decideSessionRowClose(
+        session,
+        sessionsByWorktreeIdRef.current.get(worktree.id)?.sessions ?? [],
+        useChatStore.getState().inputDrafts
+      )
+      if (decision === 'close-session') closeSession(target)
+      else if (decision === 'confirm-session') setCloseSessionTarget(target)
+      else
+        setCloseWorktreeTarget({
+          worktreeId: worktree.id,
+          branchName: worktree.branch,
+        })
+    },
+    [closeSession]
+  )
+
   const handleConfirmCloseWorktree = useCallback(() => {
     if (!closeWorktreeTarget) return
     closeWorktreeDirectly(closeWorktreeTarget.worktreeId)
@@ -3157,27 +3184,9 @@ export function ProjectCanvasView({
         const section = worktreeSections.find(
           s => s.worktree.id === item.worktreeId
         )
-        // Session rows close one session, not the whole worktree
-        if (sessionRows) {
-          const target = {
-            worktreeId: item.worktreeId,
-            worktreePath: item.worktreePath,
-            sessionId: item.card.session.id,
-          }
-          const decision = decideSessionRowClose(
-            item.card.session,
-            sessionsByWorktreeIdRef.current.get(item.worktreeId)?.sessions ??
-              [],
-            useChatStore.getState().inputDrafts
-          )
-          if (decision === 'close-session') {
-            closeSession(target)
-            return
-          }
-          if (decision === 'confirm-session') {
-            setCloseSessionTarget(target)
-            return
-          }
+        if (sessionRows && section) {
+          requestCloseSessionRow(section.worktree, item.card.session)
+          return
         }
         setCloseWorktreeTarget({
           worktreeId: item.worktreeId,
@@ -3205,7 +3214,7 @@ export function ProjectCanvasView({
     flatCards,
     worktreeSections,
     sessionRows,
-    closeSession,
+    requestCloseSessionRow,
   ])
 
   // Listen for create-new-session event to handle CMD+T / picker shortcut
@@ -3903,6 +3912,10 @@ export function ProjectCanvasView({
                     sessionRows && !section.isPending && section.cards.length
                       ? section.cards
                       : null
+                  const openSessionCount = (
+                    sessionsByWorktreeId.get(section.worktree.id)?.sessions ??
+                    []
+                  ).filter(s => !s.archived_at).length
                   const currentIndex = cardIndex
                   cardIndex += rowCards?.length ?? 1
                   const rowState = isMobile ? getSectionRowState(section) : null
@@ -3979,31 +3992,48 @@ export function ProjectCanvasView({
                                 cardRefs.current[rowIndex] = el
                               }}
                             >
-                              <WorktreeSectionHeader
-                                worktree={section.worktree}
-                                projectId={projectId}
-                                defaultBranch={project.default_branch}
-                                openPRs={openPRs}
-                                cards={singleCardList(card)}
-                                title={card.session.name || 'Untitled'}
-                                showDetails={true}
-                                compact={isMobile}
-                                isSelected={selectedIndex === rowIndex}
-                                rowIndex={rowIndex}
-                                onRowClick={handleSectionRowClick}
-                                onDiffClick={setCanvasDiffRequest}
-                                onSetLabels={
-                                  showWorktreeLabelContextMenu
-                                    ? openWorktreeLabelModal
-                                    : undefined
+                              <SwipeActionRow
+                                enabled={isMobile}
+                                actionLabel="Close"
+                                onAction={() =>
+                                  requestCloseSessionRow(
+                                    section.worktree,
+                                    card.session
+                                  )
                                 }
-                                onResolveConflicts={
-                                  handleCanvasResolveConflicts
-                                }
-                                disableTextSelection={
-                                  disableWorktreeTextSelection
-                                }
-                              />
+                              >
+                                <WorktreeSectionHeader
+                                  worktree={section.worktree}
+                                  projectId={projectId}
+                                  defaultBranch={project.default_branch}
+                                  openPRs={openPRs}
+                                  cards={singleCardList(card)}
+                                  title={
+                                    sessionRowTitle(
+                                      card.session.name,
+                                      section.worktree.name,
+                                      openSessionCount
+                                    ) || 'Untitled'
+                                  }
+                                  showDetails={true}
+                                  compact={isMobile}
+                                  isSelected={selectedIndex === rowIndex}
+                                  rowIndex={rowIndex}
+                                  onRowClick={handleSectionRowClick}
+                                  onDiffClick={setCanvasDiffRequest}
+                                  onSetLabels={
+                                    showWorktreeLabelContextMenu
+                                      ? openWorktreeLabelModal
+                                      : undefined
+                                  }
+                                  onResolveConflicts={
+                                    handleCanvasResolveConflicts
+                                  }
+                                  disableTextSelection={
+                                    disableWorktreeTextSelection
+                                  }
+                                />
+                              </SwipeActionRow>
                             </div>
                           )
                         }) ?? (

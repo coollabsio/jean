@@ -115,7 +115,7 @@ export function WorktreeContextMenu({
         {isBase ? (
           <ContextMenuItem onClick={handleClose}>
             <X className="mr-2 h-4 w-4" />
-            Close Session
+            Close Base Session
           </ContextMenuItem>
         ) : (
           <ContextMenuItem onClick={() => setShowDeleteConfirm(true)}>

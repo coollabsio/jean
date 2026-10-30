@@ -1095,6 +1095,14 @@ export const SessionChatModal = memo(function SessionChatModal({
       packageScripts={packageScripts}
       onRunPackageScript={handlePackageScript}
       serverProject={project.server ? project : null}
+      onCloseSession={
+        currentSessionId && !isServer
+          ? () =>
+              // Same flow as CMD+W: confirms non-empty sessions and follows
+              // the single session view rules.
+              window.dispatchEvent(new Event('close-session-or-worktree'))
+          : undefined
+      }
     />
   )
 
@@ -1176,7 +1184,7 @@ export const SessionChatModal = memo(function SessionChatModal({
   // no tab row
   const headerSessionTitle = singleSessionView && currentSession && (
     <>
-      <span className="mx-1.5 text-muted-foreground/40">/</span>
+      <span className="mx-1.5 shrink-0 text-muted-foreground/40">/</span>
       {renamingSessionId === currentSession.id ? (
         renderRenameInput(currentSession.id, 'md:text-sm')
       ) : (
@@ -1184,7 +1192,10 @@ export const SessionChatModal = memo(function SessionChatModal({
           <ContextMenuTrigger asChild>
             <button
               type="button"
-              className="inline cursor-default"
+              className={cn(
+                'cursor-default',
+                isMobile ? 'min-w-0 truncate' : 'inline'
+              )}
               onDoubleClick={() =>
                 handleStartRenameImmediate(
                   currentSession.id,
@@ -1268,7 +1279,9 @@ export const SessionChatModal = memo(function SessionChatModal({
                     <h2
                       className={cn(
                         'text-sm font-medium min-w-0 truncate',
-                        !isMobile && 'flex-1'
+                        // Mobile: the worktree prefix shrinks first so the
+                        // session name stays visible
+                        isMobile ? 'flex items-center' : 'flex-1'
                       )}
                     >
                       {project && !isMobile && !isServer && (
@@ -1285,11 +1298,17 @@ export const SessionChatModal = memo(function SessionChatModal({
                           </span>
                         </span>
                       )}
-                      {isServer
-                        ? project?.name
-                        : isBase
-                          ? 'Base Session'
-                          : (worktree?.name ?? 'Worktree')}
+                      <span
+                        className={cn(
+                          isMobile && 'min-w-0 shrink-[100] truncate'
+                        )}
+                      >
+                        {isServer
+                          ? project?.name
+                          : isBase
+                            ? 'Base Session'
+                            : (worktree?.name ?? 'Worktree')}
+                      </span>
                       {headerSessionTitle}
                     </h2>
                     {worktreeMenu}

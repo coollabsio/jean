@@ -14,7 +14,9 @@ describe('RecentWorktreesList structure', () => {
     expect(source).toContain('setLimit(pageSize + RECENT_PAGE_SIZE)')
     // Paging actions scroll with the list instead of a fixed sidebar footer.
     expect(source).not.toContain('createPortal')
-    expect(source).toContain('const showLoadMore = snoozedExpanded && hiddenCount > 0')
+    expect(source).toContain(
+      'const showLoadMore = snoozedExpanded && hiddenCount > 0'
+    )
     expect(source).toContain('aria-label="Snoozed sessions"')
     expect(source).toContain('aria-expanded={snoozedExpanded}')
     expect(source).toContain('isSnoozedSession(row.lastActivityAt)')
@@ -27,15 +29,14 @@ describe('RecentWorktreesList structure', () => {
     expect(source).toContain('aria-label="Working sessions"')
     expect(source).toContain('aria-expanded={workingExpanded}')
     expect(source).toMatch(
-      /\[\s*\.\.\.topRows,\s*\.\.\.visibleWorkingRows,\s*\.\.\.restRows,\s*\.\.\.visibleSnoozedRows,\s*\]/
+      /\[\.\.\.listRows, \.\.\.visibleWorkingRows, \.\.\.visibleSnoozedRows\]/
     )
-    // Mobile puts the shelf at the top, just below the pinned rows.
-    expect(source).toContain('{isMobile && workingShelfSection}')
-    expect(source).toContain('{!isMobile && workingShelfSection}')
+    // The shelf sits at the bottom on every view, mobile included.
+    expect(source).not.toContain('isMobile && workingShelfSection')
   })
 
   it('shows session, project, worktree, and activity without Git diff information', () => {
-    expect(source).toContain('{row.session.name}')
+    expect(source).toContain(': title}')
     expect(source).toContain('namingSessionIds[row.session.id]')
     expect(source).toContain("'Generating…'")
     expect(source).toContain('{row.projectName} · {row.worktree.name}')

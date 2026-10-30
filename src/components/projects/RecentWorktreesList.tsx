@@ -40,6 +40,7 @@ import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
 import { chatQueryKeys } from '@/services/chat'
 import { fetchRecentWorktrees } from '@/services/projects'
+import { sessionRowTitle } from '@/lib/session-title'
 import {
   setRecentSessionPinned,
   useRecentSessionPins,
@@ -195,6 +196,15 @@ export function RecentWorktreesList({
   const rows = query.data?.items ?? EMPTY_RECENT_ROWS
   const pageSize = query.data?.pageSize ?? limit
   const pinned = useMemo(() => new Set(pinnedSessionIds), [pinnedSessionIds])
+  // Single session view lists every session, so loaded rows give the open
+  // session count per worktree.
+  const sessionCountByWorktree = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const row of rows) {
+      counts.set(row.worktree.id, (counts.get(row.worktree.id) ?? 0) + 1)
+    }
+    return counts
+  }, [rows])
   // Unpinned running sessions move to a collapsible Working shelf, and
   // unpinned snoozed sessions to a collapsible Snoozed shelf below it.
   // Pinned sessions stay in the pinned group.
@@ -228,26 +238,10 @@ export function RecentWorktreesList({
   }, [pinned, rows, searchQuery, sendingSessionIds, waitingForInputSessionIds])
   const visibleWorkingRows = workingExpanded ? workingRows : EMPTY_RECENT_ROWS
   const visibleSnoozedRows = snoozedExpanded ? snoozedRows : EMPTY_RECENT_ROWS
-  // Mobile shows the Working shelf at the top, between pinned and other rows.
-  const { pinnedCount, topRows, restRows } = useMemo(() => {
-    const count = isMobile
-      ? listRows.filter(row => pinned.has(row.session.id)).length
-      : listRows.length
-    return {
-      pinnedCount: count,
-      topRows: listRows.slice(0, count),
-      restRows: listRows.slice(count),
-    }
-  }, [isMobile, listRows, pinned])
   // Visual order, used by Cmd+Arrow navigation and Cmd+1-9 shortcuts.
   const displayedRows = useMemo(
-    () => [
-      ...topRows,
-      ...visibleWorkingRows,
-      ...restRows,
-      ...visibleSnoozedRows,
-    ],
-    [topRows, visibleWorkingRows, restRows, visibleSnoozedRows]
+    () => [...listRows, ...visibleWorkingRows, ...visibleSnoozedRows],
+    [listRows, visibleWorkingRows, visibleSnoozedRows]
   )
   const projectsById = useMemo(
     () => new Map(projects.map(project => [project.id, project])),
@@ -420,6 +414,13 @@ export function RecentWorktreesList({
     const isPinned = pinned.has(row.session.id)
     const project = projectsById.get(row.projectId)
     const isServer = !!project?.server
+    const title = includeEmpty
+      ? sessionRowTitle(
+          row.session.name,
+          row.worktree.name,
+          sessionCountByWorktree.get(row.worktree.id) ?? 1
+        )
+      : row.session.name
     const showPinnedSeparator =
       !isPinned && !!previous && pinned.has(previous.session.id)
     return (
@@ -465,15 +466,13 @@ export function RecentWorktreesList({
             }}
             type="button"
             aria-current={isCurrent ? 'page' : undefined}
-            aria-label={`${row.session.name}, ${isServer ? 'server ' : ''}${row.projectName}, ${row.worktree.name}, ${status.label}${isUnread ? ', unread' : ''}, ${activityLabel}`}
+            aria-label={`${title}, ${isServer ? 'server ' : ''}${row.projectName}, ${row.worktree.name}, ${status.label}${isUnread ? ', unread' : ''}, ${activityLabel}`}
             className="flex w-full flex-col gap-y-1 text-left focus-visible:outline-none"
           >
             <span className="flex items-center gap-2">
               {project && <ProjectAvatar project={project} />}
               <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
-                {namingSessionIds[row.session.id]
-                  ? 'Generating…'
-                  : row.session.name}
+                {namingSessionIds[row.session.id] ? 'Generating…' : title}
               </span>
               <span className="flex shrink-0 items-center justify-end gap-1.5 text-2xs empty:hidden">
                 {isUnread && (
@@ -547,7 +546,7 @@ export function RecentWorktreesList({
       </button>
       <ul className={listClassName}>
         {visibleWorkingRows.map((row, index) =>
-          renderRow(row, topRows.length + index)
+          renderRow(row, listRows.length + index)
         )}
       </ul>
     </section>
@@ -568,32 +567,14 @@ export function RecentWorktreesList({
           aria-label="Recent sessions"
           className={`${listClassName} pt-2 pb-2`}
         >
-          {topRows.map((row, index) =>
-            renderRow(row, index, topRows[index - 1])
+          {listRows.map((row, index) =>
+            renderRow(row, index, listRows[index - 1])
           )}
         </ul>
-        {isMobile && workingShelfSection}
-        {restRows.length > 0 && (
-          <ul
-            aria-label="Other recent sessions"
-            className={`${listClassName} pb-2`}
-          >
-            {restRows.map((row, index) =>
-              renderRow(
-                row,
-                topRows.length + visibleWorkingRows.length + index,
-                // The Working shelf header already separates the groups.
-                workingShelfSection
-                  ? restRows[index - 1]
-                  : listRows[pinnedCount + index - 1]
-              )
-            )}
-          </ul>
-        )}
         {/* Shelves and paging actions sit at the bottom of a short list and
             scroll with a long one. */}
         <div className="mt-auto pb-[env(safe-area-inset-bottom)]">
-          {!isMobile && workingShelfSection}
+          {workingShelfSection}
           {snoozedCount > 0 && (
             <section aria-label="Snoozed sessions" className="pb-2">
               <button
