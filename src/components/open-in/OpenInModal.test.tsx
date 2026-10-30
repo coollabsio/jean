@@ -113,6 +113,7 @@ vi.mock('@/lib/environment', () => ({
 
 vi.mock('@/lib/platform', () => ({
   openExternal: mocks.openExternal,
+  getModifierSymbol: () => '⌘',
   isMacOS: true,
   isWindows: false,
   isLinux: false,
@@ -301,7 +302,7 @@ describe('OpenInModal', () => {
     )
   })
 
-  it('opens a port with its plain number key, without Cmd/Ctrl', async () => {
+  it('opens a port with Cmd/Ctrl + its number key', async () => {
     openInState.ports = [
       { port: 3000, label: 'API' },
       { port: 1420, label: 'App' },
@@ -310,20 +311,21 @@ describe('OpenInModal', () => {
     render(<OpenInModal />)
 
     await screen.findByText('App (localhost:1420)')
-    await userEvent.keyboard('2')
+    await userEvent.keyboard('{Meta>}2{/Meta}')
     expect(mocks.openExternal).toHaveBeenCalledWith('http://localhost:1420')
   })
 
-  it('numbers context keys after port keys so digits do not clash', async () => {
+  it('opens the context, not the port, with a plain number key', async () => {
     openInState.ports = [{ port: 3000, label: 'API' }]
 
     render(<OpenInModal />)
 
     await screen.findByText('API (localhost:3000)')
-    await userEvent.keyboard('2')
+    await userEvent.keyboard('1')
     expect(mocks.openExternal).toHaveBeenCalledWith(
       'https://github.com/acme/app/security/dependabot/7'
     )
+    expect(mocks.openExternal).not.toHaveBeenCalledWith('http://localhost:3000')
   })
 
   it('shows worktree and loaded security/advisory context URLs', async () => {

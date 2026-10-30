@@ -58,7 +58,7 @@ import { parseServerResourceKey } from '@/lib/server-resource'
 import { LOCAL_SERVER_ID } from '@/types/server-resource'
 import { getEditorLabel, getTerminalLabel } from '@/types/preferences'
 import { notify } from '@/lib/notifications'
-import { openExternal } from '@/lib/platform'
+import { getModifierSymbol, openExternal } from '@/lib/platform'
 import { cn } from '@/lib/utils'
 import { Kbd } from '@/components/ui/kbd'
 import {
@@ -76,6 +76,7 @@ interface ModalOption {
   label: string
   icon: ComponentType<{ className?: string }>
   key?: string
+  metaKey?: boolean
   url?: string
 }
 
@@ -238,16 +239,16 @@ export function OpenInModal() {
       label: `${p.label} (${resolvePortHost(p, preferences?.browser_default_host)}:${p.port})`,
       icon: Globe,
       key: i < 9 ? String(i + 1) : undefined,
+      metaKey: true,
       url: resolvePortUrl(p, preferences?.browser_default_host),
     }))
   }, [ports, preferences?.browser_default_host])
 
-  // Context options (worktree + loaded GitHub contexts). Number keys continue
-  // after the port keys, so each digit selects one option only.
+  // Context options (worktree + loaded GitHub contexts, numbered 1-9)
   const contextOptions = useMemo(() => {
     const items: ModalOption[] = []
     const seenUrls = new Set<string>()
-    let keyIndex = portOptions.length + 1
+    let keyIndex = 1
 
     const addOption = (option: Omit<ModalOption, 'key'>) => {
       if (option.url && seenUrls.has(option.url)) return
@@ -350,7 +351,6 @@ export function OpenInModal() {
 
     return items
   }, [
-    portOptions.length,
     loadedPRs,
     loadedIssues,
     loadedDiscussions,
@@ -501,9 +501,12 @@ export function OpenInModal() {
       const allIds = allOptions.map(opt => opt.id)
       const hasMeta = e.metaKey || e.ctrlKey
 
-      // Quick select with shortcut keys
+      // Quick select with shortcut keys (metaKey options require Cmd/Ctrl)
       const matchedOption = allOptions.find(
-        opt => !hasMeta && opt.key && opt.key.toLowerCase() === key
+        opt =>
+          opt.key &&
+          opt.key.toLowerCase() === key &&
+          (opt.metaKey ? hasMeta : !hasMeta)
       )
       if (matchedOption) {
         e.preventDefault()
@@ -555,7 +558,13 @@ export function OpenInModal() {
           <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
           <span className="truncate">{option.label}</span>
         </div>
-        {option.key && <Kbd className="ml-2 shrink-0">{option.key}</Kbd>}
+        {option.key && (
+          <Kbd modHint={option.metaKey} className="ml-2 shrink-0">
+            {option.metaKey
+              ? `${getModifierSymbol()}${option.key}`
+              : option.key}
+          </Kbd>
+        )}
       </button>
     )
   }
