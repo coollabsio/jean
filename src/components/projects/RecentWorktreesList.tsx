@@ -314,7 +314,9 @@ export function RecentWorktreesList({
     )
     if (!row) return
     handleOpen(row)
-    rowRefs.current.get(row.session.id)?.focus()
+    const element = rowRefs.current.get(row.session.id)
+    element?.focus({ preventScroll: true })
+    element?.closest('li')?.scrollIntoView({ block: 'nearest' })
   })
 
   useEffect(() => {
@@ -329,7 +331,12 @@ export function RecentWorktreesList({
   const onOpenByIndex = useEffectEvent((event: Event) => {
     const index = (event as CustomEvent<{ index: number }>).detail?.index
     const row = index === undefined ? undefined : displayedRows[index]
-    if (row) handleOpen(row)
+    if (!row) return
+    handleOpen(row)
+    rowRefs.current
+      .get(row.session.id)
+      ?.closest('li')
+      ?.scrollIntoView({ block: 'nearest' })
   })
 
   useEffect(() => {
