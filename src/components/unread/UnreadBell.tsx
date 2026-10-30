@@ -574,7 +574,7 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
                   onClick={() => handleSelect(item)}
                   onMouseEnter={() => setFocusedIndex(idx)}
                   className={cn(
-                    'w-full text-left px-2 py-1.5 rounded-md hover:bg-accent/50 transition-colors cursor-pointer flex items-start gap-2',
+                    'w-full text-left px-2 py-1.5 rounded-md transition-colors cursor-pointer flex items-start gap-2',
                     focusedIndex === idx && 'bg-accent'
                   )}
                 >
@@ -599,7 +599,9 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
                       </span>
                       {showDesktopKeyboardAffordances &&
                         focusedIndex === idx && (
-                          <Kbd title="Press R to mark read">R</Kbd>
+                          <Kbd title="Press R to mark read" className="-my-1">
+                            R
+                          </Kbd>
                         )}
                     </div>
                     <span className="text-[13px] truncate block">
