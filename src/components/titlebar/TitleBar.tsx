@@ -26,6 +26,7 @@ import { useRemoteConnections } from '@/lib/remote-connections'
 import { useProjectsStore } from '@/store/projects-store'
 import { resolveHeaderServerLabel } from './server-context'
 import { UpdatesIndicator } from './UpdatesIndicator'
+import { TitleBarGitDiff } from './TitleBarGitDiff'
 
 // Dark pill that matches the toast surface (card bg + soft border).
 const SERVER_BADGE_CLASS = 'border border-border/60 bg-card text-2xs'
@@ -54,6 +55,13 @@ export function TitleBar({
   const isMobile = useIsMobile()
   /** Mobile zen: single header line in the title bar (name + exit). */
   const mobileZen = zenMode && isMobile
+  // Mobile: the session header is too narrow for diff counts, so show them
+  // next to the project name.
+  const diffWorktreeId = useUIStore(state =>
+    isMobile && state.sessionChatModalOpen
+      ? state.sessionChatModalWorktreeId
+      : null
+  )
 
   const sidebarShortcut = formatShortcutDisplay(
     (preferences?.keybindings?.toggle_left_sidebar ||
@@ -206,7 +214,10 @@ export function TitleBar({
                 {serverLabel}
               </Badge>
             )}
-            <UnreadBell title={title} hideTitle={hideTitle} />
+            <div className="min-w-0">
+              <UnreadBell title={title} hideTitle={hideTitle} />
+            </div>
+            {diffWorktreeId && <TitleBarGitDiff worktreeId={diffWorktreeId} />}
           </div>
         </div>
       )}
