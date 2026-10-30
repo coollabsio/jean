@@ -918,6 +918,9 @@ export const SessionChatModal = memo(function SessionChatModal({
 
   // Display preference of this client, not of the worktree's server
   const { data: localPreferences } = usePreferences(LOCAL_SERVER_ID)
+  // Experimental: no tab row; the Recent list is the session switcher
+  const singleSessionView =
+    localPreferences?.single_session_view_enabled ?? false
 
   const handleSync = useCallback(
     (e: React.MouseEvent) => {
@@ -1090,6 +1093,74 @@ export const SessionChatModal = memo(function SessionChatModal({
     </>
   )
 
+  const renderRenameInput = (sessionId: string, className?: string) => (
+    <input
+      ref={renameInputRef}
+      type="text"
+      value={renameValue}
+      onChange={e => setRenameValue(e.target.value)}
+      onBlur={() => handleRenameSubmit(sessionId)}
+      onKeyDown={e => handleRenameKeyDown(e, sessionId)}
+      onPointerDown={e => e.stopPropagation()}
+      onClick={e => e.stopPropagation()}
+      aria-label="Rename session"
+      className={cn(
+        'w-full min-w-0 bg-transparent text-base outline-none',
+        className
+      )}
+    />
+  )
+
+  const renderSessionMenuItems = (session: Session) => (
+    <SessionContextMenuItems
+      session={session}
+      hasLabel={!!useChatStore.getState().sessionLabels[session.id]}
+      resumeCommand={getResumeCommand(session)}
+      nativeClientPending={isOpeningInNativeClient}
+      onRename={() => handleStartRename(session.id, session.name)}
+      onToggleLabel={() => {
+        setLabelTargetSessionId(session.id)
+        setLabelModalOpen(true)
+      }}
+      onOpenInNativeClient={() => handleOpenInNativeClient(session)}
+      onReconnect={() => void reconnectNativeCliSession(session, worktreeId)}
+      onDelete={() => removeSessionTab(session)}
+    />
+  )
+
+  // Single session view: the header names the open session, since there is
+  // no tab row
+  const headerSessionTitle = singleSessionView && currentSession && (
+    <>
+      <span className="mx-1.5 text-muted-foreground/40">/</span>
+      {renamingSessionId === currentSession.id ? (
+        renderRenameInput(currentSession.id, 'md:text-sm')
+      ) : (
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <button
+              type="button"
+              className="inline cursor-default"
+              onDoubleClick={() =>
+                handleStartRenameImmediate(
+                  currentSession.id,
+                  currentSession.name
+                )
+              }
+            >
+              {namingSessionIds[currentSession.id]
+                ? 'Generating…'
+                : currentSession.name}
+            </button>
+          </ContextMenuTrigger>
+          <ContextMenuContent className="w-64">
+            {renderSessionMenuItems(currentSession)}
+          </ContextMenuContent>
+        </ContextMenu>
+      )}
+    </>
+  )
+
   return (
     <>
       <div
@@ -1175,6 +1246,7 @@ export const SessionChatModal = memo(function SessionChatModal({
                         : isBase
                           ? 'Base Session'
                           : (worktree?.name ?? 'Worktree')}
+                      {headerSessionTitle}
                     </h2>
                     {worktreeMenu}
                   </div>
@@ -1208,6 +1280,22 @@ export const SessionChatModal = memo(function SessionChatModal({
                   )}
                   {!zenMode && (
                     <>
+                      {singleSessionView && !isMobile && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 w-6 shrink-0 p-0"
+                              onClick={handleCreateSession}
+                              aria-label="New session"
+                            >
+                              <Plus className="h-3 w-3" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>New session</TooltipContent>
+                        </Tooltip>
+                      )}
                       {currentSessionId && !project?.server && (
                         <TerminalMagicButton sessionId={currentSessionId} />
                       )}
@@ -1277,7 +1365,7 @@ export const SessionChatModal = memo(function SessionChatModal({
           )}
 
           {/* Session tabs — hidden in zen mode for an immersive chat surface */}
-          {!zenMode && showSessionTabs && (
+          {!zenMode && !singleSessionView && showSessionTabs && (
             <div
               className={cn(
                 'relative flex shrink-0 items-center gap-0.5 border-b border-border/20 pr-4',
@@ -1315,9 +1403,6 @@ export const SessionChatModal = memo(function SessionChatModal({
                     const isActive = session.id === currentSessionId
                     const status = card.status
                     const config = statusConfig[status]
-                    const chatState = useChatStore.getState()
-                    const sessionLabel = chatState.sessionLabels[session.id]
-                    const resumeCommand = getResumeCommand(session)
                     const isGeneratingName =
                       namingSessionIds[session.id] ?? false
                     return (
@@ -1361,20 +1446,7 @@ export const SessionChatModal = memo(function SessionChatModal({
                               </kbd>
                             )}
                             {renamingSessionId === session.id ? (
-                              <input
-                                ref={renameInputRef}
-                                type="text"
-                                value={renameValue}
-                                onChange={e => setRenameValue(e.target.value)}
-                                onBlur={() => handleRenameSubmit(session.id)}
-                                onKeyDown={e =>
-                                  handleRenameKeyDown(e, session.id)
-                                }
-                                onPointerDown={e => e.stopPropagation()}
-                                onClick={e => e.stopPropagation()}
-                                aria-label="Rename session"
-                                className="w-full min-w-0 bg-transparent text-base outline-none md:text-xs"
-                              />
+                              renderRenameInput(session.id, 'md:text-xs')
                             ) : (
                               <Tooltip>
                                 <TooltipTrigger asChild>
@@ -1412,29 +1484,7 @@ export const SessionChatModal = memo(function SessionChatModal({
                           </div>
                         </ContextMenuTrigger>
                         <ContextMenuContent className="w-64">
-                          <SessionContextMenuItems
-                            session={session}
-                            hasLabel={!!sessionLabel}
-                            resumeCommand={resumeCommand}
-                            nativeClientPending={isOpeningInNativeClient}
-                            onRename={() =>
-                              handleStartRename(session.id, session.name)
-                            }
-                            onToggleLabel={() => {
-                              setLabelTargetSessionId(session.id)
-                              setLabelModalOpen(true)
-                            }}
-                            onOpenInNativeClient={() =>
-                              handleOpenInNativeClient(session)
-                            }
-                            onReconnect={() =>
-                              void reconnectNativeCliSession(
-                                session,
-                                worktreeId
-                              )
-                            }
-                            onDelete={() => removeSessionTab(session)}
-                          />
+                          {renderSessionMenuItems(session)}
                         </ContextMenuContent>
                       </ContextMenu>
                     )

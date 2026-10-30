@@ -1,13 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Plus } from '@/components/icons/reicon'
-import {
-  convertFileSrc,
-  convertProjectFileSrc,
-  convertServerFileSrc,
-  convertServerProjectFileSrc,
-} from '@/lib/transport'
 import type { Project } from '@/types/projects'
-import { useAppDataDir } from '@/services/projects'
+import { ProjectAvatar } from '@/components/projects/ProjectAvatar'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { LOCAL_SERVER_ID } from '@/types/server-resource'
@@ -20,53 +14,22 @@ interface WelcomeProjectGridProps {
 
 function ProjectCard({
   project,
-  appDataDir,
   onClick,
 }: {
   project: Project
-  appDataDir: string
   onClick: () => void
 }) {
-  const avatarKey = project.avatar_path ?? project.default_avatar_path ?? null
-  const [imgErrorKey, setImgErrorKey] = useState<string | null>(null)
-  const imgError = imgErrorKey === avatarKey
-
-  const avatarUrl =
-    project.avatar_path && !imgError
-      ? project.serverId
-        ? convertServerFileSrc(project.serverId, project.avatar_path)
-        : appDataDir
-          ? convertFileSrc(`${appDataDir}/${project.avatar_path}`)
-          : null
-      : project.default_avatar_path && !imgError
-        ? project.serverId
-          ? convertServerProjectFileSrc(
-              project.serverId,
-              project.default_avatar_path
-            )
-          : convertProjectFileSrc(project.default_avatar_path)
-        : null
-
   return (
     <button
       type="button"
       onClick={onClick}
       className="flex items-center gap-3 rounded-md border bg-muted/30 p-3 text-left transition-colors hover:border-foreground/20 hover:bg-muted/50"
     >
-      {avatarUrl ? (
-        <img
-          src={avatarUrl}
-          alt={project.name}
-          className="size-8 shrink-0 rounded-md object-cover"
-          onError={() => setImgErrorKey(avatarKey)}
-        />
-      ) : (
-        <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted-foreground/20">
-          <span className="text-sm font-medium uppercase text-muted-foreground">
-            {project.name[0]}
-          </span>
-        </div>
-      )}
+      <ProjectAvatar
+        project={project}
+        className="size-8 rounded-md"
+        letterClassName="text-sm text-muted-foreground"
+      />
       <span className="truncate text-sm font-medium">{project.name}</span>
     </button>
   )
@@ -78,7 +41,6 @@ export function WelcomeProjectGrid({
   onAddProject,
 }: WelcomeProjectGridProps) {
   const [search, setSearch] = useState('')
-  const { data: appDataDir = '' } = useAppDataDir()
 
   const projectGroups = useMemo(() => {
     const filtered = search.trim()
@@ -153,7 +115,6 @@ export function WelcomeProjectGrid({
                 <ProjectCard
                   key={project.id}
                   project={project}
-                  appDataDir={appDataDir}
                   onClick={() => onProjectClick(project.id)}
                 />
               ))}

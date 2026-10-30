@@ -1,12 +1,14 @@
 import { createRef } from 'react'
 import { QueryClient } from '@tanstack/react-query'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@/test/test-utils'
 import { ChatInput } from './ChatInput'
 import { withUniqueTokens, type MentionCandidate } from './agent-mentions'
 import { invoke } from '@/lib/transport'
 import { queryClient } from '@/lib/query-client'
 import { preferencesQueryKeys } from '@/services/preferences'
+import { chatQueryKeys } from '@/services/chat'
+import { LOCAL_SERVER_ID } from '@/types/server-resource'
 import type * as EnvironmentModule from '@/lib/environment'
 import type * as PreferencesModule from '@/services/preferences'
 import { useUIStore } from '@/store/ui-store'
@@ -1155,6 +1157,73 @@ describe('ChatInput IME composition (issue #584)', () => {
     expect(onSteerModifierChange).toHaveBeenCalledWith(true)
     queryClient.removeQueries({
       queryKey: preferencesQueryKeys.preferences(undefined),
+    })
+  })
+
+  describe('single session view', () => {
+    const localPreferencesKey =
+      preferencesQueryKeys.preferences(LOCAL_SERVER_ID)
+    const pressModEnter = (textarea: HTMLTextAreaElement) =>
+      fireEvent.keyDown(textarea, {
+        key: 'Enter',
+        code: 'Enter',
+        keyCode: 13,
+        metaKey: true,
+      })
+    const setFirstPrompt = (messageCount: number) =>
+      queryClient.setQueryData(chatQueryKeys.session('session-1'), {
+        id: 'session-1',
+        messages: Array.from({ length: messageCount }, () => ({})),
+      })
+
+    afterEach(() => {
+      queryClient.removeQueries({ queryKey: localPreferencesKey })
+      queryClient.removeQueries({
+        queryKey: chatQueryKeys.session('session-1'),
+      })
+    })
+
+    it('sends the first prompt in the background and opens a new session on Mod+Enter', async () => {
+      queryClient.setQueryData(localPreferencesKey, {
+        single_session_view_enabled: true,
+      })
+      setFirstPrompt(0)
+      const created: unknown[] = []
+      const listener = (event: Event) =>
+        created.push((event as CustomEvent).detail)
+      window.addEventListener('create-new-session', listener)
+      const { textarea, onSubmit } = renderWithSubmit()
+      fireEvent.change(textarea, { target: { value: 'first prompt' } })
+
+      pressModEnter(textarea)
+      expect(created).toEqual([])
+      await onSubmit.mock.calls[0]?.[1]?.beforeSend()
+
+      window.removeEventListener('create-new-session', listener)
+      expect(created).toEqual([{ intent: 'default' }])
+    })
+
+    it('sends normally on Mod+Enter after the first prompt', () => {
+      queryClient.setQueryData(localPreferencesKey, {
+        single_session_view_enabled: true,
+      })
+      setFirstPrompt(2)
+      const { textarea, onSubmit } = renderWithSubmit()
+      fireEvent.change(textarea, { target: { value: 'follow-up' } })
+
+      pressModEnter(textarea)
+
+      expect(onSubmit).toHaveBeenCalledWith(expect.anything(), undefined)
+    })
+
+    it('sends normally on Mod+Enter when the view is off', () => {
+      setFirstPrompt(0)
+      const { textarea, onSubmit } = renderWithSubmit()
+      fireEvent.change(textarea, { target: { value: 'first prompt' } })
+
+      pressModEnter(textarea)
+
+      expect(onSubmit).toHaveBeenCalledWith(expect.anything(), undefined)
     })
   })
 

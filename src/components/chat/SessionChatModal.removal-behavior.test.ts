@@ -160,7 +160,9 @@ describe('SessionChatModal removal behavior', () => {
 
     expect(source).toContain('state => state.zenMode')
     expect(source).not.toContain('{!(zenMode && isMobile) && (')
-    expect(source).toContain('{!zenMode && showSessionTabs && (')
+    expect(source).toContain(
+      '{!zenMode && !singleSessionView && showSessionTabs && ('
+    )
     expect(source).toMatch(/sessionsForTabBar\(\s*sessions,/)
     expect(source).toContain('{!zenMode && (')
     expect(source).toContain('<ModalCloseButton')

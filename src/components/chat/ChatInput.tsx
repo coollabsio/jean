@@ -29,6 +29,7 @@ import {
 } from './FileMentionPopover'
 import { queryClient } from '@/lib/query-client'
 import { parseServerResourceKey } from '@/lib/server-resource'
+import { LOCAL_SERVER_ID } from '@/types/server-resource'
 import { fileQueryKeys } from '@/services/files'
 import { chatQueryKeys } from '@/services/chat'
 import { useCreateWorktree } from '@/services/projects'
@@ -701,7 +702,33 @@ export const ChatInput = memo(function ChatInput({
             .getState()
             .setInputDraft(activeSessionId, valueRef.current)
         }
-        onSubmit(e, submitOptions)
+        // Single session view: Mod+Enter on the first prompt sends it in the
+        // background and opens a new session. The send stays bound to this
+        // session.
+        const sendInBackground =
+          (e.metaKey || e.ctrlKey) &&
+          !isSending &&
+          !!activeSessionId &&
+          queryClient.getQueryData<AppPreferences>(
+            preferencesQueryKeys.preferences(LOCAL_SERVER_ID)
+          )?.single_session_view_enabled === true &&
+          queryClient.getQueryData<Session>(
+            chatQueryKeys.session(activeSessionId)
+          )?.messages.length === 0
+        onSubmit(
+          e,
+          sendInBackground
+            ? {
+                beforeSend: async () => {
+                  window.dispatchEvent(
+                    new CustomEvent('create-new-session', {
+                      detail: { intent: 'default' },
+                    })
+                  )
+                },
+              }
+            : submitOptions
+        )
         // The submit handler clears accepted messages through the registered
         // clear handler. A blocked submit must keep the visible draft intact.
       }

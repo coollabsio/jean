@@ -1,12 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDownUp } from '@/components/icons/reicon'
 import { DisclosureChevron } from './DisclosureChevron'
-import {
-  convertFileSrc,
-  convertProjectFileSrc,
-  convertServerFileSrc,
-  convertServerProjectFileSrc,
-} from '@/lib/transport'
+import { ProjectAvatar } from './ProjectAvatar'
 import { cn } from '@/lib/utils'
 import type { Project } from '@/types/projects'
 import { isBaseSession } from '@/types/projects'
@@ -15,11 +10,7 @@ import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useRemotePicker } from '@/hooks/useRemotePicker'
-import {
-  useAppDataDir,
-  useUpdateProjectSettings,
-  useWorktrees,
-} from '@/services/projects'
+import { useUpdateProjectSettings, useWorktrees } from '@/services/projects'
 import {
   useFetchWorktreesStatus,
   useGitStatus,
@@ -72,7 +63,6 @@ export function ProjectTreeItem({
       ),
     [loadedWorktrees]
   )
-  const { data: appDataDir = '' } = useAppDataDir()
   // Prefer loaded worktrees: project.worktree_count can be stale
   const worktreeCount = loadedWorktrees
     ? worktrees.length
@@ -83,30 +73,6 @@ export function ProjectTreeItem({
     matchesWorktreeSearch(worktree, searchQuery)
   )
   const isExpanded = hasWorktrees && (Boolean(searchQuery) || isProjectExpanded)
-
-  const avatarKey = project.avatar_path ?? project.default_avatar_path ?? null
-
-  // Track image load errors to fall back to letter avatar
-  // Use avatar key to reset error state when it changes
-  const [imgErrorKey, setImgErrorKey] = useState<string | null>(null)
-  const imgError = imgErrorKey === avatarKey
-
-  // Build avatar URL from relative path
-  const avatarUrl =
-    project.avatar_path && !imgError
-      ? project.serverId
-        ? convertServerFileSrc(project.serverId, project.avatar_path)
-        : appDataDir
-          ? convertFileSrc(`${appDataDir}/${project.avatar_path}`)
-          : null
-      : project.default_avatar_path && !imgError
-        ? project.serverId
-          ? convertServerProjectFileSrc(
-              project.serverId,
-              project.default_avatar_path
-            )
-          : convertProjectFileSrc(project.default_avatar_path)
-        : null
 
   // Fetch git status for all worktrees when project is expanded
   useFetchWorktreesStatus(project.id, isExpanded && !searchQuery)
@@ -284,21 +250,7 @@ export function ProjectTreeItem({
           onDoubleClick={handleDoubleClick}
           data-testid={`project-row-${project.id}`}
         >
-          {/* Avatar */}
-          {avatarUrl ? (
-            <img
-              src={avatarUrl}
-              alt={project.name}
-              className="size-4 shrink-0 rounded object-cover"
-              onError={() => setImgErrorKey(avatarKey)}
-            />
-          ) : (
-            <div className="flex size-4 shrink-0 items-center justify-center rounded bg-muted-foreground/20">
-              <span className="text-2xs font-medium uppercase">
-                {project.name[0]}
-              </span>
-            </div>
-          )}
+          <ProjectAvatar project={project} />
 
           {/* Name + Chevron */}
           {isEditing ? (

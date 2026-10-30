@@ -4027,22 +4027,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               />
             </InlineField>
 
-            <InlineField
-              id="pref-general-agents"
-              label="Agents"
-              description="Show the Agents tab with Jean, the coordinator agent"
-            >
-              <Switch
-                checked={preferences?.agents_enabled ?? false}
-                onCheckedChange={checked => {
-                  patchPreferences.mutate({ agents_enabled: checked })
-                  // Leave the Agents page when the feature is turned off
-                  if (!checked)
-                    useUIStore.getState().setRailSection('workspace')
-                }}
-              />
-            </InlineField>
-
             {isNativeApp() && (
               <InlineField
                 id="pref-general-section-troubleshooting"
@@ -4065,6 +4049,45 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 </Button>
               </InlineField>
             )}
+          </SettingsSection>
+
+          <SettingsSection
+            title="Experimental"
+            anchorId="pref-general-section-experimental"
+            collapsible
+            defaultOpen={false}
+          >
+            <InlineField
+              id="pref-general-agents"
+              label="Agents"
+              description="Show the Agents tab with Jean, the coordinator agent"
+            >
+              <Switch
+                checked={preferences?.agents_enabled ?? false}
+                onCheckedChange={checked => {
+                  patchPreferences.mutate({ agents_enabled: checked })
+                  // Leave the Agents page when the feature is turned off
+                  if (!checked)
+                    useUIStore.getState().setRailSection('workspace')
+                }}
+              />
+            </InlineField>
+
+            <InlineField
+              id="pref-general-single-session-view"
+              label="Single session view"
+              description="Hide the session tabs and switch sessions from the Recent list"
+              help="Cmd/Ctrl+Enter on the first prompt sends it in the background and opens a new session."
+            >
+              <Switch
+                checked={preferences?.single_session_view_enabled ?? false}
+                onCheckedChange={checked => {
+                  patchPreferences.mutate({
+                    single_session_view_enabled: checked,
+                  })
+                }}
+              />
+            </InlineField>
           </SettingsSection>
 
           <div

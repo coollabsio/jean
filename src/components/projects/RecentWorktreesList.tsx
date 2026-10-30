@@ -46,6 +46,7 @@ import {
 import type { WorktreeSessions } from '@/types/chat'
 import type { Project, RecentWorktreeItem } from '@/types/projects'
 import { isUnreadSession } from '@/components/unread/unread-utils'
+import { ProjectAvatar } from './ProjectAvatar'
 import { getRecentSessionStatus } from './recent-session-status'
 import { matchesSidebarSearch } from './SidebarSearchField'
 
@@ -137,12 +138,7 @@ export function RecentWorktreesList({
   const pinnedSessionIds = useRecentSessionPins(projects)
   const [limit, setLimit] = useState(INITIAL_RECENT_LIMIT)
   const [showSnoozed, setShowSnoozed] = useState(false)
-  // 'auto' is the default collapsed shelf that still shows the open session;
-  // an explicit collapse hides every working row.
-  const [workingShelf, setWorkingShelf] = useState<
-    'auto' | 'expanded' | 'collapsed'
-  >('auto')
-  const workingExpanded = workingShelf === 'expanded'
+  const [workingExpanded, setWorkingExpanded] = useState(false)
   const shortcutsEnabled = isNativeApp() && !isMobile
   const showShortcutHints = useModifierHintsVisible(
     isModOnlyHeld,
@@ -223,12 +219,7 @@ export function RecentWorktreesList({
     sendingSessionIds,
     waitingForInputSessionIds,
   ])
-  // The default shelf still shows the open session, like t3code.
-  const visibleWorkingRows = useMemo(() => {
-    if (workingShelf === 'expanded') return workingRows
-    if (workingShelf === 'collapsed') return EMPTY_RECENT_ROWS
-    return workingRows.filter(row => row.session.id === selectedSessionId)
-  }, [selectedSessionId, workingShelf, workingRows])
+  const visibleWorkingRows = workingExpanded ? workingRows : EMPTY_RECENT_ROWS
   // Mobile shows the Working shelf at the top, between pinned and other rows.
   const { pinnedCount, topRows, restRows } = useMemo(() => {
     const count = isMobile
@@ -245,11 +236,8 @@ export function RecentWorktreesList({
     () => [...topRows, ...visibleWorkingRows, ...restRows, ...snoozedRows],
     [topRows, visibleWorkingRows, restRows, snoozedRows]
   )
-  const serverProjectIds = useMemo(
-    () =>
-      new Set(
-        projects.filter(project => !!project.server).map(project => project.id)
-      ),
+  const projectsById = useMemo(
+    () => new Map(projects.map(project => [project.id, project])),
     [projects]
   )
   const handleOpen = useCallback(
@@ -442,7 +430,8 @@ export function RecentWorktreesList({
     const isWorking = status.tone === 'working'
     const isUnread = isUnreadSession(row.session)
     const isPinned = pinned.has(row.session.id)
-    const isServer = serverProjectIds.has(row.projectId)
+    const project = projectsById.get(row.projectId)
+    const isServer = !!project?.server
     const showPinnedSeparator =
       !isPinned && !!previous && pinned.has(previous.session.id)
     return (
@@ -492,6 +481,7 @@ export function RecentWorktreesList({
             className="flex w-full flex-col gap-y-1 text-left focus-visible:outline-none"
           >
             <span className="flex items-center gap-2">
+              {project && <ProjectAvatar project={project} />}
               <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
                 {namingSessionIds[row.session.id]
                   ? 'Generating…'
@@ -556,11 +546,7 @@ export function RecentWorktreesList({
         type="button"
         aria-expanded={workingExpanded}
         className="flex h-8 w-full items-center gap-1 px-3 text-2xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-        onClick={() =>
-          setWorkingShelf(value =>
-            value === 'expanded' ? 'collapsed' : 'expanded'
-          )
-        }
+        onClick={() => setWorkingExpanded(value => !value)}
       >
         <ChevronRight
           className={`size-3 transition-transform ${workingExpanded ? 'rotate-90' : ''}`}

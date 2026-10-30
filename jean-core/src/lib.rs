@@ -283,6 +283,8 @@ pub struct AppPreferences {
     #[serde(default)]
     pub agents_enabled: bool, // Experimental: show the Agents tab (default: false)
     #[serde(default)]
+    pub single_session_view_enabled: bool, // Experimental: hide session tabs, follow sessions in Recent (default: false)
+    #[serde(default)]
     pub default_enabled_mcp_servers: Vec<String>, // MCP server names enabled by default (empty = none)
     #[serde(default)]
     pub known_mcp_servers: Vec<String>, // All MCP server names ever seen (prevents re-enabling user-disabled servers)
@@ -3329,6 +3331,7 @@ impl Default for AppPreferences {
             auto_pull_base_branch: default_auto_pull_base_branch(),
             debug_mode_enabled: false,
             agents_enabled: false,
+            single_session_view_enabled: false,
             default_effort_level: default_effort_level(),
             default_enabled_mcp_servers: Vec::new(),
             known_mcp_servers: Vec::new(),

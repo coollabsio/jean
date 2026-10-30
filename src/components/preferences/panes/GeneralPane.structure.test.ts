@@ -256,11 +256,27 @@ describe('GeneralPane settings structure', () => {
       'label="Auto-update AI backends"',
       '<WslSettingsFields',
       'debug_mode_enabled',
-      'agents_enabled',
       "invoke('open_log_directory')",
     ]) {
       expect(advanced, expected).toContain(expected)
     }
+  })
+
+  it('groups experimental features in the collapsed Experimental section', () => {
+    const source = readFileSync(
+      'src/components/preferences/panes/GeneralPane.tsx',
+      'utf8'
+    )
+    const experimentalIndex = source.indexOf('title="Experimental"')
+    const experimental = source.slice(
+      experimentalIndex,
+      source.indexOf('</SettingsSection>', experimentalIndex)
+    )
+
+    expect(experimentalIndex).toBeGreaterThan(-1)
+    expect(experimental).toContain('defaultOpen={false}')
+    expect(experimental).toContain('agents_enabled')
+    expect(experimental).toContain('single_session_view_enabled')
   })
 
   it('marks the GitLab CLI settings section as beta', () => {
