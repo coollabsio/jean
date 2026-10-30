@@ -18,6 +18,7 @@ import { useIsTouchDevice } from '@/hooks/use-touch-device'
 import { chatQueryKeys } from '@/services/chat'
 import { isTauri, useReorderWorktrees } from '@/services/projects'
 import { useProjectsStore } from '@/store/projects-store'
+import { useChatStore } from '@/store/chat-store'
 import {
   compareWorktreesForCanvasSort,
   getWorktreeLastActivity,
@@ -242,6 +243,8 @@ export function WorktreeList({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionsFingerprint])
 
+  const sendingSessionIds = useChatStore(state => state.sendingSessionIds)
+
   // Match ProjectCanvasView ordering: pending first, then base session first,
   // then selected canvas sort mode using session last activity when requested.
   const sortedWorktrees = useMemo(() => {
@@ -253,7 +256,11 @@ export function WorktreeList({
       const sessions = sessionsByWorktreeId.get(worktree.id)?.sessions ?? []
       latestActivityByWorktreeId.set(
         worktree.id,
-        getWorktreeLastActivity(sessions, worktree.created_at)
+        getWorktreeLastActivity(
+          sessions,
+          worktree.created_at,
+          sendingSessionIds
+        )
       )
     }
 
@@ -270,7 +277,13 @@ export function WorktreeList({
     )
 
     return [...sortedPending, ...sortedReady]
-  }, [pendingWorktrees, readyWorktrees, sessionsByWorktreeId, worktreeSortMode])
+  }, [
+    pendingWorktrees,
+    readyWorktrees,
+    sessionsByWorktreeId,
+    sendingSessionIds,
+    worktreeSortMode,
+  ])
 
   const canReorderWorktree = useCallback((worktree: Worktree) => {
     return (

@@ -7,14 +7,27 @@ import type { Session } from '@/types/chat'
 
 export type { WorktreeSortMode } from '@/types/projects'
 
+/**
+ * Latest real activity of a session: last run, terminal, or review activity.
+ * Returns 0 for a session that was only created (for example the empty
+ * session opened with a worktree), so it does not bump the worktree to the top.
+ */
 export function getSessionActivityTimestamp(session: Session): number {
-  return session.last_message_at ?? session.updated_at ?? session.created_at
+  if (session.last_message_at) return session.last_message_at
+  return session.updated_at > session.created_at ? session.updated_at : 0
 }
+
+/** Sort value for a worktree with a running session: above all others. */
+const RUNNING_ACTIVITY = Number.MAX_SAFE_INTEGER
 
 export function getWorktreeLastActivity(
   sessions: Session[],
-  fallbackTimestamp: number
+  fallbackTimestamp: number,
+  sendingSessionIds: Readonly<Record<string, boolean>> = {}
 ): number {
+  if (sessions.some(session => sendingSessionIds[session.id])) {
+    return RUNNING_ACTIVITY
+  }
   return sessions.reduce(
     (latest, session) => Math.max(latest, getSessionActivityTimestamp(session)),
     fallbackTimestamp

@@ -40,7 +40,33 @@ describe('worktree-sort-utils', () => {
         session({ created_at: 10, updated_at: 20, last_message_at: 30 })
       )
     ).toBe(30)
-    expect(getSessionActivityTimestamp(session({ created_at: 10 }))).toBe(10)
+    expect(
+      getSessionActivityTimestamp(session({ created_at: 10, updated_at: 20 }))
+    ).toBe(20)
+  })
+
+  it('ignores sessions that were only created, with no activity', () => {
+    expect(getSessionActivityTimestamp(session({ created_at: 10 }))).toBe(0)
+    expect(
+      getWorktreeLastActivity(
+        [session({ created_at: 100, updated_at: 100 })],
+        5
+      )
+    ).toBe(5)
+  })
+
+  it('puts worktrees with a running session above all others', () => {
+    const running = getWorktreeLastActivity(
+      [session({ id: 'run', created_at: 10, last_message_at: 20 })],
+      5,
+      { run: true }
+    )
+    const recent = getWorktreeLastActivity(
+      [session({ id: 'idle', created_at: 10, last_message_at: 9_999_999_999 })],
+      5,
+      { run: true }
+    )
+    expect(running).toBeGreaterThan(recent)
   })
 
   it('finds latest activity across sessions with worktree fallback', () => {

@@ -1565,7 +1565,8 @@ export function ProjectCanvasView({
       const grouped = flattenGroups(groupCardsByStatus(cards))
       const latestActivityAt = getWorktreeLastActivity(
         filteredSessions,
-        worktree.created_at
+        worktree.created_at,
+        storeState.sendingSessionIds
       )
 
       latestActivityByWorktreeId.set(worktree.id, latestActivityAt)
