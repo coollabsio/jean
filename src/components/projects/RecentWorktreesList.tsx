@@ -638,7 +638,7 @@ export function RecentWorktreesList({
       className="flex h-full min-h-0 flex-1 flex-col overflow-hidden"
       data-testid="recent-worktrees-list"
     >
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto">
         {displayedRows.length === 0 && snoozedCount === 0 && (
           <div className="px-3 py-6 text-center text-xs text-muted-foreground">
             {searchQuery.trim() ? 'No matching sessions' : 'No recent sessions'}
@@ -652,53 +652,53 @@ export function RecentWorktreesList({
             renderRow(row, index, listRows[index - 1])
           )}
         </ul>
-        {/* Shelves and paging actions sit at the bottom of a short list and
-            scroll with a long one. */}
-        <div className="mt-auto pb-[env(safe-area-inset-bottom)]">
-          {workingShelfSection}
-          {snoozedCount > 0 && (
-            <section aria-label="Snoozed sessions" className="pb-2">
-              <button
-                type="button"
-                aria-expanded={snoozedExpanded}
-                title="Inactive for 24 hours"
-                className="flex h-8 w-full items-center gap-1 px-3 text-2xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                onClick={() => {
-                  if (!snoozedExpanded && snoozedRows.length === 0) loadMore()
-                  setSnoozedExpanded(value => !value)
-                }}
-              >
-                <ChevronRight
-                  className={`size-3 transition-transform ${snoozedExpanded ? 'rotate-90' : ''}`}
-                />
-                Snoozed
-                <span className="ml-auto font-normal tabular-nums">
-                  {snoozedCount}
-                </span>
-              </button>
-              <ul className={listClassName}>
-                {visibleSnoozedRows.map((row, index) =>
-                  renderRow(
-                    row,
-                    listRows.length + visibleWorkingRows.length + index
-                  )
-                )}
-              </ul>
-            </section>
-          )}
-          {showLoadMore && (
-            <div className="flex justify-center px-2 pb-2">
-              <button
-                type="button"
-                className="flex h-5 items-center justify-center gap-1 rounded-md px-2 text-xs text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                onClick={loadMore}
-              >
-                <Plus className="size-3.5" /> Show{' '}
-                {Math.min(hiddenCount, RECENT_PAGE_SIZE)} more
-              </button>
-            </div>
-          )}
-        </div>
+      </div>
+      {/* Shelves stay pinned below the scrolling recent list. Expanded shelves
+          scroll on their own, capped so the recent list stays usable. */}
+      <div className="max-h-[50%] shrink-0 overflow-y-auto pb-[env(safe-area-inset-bottom)]">
+        {workingShelfSection}
+        {snoozedCount > 0 && (
+          <section aria-label="Snoozed sessions" className="pb-2">
+            <button
+              type="button"
+              aria-expanded={snoozedExpanded}
+              title="Inactive for 24 hours"
+              className="flex h-8 w-full items-center gap-1 px-3 text-2xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              onClick={() => {
+                if (!snoozedExpanded && snoozedRows.length === 0) loadMore()
+                setSnoozedExpanded(value => !value)
+              }}
+            >
+              <ChevronRight
+                className={`size-3 transition-transform ${snoozedExpanded ? 'rotate-90' : ''}`}
+              />
+              Snoozed
+              <span className="ml-auto font-normal tabular-nums">
+                {snoozedCount}
+              </span>
+            </button>
+            <ul className={listClassName}>
+              {visibleSnoozedRows.map((row, index) =>
+                renderRow(
+                  row,
+                  listRows.length + visibleWorkingRows.length + index
+                )
+              )}
+            </ul>
+          </section>
+        )}
+        {showLoadMore && (
+          <div className="flex justify-center px-2 pb-2">
+            <button
+              type="button"
+              className="flex h-5 items-center justify-center gap-1 rounded-md px-2 text-xs text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+              onClick={loadMore}
+            >
+              <Plus className="size-3.5" /> Show{' '}
+              {Math.min(hiddenCount, RECENT_PAGE_SIZE)} more
+            </button>
+          </div>
+        )}
       </div>
       <CloseWorktreeDialog
         open={!!closeTarget}
