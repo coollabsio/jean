@@ -1172,11 +1172,21 @@ describe('ChatInput IME composition (issue #584)', () => {
         keyCode: 13,
         metaKey: true,
       })
-    const setFirstPrompt = (messageCount: number) =>
+    const setMessageCount = (messageCount: number) =>
       queryClient.setQueryData(chatQueryKeys.session('session-1'), {
         id: 'session-1',
         messages: Array.from({ length: messageCount }, () => ({})),
       })
+    const captureCreatedSessions = () => {
+      const created: unknown[] = []
+      const listener = (event: Event) =>
+        created.push((event as CustomEvent).detail)
+      window.addEventListener('create-new-session', listener)
+      return {
+        created,
+        stop: () => window.removeEventListener('create-new-session', listener),
+      }
+    }
 
     afterEach(() => {
       clearClientPreferencesForTests()
@@ -1185,33 +1195,33 @@ describe('ChatInput IME composition (issue #584)', () => {
       })
     })
 
-    it('sends the first prompt in the background and opens a new session on Mod+Enter', async () => {
+    it.each([0, 2])(
+      'sends in the background and opens a new session on Mod+Enter (%i messages)',
+      async messageCount => {
+        updateClientPreferences({ single_session_view_enabled: true })
+        setMessageCount(messageCount)
+        const { created, stop } = captureCreatedSessions()
+        const { textarea, onSubmit } = renderWithSubmit()
+        fireEvent.change(textarea, { target: { value: 'prompt' } })
+
+        pressModEnter(textarea)
+        expect(created).toEqual([])
+        await onSubmit.mock.calls[0]?.[1]?.beforeSend()
+
+        stop()
+        expect(created).toEqual([{ intent: 'default' }])
+      }
+    )
+
+    it('keeps the running-turn behavior on Mod+Enter while sending', () => {
       updateClientPreferences({ single_session_view_enabled: true })
-      setFirstPrompt(0)
-      const created: unknown[] = []
-      const listener = (event: Event) =>
-        created.push((event as CustomEvent).detail)
-      window.addEventListener('create-new-session', listener)
-      const { textarea, onSubmit } = renderWithSubmit()
-      fireEvent.change(textarea, { target: { value: 'first prompt' } })
-
-      pressModEnter(textarea)
-      expect(created).toEqual([])
-      await onSubmit.mock.calls[0]?.[1]?.beforeSend()
-
-      window.removeEventListener('create-new-session', listener)
-      expect(created).toEqual([{ intent: 'default' }])
-    })
-
-    it('sends normally on Mod+Enter after the first prompt', () => {
-      updateClientPreferences({ single_session_view_enabled: true })
-      setFirstPrompt(2)
-      const { textarea, onSubmit } = renderWithSubmit()
+      setMessageCount(2)
+      const { textarea, onSubmit } = renderWithSubmit({ isSending: true })
       fireEvent.change(textarea, { target: { value: 'follow-up' } })
 
       pressModEnter(textarea)
 
-      expect(onSubmit).toHaveBeenCalledWith(expect.anything(), undefined)
+      expect(onSubmit.mock.calls[0]?.[1]?.beforeSend).toBeUndefined()
     })
 
     it('ignores the server preference, since the view is a client setting', () => {
@@ -1219,7 +1229,7 @@ describe('ChatInput IME composition (issue #584)', () => {
         preferencesQueryKeys.preferences(LOCAL_SERVER_ID),
         { single_session_view_enabled: true }
       )
-      setFirstPrompt(0)
+      setMessageCount(0)
       const { textarea, onSubmit } = renderWithSubmit()
       fireEvent.change(textarea, { target: { value: 'first prompt' } })
 
@@ -1232,7 +1242,7 @@ describe('ChatInput IME composition (issue #584)', () => {
     })
 
     it('sends normally on Mod+Enter when the view is off', () => {
-      setFirstPrompt(0)
+      setMessageCount(0)
       const { textarea, onSubmit } = renderWithSubmit()
       fireEvent.change(textarea, { target: { value: 'first prompt' } })
 

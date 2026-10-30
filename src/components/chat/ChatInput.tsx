@@ -702,17 +702,14 @@ export const ChatInput = memo(function ChatInput({
             .getState()
             .setInputDraft(activeSessionId, valueRef.current)
         }
-        // Single session view: Mod+Enter on the first prompt sends it in the
-        // background and opens a new session. The send stays bound to this
-        // session.
+        // Single session view: Mod+Enter on an idle session sends the prompt
+        // in the background and opens a new session in this worktree. The
+        // send stays bound to this session.
         const sendInBackground =
           (e.metaKey || e.ctrlKey) &&
           !isSending &&
           !!activeSessionId &&
-          readClientPreferences().single_session_view_enabled === true &&
-          queryClient.getQueryData<Session>(
-            chatQueryKeys.session(activeSessionId)
-          )?.messages.length === 0
+          readClientPreferences().single_session_view_enabled === true
         onSubmit(
           e,
           sendInBackground
