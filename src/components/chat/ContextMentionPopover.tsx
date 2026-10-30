@@ -158,16 +158,16 @@ export function getInvestigateLabels(items: ContextMentionItem[]): {
   if (others === 0) return { action: `Investigate in ${worktrees}` }
   if (prs === 0) {
     return {
-      action: `Investigate ${others} in new session`,
+      action: `Investigate ${others} in one session`,
       separate:
-        others > 1 ? `Investigate in ${others} new sessions` : undefined,
+        others > 1 ? `Investigate ${others} in separate sessions` : undefined,
     }
   }
   return {
-    action: `Investigate in 1 new session + ${worktrees}`,
+    action: `Investigate in one session + ${worktrees}`,
     separate:
       others > 1
-        ? `Investigate in ${others} new sessions + ${worktrees}`
+        ? `Investigate in separate sessions + ${worktrees}`
         : undefined,
   }
 }

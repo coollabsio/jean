@@ -9,7 +9,7 @@ export interface BulkInvestigateBarProps {
   noun?: string
   /** Replaces the default "Investigate N items in background" label */
   actionLabel?: string
-  /** Optional second action shown before the main button */
+  /** Optional second action shown after the main button */
   secondaryActionLabel?: string
   onSecondaryAction?: () => void
   /** Keyboard shortcut hints shown inside the action buttons */
@@ -55,24 +55,9 @@ export function BulkInvestigateBar({
           Clear
         </button>
       </div>
-      {secondaryActionLabel && onSecondaryAction && (
-        <Button
-          size="sm"
-          variant="outline"
-          className="w-full h-10 sm:h-8 sm:w-auto sm:ml-auto"
-          disabled={isLoading}
-          onClick={onSecondaryAction}
-        >
-          {secondaryActionLabel}
-          {secondaryActionKbd && <Kbd>{secondaryActionKbd}</Kbd>}
-        </Button>
-      )}
       <Button
         size="sm"
-        className={cn(
-          'w-full h-10 sm:h-8 sm:w-auto',
-          !(secondaryActionLabel && onSecondaryAction) && 'sm:ml-auto'
-        )}
+        className="w-full h-10 sm:h-8 sm:w-auto sm:ml-auto"
         disabled={isLoading}
         onClick={onInvestigate}
       >
@@ -90,6 +75,18 @@ export function BulkInvestigateBar({
           </Kbd>
         )}
       </Button>
+      {secondaryActionLabel && onSecondaryAction && (
+        <Button
+          size="sm"
+          variant="outline"
+          className="w-full h-10 sm:h-8 sm:w-auto"
+          disabled={isLoading}
+          onClick={onSecondaryAction}
+        >
+          {secondaryActionLabel}
+          {secondaryActionKbd && <Kbd>{secondaryActionKbd}</Kbd>}
+        </Button>
+      )}
     </div>
   )
 }

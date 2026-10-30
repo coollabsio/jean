@@ -636,7 +636,7 @@ describe('ContextMentionPopover', () => {
     expect(onSelectContext).not.toHaveBeenCalled()
     fireEvent.click(
       screen.getByRole('button', {
-        name: 'Investigate in 1 new session + 1 new worktree',
+        name: 'Investigate in one session + 1 new worktree',
       })
     )
 
@@ -647,7 +647,7 @@ describe('ContextMentionPopover', () => {
 
     fireEvent.click(
       screen.getByRole('button', {
-        name: 'Investigate in 2 new sessions + 1 new worktree',
+        name: 'Investigate in separate sessions + 1 new worktree',
       })
     )
     expect(onInvestigateInNewSession).toHaveBeenLastCalledWith(
@@ -903,8 +903,8 @@ describe('getInvestigateLabels', () => {
     expect(
       getInvestigateLabels([issueItem, { ...issueItem, id: 'issue:124' }])
     ).toEqual({
-      action: 'Investigate 2 in new session',
-      separate: 'Investigate in 2 new sessions',
+      action: 'Investigate 2 in one session',
+      separate: 'Investigate 2 in separate sessions',
     })
   })
 })
