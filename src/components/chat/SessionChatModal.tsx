@@ -618,6 +618,10 @@ export const SessionChatModal = memo(function SessionChatModal({
     [worktreeId]
   )
 
+  // Experimental: no tab row; the Recent list is the session switcher
+  const singleSessionView =
+    useClientPreferences().preferences.single_session_view_enabled ?? false
+
   // CMD+W: close the active session tab, or close modal if last tab
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)
   const [closeConfirmMode, setCloseConfirmMode] =
@@ -690,8 +694,20 @@ export const SessionChatModal = memo(function SessionChatModal({
         setCloseConfirmOpen(true)
         return
       }
+      const currentSession = tabSessions.find(s => s.id === currentSessionId)
+      const sessionIsEmpty =
+        !currentSession ||
+        isSessionEmpty(currentSession, useChatStore.getState().inputDrafts)
       const action = () => {
-        if (activeSessions.length <= 1) {
+        if (singleSessionView) {
+          // No tabs to fall back to: delete the session and leave the view.
+          // Keep a lone empty session, the backend would only recreate it.
+          const isLoneEmpty = sessionIsEmpty && activeSessions.length <= 1
+          if (currentSessionId && !isLoneEmpty) {
+            handleDeleteSession(currentSessionId)
+          }
+          onClose()
+        } else if (activeSessions.length <= 1) {
           if (currentSessionId) {
             handleDeleteSession(currentSessionId)
           }
@@ -700,10 +716,6 @@ export const SessionChatModal = memo(function SessionChatModal({
           handleDeleteSession(currentSessionId)
         }
       }
-      const currentSession = tabSessions.find(s => s.id === currentSessionId)
-      const sessionIsEmpty =
-        !currentSession ||
-        isSessionEmpty(currentSession, useChatStore.getState().inputDrafts)
       if (!sessionIsEmpty) {
         setCloseConfirmMode('session')
         pendingCloseAction.current = action
@@ -728,6 +740,7 @@ export const SessionChatModal = memo(function SessionChatModal({
     onRequestCloseWorktree,
     onClose,
     isServer,
+    singleSessionView,
   ])
 
   // Listen for toggle-session-label event (CMD+S)
@@ -919,9 +932,6 @@ export const SessionChatModal = memo(function SessionChatModal({
 
   // Display preference of this client, not of the worktree's server
   const { data: localPreferences } = usePreferences(LOCAL_SERVER_ID)
-  // Experimental: no tab row; the Recent list is the session switcher
-  const singleSessionView =
-    useClientPreferences().preferences.single_session_view_enabled ?? false
 
   const handleSync = useCallback(
     (e: React.MouseEvent) => {
