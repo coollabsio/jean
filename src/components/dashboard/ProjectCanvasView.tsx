@@ -508,16 +508,6 @@ function getSessionMetrics(cards: SessionCardData[]) {
   const waitingCount = cards.filter(c =>
     isActionableWaitingStatus(c.status)
   ).length
-  // Keep review-ready and completed countable together for metrics, but
-  // cancelled/crashed are not "ready for review".
-  const reviewCount = cards.filter(
-    c => c.status === 'review' || c.status === 'completed'
-  ).length
-  const planningCount = cards.filter(
-    c => c.status === 'planning' || c.status === 'scheduled'
-  ).length
-  const buildingCount = cards.filter(c => c.status === 'vibing').length
-  const yoloCount = cards.filter(c => c.status === 'yoloing').length
   const runningCount = cards.filter(
     c =>
       c.status === 'planning' || c.status === 'vibing' || c.status === 'yoloing'
@@ -530,10 +520,6 @@ function getSessionMetrics(cards: SessionCardData[]) {
 
   return {
     waitingCount,
-    reviewCount,
-    planningCount,
-    buildingCount,
-    yoloCount,
     runningCount,
     latestActivityAt,
   }
@@ -960,6 +946,17 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
       {compactContent || (
         <div className={cn(showDetails ? 'flex flex-col gap-1.5' : 'contents')}>
           <div className="flex min-w-0 flex-wrap items-center gap-2 sm:flex-nowrap">
+            {waitingCount > 0 ? (
+              <span
+                role="img"
+                aria-label={`${waitingCount} waiting`}
+                className="size-2 shrink-0 rounded-full bg-warning"
+              />
+            ) : (
+              runningCount > 0 && (
+                <WorkingWaveform label={`${runningCount} running`} />
+              )
+            )}
             {isVisible && showWorktreeInfo && (
               <TerminalStatusIndicator
                 worktreeId={worktree.id}
@@ -1094,31 +1091,6 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
           </div>
           {showDetails && showSessionInfo && sessionMetrics && (
             <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-              {sessionMetrics.waitingCount > 0 && (
-                <span className="rounded bg-warning px-2 py-0.5 text-warning-foreground">
-                  {sessionMetrics.waitingCount} waiting
-                </span>
-              )}
-              {sessionMetrics.planningCount > 0 && (
-                <span className="rounded bg-info/10 px-2 py-0.5 text-info">
-                  {sessionMetrics.planningCount} planning
-                </span>
-              )}
-              {sessionMetrics.buildingCount > 0 && (
-                <span className="rounded bg-info/10 px-2 py-0.5 text-info">
-                  {sessionMetrics.buildingCount} building
-                </span>
-              )}
-              {sessionMetrics.yoloCount > 0 && (
-                <span className="rounded bg-destructive/10 px-2 py-0.5 text-destructive">
-                  {sessionMetrics.yoloCount} full access
-                </span>
-              )}
-              {sessionMetrics.reviewCount > 0 && (
-                <span className="rounded bg-success/10 px-2 py-0.5 text-success">
-                  {sessionMetrics.reviewCount} review
-                </span>
-              )}
               {uniqueSessionLabels.map(label => (
                 <span
                   key={label.name}
