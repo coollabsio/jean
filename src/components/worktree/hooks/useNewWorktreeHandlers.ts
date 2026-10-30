@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { invoke } from '@/lib/transport'
 import { toast } from 'sonner'
 import { useUIStore, type InvestigationOverride } from '@/store/ui-store'
@@ -89,6 +89,9 @@ export function useNewWorktreeHandlers(
   const [creatingFromBranch, setCreatingFromBranch] = useState<string | null>(
     null
   )
+  // Branches whose create command has not returned yet (background clicks and
+  // repeated Cmd+Enter keep the modal open).
+  const branchCreationsInFlight = useRef(new Set<string>())
   const [creatingFromGhsaId, setCreatingFromGhsaId] = useState<string | null>(
     null
   )
@@ -300,18 +303,25 @@ export function useNewWorktreeHandlers(
         toast.error('No project selected')
         return
       }
+      // A double click lands its second click on the closing modal, after
+      // handleOpenChange(false) has already reset creatingFromBranch.
+      if (!useUIStore.getState().newWorktreeModalOpen) return
+      const inFlight = branchCreationsInFlight.current
+      if (inFlight.has(branchName)) return
+      inFlight.add(branchName)
       setCreatingFromBranch(branchName)
       if (background)
         useUIStore.getState().incrementPendingBackgroundCreations()
-      createWorktreeFromBranch.mutate(
-        { projectId: selectedProjectId, branchName, background },
-        {
-          onError: () => setCreatingFromBranch(null),
-          onSuccess: () => {
+      createWorktreeFromBranch
+        .mutateAsync({ projectId: selectedProjectId, branchName, background })
+        .then(
+          () => {
             if (background) setCreatingFromBranch(null)
           },
-        }
-      )
+          // The mutation's onError already shows the toast
+          () => setCreatingFromBranch(null)
+        )
+        .finally(() => inFlight.delete(branchName))
       if (!background) handleOpenChange(false)
     },
     [selectedProjectId, createWorktreeFromBranch, handleOpenChange]

@@ -1019,6 +1019,7 @@ export function useCreateWorktree() {
       return worktree
     },
     onSuccess: (worktree, { projectId, background: isBackground }) => {
+      if (failedWorktreeCreations.delete(worktree.id)) return
       const shouldAutoOpen = !isBackground
       // Check if this worktree was already resolved by an event handler
       const existing = queryClient.getQueryData<Worktree[]>(
@@ -1186,6 +1187,18 @@ export function useCreateWorktreeFromExistingBranch() {
       return { ...worktree, status: 'pending' as const }
     },
     onSuccess: (pendingWorktree, { projectId, background: isBackground }) => {
+      if (failedWorktreeCreations.delete(pendingWorktree.id)) return
+      const { expandProject, selectWorktree } = useProjectsStore.getState()
+      // worktree:created can arrive before the command response
+      const existingEntry = queryClient
+        .getQueryData<Worktree[]>(projectsQueryKeys.worktrees(projectId))
+        ?.find(w => w.id === pendingWorktree.id)
+      if (existingEntry?.status === 'ready') {
+        expandProject(projectId)
+        if (!isBackground) selectWorktree(pendingWorktree.id)
+        return
+      }
+
       logger.info('Worktree creation from existing branch started (pending)', {
         id: pendingWorktree.id,
         name: pendingWorktree.name,
@@ -1207,7 +1220,6 @@ export function useCreateWorktreeFromExistingBranch() {
       )
 
       // Auto-expand the project and select the new worktree
-      const { expandProject, selectWorktree } = useProjectsStore.getState()
       expandProject(projectId)
       if (!isBackground) {
         selectWorktree(pendingWorktree.id)
@@ -1255,6 +1267,13 @@ export function useCreateWorktreeKeybinding() {
       window.removeEventListener('create-new-worktree', handleCreateWorktree)
   }, [])
 }
+
+/**
+ * Worktree ids whose `worktree:error` event arrived. The backend can fail fast
+ * (e.g. path already exists) and emit the error before the create command
+ * response reaches the client; the mutation's onSuccess must not re-add it.
+ */
+const failedWorktreeCreations = new Set<string>()
 
 /** Shared post-ready logic for ready worktrees */
 function handleWorktreeReady(
@@ -1583,6 +1602,7 @@ export function useWorktreeEvents() {
       listen<WorktreeCreateErrorEvent>('worktree:error', event => {
         const { id, project_id, error } = event.payload
         logger.error('Worktree creation failed', { id, project_id, error })
+        failedWorktreeCreations.add(id)
 
         // Clear recovery timeout since we got the error event
         clearPendingTimeout(id)

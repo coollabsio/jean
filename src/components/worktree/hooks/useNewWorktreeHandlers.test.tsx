@@ -164,4 +164,38 @@ describe('useNewWorktreeHandlers duplicate guard', () => {
     expect(openContextLinkMatch).toHaveBeenCalledWith(match)
     expect(invoke).not.toHaveBeenCalled()
   })
+
+  it('creates one worktree when a branch is double-clicked', () => {
+    const createWorktreeFromBranch = {
+      mutateAsync: vi.fn(() => Promise.resolve({ id: 'wt-branch' })),
+    }
+    const { result } = setup(
+      vi.fn(() => []),
+      { createWorktreeFromBranch }
+    )
+
+    act(() => {
+      result.current.handleSelectBranch('origin/next')
+      result.current.handleSelectBranch('origin/next')
+    })
+
+    expect(createWorktreeFromBranch.mutateAsync).toHaveBeenCalledTimes(1)
+  })
+
+  it('creates one worktree for repeated background selects of a branch', () => {
+    const createWorktreeFromBranch = {
+      mutateAsync: vi.fn(() => new Promise(() => undefined)),
+    }
+    const { result } = setup(
+      vi.fn(() => []),
+      { createWorktreeFromBranch }
+    )
+
+    act(() => {
+      result.current.handleSelectBranch('origin/next', true)
+      result.current.handleSelectBranch('origin/next', true)
+      result.current.handleSelectBranch('origin/main', true)
+    })
+    expect(createWorktreeFromBranch.mutateAsync).toHaveBeenCalledTimes(2)
+  })
 })
