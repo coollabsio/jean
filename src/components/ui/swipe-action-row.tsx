@@ -96,19 +96,19 @@ export function SwipeActionRow({
 
   return (
     <div ref={rowRef} className="relative overflow-hidden rounded-md">
-      <button
-        type="button"
-        onClick={() => {
-          setOffset(0)
-          onAction()
-        }}
-        className="absolute inset-y-0 right-0 flex items-center justify-end bg-destructive pr-5 text-sm font-medium text-white"
-        style={{ width: Math.max(ACTION_WIDTH, -offset) }}
-        tabIndex={offset === 0 ? -1 : 0}
-        aria-hidden={offset === 0}
-      >
-        {actionLabel}
-      </button>
+      {offset < 0 && (
+        <button
+          type="button"
+          onClick={() => {
+            setOffset(0)
+            onAction()
+          }}
+          className="absolute inset-y-0 right-0 flex items-center justify-end bg-destructive pr-5 text-sm font-medium text-white"
+          style={{ width: Math.max(ACTION_WIDTH, -offset) }}
+        >
+          {actionLabel}
+        </button>
+      )}
       <div
         className={cn(
           'relative touch-pan-y bg-background',

@@ -1184,7 +1184,7 @@ export const SessionChatModal = memo(function SessionChatModal({
   // no tab row
   const headerSessionTitle = singleSessionView && currentSession && (
     <>
-      <span className="mx-1.5 shrink-0 text-muted-foreground/40">/</span>
+      {!isMobile && <span className="mx-1.5 text-muted-foreground/40">/</span>}
       {renamingSessionId === currentSession.id ? (
         renderRenameInput(currentSession.id, 'md:text-sm')
       ) : (
@@ -1194,7 +1194,9 @@ export const SessionChatModal = memo(function SessionChatModal({
               type="button"
               className={cn(
                 'cursor-default',
-                isMobile ? 'min-w-0 truncate' : 'inline'
+                isMobile
+                  ? 'inline-block max-w-full truncate align-bottom'
+                  : 'inline'
               )}
               onDoubleClick={() =>
                 handleStartRenameImmediate(
@@ -1279,9 +1281,7 @@ export const SessionChatModal = memo(function SessionChatModal({
                     <h2
                       className={cn(
                         'text-sm font-medium min-w-0 truncate',
-                        // Mobile: the worktree prefix shrinks first so the
-                        // session name stays visible
-                        isMobile ? 'flex items-center' : 'flex-1'
+                        !isMobile && 'flex-1'
                       )}
                     >
                       {project && !isMobile && !isServer && (
@@ -1298,17 +1298,14 @@ export const SessionChatModal = memo(function SessionChatModal({
                           </span>
                         </span>
                       )}
-                      <span
-                        className={cn(
-                          isMobile && 'min-w-0 shrink-[100] truncate'
-                        )}
-                      >
-                        {isServer
+                      {/* Mobile single session view shows only the session
+                          name, since the header is too narrow for both */}
+                      {!(isMobile && headerSessionTitle) &&
+                        (isServer
                           ? project?.name
                           : isBase
                             ? 'Base Session'
-                            : (worktree?.name ?? 'Worktree')}
-                      </span>
+                            : (worktree?.name ?? 'Worktree'))}
                       {headerSessionTitle}
                     </h2>
                     {worktreeMenu}
