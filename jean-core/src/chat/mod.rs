@@ -66,10 +66,10 @@ Tested against local dev env: Yes/No
 Rules:
 - Heading must be the literal string `## Recap` on its own line.
 - Place it as the LAST block of the message, after any prose.
-- Keep the recap brief: short sentences, no filler, no background the user did not ask for. Every line must earn its place.
+- Keep the recap brief: short sentences, no filler, no background the user did not ask for. Every line must earn its place. Brevity applies to the wording, never to the number of findings: do not drop items to make the recap shorter.
 - The recap is the user-facing deliverable — it must be self-contained. Include the actual answer/result inline. Do NOT write things like \"I looked it up\" or \"see above\" — restate the answer.
 - Keep links in the recap. When the recap names an issue, PR, commit, security advisory, Linear issue, Sentry issue, URL, or other external resource that has a known link, write it as a Markdown link (for example `[GHSA-xxxx-xxxx-xxxx](https://github.com/owner/repo/security/advisories/GHSA-xxxx-xxxx-xxxx)` or `[#123](https://github.com/owner/repo/pull/123)`). If the same item is a link earlier in the message, it must also be a link in the recap. Do not invent URLs.
-- If the turn found issues, gaps, risks, or recommended fixes, list them in the recap as a Markdown table (for example: | # | Finding | Location | Impact | Recommended fix |), not as bullets or prose.
+- If the turn found issues, gaps, risks, ideas, or recommended fixes, list them in the recap as a Markdown table (for example: | # | Finding | Location | Impact | Recommended fix |), not as bullets or prose. The table must include EVERY item from the turn, with one row per item, across all groups and priorities (for example all numbered ideas plus all lettered bugs). Keep the same numbers or letters as earlier in the message. Do not keep only the top items, merge items into one row, or move items into a bullet such as \"smaller ideas\". The user must not need to open the full message to find an item. Shorten each cell instead.
 - Add a `### How to test` subsection ONLY when the turn produced code, config, or behavior changes the user can verify. Keep it simple: a numbered list of at most 5 short steps, each one plain action — the link or command, what to click, what to see (for example: `1. Open [http://localhost:1420/settings](http://localhost:1420/settings)` / `2. Click **Save**` / `3. Check that a \"Saved\" toast shows`). Use the exact URL or command when you know it. Make the steps a manual smoke test of the main behavior if it makes sense. No explanations, no edge-case lists. OMIT the subsection entirely on read-only turns — questions, explanations, research, planning, code review without edits, or any turn where there is nothing meaningful to test. Do NOT include placeholder content like \"N/A\", \"Nothing to test\", \"No tests needed\", or an empty bullet list. If in doubt, leave it out.
 - When the turn produced code, config, or behavior changes, include the line `Tested against local dev env: Yes` or `Tested against local dev env: No` (pick one, based on whether you actually verified the change in a running local dev environment). Omit this line on read-only turns.
 - Add a `### Possible regressions` subsection ONLY when the turn changed functional behavior: logic, data flow, state, persistence, APIs, commands, parsing, or code shared by other callers. Use a Markdown table of existing behavior the change could break: | # | Area | What could break | Likelihood (Low/Medium/High) | Verified not broken |. In `Verified not broken`, name how you proved this item does not break (test name, typecheck, callers read, local dev env run), or write `Not verified`. Look beyond the diff: callers, shared types, persistence, other backends, web access, and mobile. If you found none, write the single line `No possible regressions found` and the reason, not an empty table. OMIT the subsection for visual-only UI changes (styling, layout, spacing, colors, icons, copy), docs, comments, prompt text, tests-only changes, and read-only turns.
@@ -131,6 +131,12 @@ mod tests {
         assert!(RECAP_INSTRUCTION.contains("put the question at the end of the recap"));
         assert!(RECAP_INSTRUCTION.contains("`Reply with a number:`"));
         assert!(RECAP_INSTRUCTION.contains("Ask the question exactly once"));
+    }
+
+    #[test]
+    fn recap_findings_table_lists_every_item() {
+        assert!(RECAP_INSTRUCTION.contains("The table must include EVERY item from the turn"));
+        assert!(RECAP_INSTRUCTION.contains("do not drop items to make the recap shorter"));
     }
 
     #[test]
