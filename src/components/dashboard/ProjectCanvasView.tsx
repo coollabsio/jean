@@ -45,9 +45,7 @@ import {
   AlertCircle,
   CircleDot,
   Check,
-  GitBranch,
   GitMerge,
-  GitBranchPlus,
   GitPullRequestArrow,
   ShieldAlert,
   Code,
@@ -972,12 +970,8 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
                 <span className="min-w-0 flex-1 truncate">{rowTitle}</span>
                 {showBranchBadge && (
                   <span className="hidden items-center gap-1 rounded border border-border/50 px-1.5 py-0.5 text-2xs font-normal text-muted-foreground sm:inline-flex">
-                    <GitBranch className="h-2.5 w-2.5" />
-                    <span className="max-w-40 truncate">{displayBranch}</span>
                     {stackedBaseBranch && (
                       <>
-                        <span className="text-border">·</span>
-                        <GitBranchPlus className="h-2.5 w-2.5" />
                         <span className="max-w-32 truncate">
                           {stackedBaseBranch}
                         </span>
@@ -987,8 +981,10 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
                             {stackedOnPR.number}
                           </>
                         )}
+                        <span className="text-border">←</span>
                       </>
                     )}
+                    <span className="max-w-40 truncate">{displayBranch}</span>
                     {worktree.pr_number && (
                       <>
                         <span className="text-border">·</span>
@@ -1032,12 +1028,8 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
               </span>
               {showBranchBadge && (
                 <span className="inline-flex max-w-full items-center gap-1 self-start rounded border border-border/50 px-1.5 py-0.5 text-2xs font-normal text-muted-foreground sm:hidden">
-                  <GitBranch className="h-2.5 w-2.5 shrink-0" />
-                  <span className="max-w-full truncate">{displayBranch}</span>
                   {stackedBaseBranch && (
                     <>
-                      <span className="text-border">·</span>
-                      <GitBranchPlus className="h-2.5 w-2.5 shrink-0" />
                       <span className="max-w-32 truncate">
                         {stackedBaseBranch}
                       </span>
@@ -1047,8 +1039,10 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
                           #{stackedOnPR.number}
                         </>
                       )}
+                      <span className="shrink-0 text-border">←</span>
                     </>
                   )}
+                  <span className="max-w-full truncate">{displayBranch}</span>
                   {worktree.pr_number && (
                     <>
                       <span className="text-border">·</span>
