@@ -3929,6 +3929,13 @@ export function ProjectCanvasView({
                       </div>
                     ) : null
                   previousRowState = rowState
+                  const worktreeHeader = rowCards ? (
+                    <div className="truncate px-3 pt-3 pb-1 text-xs font-medium text-muted-foreground">
+                      {isBaseSession(section.worktree)
+                        ? 'Base Session'
+                        : section.worktree.name}
+                    </div>
+                  ) : null
                   const isReorderDisabled =
                     !canvasReorderEnabled ||
                     reorderWorktrees.isPending ||
@@ -3970,6 +3977,7 @@ export function ProjectCanvasView({
                   return (
                     <Fragment key={section.worktree.id}>
                       {groupHeader}
+                      {worktreeHeader}
                       <SortableCanvasWorktreeSection
                         section={section}
                         disabled={isReorderDisabled}
