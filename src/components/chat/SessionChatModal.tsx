@@ -36,7 +36,10 @@ import {
   type CloseConfirmMode,
 } from './CloseWorktreeDialog'
 import { useChatStore } from '@/store/chat-store'
-import { isSessionEmpty } from '@/components/projects/worktree-close-decision'
+import {
+  decideSessionRowClose,
+  isSessionEmpty,
+} from '@/components/projects/worktree-close-decision'
 import { useTerminalStore } from '@/store/terminal-store'
 import { useBrowserStore } from '@/store/browser-store'
 import { useUIStore } from '@/store/ui-store'
@@ -695,13 +698,43 @@ export const SessionChatModal = memo(function SessionChatModal({
         return
       }
       const currentSession = tabSessions.find(s => s.id === currentSessionId)
+      // Single session view follows the Recent list row rules, so one CMD+W
+      // closes the session (or its worktree) instead of only leaving the view.
+      if (singleSessionView && !isServer && currentSession) {
+        const decision = decideSessionRowClose(
+          currentSession,
+          tabSessions,
+          useChatStore.getState().inputDrafts
+        )
+        if (decision === 'confirm-worktree') {
+          setCloseConfirmMode('worktree')
+          pendingCloseAction.current = () => {
+            onRequestCloseWorktree()
+            onClose()
+          }
+          setCloseConfirmOpen(true)
+          return
+        }
+        const closeAndLeave = () => {
+          handleDeleteSession(currentSession.id)
+          onClose()
+        }
+        if (decision === 'close-session') {
+          closeAndLeave()
+        } else {
+          setCloseConfirmMode('session')
+          pendingCloseAction.current = closeAndLeave
+          setCloseConfirmOpen(true)
+        }
+        return
+      }
       const sessionIsEmpty =
         !currentSession ||
         isSessionEmpty(currentSession, useChatStore.getState().inputDrafts)
       const action = () => {
         if (singleSessionView) {
-          // No tabs to fall back to: delete the session and leave the view.
-          // Keep a lone empty session, the backend would only recreate it.
+          // Server: no worktree to close. Keep a lone empty session, the
+          // backend would only recreate it.
           const isLoneEmpty = sessionIsEmpty && activeSessions.length <= 1
           if (currentSessionId && !isLoneEmpty) {
             handleDeleteSession(currentSessionId)
