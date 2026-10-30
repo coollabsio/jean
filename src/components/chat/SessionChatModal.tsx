@@ -50,6 +50,7 @@ import {
   useCloseSession,
 } from '@/services/chat'
 import { usePreferences } from '@/services/preferences'
+import { useClientPreferences } from '@/hooks/useClientPreferences'
 import { LOCAL_SERVER_ID } from '@/types/server-resource'
 import { usePackageScripts, type PackageScript } from '@/services/projects'
 import { useGitHubPRs } from '@/services/github'
@@ -920,7 +921,7 @@ export const SessionChatModal = memo(function SessionChatModal({
   const { data: localPreferences } = usePreferences(LOCAL_SERVER_ID)
   // Experimental: no tab row; the Recent list is the session switcher
   const singleSessionView =
-    localPreferences?.single_session_view_enabled ?? false
+    useClientPreferences().preferences.single_session_view_enabled ?? false
 
   const handleSync = useCallback(
     (e: React.MouseEvent) => {

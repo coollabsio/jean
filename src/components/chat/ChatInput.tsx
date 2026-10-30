@@ -29,7 +29,7 @@ import {
 } from './FileMentionPopover'
 import { queryClient } from '@/lib/query-client'
 import { parseServerResourceKey } from '@/lib/server-resource'
-import { LOCAL_SERVER_ID } from '@/types/server-resource'
+import { readClientPreferences } from '@/lib/client-preferences'
 import { fileQueryKeys } from '@/services/files'
 import { chatQueryKeys } from '@/services/chat'
 import { useCreateWorktree } from '@/services/projects'
@@ -709,9 +709,7 @@ export const ChatInput = memo(function ChatInput({
           (e.metaKey || e.ctrlKey) &&
           !isSending &&
           !!activeSessionId &&
-          queryClient.getQueryData<AppPreferences>(
-            preferencesQueryKeys.preferences(LOCAL_SERVER_ID)
-          )?.single_session_view_enabled === true &&
+          readClientPreferences().single_session_view_enabled === true &&
           queryClient.getQueryData<Session>(
             chatQueryKeys.session(activeSessionId)
           )?.messages.length === 0

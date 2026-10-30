@@ -9,6 +9,10 @@ import { queryClient } from '@/lib/query-client'
 import { preferencesQueryKeys } from '@/services/preferences'
 import { chatQueryKeys } from '@/services/chat'
 import { LOCAL_SERVER_ID } from '@/types/server-resource'
+import {
+  clearClientPreferencesForTests,
+  updateClientPreferences,
+} from '@/lib/client-preferences'
 import type * as EnvironmentModule from '@/lib/environment'
 import type * as PreferencesModule from '@/services/preferences'
 import { useUIStore } from '@/store/ui-store'
@@ -1161,8 +1165,6 @@ describe('ChatInput IME composition (issue #584)', () => {
   })
 
   describe('single session view', () => {
-    const localPreferencesKey =
-      preferencesQueryKeys.preferences(LOCAL_SERVER_ID)
     const pressModEnter = (textarea: HTMLTextAreaElement) =>
       fireEvent.keyDown(textarea, {
         key: 'Enter',
@@ -1177,16 +1179,14 @@ describe('ChatInput IME composition (issue #584)', () => {
       })
 
     afterEach(() => {
-      queryClient.removeQueries({ queryKey: localPreferencesKey })
+      clearClientPreferencesForTests()
       queryClient.removeQueries({
         queryKey: chatQueryKeys.session('session-1'),
       })
     })
 
     it('sends the first prompt in the background and opens a new session on Mod+Enter', async () => {
-      queryClient.setQueryData(localPreferencesKey, {
-        single_session_view_enabled: true,
-      })
+      updateClientPreferences({ single_session_view_enabled: true })
       setFirstPrompt(0)
       const created: unknown[] = []
       const listener = (event: Event) =>
@@ -1204,15 +1204,30 @@ describe('ChatInput IME composition (issue #584)', () => {
     })
 
     it('sends normally on Mod+Enter after the first prompt', () => {
-      queryClient.setQueryData(localPreferencesKey, {
-        single_session_view_enabled: true,
-      })
+      updateClientPreferences({ single_session_view_enabled: true })
       setFirstPrompt(2)
       const { textarea, onSubmit } = renderWithSubmit()
       fireEvent.change(textarea, { target: { value: 'follow-up' } })
 
       pressModEnter(textarea)
 
+      expect(onSubmit).toHaveBeenCalledWith(expect.anything(), undefined)
+    })
+
+    it('ignores the server preference, since the view is a client setting', () => {
+      queryClient.setQueryData(
+        preferencesQueryKeys.preferences(LOCAL_SERVER_ID),
+        { single_session_view_enabled: true }
+      )
+      setFirstPrompt(0)
+      const { textarea, onSubmit } = renderWithSubmit()
+      fireEvent.change(textarea, { target: { value: 'first prompt' } })
+
+      pressModEnter(textarea)
+
+      queryClient.removeQueries({
+        queryKey: preferencesQueryKeys.preferences(LOCAL_SERVER_ID),
+      })
       expect(onSubmit).toHaveBeenCalledWith(expect.anything(), undefined)
     })
 

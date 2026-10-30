@@ -4103,6 +4103,7 @@ const CLIENT_ONLY_PREFERENCE_KEYS: &[&str] = &[
     "finished_session_animation_enabled",
     "terminal_background",
     "terminal_background_custom",
+    "single_session_view_enabled",
 ];
 
 #[derive(Debug, Clone, Serialize)]
