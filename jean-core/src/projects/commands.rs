@@ -281,6 +281,25 @@ fn generate_pr_worktree_name(pr_number: u32, head_ref_name: &str) -> String {
     }
 }
 
+/// Pick the local branch name for a PR checkout. Returns `(name, collides)`.
+///
+/// Use `pr-<n>-<head>` when the head name is already a local branch, or when it
+/// is the same as the base branch (fork PR `fork:next` → `next`). Otherwise the
+/// fork branch takes the base branch name and later worktrees on it break.
+fn pr_local_branch_name(
+    project_path: &str,
+    pr_number: u32,
+    head_ref: &str,
+    base_ref: &str,
+) -> (String, bool) {
+    let collides = head_ref == base_ref || git::branch_exists(project_path, head_ref);
+    if collides {
+        (format!("pr-{pr_number}-{head_ref}"), true)
+    } else {
+        (head_ref.to_string(), false)
+    }
+}
+
 /// Get current Unix timestamp
 fn now() -> u64 {
     SystemTime::now()
@@ -2291,19 +2310,12 @@ pub async fn create_worktree(
                     ctx.number
                 );
 
-                // Check if PR head branch name collides with a locally checked-out branch
-                // (e.g. PR from fork with head "main" when local "main" is already checked out)
-                let branch_collision = git::branch_exists(&project_path, &ctx.head_ref_name);
-                let local_branch_name = if branch_collision {
-                    let alt = format!("pr-{}-{}", ctx.number, ctx.head_ref_name);
-                    log::trace!(
-                        "Branch '{}' already exists, using '{alt}' instead",
-                        ctx.head_ref_name
-                    );
-                    alt
-                } else {
-                    ctx.head_ref_name.clone()
-                };
+                let (local_branch_name, branch_collision) = pr_local_branch_name(
+                    &project_path,
+                    ctx.number,
+                    &ctx.head_ref_name,
+                    &ctx.base_ref_name,
+                );
 
                 // Clean up stale branch from a previous checkout of this PR
                 git::cleanup_stale_branch(&project_path, &local_branch_name);
@@ -3883,16 +3895,8 @@ pub async fn checkout_pr(
             log::trace!("Background: Worktree created, now running gh pr checkout {pr_number}");
 
             // Determine safe local branch name for gh pr checkout -b
-            // If pr_head_ref (e.g. "main") already exists locally, use an alternative
-            // to avoid "refusing to fetch into branch" errors when the branch is checked out
-            let branch_collision = git::branch_exists(&project_path, &pr_head_ref);
-            let local_branch_name = if branch_collision {
-                let alt = format!("pr-{pr_number}-{pr_head_ref}");
-                log::trace!("Branch '{pr_head_ref}' already exists, using '{alt}' instead");
-                alt
-            } else {
-                pr_head_ref.clone()
-            };
+            let (local_branch_name, branch_collision) =
+                pr_local_branch_name(&project_path, pr_number, &pr_head_ref, &pr_base_ref);
 
             // Clean up stale branch from a previous checkout of this PR
             // Handles: archived worktree still has branch checked out, or
@@ -3914,8 +3918,11 @@ pub async fn checkout_pr(
                         log::trace!(
                             "Background: Manual PR fetch+checkout succeeded, branch: {branch}"
                         );
-                        // Set upstream tracking so terminal `git push` works correctly
-                        if let Err(e) = git::set_upstream_tracking(
+                        // Set upstream tracking so terminal `git push` works correctly.
+                        // Skip when head == base: origin/<head> is the base branch, not the PR.
+                        if pr_head_ref == pr_base_ref {
+                            log::trace!("Background: PR head equals base, skipping upstream");
+                        } else if let Err(e) = git::set_upstream_tracking(
                             &project_path,
                             &local_branch_name,
                             &pr_head_ref,
@@ -7115,6 +7122,50 @@ fn detect_ephemeral_pr_push_target(
 mod pr_remote_cleanup_tests {
     use super::super::types::ProjectsData;
     use super::*;
+
+    #[test]
+    fn pr_local_branch_name_avoids_base_and_existing_branches() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let repo = dir.path().to_str().unwrap();
+        let git = |args: &[&str]| {
+            let ok = std::process::Command::new("git")
+                .args(args)
+                .current_dir(repo)
+                .output()
+                .expect("git")
+                .status
+                .success();
+            assert!(ok, "git {args:?} failed");
+        };
+        git(&["init", "-q", "-b", "main"]);
+        git(&[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "init",
+        ]);
+
+        // Fork PR `fork:next` → `next`: no local `next`, but it must not take the base name.
+        assert_eq!(
+            pr_local_branch_name(repo, 7, "next", "next"),
+            ("pr-7-next".to_string(), true)
+        );
+        // Head name already used by a local branch.
+        assert_eq!(
+            pr_local_branch_name(repo, 8, "main", "next"),
+            ("pr-8-main".to_string(), true)
+        );
+        // Normal PR keeps its head name.
+        assert_eq!(
+            pr_local_branch_name(repo, 9, "feature", "next"),
+            ("feature".to_string(), false)
+        );
+    }
 
     fn minimal_worktree(
         id: &str,
