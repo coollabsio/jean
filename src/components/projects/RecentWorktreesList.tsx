@@ -248,6 +248,9 @@ export function RecentWorktreesList({
     }
     return groups
   }, [pinned, rows, searchQuery, sendingSessionIds, waitingForInputSessionIds])
+  // The shelf hides when no session runs. Collapse it then, so it always
+  // comes back closed and the first click opens it.
+  if (workingExpanded && workingRows.length === 0) setWorkingExpanded(false)
   const visibleWorkingRows = workingExpanded ? workingRows : EMPTY_RECENT_ROWS
   const visibleSnoozedRows = snoozedExpanded ? snoozedRows : EMPTY_RECENT_ROWS
   // Visual order, used by Cmd+Arrow navigation and Cmd+1-9 shortcuts.
