@@ -554,7 +554,8 @@ export function RecentWorktreesList({
           className={`size-3 transition-transform ${workingExpanded ? 'rotate-90' : ''}`}
         />
         Working
-        <span className="ml-auto font-normal tabular-nums">
+        <span className="ml-auto flex items-center gap-1.5 font-normal tabular-nums">
+          <WorkingWaveform />
           {workingRows.length}
         </span>
       </button>
