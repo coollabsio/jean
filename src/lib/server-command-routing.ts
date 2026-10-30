@@ -352,11 +352,26 @@ export function decorateServerResult<T>(
     [
       'get_worktree',
       'create_worktree',
+      'create_worktree_from_existing_branch',
+      'checkout_pr',
+      'import_worktree',
       'rename_worktree',
       'create_base_session',
     ].includes(command)
   ) {
     return decorateWorktree(serverId, value) as T
+  }
+  if (
+    command === 'fork_session_to_worktree' &&
+    value &&
+    typeof value === 'object'
+  ) {
+    const result = value as Record<string, unknown>
+    return {
+      ...result,
+      worktree: decorateWorktree(serverId, result.worktree),
+      session: decorateSession(serverId, result.session),
+    } as T
   }
   if (['get_session', 'create_session'].includes(command)) {
     return decorateSession(serverId, value) as T

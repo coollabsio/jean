@@ -396,6 +396,40 @@ describe('server command routing', () => {
     })
   })
 
+  it('scopes every created worktree like its lifecycle events', () => {
+    const event = decorateServerEvent(
+      'r1',
+      { id: 'w1', project_id: 'p1', path: '/repo/next' },
+      'worktree:creating'
+    ) as { id: string }
+    for (const command of [
+      'create_worktree',
+      'create_worktree_from_existing_branch',
+      'checkout_pr',
+      'import_worktree',
+    ]) {
+      expect(
+        decorateServerResult('r1', command, {
+          id: 'w1',
+          project_id: 'p1',
+          path: '/repo/next',
+        })
+      ).toMatchObject({ id: event.id, project_id: 'r1:p1' })
+    }
+  })
+
+  it('decorates the worktree and session of a forked session', () => {
+    expect(
+      decorateServerResult('r1', 'fork_session_to_worktree', {
+        worktree: { id: 'w1', project_id: 'p1' },
+        session: { id: 's1', worktree_id: 'w1' },
+      })
+    ).toMatchObject({
+      worktree: { id: 'r1:w1', project_id: 'r1:p1' },
+      session: { id: 'r1:s1', worktree_id: 'r1:w1' },
+    })
+  })
+
   it('scopes the next active session id returned by close', () => {
     expect(decorateServerResult('r1', 'close_session', 's2')).toBe('r1:s2')
     expect(decorateServerResult('r1', 'close_session', null)).toBeNull()
