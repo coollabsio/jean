@@ -1508,6 +1508,9 @@ export function ProjectCanvasView({
   const openWorktreeModal = useCallback(
     (worktreeId: string, worktreePath: string) => {
       markWorktreeLastUsed(worktreeId)
+      // Sync projects store so magic dialogs (e.g. Update PR) target this worktree
+      useProjectsStore.getState().selectWorktree(worktreeId)
+      useChatStore.getState().registerWorktreePath(worktreeId, worktreePath)
       setSelectedWorktreeModal({ worktreeId, worktreePath })
       const sessionId = useChatStore.getState().activeSessionIds[worktreeId]
       if (sessionId) {
