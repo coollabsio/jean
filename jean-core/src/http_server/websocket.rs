@@ -381,12 +381,11 @@ pub async fn handle_ws_connection(
                             break;
                         }
                     }
-                    // Skipped events can include chat:sending/chat:done, so
-                    // session status would stay stale. Close the socket: the
-                    // client then resyncs (web reloads, native reconciles).
                     Err(broadcast::error::RecvError::Lagged(n)) => {
-                        log::warn!("WS client lagged, skipped {n} events; closing to force resync");
-                        break;
+                        log::warn!("WS client lagged, skipped {n} events; requesting resync");
+                        if ws_tx.send(Message::Text(RESYNC_EVENT_JSON.into())).await.is_err() {
+                            break;
+                        }
                     }
                     Err(broadcast::error::RecvError::Closed) => break,
                 }
@@ -397,13 +396,16 @@ pub async fn handle_ws_connection(
     log::trace!("WebSocket client disconnected");
 }
 
+/// Sent to a client that lagged behind the broadcast channel. Skipped events can
+/// include chat:sending/chat:done, so the client must resync session state.
+const RESYNC_EVENT_JSON: &str = r#"{"type":"event","event":"ws:resync","payload":{}}"#;
+
 /// Maximum additional messages to drain after the first in a single flush cycle.
 const DRAIN_MAX: usize = 32;
 
 /// Feed the first message, then non-blocking drain up to `DRAIN_MAX` more
 /// pending messages from both the broadcast and command response channels.
 /// Finishes with a single `flush()` to coalesce into fewer syscalls.
-/// Returns an error when the client lagged, so the caller closes the socket.
 async fn feed_and_drain(
     ws_tx: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     event_rx: &mut broadcast::Receiver<WsEvent>,
@@ -423,10 +425,9 @@ async fn feed_and_drain(
                 continue;
             }
             Err(broadcast::error::TryRecvError::Lagged(n)) => {
-                log::warn!(
-                    "WS client lagged during drain, skipped {n} events; closing to force resync"
-                );
-                return Err(axum::Error::new(format!("client lagged by {n} events")));
+                log::warn!("WS client lagged during drain, skipped {n} events; requesting resync");
+                ws_tx.feed(Message::Text(RESYNC_EVENT_JSON.into())).await?;
+                continue;
             }
             _ => {}
         }

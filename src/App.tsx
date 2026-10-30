@@ -974,6 +974,18 @@ function App() {
     [queryClient]
   )
 
+  // A server sends ws:resync when this client lagged and events were skipped
+  // on a socket that stays open, so the reconnect resync above never runs.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined
+    void listen('ws:resync', () => {
+      void reconcileSessionsAfterReconnect(queryClient)
+    }).then(fn => {
+      unlisten = fn
+    })
+    return () => unlisten?.()
+  }, [queryClient])
+
   // Add native-app class to body for desktop-only CSS (cursor, user-select, etc.)
   useEffect(() => {
     if (isNativeApp()) {

@@ -1202,7 +1202,7 @@ export const CompactMessageList = memo(
                 >
                   {renderMessageItem(singleMessage, {
                     hasFollowUpMessage,
-                    bubble: true,
+                    bubble: hideToolActivity,
                     onSendAnswer,
                     durationMs: durationFor(
                       singleMessage.globalIndex,
