@@ -394,7 +394,7 @@ function SortableCanvasWorktreeSection({
         <button
           ref={dragHandleRef}
           type="button"
-          className="absolute -left-5 top-2 z-10 flex h-7 w-5 cursor-grab items-center justify-center rounded text-muted-foreground/45 opacity-0 transition-opacity hover:bg-muted/70 hover:text-muted-foreground group-hover/canvas-list:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60 active:cursor-grabbing"
+          className="absolute -left-5 top-2 z-10 flex h-7 w-5 cursor-grab items-center justify-center rounded text-muted-foreground/45 opacity-0 transition-opacity hover:bg-muted/70 hover:text-muted-foreground group-hover/canvas-list:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/50 active:cursor-grabbing"
           aria-label={`Reorder ${isBaseSession(section.worktree) ? 'Base Session' : section.worktree.name}`}
           onClick={event => event.stopPropagation()}
         >
@@ -877,7 +877,7 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
           : 'mb-0.5 flex items-center gap-2',
         onRowClick &&
           (showDetails
-            ? 'cursor-pointer hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60'
+            ? 'cursor-pointer hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/50'
             : 'cursor-pointer px-2 -mx-2 py-1 hover:bg-muted/50'),
         isSelected && onRowClick && 'border-border/40 bg-muted/35',
         compact &&

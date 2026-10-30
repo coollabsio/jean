@@ -347,7 +347,7 @@ function PromptRow({ row, rowIndex, inPrompt, note, onSave }: PromptRowProps) {
           ref: rowRef,
           className: cn(
             row.props.className,
-            'cursor-pointer transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/60',
+            'cursor-pointer transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50',
             inPrompt
               ? 'bg-primary/10 shadow-[inset_3px_0_0_var(--primary)] hover:bg-primary/15'
               : 'hover:bg-muted/50 focus-visible:bg-muted/50'

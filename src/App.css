@@ -146,7 +146,7 @@
   --info-foreground: #101010;
   --border: #323232; /* coolgray-500 */
   --input: #323232; /* coolgray-500 */
-  --ring: #fcd452; /* yellow focus ring */
+  --ring: #737373; /* neutral gray focus ring */
   --chart-1: #fcd452;
   --chart-2: #22c55e;
   --chart-3: #6b16ed;
@@ -159,7 +159,7 @@
   --sidebar-accent: #282828; /* coolgray-400 */
   --sidebar-accent-foreground: #fafafa;
   --sidebar-border: #323232; /* coolgray-500 */
-  --sidebar-ring: #fcd452;
+  --sidebar-ring: #737373;
   --toast-background: #181818; /* one step above the app bg (#101010) */
   --toast-border: #262626;
 }
