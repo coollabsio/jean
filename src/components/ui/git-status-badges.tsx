@@ -1,4 +1,4 @@
-import { ArrowDownUp } from '@/components/icons/reicon'
+import { ArrowDown, ArrowDownUp, ArrowUp } from '@/components/icons/reicon'
 import {
   Tooltip,
   TooltipTrigger,
@@ -87,12 +87,23 @@ export function GitStatusBadges({
               onClick={onSync}
               className="inline-flex shrink-0 cursor-pointer items-center gap-0.5 rounded bg-violet-500/10 px-1.5 py-0.5 text-[11px] font-medium text-violet-600 dark:text-violet-400 transition-colors hover:bg-violet-500/20"
             >
-              <ArrowDownUp className="h-3 w-3" />
-              {behindCount > 0 && unpushedCount > 0
-                ? `${behindCount}/${unpushedCount}`
-                : behindCount > 0
-                  ? behindCount
-                  : unpushedCount}
+              {/* Show the action, not the counts; the counts are in the tooltip */}
+              {behindCount > 0 && unpushedCount > 0 ? (
+                <>
+                  <ArrowDownUp className="h-3 w-3" />
+                  Sync
+                </>
+              ) : behindCount > 0 ? (
+                <>
+                  <ArrowDown className="h-3 w-3" />
+                  Pull
+                </>
+              ) : (
+                <>
+                  <ArrowUp className="h-3 w-3" />
+                  Push
+                </>
+              )}
             </button>
           </TooltipTrigger>
           <TooltipContent>{syncTooltip}</TooltipContent>

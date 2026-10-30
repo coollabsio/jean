@@ -431,7 +431,7 @@ export function WorktreeDropdownMenu({
                 </DropdownMenuItem>
               )}
 
-              {isMobile && hasBranchDiff && (
+              {hasBranchDiff && (
                 <DropdownMenuItem onClick={onBranchDiffClick}>
                   <GitBranch className="mr-2 h-4 w-4" />
                   <span>Branch diff</span>

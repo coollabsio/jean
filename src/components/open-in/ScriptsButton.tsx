@@ -11,6 +11,11 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { usePackageScripts, type PackageScript } from '@/services/projects'
 import { usePatchPreferences, usePreferences } from '@/services/preferences'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
 interface ScriptsButtonProps {
@@ -95,17 +100,21 @@ export function ScriptsButton(props: ScriptsButtonProps) {
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="sm"
-          className={raisedToolbar}
-          aria-label="Scripts"
-        >
-          <Play className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">Scripts</span>
-        </Button>
-      </DropdownMenuTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className={raisedToolbar}
+              aria-label="Scripts"
+            >
+              <Play className="h-3.5 w-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent>Scripts</TooltipContent>
+      </Tooltip>
       <DropdownMenuContent align="end" className="min-w-48">
         <ScriptMenuItems {...props} />
       </DropdownMenuContent>

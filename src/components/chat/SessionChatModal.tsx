@@ -1133,14 +1133,12 @@ export const SessionChatModal = memo(function SessionChatModal({
         <GitStatusBadges
           behindCount={behindCount}
           unpushedCount={unpushedCount}
-          // Mobile shows diff counts in the title bar instead
+          // Header shows only uncommitted changes; the branch diff is in the
+          // worktree menu. Mobile shows diff counts in the title bar instead
           diffAdded={isMobile ? 0 : uncommittedAdded}
           diffRemoved={isMobile ? 0 : uncommittedRemoved}
-          branchDiffAdded={isBase || isMobile ? 0 : branchDiffAdded}
-          branchDiffRemoved={isBase || isMobile ? 0 : branchDiffRemoved}
           onSync={handleSync}
           onDiffClick={handleUncommittedDiffClick}
-          onBranchDiffClick={handleBranchDiffClick}
         />
       )}
     </>
