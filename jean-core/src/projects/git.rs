@@ -862,7 +862,9 @@ fn find_unique_branch_name(repo_path: &str, base_name: &str) -> Result<String, S
 /// Get list of local branches for a repository
 pub fn get_branches(repo_path: &str) -> Result<Vec<String>, String> {
     let output = wsl_aware_command("git", Some(Path::new(repo_path)))
-        .args(["branch", "--format=%(refname:short)"])
+        // lstrip=2, not :short — :short renames a branch to `heads/x` when a
+        // remote-tracking ref has the same short name.
+        .args(["branch", "--format=%(refname:lstrip=2)"])
         .output()
         .map_err(|e| format!("Failed to run git command: {e}"))?;
 
@@ -1460,7 +1462,7 @@ pub struct RemoteBranch {
     pub qualified: String,
 }
 
-/// Parse one `git branch -r --format=%(refname:short)` line.
+/// Parse one `git branch -r --format=%(refname:lstrip=2)` line.
 ///
 /// Skips symbolic HEAD refs (`origin/HEAD`). Branch names may contain slashes.
 pub fn parse_remote_tracking_ref(raw: &str) -> Option<RemoteBranch> {
@@ -1506,7 +1508,9 @@ pub fn distinct_remote_branches<'a>(lines: impl IntoIterator<Item = &'a str>) ->
 /// Remote-tracking branches for every configured remote.
 pub fn list_remote_branches(repo_path: &str) -> Result<Vec<RemoteBranch>, String> {
     let output = wsl_aware_command("git", Some(Path::new(repo_path)))
-        .args(["branch", "-r", "--format=%(refname:short)"])
+        // lstrip=2, not :short — :short prints `remotes/origin/next` when a
+        // local branch named `origin/next` exists, and the branch disappears.
+        .args(["branch", "-r", "--format=%(refname:lstrip=2)"])
         .output()
         .map_err(|e| format!("Failed to run git command: {e}"))?;
 
@@ -3551,6 +3555,24 @@ mod tests {
         // Local/origin checks that get_valid_base_branch uses must both fail.
         assert!(!branch_exists(path, "feature-x"));
         assert!(!remote_branch_exists(path, "feature-x"));
+    }
+
+    #[test]
+    fn test_branch_lists_survive_local_branch_named_like_remote_ref() {
+        let dir = repo_with_fork_remote();
+        let path = dir.path().to_str().unwrap();
+        run_git(
+            dir.path(),
+            &["update-ref", "refs/remotes/origin/next", "HEAD"],
+        );
+        run_git(dir.path(), &["branch", "origin/next"]);
+
+        assert!(get_remote_branches(path)
+            .unwrap()
+            .contains(&"next".to_string()));
+        assert!(get_branches(path)
+            .unwrap()
+            .contains(&"origin/next".to_string()));
     }
 
     #[test]
