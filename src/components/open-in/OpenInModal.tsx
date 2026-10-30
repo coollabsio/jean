@@ -231,11 +231,23 @@ export function OpenInModal() {
     gitProvider,
   ])
 
-  // Context options (worktree + loaded GitHub contexts, numbered 1-9)
+  const portOptions: ModalOption[] = useMemo(() => {
+    if (!ports || ports.length === 0) return []
+    return ports.map((p, i) => ({
+      id: `port-${p.port}`,
+      label: `${p.label} (${resolvePortHost(p, preferences?.browser_default_host)}:${p.port})`,
+      icon: Globe,
+      key: i < 9 ? String(i + 1) : undefined,
+      url: resolvePortUrl(p, preferences?.browser_default_host),
+    }))
+  }, [ports, preferences?.browser_default_host])
+
+  // Context options (worktree + loaded GitHub contexts). Number keys continue
+  // after the port keys, so each digit selects one option only.
   const contextOptions = useMemo(() => {
     const items: ModalOption[] = []
     const seenUrls = new Set<string>()
-    let keyIndex = 1
+    let keyIndex = portOptions.length + 1
 
     const addOption = (option: Omit<ModalOption, 'key'>) => {
       if (option.url && seenUrls.has(option.url)) return
@@ -338,6 +350,7 @@ export function OpenInModal() {
 
     return items
   }, [
+    portOptions.length,
     loadedPRs,
     loadedIssues,
     loadedDiscussions,
@@ -365,17 +378,6 @@ export function OpenInModal() {
     },
     [setOpenInModalOpen, canOpenEditor]
   )
-
-  const portOptions: ModalOption[] = useMemo(() => {
-    if (!ports || ports.length === 0) return []
-    return ports.map((p, i) => ({
-      id: `port-${p.port}`,
-      label: `${p.label} (${resolvePortHost(p, preferences?.browser_default_host)}:${p.port})`,
-      icon: Globe,
-      key: i < 9 ? String(i + 1) : undefined,
-      url: resolvePortUrl(p, preferences?.browser_default_host),
-    }))
-  }, [ports, preferences?.browser_default_host])
 
   const allOptions = useMemo(
     () => [...baseOptions, ...portOptions, ...contextOptions],

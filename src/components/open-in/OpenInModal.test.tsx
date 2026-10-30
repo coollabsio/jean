@@ -314,6 +314,18 @@ describe('OpenInModal', () => {
     expect(mocks.openExternal).toHaveBeenCalledWith('http://localhost:1420')
   })
 
+  it('numbers context keys after port keys so digits do not clash', async () => {
+    openInState.ports = [{ port: 3000, label: 'API' }]
+
+    render(<OpenInModal />)
+
+    await screen.findByText('API (localhost:3000)')
+    await userEvent.keyboard('2')
+    expect(mocks.openExternal).toHaveBeenCalledWith(
+      'https://github.com/acme/app/security/dependabot/7'
+    )
+  })
+
   it('shows worktree and loaded security/advisory context URLs', async () => {
     render(<OpenInModal />)
 
