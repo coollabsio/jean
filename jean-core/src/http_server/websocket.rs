@@ -381,8 +381,12 @@ pub async fn handle_ws_connection(
                             break;
                         }
                     }
+                    // Skipped events can include chat:sending/chat:done, so
+                    // session status would stay stale. Close the socket: the
+                    // client then resyncs (web reloads, native reconciles).
                     Err(broadcast::error::RecvError::Lagged(n)) => {
-                        log::warn!("WS client lagged, skipped {n} events");
+                        log::warn!("WS client lagged, skipped {n} events; closing to force resync");
+                        break;
                     }
                     Err(broadcast::error::RecvError::Closed) => break,
                 }
@@ -399,6 +403,7 @@ const DRAIN_MAX: usize = 32;
 /// Feed the first message, then non-blocking drain up to `DRAIN_MAX` more
 /// pending messages from both the broadcast and command response channels.
 /// Finishes with a single `flush()` to coalesce into fewer syscalls.
+/// Returns an error when the client lagged, so the caller closes the socket.
 async fn feed_and_drain(
     ws_tx: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     event_rx: &mut broadcast::Receiver<WsEvent>,
@@ -418,8 +423,10 @@ async fn feed_and_drain(
                 continue;
             }
             Err(broadcast::error::TryRecvError::Lagged(n)) => {
-                log::warn!("WS client lagged during drain, skipped {n} events");
-                continue;
+                log::warn!(
+                    "WS client lagged during drain, skipped {n} events; closing to force resync"
+                );
+                return Err(axum::Error::new(format!("client lagged by {n} events")));
             }
             _ => {}
         }
