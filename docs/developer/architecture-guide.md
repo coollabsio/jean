@@ -962,3 +962,17 @@ Browsers do not keep the web access token. Code: `jean-core/src/http_server/sess
 - **Origin check:** a cookie is accepted only if `Origin` is missing or matches `Host`, `X-Forwarded-Host`, or `JEAN_ALLOWED_ORIGINS`. This blocks CSRF and cross-site WebSocket hijacking.
 - **Rate limit:** 10 failed tokens per IP per minute, then HTTP 429.
 - **Sign out:** `POST /api/logout` revokes the session and clears the cookie.
+
+### Adding remote MCP endpoints
+
+Settings → MCP Servers accepts an HTTP(S) endpoint and defaults to global
+configuration for installed harnesses with MCP config support. Advanced settings
+allow a custom name, HTTP headers, and harness selection. The
+`add_remote_mcp_server` core dispatch command runs config writes off the async
+runtime and returns a result per harness. Native and Web Access use the same
+core dispatcher; remote settings route the command to the selected server.
+
+The installer in `jean_mcp_config.rs` reuses the config file locks, JSONC source
+patcher, and atomic writes with backups. Duplicate names fail without replacement.
+Authentication stays per harness through the existing MCP sign-in flow. Adding a
+server does not modify running sessions; start a new session to use it.

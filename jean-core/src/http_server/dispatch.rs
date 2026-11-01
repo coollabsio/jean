@@ -3532,6 +3532,12 @@ pub async fn dispatch_command(
                     .await?;
             to_value(result)
         }
+        "add_remote_mcp_server" => {
+            let request = from_field(&args, "request")?;
+            let result = Box::pin(crate::jean_mcp_config::add_remote_mcp_server(request)).await?;
+            emit_cache_invalidation(&app, &["mcp-servers"]);
+            to_value(result)
+        }
         "get_mcp_servers" => {
             let backend: Option<String> = from_field_opt(&args, "backend")?;
             let worktree_path: Option<String> = field_opt(&args, "worktreePath", "worktree_path")?;

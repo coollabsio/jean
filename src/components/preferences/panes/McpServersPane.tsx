@@ -1,3 +1,4 @@
+import { AddMcpEndpoint } from '@/components/mcp/AddMcpEndpoint'
 import React, { useEffect, useMemo } from 'react'
 import {
   CheckCircle,
@@ -239,6 +240,17 @@ export const McpServersPane: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      <SettingsSection
+        title="Add MCP Server"
+        description="Paste an endpoint to add it across your harnesses."
+      >
+        <AddMcpEndpoint
+          key={serverId}
+          installedBackends={installedBackends}
+          serverId={serverId}
+          onAdded={checkHealth}
+        />
+      </SettingsSection>
       <SettingsSection
         title="Default MCP Servers"
         description="Defaults for new sessions. Change a session from its toolbar."

@@ -1462,3 +1462,243 @@ installer = "npm"
         assert_eq!(arr.get(0).and_then(|v| v.as_str()), Some("other"));
     }
 }
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteMcpRequest {
+    pub url: String,
+    pub name: Option<String>,
+    pub backends: Vec<String>,
+    #[serde(default)]
+    pub headers: HashMap<String, String>,
+}
+
+#[derive(Serialize)]
+pub struct RemoteMcpResult {
+    backend: String,
+    name: String,
+    success: bool,
+    message: String,
+}
+
+pub async fn add_remote_mcp_server(
+    request: RemoteMcpRequest,
+) -> Result<Vec<RemoteMcpResult>, String> {
+    let url = reqwest::Url::parse(request.url.trim()).map_err(|_| "Enter a valid HTTP endpoint")?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.fragment().is_some()
+    {
+        return Err("Use an HTTP or HTTPS endpoint without credentials or a fragment".into());
+    }
+    let default_name = url
+        .host_str()
+        .unwrap_or("server")
+        .split('.')
+        .next()
+        .unwrap_or("server")
+        .to_string();
+    let name = request
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(&default_name)
+        .to_string();
+    if name.len() > 100
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+    {
+        return Err(
+            "Server name must contain only letters, numbers, hyphens, or underscores".into(),
+        );
+    }
+    if request.backends.is_empty() {
+        return Err("Select at least one harness".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let home = dirs::home_dir().ok_or("Home directory unavailable")?;
+        let mut results = Vec::new();
+        for backend in &request.backends {
+            let result = remote_config_target(&home, backend).and_then(|(path, key)| {
+                install_remote_at(&path, key, backend, &name, url.as_str(), &request.headers)
+            });
+            results.push(RemoteMcpResult {
+                backend: backend.clone(),
+                name: name.clone(),
+                success: result.is_ok(),
+                message: result
+                    .err()
+                    .unwrap_or_else(|| "Added. Start a new session to use this server.".into()),
+            });
+        }
+        Ok(results)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn remote_config_target(home: &Path, backend: &str) -> Result<(PathBuf, &'static str), String> {
+    let (path, key) = match backend {
+        "claude" => (home.join(".claude.json"), "mcpServers"),
+        "codex" => (home.join(".codex/config.toml"), "mcp_servers"),
+        "grok" => (home.join(".grok/config.toml"), "mcp_servers"),
+        "cursor" => (home.join(".cursor/mcp.json"), "mcpServers"),
+        "kimi" => (home.join(".kimi-code/mcp.json"), "mcpServers"),
+        "antigravity" => (home.join(".gemini/config/mcp_config.json"), "mcpServers"),
+        "devin" => (
+            crate::devin_cli::mcp::user_config_dir()
+                .ok_or("Devin config directory unavailable")?
+                .join("mcp_config.json"),
+            "mcpServers",
+        ),
+        "muse" => (
+            crate::muse_cli::settings_path().ok_or("Muse config directory unavailable")?,
+            "mcp_servers",
+        ),
+        "opencode" => (
+            find_opencode_config_path(home)
+                .unwrap_or_else(|| home.join(".config/opencode/opencode.json")),
+            "mcp",
+        ),
+        _ => return Err(format!("{backend} does not support endpoint setup")),
+    };
+    Ok((path, key))
+}
+
+fn install_remote_at(
+    path: &Path,
+    key: &str,
+    backend: &str,
+    name: &str,
+    url: &str,
+    headers: &HashMap<String, String>,
+) -> Result<(), String> {
+    let target = crate::platform::resolve_write_target(path)?;
+    with_config_lock(&target, || {
+        let content = read_optional(&target)?;
+        let updated = if matches!(backend, "codex" | "grok") {
+            let mut doc = content
+                .parse::<toml_edit::DocumentMut>()
+                .map_err(|e| e.to_string())?;
+            if doc.get(key).and_then(|v| v.get(name)).is_some() {
+                return Err(format!(
+                    "Server {name} already exists. Choose another name."
+                ));
+            }
+            let mut table = toml_edit::Table::new();
+            table["url"] = toml_edit::value(url);
+            if !headers.is_empty() {
+                let mut values = toml_edit::Table::new();
+                for (k, v) in headers {
+                    values[k] = toml_edit::value(v);
+                }
+                table[if backend == "grok" {
+                    "headers"
+                } else {
+                    "http_headers"
+                }] = toml_edit::Item::Table(values);
+            }
+            if doc.get(key).is_none() {
+                doc[key] = toml_edit::Item::Table(toml_edit::Table::new());
+            }
+            if !doc[key].is_table_like() {
+                return Err(format!("{key} must be a table"));
+            }
+            doc[key][name] = toml_edit::Item::Table(table);
+            doc.to_string()
+        } else {
+            let source = if content.trim().is_empty() {
+                "{}"
+            } else {
+                &content
+            };
+            let parsed: serde_json::Value =
+                serde_json::from_str(&strip_trailing_commas(&strip_jsonc_comments(source)))
+                    .map_err(|e| e.to_string())?;
+            if parsed.get(key).and_then(|v| v.get(name)).is_some() {
+                return Err(format!(
+                    "Server {name} already exists. Choose another name."
+                ));
+            }
+            let mut value = match backend {
+                "opencode" => json!({"type":"remote", "url":url, "enabled":true}),
+                "antigravity" => json!({"serverUrl":url}),
+                "muse" => json!({"transport":"streamable_http", "url":url}),
+                "cursor" | "kimi" => json!({"url":url}),
+                _ => json!({"type":"http", "url":url}),
+            };
+            if !headers.is_empty() {
+                value["headers"] = json!(headers);
+            }
+            let source = if backend == "muse" && content.trim().is_empty() {
+                "{\"schema_version\":1}"
+            } else {
+                source
+            };
+            patch_jsonc_object_property(source, key, name, &value)?
+        };
+        crate::platform::write_file_atomically_with_backup(&target, updated.as_bytes())?;
+        Ok(())
+    })
+}
+
+#[cfg(test)]
+mod remote_tests {
+    use super::*;
+    #[test]
+    fn remote_install_preserves_config_and_rejects_duplicates() {
+        for backend in [
+            "claude",
+            "codex",
+            "opencode",
+            "cursor",
+            "grok",
+            "kimi",
+            "antigravity",
+            "muse",
+            "devin",
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("config");
+            let key = if matches!(backend, "codex" | "grok" | "muse") {
+                "mcp_servers"
+            } else if backend == "opencode" {
+                "mcp"
+            } else {
+                "mcpServers"
+            };
+            let initial = if matches!(backend, "codex" | "grok") {
+                "# Keep me\nother = true\n"
+            } else {
+                "{\n// Keep me\n\"other\":true\n}"
+            };
+            std::fs::write(&path, initial).unwrap();
+            install_remote_at(
+                &path,
+                key,
+                backend,
+                "orbit",
+                "https://orbit.coollabs.io/mcp",
+                &HashMap::new(),
+            )
+            .unwrap();
+            let installed = std::fs::read_to_string(&path).unwrap();
+            assert!(installed.contains("Keep me"));
+            assert!(installed.contains("https://orbit.coollabs.io/mcp"));
+            assert!(install_remote_at(
+                &path,
+                key,
+                backend,
+                "orbit",
+                "https://other.test/mcp",
+                &HashMap::new()
+            )
+            .is_err());
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), installed);
+        }
+    }
+}
