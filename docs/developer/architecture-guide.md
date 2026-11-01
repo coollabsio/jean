@@ -976,3 +976,13 @@ The installer in `jean_mcp_config.rs` reuses the config file locks, JSONC source
 patcher, and atomic writes with backups. Duplicate names fail without replacement.
 Authentication stays per harness through the existing MCP sign-in flow. Adding a
 server does not modify running sessions; start a new session to use it.
+
+Endpoint setup also offers browser-free bearer-token and API-key authentication
+under Advanced settings. Users supply credentials issued for that MCP server;
+Jean does not obtain or refresh them. `buildMcpEndpointHeaders` validates the
+header map and rejects authentication headers that conflict (case-insensitively)
+with the selected method. The existing per-harness config writers persist the
+headers. The result panel omits OAuth sign-in buttons for explicit credentials.
+Credential inputs clear after all selected writes succeed; partial failures keep
+them available for retry. OAuth-only servers still need browser authorization.
+See the [MCP authorization specification](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization).

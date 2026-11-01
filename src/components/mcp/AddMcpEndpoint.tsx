@@ -1,3 +1,7 @@
+import {
+  buildMcpEndpointHeaders,
+  type McpEndpointAuth,
+} from '@/services/mcp-endpoint-auth'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -40,6 +44,10 @@ export function AddMcpEndpoint({
   const [endpoint, setEndpoint] = useState('')
   const [name, setName] = useState('')
   const [headers, setHeaders] = useState('')
+  const [auth, setAuth] = useState<McpEndpointAuth>('default')
+  const [credential, setCredential] = useState('')
+  const [apiKeyHeader, setApiKeyHeader] = useState('X-API-Key')
+  const [resultUsesCredentials, setResultUsesCredentials] = useState(false)
   const [excluded, setExcluded] = useState<CliBackend[]>([])
   const [busy, setBusy] = useState(false)
   const [results, setResults] = useState<Result[]>([])
@@ -59,19 +67,12 @@ export function AddMcpEndpoint({
         event.preventDefault()
         let parsedHeaders: Record<string, string> = {}
         try {
-          if (headers.trim()) {
-            const value: unknown = JSON.parse(headers)
-            if (
-              !value ||
-              typeof value !== 'object' ||
-              Array.isArray(value) ||
-              Object.values(value).some(v => typeof v !== 'string')
-            )
-              throw new Error(
-                'Headers must be a JSON object with string values'
-              )
-            parsedHeaders = value as Record<string, string>
-          }
+          parsedHeaders = buildMcpEndpointHeaders(
+            headers,
+            auth,
+            credential,
+            apiKeyHeader
+          )
         } catch (error) {
           toast.error(String(error))
           return
@@ -93,6 +94,11 @@ export function AddMcpEndpoint({
             }
           )
           setResults(added)
+          setResultUsesCredentials(auth !== 'default')
+          if (added.every(result => result.success)) {
+            setCredential('')
+            setHeaders('')
+          }
           invalidateAllMcpServers()
           onAdded()
           const successes = added.filter(r => r.success).length
@@ -143,6 +149,64 @@ export function AddMcpEndpoint({
             placeholder={suggestedName || 'From endpoint hostname'}
             onChange={e => setName(e.target.value)}
           />
+          <fieldset className="space-y-2">
+            <legend className="mb-2 text-sm font-medium">Authentication</legend>
+            {(
+              [
+                ['default', 'Default (sign in if required)'],
+                ['bearer', 'Bearer token (no browser)'],
+                ['api-key', 'API key (no browser)'],
+              ] as const
+            ).map(([value, label]) => (
+              <label key={value} className="flex items-center gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="mcp-endpoint-auth"
+                  value={value}
+                  checked={auth === value}
+                  onChange={() => setAuth(value)}
+                />
+                {label}
+              </label>
+            ))}
+          </fieldset>
+          {auth !== 'default' && (
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">
+                Use a credential issued by this MCP server. The server must
+                support this method. OAuth-only servers still require browser
+                sign-in.
+              </p>
+              {auth === 'api-key' && (
+                <>
+                  <Label htmlFor="mcp-api-key-header">
+                    API key header name
+                  </Label>
+                  <Input
+                    id="mcp-api-key-header"
+                    value={apiKeyHeader}
+                    onChange={e => setApiKeyHeader(e.target.value)}
+                    required
+                  />
+                </>
+              )}
+              <Label htmlFor="mcp-auth-credential">
+                {auth === 'bearer' ? 'Bearer token' : 'API key'}
+              </Label>
+              <Input
+                id="mcp-auth-credential"
+                type="password"
+                autoComplete="off"
+                value={credential}
+                onChange={e => setCredential(e.target.value)}
+                required
+              />
+              <p className="text-xs text-muted-foreground">
+                Credentials are saved in the selected harness configuration
+                files. Jean does not refresh tokens automatically.
+              </p>
+            </div>
+          )}
           <Label htmlFor="mcp-endpoint-headers">Headers (JSON)</Label>
           <Input
             id="mcp-endpoint-headers"
@@ -194,7 +258,7 @@ export function AddMcpEndpoint({
               >
                 {result.message}
               </span>
-              {result.success && (
+              {result.success && !resultUsesCredentials && (
                 <McpSignInButton
                   backend={result.backend}
                   serverName={result.name}
