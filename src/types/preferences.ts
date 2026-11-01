@@ -88,7 +88,7 @@ export interface MagicPrompts {
   investigate_sentry_issue: string | null
   /** Prompt for addressing inline PR review comments */
   review_comments: string | null
-  /** Prompt for reviewing all changes since the last production release */
+  /** Prompt for reviewing all changes against the base branch before a release */
   pre_release_review: string | null
 }
 
@@ -795,31 +795,31 @@ Address the following review comments from PR #{prNumber}
 
 </guidelines>`
 
-/** Default prompt for reviewing all changes since the last production release */
-export const DEFAULT_PRE_RELEASE_REVIEW_PROMPT = `# Pre-release review: all changes since the last production release
+/** Default prompt for reviewing all changes against the base branch before a release */
+export const DEFAULT_PRE_RELEASE_REVIEW_PROMPT = `# Pre-release review: all changes against the base branch
 
 ## Context
 - Repository: the current worktree.
-- Last production release: find it yourself (see Phase 1).
+- Base branch: \`{base_branch}\`. Always compare against this branch, not against a release tag.
 - Target: HEAD, unless I give another branch or commit.
 - Dev/test environment for live checks: call Jean MCP \`get_run_environments\` and use the
   returned URL/port/command. If none is available, ask me or write "none".
 - Project rules: read the repo's AGENTS.md / CLAUDE.md / CONTRIBUTING.md first and follow them.
 
 ## Phase 1 — Find the range
-1. If the release is not given, find it: the latest release tag (\`git tag --sort=-creatordate\`),
-   the release workflow, the version files, or the changelog. State which one you used and why.
+1. Fetch the base branch (\`git fetch\`) so \`{base_branch}\` is current. Use the merge base
+   as the start of the range: \`git merge-base {base_branch} <target>\`.
 2. Show the size of the range: number of commits, changed files, and the main areas
-   (\`git log --oneline <release>..<target>\`, \`git diff --stat\`).
+   (\`git log --oneline {base_branch}..<target>\`, \`git diff --stat {base_branch}...<target>\`).
 
 ## Phase 2 — Review in parallel (read only, change nothing)
 Split the diff into areas that fit this project (e.g. auth, API, data/migrations,
 deployments/jobs, storage/files, networking/proxy, UI, infra/CI, security, performance).
 Review each area in parallel with subagents, plus one agent for the full diff.
 Every agent must, for each finding:
-- compare with the last release (\`git show <release>:<file>\`), and say whether it is a
-  **regression** (new in this range) or an **old bug** (also in the release); for a
-  regression, describe how it worked in the last release;
+- compare with the base branch (\`git show {base_branch}:<file>\`), and say whether it is a
+  **regression** (new in this range) or an **old bug** (also in the base branch); for a
+  regression, describe how it works on the base branch;
 - describe a concrete failure scenario (input/state → wrong result), who is affected,
   and who can trigger it (for security: which role);
 - prefer real evidence (a failing test, a reproduction, a query) over guesses. If possible,
@@ -844,7 +844,7 @@ For each severity, output a table:
 | # | Verified | Problem and impact | Regression | Recommended fix |
 
 In the Regression column, write **No**, or **Yes** followed by how it worked in the
-last release (e.g. "Yes: the release kept existing values on upgrade").
+base branch (e.g. "Yes: the base branch kept existing values on upgrade").
 Use only these columns. Do not add file, size, effort, or timing columns.
 
 Then add:
@@ -858,7 +858,7 @@ I answer with item numbers and a decision, for example
 "H1 fix, M3 check only, L5 skip, L7 explain". Use these verbs:
 - **explain** — facts only: before vs now, impact, options with a recommendation. No change.
 - **check only** — verify (and reproduce if possible, preferably live on the local dev
-  instance), compare with the last release, recommend a fix. No code change.
+  instance), compare with the base branch, recommend a fix. No code change.
 - **fix** — then follow this workflow:
   1. First verify the item is real in the code. If it is not, report and stop.
   2. TDD: write a failing test first (behavior, not markup), then the fix, then the

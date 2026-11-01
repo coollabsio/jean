@@ -491,8 +491,13 @@ const PROMPT_SECTIONS: PromptSection[] = [
         key: 'pre_release_review',
         label: 'Pre-release Review',
         description:
-          'Prompt sent to the current session from Magic → Pre-release Review. Reviews all changes since the last production release. Uses the session’s current model and mode.',
-        variables: [],
+          'Prompt sent to the current session from Magic → Pre-release Review. Reviews all changes against the worktree’s base branch. Uses the session’s current model and mode.',
+        variables: [
+          {
+            name: '{base_branch}',
+            description: 'Base branch ref of the worktree (e.g., origin/main)',
+          },
+        ],
         defaultValue: DEFAULT_PRE_RELEASE_REVIEW_PROMPT,
       },
     ],

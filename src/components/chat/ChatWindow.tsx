@@ -1871,9 +1871,14 @@ const ChatWindowContent = memo(function ChatWindowContent({
   }, [activeSessionId, getMcpConfig, sendMessageNow])
 
   const handlePreReleaseReview = useCallback(() => {
-    const message =
+    const baseBranch =
+      gitStatus?.base_branch ?? worktree?.base_branch ?? 'main'
+    const baseRemote =
+      gitStatus?.base_remote ?? worktree?.base_remote ?? 'origin'
+    const message = (
       preferences?.magic_prompts?.pre_release_review ??
       DEFAULT_PRE_RELEASE_REVIEW_PROMPT
+    ).replaceAll('{base_branch}', `${baseRemote}/${baseBranch}`)
     if (routeCurrentSessionMagicPrompt(activeSessionId, message) !== 'chat') {
       return
     }
@@ -1898,8 +1903,12 @@ const ChatWindowContent = memo(function ChatWindowContent({
   }, [
     activeSessionId,
     getMcpConfig,
+    gitStatus?.base_branch,
+    gitStatus?.base_remote,
     preferences?.magic_prompts?.pre_release_review,
     sendMessageNow,
+    worktree?.base_branch,
+    worktree?.base_remote,
   ])
 
   // Claude's goal lives in the CLI session: queue `/goal clear` (a local CLI

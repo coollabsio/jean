@@ -1232,7 +1232,7 @@ const magicPromptDefinitions: {
   {
     key: 'pre_release_review',
     title: 'Pre-release Review Prompt',
-    description: 'Review all changes since the last production release.',
+    description: 'Review all changes against the base branch.',
     keywords: ['pre-release review prompt', 'release review', 'regression'],
   },
   {
