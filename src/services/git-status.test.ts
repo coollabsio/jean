@@ -20,6 +20,7 @@ import {
   useWorktreePolling,
   performGitPull,
   performGitSync,
+  useIsGitSyncing,
   type WorktreePollingInfo,
   type GitStatusEvent,
 } from './git-status'
@@ -503,6 +504,31 @@ describe('git-status service', () => {
   })
 
   describe('performGitSync', () => {
+    it('reports the worktree as syncing for the whole pull and push, then clears', async () => {
+      const { result } = renderHook(() => useIsGitSyncing('wt-sync'))
+      const seen: boolean[] = []
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'git_pull' || cmd === 'git_push') seen.push(result.current)
+        if (cmd === 'git_pull') return 'Already up to date.'
+        if (cmd === 'git_push') throw new Error('rejected')
+        return undefined
+      })
+
+      expect(result.current).toBe(false)
+      await performGitSync({
+        needsPull: true,
+        needsPush: true,
+        pull: {
+          worktreeId: 'wt-sync',
+          worktreePath: '/path/to/repo',
+          baseBranch: 'main',
+        },
+      })
+
+      expect(seen).toEqual([true, true])
+      await waitFor(() => expect(result.current).toBe(false))
+    })
+
     it('pulls then pushes when both are needed with sync toasts', async () => {
       mockInvoke.mockImplementation(async (cmd: string) => {
         if (cmd === 'git_pull') return 'Already up to date.'

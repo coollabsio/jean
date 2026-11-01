@@ -3,7 +3,11 @@ import { describe, expect, it } from 'vitest'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { GitStatusBadges } from './git-status-badges'
 
-function renderBadges(behindCount: number, unpushedCount: number) {
+function renderBadges(
+  behindCount: number,
+  unpushedCount: number,
+  isSyncing = false
+) {
   render(
     <TooltipProvider>
       <GitStatusBadges
@@ -11,6 +15,7 @@ function renderBadges(behindCount: number, unpushedCount: number) {
         unpushedCount={unpushedCount}
         diffAdded={0}
         diffRemoved={0}
+        isSyncing={isSyncing}
       />
     </TooltipProvider>
   )
@@ -23,9 +28,17 @@ describe('GitStatusBadges sync button', () => {
     [64, 1383, 'Sync'],
   ])('behind %i, unpushed %i shows %s', (behind, unpushed, label) => {
     renderBadges(behind, unpushed)
-    const button = screen.getByRole('button')
-    expect(button).toHaveTextContent(label)
-    expect(button).not.toHaveTextContent(/\d/)
+    const button = screen.getByRole('button', { name: label })
+    expect(button.textContent).toBe('')
+    expect(button).toBeEnabled()
+  })
+
+  it('shows a spinner and blocks clicks while syncing', () => {
+    renderBadges(3, 5, true)
+    const button = screen.getByRole('button', { name: 'Sync' })
+    expect(button).toBeDisabled()
+    expect(button).toHaveAttribute('aria-busy', 'true')
+    expect(screen.getByRole('status')).toBeInTheDocument()
   })
 
   it('renders nothing when in sync and clean', () => {

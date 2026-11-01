@@ -1,4 +1,5 @@
 import { ArrowDown, ArrowDownUp, ArrowUp } from '@/components/icons/reicon'
+import { Spinner } from '@/components/ui/spinner'
 import {
   Tooltip,
   TooltipTrigger,
@@ -12,6 +13,8 @@ interface GitStatusBadgesProps {
   diffRemoved: number
   branchDiffAdded?: number
   branchDiffRemoved?: number
+  /** Pull/push in progress: shows a spinner on the sync badge */
+  isSyncing?: boolean
   onSync?: (e: React.MouseEvent) => void
   onDiffClick?: (e: React.MouseEvent) => void
   onBranchDiffClick?: (e: React.MouseEvent) => void
@@ -24,6 +27,7 @@ export function GitStatusBadges({
   diffRemoved,
   branchDiffAdded = 0,
   branchDiffRemoved = 0,
+  isSyncing = false,
   onSync,
   onDiffClick,
   onBranchDiffClick,
@@ -32,6 +36,13 @@ export function GitStatusBadges({
   const hasBranchDiff = branchDiffAdded > 0 || branchDiffRemoved > 0
   const hasRemoteDivergence = behindCount > 0 || unpushedCount > 0
   if (!behindCount && !unpushedCount && !hasDiff && !hasBranchDiff) return null
+
+  const [SyncIcon, syncLabel] =
+    behindCount > 0 && unpushedCount > 0
+      ? [ArrowDownUp, 'Sync']
+      : behindCount > 0
+        ? [ArrowDown, 'Pull']
+        : [ArrowUp, 'Push']
 
   const syncTooltip = (() => {
     const parts: string[] = []
@@ -85,24 +96,16 @@ export function GitStatusBadges({
             <button
               type="button"
               onClick={onSync}
-              className="inline-flex shrink-0 cursor-pointer items-center gap-0.5 rounded bg-violet-500/10 px-1.5 py-0.5 text-[11px] font-medium text-violet-600 dark:text-violet-400 transition-colors hover:bg-violet-500/20"
+              disabled={isSyncing}
+              aria-busy={isSyncing}
+              aria-label={syncLabel}
+              className="inline-flex shrink-0 cursor-pointer items-center gap-0.5 rounded bg-violet-500/10 px-1 py-0.5 text-[11px] font-medium text-violet-600 dark:text-violet-400 transition-colors hover:bg-violet-500/20 disabled:cursor-default"
             >
-              {/* Show the action, not the counts; the counts are in the tooltip */}
-              {behindCount > 0 && unpushedCount > 0 ? (
-                <>
-                  <ArrowDownUp className="h-3 w-3" />
-                  Sync
-                </>
-              ) : behindCount > 0 ? (
-                <>
-                  <ArrowDown className="h-3 w-3" />
-                  Pull
-                </>
+              {/* Icon only; the action and counts are in the tooltip */}
+              {isSyncing ? (
+                <Spinner className="size-3" />
               ) : (
-                <>
-                  <ArrowUp className="h-3 w-3" />
-                  Push
-                </>
+                <SyncIcon className="h-3 w-3" />
               )}
             </button>
           </TooltipTrigger>

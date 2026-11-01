@@ -121,7 +121,7 @@ import {
 } from '@/services/github'
 import { useGhCliAuth } from '@/services/gh-cli'
 import { providerLabels, useProjectGitProvider } from '@/services/git-provider'
-import { useGitStatus } from '@/services/git-status'
+import { useGitStatus, useIsGitSyncing } from '@/services/git-status'
 import { useChatStore } from '@/store/chat-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
@@ -560,6 +560,7 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
   const isBase = isBaseSession(worktree)
   const rowTitle = isBase ? 'Base Session' : worktree.name
   const { data: gitStatus } = useGitStatus(isVisible ? worktree.id : null)
+  const isGitSyncing = useIsGitSyncing(worktree.id)
 
   const behindCount =
     gitStatus?.behind_count ?? worktree.cached_behind_count ?? 0
@@ -961,6 +962,7 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
                     unpushedCount={unpushedCount}
                     diffAdded={diffAdded}
                     diffRemoved={diffRemoved}
+                    isSyncing={isGitSyncing}
                     onSync={handleSync}
                     onDiffClick={handleDiffClick}
                   />

@@ -57,7 +57,11 @@ import { usePrStatus } from '@/services/pr-status'
 import type { PrDisplayStatus } from '@/types/pr-status'
 import { openExternal } from '@/lib/platform'
 import { getPrStatusDisplay } from './toolbar/toolbar-utils'
-import { useGitStatus, performGitSync } from '@/services/git-status'
+import {
+  useGitStatus,
+  useIsGitSyncing,
+  performGitSync,
+} from '@/services/git-status'
 import { isBaseSession, type Project, type Worktree } from '@/types/projects'
 import type { Session } from '@/types/chat'
 import { isNativeApp } from '@/lib/environment'
@@ -456,6 +460,7 @@ export const SessionChatModal = memo(function SessionChatModal({
   )
   const isBase = worktree ? isBaseSession(worktree) : false
   const { data: gitStatus } = useGitStatus(worktreeId)
+  const isGitSyncing = useIsGitSyncing(worktreeId)
   const behindCount =
     gitStatus?.behind_count ?? worktree?.cached_behind_count ?? 0
   const unpushedCount =
@@ -1089,6 +1094,7 @@ export const SessionChatModal = memo(function SessionChatModal({
           // worktree menu. Mobile shows diff counts in the title bar instead
           diffAdded={isMobile ? 0 : uncommittedAdded}
           diffRemoved={isMobile ? 0 : uncommittedRemoved}
+          isSyncing={isGitSyncing}
           onSync={handleSync}
           onDiffClick={handleUncommittedDiffClick}
         />

@@ -9,6 +9,7 @@ import { invoke, useWsConnectionStatus } from '@/lib/transport'
 import { listen, type UnlistenFn } from '@/lib/transport'
 import { useEffect, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { create } from 'zustand'
 
 import {
   isTauri,
@@ -25,6 +26,34 @@ import type { GitDiff, CommitHistoryResult } from '@/types/git-diff'
 import { toastActionLabel } from '@/lib/toast-action-label'
 import { logger } from '@/lib/logger'
 import { queryClient } from '@/lib/query-client'
+
+// ============================================================================
+// Git sync activity (pull/push in progress per worktree)
+// ============================================================================
+
+/** Count of running pull/push operations per worktree id (nesting-safe). */
+const useGitSyncActivityStore = create<{ counts: Record<string, number> }>(
+  () => ({ counts: {} })
+)
+
+function beginGitSync(worktreeId: string | undefined): () => void {
+  if (!worktreeId) return () => undefined
+  const adjust = (delta: number) =>
+    useGitSyncActivityStore.setState(({ counts }) => {
+      const next = (counts[worktreeId] ?? 0) + delta
+      const { [worktreeId]: _, ...rest } = counts
+      return { counts: next > 0 ? { ...rest, [worktreeId]: next } : rest }
+    })
+  adjust(1)
+  return () => adjust(-1)
+}
+
+/** True while a pull, push, or sync runs on the worktree. */
+export function useIsGitSyncing(worktreeId: string | undefined): boolean {
+  return useGitSyncActivityStore(state =>
+    worktreeId ? (state.counts[worktreeId] ?? 0) > 0 : false
+  )
+}
 
 function invalidateJeanConfigQueries() {
   queryClient.invalidateQueries({ queryKey: ['run-scripts'] })
@@ -290,6 +319,7 @@ export async function performGitPull(opts: GitPullOptions): Promise<boolean> {
   if (worktreeId) {
     setWorktreeLoading(worktreeId, 'commit')
   }
+  const endGitSync = beginGitSync(worktreeId)
   const label = branchLabel || baseBranch
   const toastId =
     existingToastId ??
@@ -420,6 +450,7 @@ export async function performGitPull(opts: GitPullOptions): Promise<boolean> {
     if (worktreeId) {
       clearWorktreeLoading(worktreeId)
     }
+    endGitSync()
   }
 }
 
@@ -442,11 +473,24 @@ export interface GitSyncOptions {
  * Skips push if pull was requested and failed.
  */
 export async function performGitSync(opts: GitSyncOptions): Promise<void> {
-  const { needsPull, needsPush, pull, prNumber, pushRemote } = opts
+  const { needsPull, needsPush, pull } = opts
   const shouldPush = needsPush || needsPull
 
   if (!needsPull && !needsPush) return
 
+  // Covers the gap between pull and push so the indicator does not flicker
+  const endGitSync = beginGitSync(pull.worktreeId)
+  try {
+    await runGitSync(opts, shouldPush)
+  } finally {
+    endGitSync()
+  }
+}
+
+async function runGitSync(
+  { needsPull, pull, prNumber, pushRemote }: GitSyncOptions,
+  shouldPush: boolean
+): Promise<void> {
   const [{ toast }] = await Promise.all([import('sonner')])
   const label = pull.branchLabel || pull.baseBranch
   const toastId = toast.loading(`Syncing ${label}...`)
@@ -510,12 +554,17 @@ export async function gitPush(
   if (!isTauri()) {
     throw new Error('Git push only available in Tauri')
   }
-  return invoke<GitPushResponse>('git_push', {
-    worktreePath,
-    prNumber: prNumber ?? null,
-    remote: remote ?? null,
-    worktreeId: ownerId,
-  })
+  const endGitSync = beginGitSync(ownerId)
+  try {
+    return await invoke<GitPushResponse>('git_push', {
+      worktreePath,
+      prNumber: prNumber ?? null,
+      remote: remote ?? null,
+      worktreeId: ownerId,
+    })
+  } finally {
+    endGitSync()
+  }
 }
 
 export interface GitRemote {
