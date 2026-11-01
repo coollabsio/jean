@@ -528,7 +528,12 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
         align="center"
         sideOffset={6}
         collisionPadding={16}
-        className="w-[min(440px,calc(100vw-2rem))] p-0"
+        className={cn(
+          'p-0',
+          isMobile
+            ? 'w-[calc(100vw-2rem)]'
+            : 'w-[min(440px,calc(100vw-2rem))]'
+        )}
         tabIndex={-1}
         onKeyDown={handleKeyDown}
         onOpenAutoFocus={e => {
