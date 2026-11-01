@@ -13,6 +13,8 @@ import { useUIStore } from '@/store/ui-store'
 const URL_SCHEME = /^[a-z][a-z\d+.-]*:/i
 const WINDOWS_ABSOLUTE = /^[a-z]:[\\/]/i
 const LINE_SUFFIX = /:\d+(?::\d+)?$/
+// `file.ts:42`, `file.ts:42:7`, `file.ts#L42` or `file.ts#L42-L50`
+const LINE_REFERENCE = /(?::\d+(?::\d+)?|#L\d+(?:-L?\d+)?)$/
 
 /**
  * Detect inline-code text that names a file, e.g. `.showreel/out/x.mp4`,
@@ -63,7 +65,7 @@ export function resolveWorktreeFilePath(
 
 /** Open a file in Jean's file viewer. Returns false if the path is unresolvable. */
 export function openLocalFile(path: string): boolean {
-  const resolved = resolveWorktreeFilePath(path)
+  const resolved = resolveWorktreeFilePath(path.replace(LINE_REFERENCE, ''))
   if (!resolved) return false
   useUIStore.getState().setViewingFilePath(resolved)
   return true

@@ -289,6 +289,21 @@ describe('Markdown', () => {
     )
   })
 
+  it.each([
+    ['/repo/app/Job.php:20', '/repo/app/Job.php'],
+    ['/repo/app/Job.php:20:5', '/repo/app/Job.php'],
+    ['app/Job.php#L20', '/repo/worktree/app/Job.php'],
+    ['app/Job.php#L20-L30', '/repo/worktree/app/Job.php'],
+  ])('strips the line reference from file link %s', (href, expected) => {
+    useChatStore.setState({ activeWorktreePath: '/repo/worktree' })
+    useUIStore.getState().setViewingFilePath(null)
+
+    render(<Markdown>{`[Job](${href})`}</Markdown>)
+    fireEvent.click(screen.getByRole('link', { name: 'Job' }))
+
+    expect(useUIStore.getState().viewingFilePath).toBe(expected)
+  })
+
   it('opens inline-code file paths in the viewer on click', () => {
     useChatStore.setState({ activeWorktreePath: '/repo/worktree' })
     useUIStore.getState().setViewingFilePath(null)
