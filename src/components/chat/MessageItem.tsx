@@ -110,7 +110,7 @@ function CopyIconButton({
           size="icon-xs"
           aria-label={label}
           onClick={onClick}
-          className="text-muted-foreground hover:text-foreground"
+          className="text-muted-foreground/40 hover:text-muted-foreground"
         >
           <Copy className="size-3.5" />
         </Button>
@@ -541,11 +541,19 @@ export const MessageItem = memo(function MessageItem({
     message.role === 'assistant' && durationMs != null && durationMs > 0 ? (
       <span
         className={cn(
-          'mt-1 block min-h-4 text-xs leading-4 text-muted-foreground/40 tabular-nums',
+          'mt-1 flex min-h-4 items-center gap-2 text-xs leading-4 text-muted-foreground/40 tabular-nums',
           ASSISTANT_HOVER_REVEAL
         )}
       >
         <MessageTiming durationMs={durationMs} timestamp={message.timestamp} />
+        {!zenMode && assistantResponse && (
+          <span className="hidden md:inline-flex">
+            <CopyIconButton
+              label="Copy response"
+              onClick={handleCopyAssistantResponse}
+            />
+          </span>
+        )}
       </span>
     ) : null
 
@@ -1103,7 +1111,11 @@ export const MessageItem = memo(function MessageItem({
           )}
           {!zenMode && assistantResponse && (
             <div
-              className={cn('mt-1 flex justify-end', ASSISTANT_HOVER_REVEAL)}
+              className={cn(
+                'mt-1 flex justify-end',
+                durationBadge && 'md:hidden',
+                ASSISTANT_HOVER_REVEAL
+              )}
             >
               <CopyIconButton
                 label="Copy response"
