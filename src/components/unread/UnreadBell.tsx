@@ -527,6 +527,7 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
         ref={contentRef}
         align="center"
         sideOffset={6}
+        collisionPadding={16}
         className="w-[min(440px,calc(100vw-2rem))] p-0"
         tabIndex={-1}
         onKeyDown={handleKeyDown}
