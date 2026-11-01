@@ -607,12 +607,12 @@ function formatCodexWebSearchExpanded(
 // block, so it scrolls away with the expanded content. Opaque bg: content must not show through.
 // Stronger bg + ring + shadow so the stuck row stands out from the chat bg and other tool rows.
 const TOOL_CALL_ROW_STICKY_OPEN_CLASS =
-  'data-[state=open]:sticky data-[state=open]:top-[calc(var(--chat-top-inset,0px)+0.5rem)] data-[state=open]:z-10 data-[state=open]:bg-[color-mix(in_oklab,var(--muted)_70%,var(--background))] data-[state=open]:hover:bg-[color-mix(in_oklab,var(--muted)_85%,var(--background))] data-[state=open]:ring-1 data-[state=open]:ring-foreground/20 data-[state=open]:shadow-md data-[state=open]:shadow-black/30'
+  'data-[state=open]:sticky data-[state=open]:top-[calc(var(--chat-top-inset,0px)+0.5rem)] data-[state=open]:z-10 data-[state=open]:bg-[color-mix(in_oklab,var(--muted)_70%,var(--background))] data-[state=open]:hover:bg-[color-mix(in_oklab,var(--muted)_85%,var(--background))] data-[state=open]:inset-ring-1 data-[state=open]:inset-ring-foreground/20 data-[state=open]:shadow-md data-[state=open]:shadow-black/30'
 
-export const TOOL_CALL_ROW_CLASS = `tool-call-row flex min-h-9 w-full items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-muted-foreground bg-muted/30 hover:bg-muted/50 select-none min-w-0 ${TOOL_CALL_ROW_STICKY_OPEN_CLASS}`
+export const TOOL_CALL_ROW_CLASS = `tool-call-row focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring flex min-h-9 w-full items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-muted-foreground bg-muted/30 hover:bg-muted/50 select-none min-w-0 ${TOOL_CALL_ROW_STICKY_OPEN_CLASS}`
 
 export const TOOL_CALL_SUB_ROW_CLASS =
-  'tool-call-row flex min-h-7 w-full items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground/80 hover:bg-muted/30 select-none min-w-0'
+  'tool-call-row focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring flex min-h-7 w-full items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground/80 hover:bg-muted/30 select-none min-w-0'
 
 // Detail pill — sits AFTER label, snug to content (no flex-1 stretch).
 // Always font-sans: .font-mono forces --chat-font-size !important and blows
