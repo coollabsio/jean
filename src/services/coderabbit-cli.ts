@@ -234,7 +234,6 @@ export function useCodeRabbitCliSetup() {
     })
   }
 
-
   return {
     status: status.data,
     isStatusLoading: status.isLoading,

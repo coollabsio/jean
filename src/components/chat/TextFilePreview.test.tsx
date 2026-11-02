@@ -22,13 +22,20 @@ describe('TextFilePreview', () => {
     invoke.mockResolvedValueOnce(undefined)
     const onRemove = vi.fn()
 
-    render(<TextFilePreview textFiles={[textFile]} onRemove={onRemove} />)
+    render(
+      <TextFilePreview
+        textFiles={[textFile]}
+        onRemove={onRemove}
+        sessionId="session-1"
+      />
+    )
 
     fireEvent.click(screen.getByRole('button', { name: 'Remove paste-1.txt' }))
 
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith('delete_pasted_text', {
         path: textFile.path,
+        sessionId: 'session-1',
       })
       expect(onRemove).toHaveBeenCalledWith(textFile.id)
     })
@@ -36,7 +43,12 @@ describe('TextFilePreview', () => {
 
   it('hides the remove button when explicitly disabled', () => {
     render(
-      <TextFilePreview textFiles={[textFile]} onRemove={vi.fn()} disabled />
+      <TextFilePreview
+        textFiles={[textFile]}
+        onRemove={vi.fn()}
+        sessionId="session-1"
+        disabled
+      />
     )
 
     expect(

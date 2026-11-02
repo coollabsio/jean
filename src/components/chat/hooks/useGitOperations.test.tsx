@@ -189,11 +189,7 @@ describe('useGitOperations conflict resolution', () => {
     )
     expect(
       queryClient
-        .getQueryData<{ sessions: Session[] }>([
-          'chat',
-          'sessions',
-          'wt-1',
-        ])
+        .getQueryData<{ sessions: Session[] }>(['chat', 'sessions', 'wt-1'])
         ?.sessions.map(session => session.id)
     ).toContain('conflict-session')
     expect(sendMessage.mutate).toHaveBeenCalledWith(
@@ -471,7 +467,10 @@ describe('useGitOperations conflict resolution', () => {
       base_remote: 'fork',
     }
     const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
     })
     const sendMessage = { mutate: vi.fn() }
     const wrapper = ({ children }: { children: React.ReactNode }) => (
@@ -598,6 +597,8 @@ describe('useGitOperations conflict resolution', () => {
     )
     expect(mocks.invoke).toHaveBeenCalledWith('get_review_job', {
       jobId: 'job-1',
+      worktreeId: 'wt-1',
+      worktreePath: '/repo/worktree',
     })
     expect(mocks.toastSuccess).toHaveBeenCalledWith(
       'Review done on Project/feature (2 findings)',

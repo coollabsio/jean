@@ -1520,6 +1520,8 @@ ${resolveInstructions}`
                     onClick: () => {
                       invoke<boolean>('cancel_review_job', {
                         jobId: job.id,
+                        worktreeId: selectedWorktreeId,
+                        worktreePath: worktree.path,
                       }).catch(error => {
                         toast.error(`Failed to cancel review: ${error}`, {
                           id: toastId,
@@ -1615,7 +1617,11 @@ ${resolveInstructions}`
                 } else {
                   const currentJob = await invoke<ReviewJob | null>(
                     'get_review_job',
-                    { jobId: job.id }
+                    {
+                      jobId: job.id,
+                      worktreeId: selectedWorktreeId,
+                      worktreePath: worktree.path,
+                    }
                   ).catch(() => null)
                   if (currentJob) handleTerminalReviewJob(currentJob)
                 }

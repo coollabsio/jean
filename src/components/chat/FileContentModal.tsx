@@ -17,11 +17,7 @@ import {
   Save,
   ExternalLink,
 } from '@/components/icons/reicon'
-import {
-  invoke,
-  invokeForOptionalServer,
-  invokeForServer,
-} from '@/lib/transport'
+import { invokeForOptionalServer } from '@/lib/transport'
 import {
   Dialog,
   DialogContent,
@@ -67,8 +63,8 @@ function isVideoFile(filename: string | null | undefined): boolean {
 interface FileContentModalProps {
   /** File path to display, or null to close the modal */
   filePath: string | null
-  /** Jean server that owns the file path. */
-  serverId?: string
+  /** Jean server that owns the file path; `undefined` means the active transport. */
+  serverId: string | undefined
   /** Callback when modal is closed */
   onClose: () => void
 }
@@ -176,11 +172,11 @@ export function FileContentModal({
       setEditorEpoch(e => e + 1)
 
       try {
-        const fileContent = serverId
-          ? await invokeForServer<string>(serverId, 'read_file_content', {
-              path,
-            })
-          : await invoke<string>('read_file_content', { path })
+        const fileContent = await invokeForOptionalServer<string>(
+          serverId,
+          'read_file_content',
+          { path }
+        )
         if (signal.cancelled) return
         setContent(fileContent)
         setEditedContent(fileContent)
@@ -207,13 +203,11 @@ export function FileContentModal({
       setImageSrc(null)
 
       try {
-        const result = serverId
-          ? await invokeForServer<FileBase64Content>(
-              serverId,
-              'read_file_base64',
-              { path }
-            )
-          : await invoke<FileBase64Content>('read_file_base64', { path })
+        const result = await invokeForOptionalServer<FileBase64Content>(
+          serverId,
+          'read_file_base64',
+          { path }
+        )
         if (signal.cancelled) return
         setImageSrc(`data:${result.mimeType};base64,${result.data}`)
       } catch (err) {
@@ -273,11 +267,7 @@ export function FileContentModal({
     setIsSaving(true)
     try {
       const args = { path: filePath, content: editedContent }
-      if (serverId) {
-        await invokeForServer(serverId, 'write_file_content', args)
-      } else {
-        await invoke('write_file_content', args)
-      }
+      await invokeForOptionalServer(serverId, 'write_file_content', args)
       setContent(editedContent)
       toast.success('File saved')
     } catch (err) {

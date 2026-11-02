@@ -45,6 +45,7 @@ vi.mock('@pierre/diffs/edit', () => ({
 
 vi.mock('@/lib/transport', () => ({
   invoke: vi.fn().mockResolvedValue('file contents'),
+  invokeForOptionalServer: vi.fn().mockResolvedValue('file contents'),
 }))
 
 function clickCopyButton() {
@@ -128,7 +129,13 @@ describe('file path copy buttons', () => {
   it.each([
     [
       'content modal',
-      () => <FileContentModal filePath="/tmp/example.ts" onClose={vi.fn()} />,
+      () => (
+        <FileContentModal
+          filePath="/tmp/example.ts"
+          serverId={undefined}
+          onClose={vi.fn()}
+        />
+      ),
     ],
     [
       'diff modal',
@@ -191,7 +198,13 @@ describe('file path copy buttons', () => {
   it.each([
     [
       'content modal',
-      () => <FileContentModal filePath="/tmp/example.ts" onClose={vi.fn()} />,
+      () => (
+        <FileContentModal
+          filePath="/tmp/example.ts"
+          serverId={undefined}
+          onClose={vi.fn()}
+        />
+      ),
     ],
     [
       'diff modal',

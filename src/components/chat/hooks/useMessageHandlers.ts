@@ -1248,7 +1248,7 @@ export function useMessageHandlers({
         const planFilePath = findPlanFilePath(message.tool_calls)
         if (planFilePath) {
           try {
-            planContent = await readPlanFile(planFilePath)
+            planContent = await readPlanFile(planFilePath, sessionId)
           } catch (err) {
             toast.error(`Failed to read plan file: ${err}`)
             return
@@ -1475,7 +1475,7 @@ export function useMessageHandlers({
           const planFilePath = findPlanFilePath(toolCalls)
           if (planFilePath) {
             try {
-              planContent = await readPlanFile(planFilePath)
+              planContent = await readPlanFile(planFilePath, sessionId)
             } catch {
               // Fall through to content blocks
             }
@@ -1708,7 +1708,7 @@ export function useMessageHandlers({
         const planFilePath = findPlanFilePath(message.tool_calls)
         if (planFilePath) {
           try {
-            planContent = await readPlanFile(planFilePath)
+            planContent = await readPlanFile(planFilePath, sessionId)
           } catch (err) {
             toast.error(`Failed to read plan file: ${err}`)
             return
@@ -2008,7 +2008,7 @@ export function useMessageHandlers({
           const planFilePath = findPlanFilePath(toolCalls)
           if (planFilePath) {
             try {
-              planContent = await readPlanFile(planFilePath)
+              planContent = await readPlanFile(planFilePath, sessionId)
             } catch {
               // Fall through to content blocks
             }

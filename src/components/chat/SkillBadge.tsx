@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
 import { Wand2, Loader2, X } from '@/components/icons/reicon'
-import { invoke } from '@/lib/transport'
+import { invokeForOptionalServer } from '@/lib/transport'
 import {
   Dialog,
   DialogContent,
@@ -20,6 +20,8 @@ import {
 interface SkillBadgeProps {
   /** The pending skill to display */
   skill: PendingSkill
+  /** Server that owns the skill file; `undefined` means the active transport. */
+  serverId: string | undefined
   /** Optional callback to remove this skill (shows X button if provided) */
   onRemove?: () => void
   /** Whether the badge is in a compact display mode */
@@ -30,7 +32,12 @@ interface SkillBadgeProps {
  * Displays a skill mention as a clickable badge that opens a preview dialog
  * Used in chat input for pending skills and in messages for sent skills
  */
-export function SkillBadge({ skill, onRemove, compact }: SkillBadgeProps) {
+export function SkillBadge({
+  skill,
+  serverId,
+  onRemove,
+  compact,
+}: SkillBadgeProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [content, setContent] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -44,9 +51,11 @@ export function SkillBadge({ skill, onRemove, compact }: SkillBadgeProps) {
       setIsLoading(true)
       setError(null)
       try {
-        const fileContent = await invoke<string>('read_file_content', {
-          path: skill.path,
-        })
+        const fileContent = await invokeForOptionalServer<string>(
+          serverId,
+          'read_file_content',
+          { path: skill.path }
+        )
         setContent(fileContent)
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e))
@@ -54,7 +63,7 @@ export function SkillBadge({ skill, onRemove, compact }: SkillBadgeProps) {
         setIsLoading(false)
       }
     }
-  }, [content, isLoading, skill.path])
+  }, [content, isLoading, serverId, skill.path])
 
   const handleRemove = useCallback(
     (e: React.MouseEvent) => {

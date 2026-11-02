@@ -927,13 +927,15 @@ export function useGitOperations({
             cancel: {
               label: 'Cancel',
               onClick: () => {
-                invoke<boolean>('cancel_review_job', { jobId: job.id }).catch(
-                  error => {
-                    toast.error(`Failed to cancel review: ${error}`, {
-                      id: toastId,
-                    })
-                  }
-                )
+                invoke<boolean>('cancel_review_job', {
+                  jobId: job.id,
+                  worktreeId: activeWorktreeId,
+                  worktreePath: activeWorktreePath,
+                }).catch(error => {
+                  toast.error(`Failed to cancel review: ${error}`, {
+                    id: toastId,
+                  })
+                })
               },
             },
           }
@@ -1011,6 +1013,8 @@ export function useGitOperations({
         } else {
           const currentJob = await invoke<ReviewJob | null>('get_review_job', {
             jobId: job.id,
+            worktreeId: activeWorktreeId,
+            worktreePath: activeWorktreePath,
           }).catch(() => null)
           if (currentJob) handleTerminalReviewJob(currentJob)
         }

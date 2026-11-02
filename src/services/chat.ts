@@ -2507,12 +2507,15 @@ export function formatAnswersAsNaturalLanguage(
  * Read a plan file from disk
  * Used by the frontend to display plan file content in the approval UI
  */
-export async function readPlanFile(path: string): Promise<string> {
+export async function readPlanFile(
+  path: string,
+  sessionId: string
+): Promise<string> {
   if (!isTauri()) {
     throw new Error('Not in Tauri context')
   }
 
-  return invoke<string>('read_plan_file', { path })
+  return invoke<string>('read_plan_file', { path, sessionId })
 }
 
 // ============================================================================

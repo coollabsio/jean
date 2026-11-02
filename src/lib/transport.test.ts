@@ -184,6 +184,36 @@ describe('transport bootstrap', () => {
     })
   })
 
+  it('sends a pasted-text read to the server of the session that owns it', async () => {
+    const invokeOnServer = vi.fn(async () => ({ content: 'notes', size: 5 }))
+    vi.doMock('./server-connections', () => ({ invokeOnServer }))
+    const transport = await loadNativeTransportModule(vi.fn())
+
+    await transport.invoke('read_pasted_text', {
+      path: '/srv/jean/pasted-texts/a.txt',
+      sessionId: 'remote-1:session-7',
+    })
+
+    expect(invokeOnServer).toHaveBeenCalledWith(
+      'remote-1',
+      'read_pasted_text',
+      { path: '/srv/jean/pasted-texts/a.txt', sessionId: 'session-7' }
+    )
+  })
+
+  it('rejects a path command that does not say which server owns the path', async () => {
+    const invokeOnServer = vi.fn()
+    vi.doMock('./server-connections', () => ({ invokeOnServer }))
+    const transport = await loadNativeTransportModule(vi.fn())
+
+    await expect(
+      transport.invoke('read_pasted_text', { path: '/tmp/a.txt' })
+    ).rejects.toThrow(
+      'read_pasted_text cannot tell which Jean server owns its arguments. Send sessionId with it, or call invokeForServer.'
+    )
+    expect(invokeOnServer).not.toHaveBeenCalled()
+  })
+
   it('routes path-only Git and GitHub commands to a remote owner', async () => {
     const invokeOnServer = vi.fn(async () => ({ issues: [], totalCount: 0 }))
     vi.doMock('./server-connections', () => ({ invokeOnServer }))
@@ -1017,10 +1047,7 @@ describe('transport bootstrap', () => {
     })
 
     expect(
-      transport.convertServerProjectFileSrc(
-        'remote-1',
-        '/home/jean/project/icon.png'
-      )
+      transport.convertProjectFileSrc('remote-1', '/home/jean/project/icon.png')
     ).toBe(
       'https://jean.example.com/api/project-files/%2Fhome%2Fjean%2Fproject%2Ficon.png?token=secret%20token'
     )

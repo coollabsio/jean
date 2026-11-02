@@ -29,8 +29,8 @@ vi.mock('@/lib/transport', async () => {
       }
       return actual.invoke(cmd, args)
     },
-    invokeForServer: (
-      _serverId: string,
+    invokeForOptionalServer: (
+      _serverId: string | undefined,
       cmd: string,
       args?: Record<string, unknown>
     ) => {

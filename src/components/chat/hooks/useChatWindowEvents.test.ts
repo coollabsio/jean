@@ -233,6 +233,7 @@ describe('useChatWindowEvents worktree approval shortcuts', () => {
       expect(invoke).toHaveBeenCalledWith('save_pasted_text', {
         content: 'Selected DOM element from embedded browser',
         filename: 'dom-button-save.txt',
+        sessionId: 'session-1',
       })
     })
     expect(useChatStore.getState().pendingTextFiles['session-1']).toEqual([

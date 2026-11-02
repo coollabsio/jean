@@ -31,8 +31,8 @@ interface TextFilePreviewProps {
   onRemove: (textFileId: string) => void
   /** Whether removal is disabled (e.g., while sending) */
   disabled?: boolean
-  /** Session ID for updating text file content */
-  sessionId?: string
+  /** Session that owns the text files */
+  sessionId: string
 }
 
 /** Format bytes to human readable string */

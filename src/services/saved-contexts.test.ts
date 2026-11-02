@@ -4,6 +4,11 @@ const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }))
 
 vi.mock('@/lib/transport', () => ({
   invoke: invokeMock,
+  invokeForOptionalServer: (
+    _serverId: string | undefined,
+    command: string,
+    args: unknown
+  ) => invokeMock(command, args),
 }))
 
 import {

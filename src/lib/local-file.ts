@@ -2,11 +2,7 @@ import { toast } from 'sonner'
 import { isLocalBackend, isNativeApp } from '@/lib/environment'
 import { openExternal } from '@/lib/platform'
 import { parseServerResourceKey } from '@/lib/server-resource'
-import {
-  convertProjectFileSrc,
-  convertServerProjectFileSrc,
-  invoke,
-} from '@/lib/transport'
+import { convertProjectFileSrc, invoke } from '@/lib/transport'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 
@@ -89,9 +85,7 @@ export async function downloadLocalFile(path: string): Promise<void> {
     return
   }
 
-  const fileUrl = isRemoteServer
-    ? convertServerProjectFileSrc(serverId, path)
-    : convertProjectFileSrc(path)
+  const fileUrl = convertProjectFileSrc(serverId, path)
   const url = `${fileUrl}${fileUrl.includes('?') ? '&' : '?'}download=true`
 
   if (isNativeApp()) {

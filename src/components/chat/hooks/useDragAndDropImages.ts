@@ -208,6 +208,7 @@ export async function processDroppedSvg(
 
     const result = await invoke<SaveTextResponse>('save_pasted_text', {
       content: svgText,
+      sessionId,
     })
 
     const { addPendingTextFile } = useChatStore.getState()
@@ -243,6 +244,7 @@ export async function processDroppedText(
     const result = await invoke<SaveTextResponse>('save_pasted_text', {
       content,
       filename,
+      sessionId,
     })
     useChatStore.getState().addPendingTextFile(sessionId, {
       ...result,
@@ -282,6 +284,7 @@ export async function processDroppedImage(
   try {
     const result = await invoke<SaveImageResponse>('save_dropped_image', {
       sourcePath,
+      sessionId,
     })
 
     updatePendingImage(sessionId, placeholderId, {

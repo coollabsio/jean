@@ -46,6 +46,8 @@ export async function startCommitJob(
 
   const currentJob = await invoke<CommitJob | null>('get_commit_job', {
     jobId: job.id,
+    worktreeId: args.worktreeId,
+    worktreePath: args.worktreePath,
   })
   handleUpdate(currentJob)
 

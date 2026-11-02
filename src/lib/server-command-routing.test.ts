@@ -5,6 +5,7 @@ import {
   decorateServerResult,
   resolveServerCommand,
   registerServerResourcePath,
+  routeServerCommand,
   stripServerScope,
 } from './server-command-routing'
 
@@ -469,5 +470,76 @@ describe('server command routing', () => {
       parentId: 'folder-7',
     })
     expect(stripServerScope('remote-1')).toBeUndefined()
+  })
+
+  it('splits a mixed-server polling batch into one call per owning server', () => {
+    clearServerResourcePaths()
+
+    expect(
+      routeServerCommand('set_all_worktrees_for_polling', {
+        worktrees: [
+          { worktreeId: 'w-local', worktreePath: '/home/me/w' },
+          { worktreeId: 'remote-1:w-remote', worktreePath: '/srv/w' },
+          { worktreeId: 'w-local-2', worktreePath: '/home/me/w2' },
+        ],
+      })
+    ).toEqual([
+      {
+        serverId: 'local',
+        args: {
+          worktrees: [
+            { worktreeId: 'w-local', worktreePath: '/home/me/w' },
+            { worktreeId: 'w-local-2', worktreePath: '/home/me/w2' },
+          ],
+        },
+      },
+      {
+        serverId: 'remote-1',
+        args: {
+          worktrees: [{ worktreeId: 'w-remote', worktreePath: '/srv/w' }],
+        },
+      },
+    ])
+  })
+
+  it('splits a project reorder across servers and keeps raw ids on the active transport', () => {
+    expect(
+      routeServerCommand('reorder_projects', {
+        projectIds: ['remote-1:p2', 'p1', 'remote-1:p3'],
+      })
+    ).toEqual([
+      { serverId: 'remote-1', args: { projectIds: ['p2', 'p3'] } },
+      { serverId: null, args: { projectIds: ['p1'] } },
+    ])
+    expect(
+      routeServerCommand('reorder_projects', {
+        projectIds: ['remote-1:p2', 'remote-1:p3'],
+      })
+    ).toEqual([{ serverId: 'remote-1', args: { projectIds: ['p2', 'p3'] } }])
+  })
+
+  it('routes a session reference to the server that owns both sessions', () => {
+    expect(
+      routeServerCommand('attach_session_reference', {
+        targetSessionId: 'remote-1:target',
+        sourceSessionId: 'remote-1:source',
+      })
+    ).toEqual([
+      {
+        serverId: 'remote-1',
+        args: { targetSessionId: 'target', sourceSessionId: 'source' },
+      },
+    ])
+  })
+
+  it('names the fix when a path command has no owner', () => {
+    expect(() =>
+      routeServerCommand('read_file_content', { path: '/srv/a.ts' })
+    ).toThrow(
+      'read_file_content cannot tell which Jean server owns its arguments. Send sessionId or worktreeId or projectId with it, or call invokeForServer.'
+    )
+    expect(
+      routeServerCommand('read_file_content', { path: '/srv/a.ts' }, true)
+    ).toEqual([{ serverId: null, args: { path: '/srv/a.ts' } }])
   })
 })

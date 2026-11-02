@@ -409,7 +409,7 @@ export function useChatWindowEvents({
 
       void invoke<{ id: string; path: string; filename: string; size: number }>(
         'save_pasted_text',
-        { content, filename }
+        { content, filename, sessionId }
       )
         .then(result => {
           useChatStore.getState().addPendingTextFile(sessionId, {

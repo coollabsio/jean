@@ -7,7 +7,6 @@ const invoke = vi.fn()
 
 vi.mock('@/lib/transport', () => ({
   invoke: (...args: unknown[]) => invoke(...args),
-  convertFileSrc: (path: string) => `local:${path}`,
   convertServerFileSrc: (serverId: string, path: string) =>
     `remote:${serverId}:${path}`,
 }))

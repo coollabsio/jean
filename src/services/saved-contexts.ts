@@ -1,4 +1,4 @@
-import { invoke } from '@/lib/transport'
+import { invoke, invokeForOptionalServer } from '@/lib/transport'
 import type { SavedContextsResponse } from '@/types/chat'
 
 export const savedContextsQueryKey = (projectId?: string | null) =>
@@ -10,8 +10,9 @@ export function listSavedContexts(projectId?: string | null) {
   })
 }
 
+// Without a project these follow `listSavedContexts` onto the active transport.
 export function readSavedContextFile(path: string, projectId?: string | null) {
-  return invoke<string>('read_context_file', {
+  return invokeForOptionalServer<string>(undefined, 'read_context_file', {
     path,
     ...(projectId ? { projectId } : {}),
   })
@@ -21,7 +22,7 @@ export function deleteSavedContextFile(
   path: string,
   projectId?: string | null
 ) {
-  return invoke('delete_context_file', {
+  return invokeForOptionalServer(undefined, 'delete_context_file', {
     path,
     ...(projectId ? { projectId } : {}),
   })

@@ -416,6 +416,7 @@ export const StreamingMessage = memo(function StreamingMessage({
                                         ) : planFilePath ? (
                                           <PlanDisplay
                                             filePath={planFilePath}
+                                            sessionId={sessionId}
                                             defaultCollapsed={false}
                                           />
                                         ) : null}

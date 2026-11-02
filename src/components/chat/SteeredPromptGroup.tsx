@@ -132,6 +132,7 @@ export const SteeredPromptGroup = memo(function SteeredPromptGroup({
                           name: name ?? path,
                           path,
                         }}
+                        serverId={serverId}
                         compact
                       />
                     )

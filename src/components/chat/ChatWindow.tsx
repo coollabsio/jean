@@ -3368,19 +3368,20 @@ const ChatWindowContent = memo(function ChatWindowContent({
                               onRemove={handleRemovePendingFile}
                             />
 
-                            {/* Pending image preview */}
-                            <ImagePreview
-                              images={currentPendingImages}
-                              onRemove={handleRemovePendingImage}
-                              sessionId={activeSessionId}
-                            />
-
-                            {/* Pending text file preview */}
-                            <TextFilePreview
-                              textFiles={currentPendingTextFiles}
-                              onRemove={handleRemovePendingTextFile}
-                              sessionId={activeSessionId}
-                            />
+                            {activeSessionId && (
+                              <>
+                                <ImagePreview
+                                  images={currentPendingImages}
+                                  onRemove={handleRemovePendingImage}
+                                  sessionId={activeSessionId}
+                                />
+                                <TextFilePreview
+                                  textFiles={currentPendingTextFiles}
+                                  onRemove={handleRemovePendingTextFile}
+                                  sessionId={activeSessionId}
+                                />
+                              </>
+                            )}
 
                             {/* Pending skills preview */}
                             {currentPendingSkills.length > 0 && (
@@ -3389,6 +3390,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                   <SkillBadge
                                     key={skill.id}
                                     skill={skill}
+                                    serverId={targetServerId}
                                     onRemove={() =>
                                       handleRemovePendingSkill(skill.id)
                                     }

@@ -914,7 +914,7 @@ export const ChatInput = memo(function ChatInput({
             try {
               const response = await invoke<ReadTextResponse>(
                 'read_pasted_text',
-                { path }
+                { path, sessionId: activeSessionId }
               )
               addPendingTextFile(activeSessionId, {
                 id: generateId(),

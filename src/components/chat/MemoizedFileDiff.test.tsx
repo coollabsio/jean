@@ -5,10 +5,10 @@ import { useUIStore } from '@/store/ui-store'
 import { MemoizedFileDiff } from './MemoizedFileDiff'
 
 vi.mock('@/lib/transport', () => ({
-  convertProjectFileSrc: (path: string) =>
-    `/api/project-files/${encodeURIComponent(path)}`,
-  convertServerProjectFileSrc: (serverId: string, path: string) =>
-    `remote:${serverId}:${path}`,
+  convertProjectFileSrc: (serverId: string | undefined, path: string) =>
+    serverId
+      ? `remote:${serverId}:${path}`
+      : `/api/project-files/${encodeURIComponent(path)}`,
 }))
 
 const binaryImageDiff: FileDiffMetadata = {

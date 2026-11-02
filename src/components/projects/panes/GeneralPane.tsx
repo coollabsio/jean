@@ -13,12 +13,7 @@ import {
   X,
 } from '@/components/icons/reicon'
 import { isLocalBackend } from '@/lib/environment'
-import {
-  convertFileSrc,
-  convertProjectFileSrc,
-  convertServerFileSrc,
-  convertServerProjectFileSrc,
-} from '@/lib/transport'
+import { convertProjectFileSrc, convertServerFileSrc } from '@/lib/transport'
 import { DirectoryBrowser } from '@/components/projects/DirectoryBrowser'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -118,15 +113,13 @@ export function GeneralPane({
       ? project.serverId
         ? convertServerFileSrc(project.serverId, project.avatar_path)
         : appDataDir
-          ? convertFileSrc(`${appDataDir}/${project.avatar_path}`)
+          ? convertServerFileSrc(
+              undefined,
+              `${appDataDir}/${project.avatar_path}`
+            )
           : null
       : project?.default_avatar_path && !imgError
-        ? project.serverId
-          ? convertServerProjectFileSrc(
-              project.serverId,
-              project.default_avatar_path
-            )
-          : convertProjectFileSrc(project.default_avatar_path)
+        ? convertProjectFileSrc(project.serverId, project.default_avatar_path)
         : null
 
   const displayedName = localName ?? project?.name ?? ''
@@ -566,6 +559,7 @@ export function GeneralPane({
         mode="select"
         title="Select worktrees base directory"
         description="Choose the parent directory where new worktrees will be created."
+        serverId={project?.serverId}
       />
     </>
   )

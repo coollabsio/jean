@@ -12,8 +12,10 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@/lib/transport', () => ({
-  convertFileSrc: (path: string) => `file://${path}`,
-  convertProjectFileSrc: (path: string) => `project://${path}`,
+  convertServerFileSrc: (serverId: string | undefined, path: string) =>
+    serverId ? `remote:${serverId}:${path}` : `file://${path}`,
+  convertProjectFileSrc: (serverId: string | undefined, path: string) =>
+    serverId ? `remote-project:${serverId}:${path}` : `project://${path}`,
 }))
 
 vi.mock('@/services/projects', () => ({

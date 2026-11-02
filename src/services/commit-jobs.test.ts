@@ -114,6 +114,7 @@ describe('startCommitJob', () => {
     )
     expect(invokeMock).toHaveBeenNthCalledWith(2, 'get_commit_job', {
       jobId: 'job-1',
+      worktreePath: '/repo/worktree',
     })
     expect(onFinished).not.toHaveBeenCalled()
   })

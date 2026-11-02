@@ -1,7 +1,7 @@
 import { parseServerResourceKey, serverResourceKey } from './server-resource'
 import { LOCAL_SERVER_ID, type ServerId } from '@/types/server-resource'
 
-const ROUTED_ARGUMENT_KEYS = new Set([
+export const ROUTED_ARGUMENT_KEYS: ReadonlySet<string> = new Set([
   'projectId',
   'project_id',
   'worktreeId',
@@ -26,12 +26,18 @@ const ROUTED_ARGUMENT_KEYS = new Set([
   'parent_id',
   'activeSessionId',
   'active_session_id',
+  'sourceSessionId',
+  'source_session_id',
+  'targetSessionId',
+  'target_session_id',
+  'sourceWorktreeId',
+  'source_worktree_id',
   // Agents: each Jean server has its own agents
   'agentId',
   'agent_id',
 ])
 
-const PATH_ARGUMENT_KEYS = new Set([
+export const PATH_ARGUMENT_KEYS: ReadonlySet<string> = new Set([
   'projectPath',
   'project_path',
   'worktreePath',
@@ -189,6 +195,114 @@ export function resolveServerCommand(
   }
   const resolved = resolvePathOwner(serverId, paths)
   return resolved ? { serverId: resolved, args: stripped } : null
+}
+
+/**
+ * Commands whose arguments do not name their owner by themselves. The generic
+ * key scan in `resolveServerCommand` routes every other command.
+ *
+ * - `owner`: the command addresses a path or job id that only its owning
+ *   server knows. Callers must also send one of these id keys (the backend
+ *   ignores it), or use `invokeForServer` / `invokeForOptionalServer`.
+ * - `fanOut`: the array argument can hold resources of several servers. Each
+ *   owning server receives its own items.
+ *
+ * `server-command-routing.test.ts` fails when a dispatch command reads an
+ * owner-looking key that neither the key scan nor this table covers.
+ */
+export const COMMAND_OWNERS: Record<
+  string,
+  { owner: readonly string[] } | { fanOut: string }
+> = {
+  read_file_content: { owner: ['sessionId', 'worktreeId', 'projectId'] },
+  read_file_base64: { owner: ['sessionId', 'worktreeId', 'projectId'] },
+  write_file_content: { owner: ['sessionId', 'worktreeId', 'projectId'] },
+  read_plan_file: { owner: ['sessionId', 'worktreeId'] },
+  read_pasted_text: { owner: ['sessionId'] },
+  update_pasted_text: { owner: ['sessionId'] },
+  delete_pasted_text: { owner: ['sessionId'] },
+  save_pasted_text: { owner: ['sessionId', 'terminalId'] },
+  save_pasted_image: { owner: ['sessionId', 'terminalId'] },
+  delete_pasted_image: { owner: ['sessionId'] },
+  save_dropped_image: { owner: ['sessionId'] },
+  read_context_file: { owner: ['sessionId', 'worktreeId', 'projectId'] },
+  delete_context_file: { owner: ['sessionId', 'worktreeId', 'projectId'] },
+  browse_directory: { owner: [] },
+  get_recent_worktrees: { owner: [] },
+  get_commit_job: { owner: ['worktreeId', 'worktreePath'] },
+  get_review_job: { owner: ['worktreeId', 'worktreePath'] },
+  cancel_review_job: { owner: ['worktreeId', 'worktreePath'] },
+  cancel_review_with_ai: { owner: ['worktreeId', 'worktreePath'] },
+  decide_agent_approval: { owner: ['agentId'] },
+  install_agent_template: { owner: ['agentId'] },
+  revert_agent_change: { owner: ['agentId'] },
+  reorder_projects: { fanOut: 'projectIds' },
+  set_sessions_last_opened_bulk: { fanOut: 'sessionIds' },
+  set_all_worktrees_for_polling: { fanOut: 'worktrees' },
+  set_pr_worktrees_for_polling: { fanOut: 'worktrees' },
+}
+
+/** One backend call. `serverId: null` means the active transport. */
+export interface ServerCommandRoute {
+  serverId: ServerId | null
+  args: Record<string, unknown> | undefined
+}
+
+/** Owner of one fan-out item and the item as that owner stores it. */
+function fanOutItem(item: unknown): [ServerId | null, unknown] {
+  if (typeof item === 'string') {
+    const ref = parseServerResourceKey(item)
+    return ref ? [ref.serverId, ref.resourceId] : [null, item]
+  }
+  if (item && typeof item === 'object') {
+    const routed = resolveServerCommand(item as Record<string, unknown>)
+    return routed ? [routed.serverId, routed.args] : [null, item]
+  }
+  return [null, item]
+}
+
+/**
+ * Route a command by its `COMMAND_OWNERS` entry and its arguments. Returns one
+ * route, or one per owning server for a mixed fan-out batch.
+ * `ownerDeclared` means the caller already chose the server explicitly.
+ */
+export function routeServerCommand(
+  command: string,
+  args: Record<string, unknown> | undefined,
+  ownerDeclared = false
+): ServerCommandRoute[] {
+  const spec = COMMAND_OWNERS[command]
+  if (spec && 'owner' in spec && !ownerDeclared) {
+    const hasOwner = spec.owner.some(key => {
+      const value = args?.[key]
+      return typeof value === 'string' && value.length > 0
+    })
+    if (!hasOwner) {
+      const fix = spec.owner.length
+        ? `Send ${spec.owner.join(' or ')} with it, or call invokeForServer`
+        : 'Call invokeForServer or invokeForOptionalServer'
+      throw new Error(
+        `${command} cannot tell which Jean server owns its arguments. ${fix}.`
+      )
+    }
+  }
+
+  if (spec && 'fanOut' in spec && Array.isArray(args?.[spec.fanOut])) {
+    const groups = new Map<ServerId | null, unknown[]>()
+    for (const item of args[spec.fanOut] as unknown[]) {
+      const [owner, raw] = fanOutItem(item)
+      groups.set(owner, [...(groups.get(owner) ?? []), raw])
+    }
+    if (groups.size > 1 || (groups.size === 1 && !groups.has(null))) {
+      return [...groups].map(([serverId, items]) => ({
+        serverId,
+        args: { ...args, [spec.fanOut]: items },
+      }))
+    }
+  }
+
+  const routed = args ? resolveServerCommand(args) : null
+  return [routed ?? { serverId: null, args }]
 }
 
 /** Reduce scoped ids to the raw ids their owning server stores and matches. */

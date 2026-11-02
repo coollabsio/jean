@@ -630,9 +630,7 @@ export function useUIStatePersistence() {
             try {
               const result = await invoke<ReadTextResponse>(
                 'read_pasted_text',
-                {
-                  path: item.path,
-                }
+                { path: item.path, sessionId: item.sessionId }
               )
               useChatStore
                 .getState()
@@ -1334,8 +1332,7 @@ export function useUIStatePersistence() {
         prevPendingFiles = state.pendingFiles
         prevPendingSkills = state.pendingSkills
         prevDismissedSetupScripts = state.dismissedSetupScripts
-        prevCollapsedQueuedPromptsSessions =
-          state.expandedQueuedPromptsSessions
+        prevCollapsedQueuedPromptsSessions = state.expandedQueuedPromptsSessions
         prevReviewSidebarVisible = state.reviewSidebarVisible
         prevLastOpenedPerProject = state.lastOpenedPerProject
         prevAutoResume = state.autoResume

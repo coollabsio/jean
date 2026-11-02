@@ -14,10 +14,7 @@ import type {
 import type { EditorOptions } from '@pierre/diffs/edit'
 import { getFileLineStats } from '@/lib/diff-stats'
 import { cn } from '@/lib/utils'
-import {
-  convertProjectFileSrc,
-  convertServerProjectFileSrc,
-} from '@/lib/transport'
+import { convertProjectFileSrc } from '@/lib/transport'
 import { parseServerResourceKey } from '@/lib/server-resource'
 import { useUIStore } from '@/store/ui-store'
 import type { SyntaxTheme } from '@/types/preferences'
@@ -151,9 +148,7 @@ export const MemoizedFileDiff = memo(
     const serverId = resourceOwnerId
       ? parseServerResourceKey(resourceOwnerId)?.serverId
       : undefined
-    const imageSrc = serverId
-      ? convertServerProjectFileSrc(serverId, absolutePath)
-      : convertProjectFileSrc(absolutePath)
+    const imageSrc = convertProjectFileSrc(serverId, absolutePath)
 
     return (
       <div className="border border-border">

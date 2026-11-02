@@ -245,7 +245,10 @@ export async function processAttachmentFiles(
  * so the saved path can be written into the pty. Returns null (and surfaces a
  * toast) when the file is unsupported, too large, or fails to save.
  */
-export async function saveImageFileToDisk(file: File): Promise<string | null> {
+export async function saveImageFileToDisk(
+  file: File,
+  terminalId: string
+): Promise<string | null> {
   const kind = classifyAttachmentFile(file)
 
   const isSvg =
@@ -267,6 +270,7 @@ export async function saveImageFileToDisk(file: File): Promise<string | null> {
       const svgText = await file.text()
       const result = await invoke<SaveTextResponse>('save_pasted_text', {
         content: svgText,
+        terminalId,
       })
       return result.path
     }
@@ -288,6 +292,7 @@ export async function saveImageFileToDisk(file: File): Promise<string | null> {
     const result = await invoke<SaveImageResponse>('save_pasted_image', {
       data: base64Data,
       mimeType,
+      terminalId,
     })
     return result.path
   } catch (error) {

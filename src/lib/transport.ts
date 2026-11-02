@@ -20,6 +20,7 @@ import {
   getRemoteConnections,
 } from './remote-connections'
 import { getSshTransportEndpoint } from './ssh-tunnel-endpoint'
+import type { ServerId } from '@/types/server-resource'
 import {
   prepareRemoteEditorOpenArgs,
   prepareRemoteTerminalOpenArgs,
@@ -114,7 +115,7 @@ export function setAppDataDir(dir: string): void {
  *
  * In browser mode, converts to /api/files/ URLs served by the HTTP server.
  */
-export function convertFileSrc(filePath: string, protocol = 'asset'): string {
+function convertFileSrc(filePath: string, protocol = 'asset'): string {
   if (!usesWebSocketBackend()) {
     // Use Tauri's native implementation which correctly percent-encodes paths
     // on all platforms (JS encodeURIComponent misses dots/hyphens/underscores
@@ -155,13 +156,8 @@ export function convertFileSrc(filePath: string, protocol = 'asset'): string {
   return filePath
 }
 
-/**
- * Convert an absolute project/worktree file path to a browser-loadable URL.
- * Native mode can use Tauri's asset protocol directly; browser mode uses the
- * authenticated project-file endpoint, which validates the path against known
- * project/worktree roots before serving it.
- */
-export function convertProjectFileSrc(filePath: string): string {
+/** Project-file URL on the active transport. */
+function activeProjectFileSrc(filePath: string): string {
   if (!usesWebSocketBackend()) {
     return convertFileSrc(filePath)
   }
@@ -190,12 +186,17 @@ function remoteHttpEndpoint(
   return { url: connection.url, token: connection.token }
 }
 
-/** Build an authenticated file URL for a project owned by a specific server. */
-export function convertServerProjectFileSrc(
-  serverId: string | undefined,
+/**
+ * Browser-loadable URL for an absolute project/worktree file. The owner is
+ * required: `undefined` deliberately means the active transport. Remote
+ * servers serve it through the authenticated project-file endpoint, which
+ * validates the path against known project/worktree roots.
+ */
+export function convertProjectFileSrc(
+  serverId: ServerId | undefined,
   filePath: string
 ): string {
-  if (!serverId || serverId === 'local') return convertProjectFileSrc(filePath)
+  if (!serverId || serverId === 'local') return activeProjectFileSrc(filePath)
 
   const connection = getRemoteConnections().find(item => item.id === serverId)
   const endpoint = remoteHttpEndpoint(connection)
@@ -207,9 +208,12 @@ export function convertServerProjectFileSrc(
   return `${base}/api/project-files/${encodeURIComponent(filePath)}${token}`
 }
 
-/** Build an authenticated app-data file URL for a specific remote server. */
+/**
+ * Browser-loadable URL for an app-data file (pasted images, avatars). The
+ * owner is required: `undefined` deliberately means the active transport.
+ */
 export function convertServerFileSrc(
-  serverId: string | undefined,
+  serverId: ServerId | undefined,
   filePath: string
 ): string {
   if (!serverId || serverId === 'local') return convertFileSrc(filePath)
@@ -350,9 +354,17 @@ const LOCAL_SHELL_COMMANDS = new Set([
 /**
  * Call a backend command. Drop-in replacement for Tauri's invoke().
  */
-export async function invoke<T>(
+export function invoke<T>(
   command: string,
   args?: Record<string, unknown>
+): Promise<T> {
+  return invokeCommand<T>(command, args, false)
+}
+
+async function invokeCommand<T>(
+  command: string,
+  args: Record<string, unknown> | undefined,
+  ownerDeclared: boolean
 ): Promise<T> {
   // E2E mock transport — route to in-memory handlers
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -365,9 +377,25 @@ export async function invoke<T>(
   }
 
   if (isNativeApp() && args) {
-    const { resolveServerCommand, decorateServerResult } =
+    const { routeServerCommand, decorateServerResult } =
       await import('./server-command-routing')
-    const routed = resolveServerCommand(args)
+    const routes = routeServerCommand(command, args, ownerDeclared)
+    if (routes.length > 1) {
+      const results = await Promise.all(
+        routes.map(route =>
+          route.serverId
+            ? invokeForServer(route.serverId, command, route.args)
+            : invokeCommand(command, route.args, true)
+        )
+      )
+      // List results from each server merge into one list; mutations return void.
+      return (results.every(Array.isArray) ? results.flat() : undefined) as T
+    }
+    const [route] = routes
+    const routed =
+      route?.serverId && route.args
+        ? { serverId: route.serverId, args: route.args }
+        : null
     if (routed) {
       // Path ownership can route local worktree actions before the normal
       // desktop-only branch below. Keep local shell actions on their native
@@ -500,7 +528,7 @@ export function invokeForOptionalServer<T>(
 ): Promise<T> {
   return serverId
     ? invokeForServer<T>(serverId, command, args)
-    : invoke<T>(command, args)
+    : invokeCommand<T>(command, args, true)
 }
 
 /** Invoke a server command when no resource id can carry its ownership. */
@@ -543,7 +571,7 @@ export async function invokeForServer<T>(
     ) {
       throw error
     }
-    value = await invoke<T>(command, args)
+    value = await invokeCommand<T>(command, args, true)
   }
   if (serverId === 'local') return value
   const { decorateServerResult } = await import('./server-command-routing')

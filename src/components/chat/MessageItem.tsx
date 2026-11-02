@@ -634,6 +634,9 @@ export const MessageItem = memo(function MessageItem({
                   name: name ?? path,
                   path,
                 }}
+                serverId={
+                  messageServerId === 'local' ? undefined : messageServerId
+                }
                 compact
               />
             )
@@ -869,6 +872,7 @@ export const MessageItem = memo(function MessageItem({
                             return (
                               <PlanDisplay
                                 filePath={planFilePath}
+                                sessionId={sessionId}
                                 defaultCollapsed={
                                   message.plan_approved || hasFollowUpMessage
                                 }

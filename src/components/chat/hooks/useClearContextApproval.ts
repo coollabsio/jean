@@ -212,7 +212,7 @@ export function useClearContextApproval({
       let planContent = updatedPlan || card.planContent
       if (!planContent && card.planFilePath) {
         try {
-          planContent = await readPlanFile(card.planFilePath)
+          planContent = await readPlanFile(card.planFilePath, sessionId)
         } catch (err) {
           toast.error(`Failed to read plan file: ${err}`)
           return

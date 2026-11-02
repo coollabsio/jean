@@ -312,9 +312,13 @@ export function useGlabCliSetup() {
   }
 
   const checkManualVersion = (version: string) =>
-    invokeForOptionalServer<boolean>(serverId, 'check_glab_cli_version_exists', {
-      version,
-    })
+    invokeForOptionalServer<boolean>(
+      serverId,
+      'check_glab_cli_version_exists',
+      {
+        version,
+      }
+    )
 
   return {
     status: status.data,

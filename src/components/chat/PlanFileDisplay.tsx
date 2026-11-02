@@ -1,6 +1,12 @@
 import { useCallback, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronRight, FileText, AlertCircle, Copy, Check } from '@/components/icons/reicon'
+import {
+  ChevronRight,
+  FileText,
+  AlertCircle,
+  Copy,
+  Check,
+} from '@/components/icons/reicon'
 import { toast } from 'sonner'
 import { readPlanFile } from '@/services/chat'
 import { Markdown } from '@/components/ui/markdown'
@@ -23,6 +29,8 @@ interface PlanDisplayBaseProps {
 interface PlanDisplayFileProps extends PlanDisplayBaseProps {
   /** File path to load plan content from */
   filePath: string
+  /** Session whose server owns the plan file */
+  sessionId: string
   content?: never
 }
 
@@ -30,6 +38,7 @@ interface PlanDisplayInlineProps extends PlanDisplayBaseProps {
   /** Inline plan content (takes precedence over filePath) */
   content: string
   filePath?: never
+  sessionId?: never
 }
 
 type PlanDisplayProps = PlanDisplayFileProps | PlanDisplayInlineProps
@@ -42,6 +51,7 @@ type PlanDisplayProps = PlanDisplayFileProps | PlanDisplayInlineProps
 export function PlanDisplay({
   content: inlineContent,
   filePath,
+  sessionId,
   className,
   defaultCollapsed = false,
 }: PlanDisplayProps) {
@@ -62,11 +72,11 @@ export function PlanDisplay({
 
   // Only fetch if we have a filePath and no inline content
   const { data: fetchedContent, isLoading } = useQuery({
-    queryKey: ['planFile', filePath],
+    queryKey: ['planFile', sessionId, filePath],
     queryFn: () => {
       // Query is disabled when !filePath, so this is always defined here
-      if (!filePath) throw new Error('filePath is required')
-      return readPlanFile(filePath)
+      if (!filePath || !sessionId) throw new Error('filePath is required')
+      return readPlanFile(filePath, sessionId)
     },
     staleTime: 1000 * 60 * 5, // 5 minutes
     retry: 1,

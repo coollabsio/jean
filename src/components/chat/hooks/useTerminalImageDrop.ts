@@ -99,7 +99,9 @@ export function useTerminalImageDrop(
         return
       }
 
-      const saved = await Promise.all(imageFiles.map(saveImageFileToDisk))
+      const saved = await Promise.all(
+        imageFiles.map(file => saveImageFileToDisk(file, terminalId))
+      )
       await writePathsToTerminal(terminalId, saved.filter(Boolean) as string[])
     },
     [terminalId]
