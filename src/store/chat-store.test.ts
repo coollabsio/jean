@@ -2168,11 +2168,128 @@ describe('ChatStore', () => {
       store.addSendingSession('other-server:busy', 1_000)
       store.applyRunStateSnapshot([], {
         ownsSession: id => !id.includes(':'),
-        requestedAt: 5_000,
+        requestedAt: 60_000,
       })
       const state = useChatStore.getState()
       expect(state.sendingSessionIds['finished-elsewhere']).toBeUndefined()
       expect(state.sendingSessionIds['other-server:busy']).toBe(true)
+    })
+
+    it('keeps a local send the backend has not acknowledged yet', () => {
+      const store = useChatStore.getState()
+      store.addSendingSession('opening', 1_000)
+      const idle = {
+        sessionId: 'opening',
+        worktreeId: 'wt',
+        status: 'idle' as const,
+        statusVersion: 1,
+        activelyManaged: false,
+        waitingForInput: false,
+      }
+      // The open-session refresh lands before the send invoke reaches the backend.
+      expect(store.applyRunStateSnapshot([idle], { requestedAt: 1_500 })).toEqual(
+        []
+      )
+      expect(useChatStore.getState().sendingSessionIds.opening).toBe(true)
+      // Absent from a full snapshot is the same case.
+      store.applyRunStateSnapshot([], {
+        ownsSession: () => true,
+        requestedAt: 1_500,
+      })
+      expect(useChatStore.getState().sendingSessionIds.opening).toBe(true)
+
+      // A versioned event is the acknowledgement: the next idle ends it.
+      store.acceptRunStateVersion('opening', 2)
+      store.applyRunStateSnapshot([{ ...idle, statusVersion: 2 }], {
+        requestedAt: 1_600,
+      })
+      expect(useChatStore.getState().sendingSessionIds.opening).toBeUndefined()
+    })
+
+    it('ends a run another client started as soon as a snapshot says idle', () => {
+      const store = useChatStore.getState()
+      store.addSendingSession('viewer', 1_000, false)
+      store.applyRunStateSnapshot(
+        [
+          {
+            sessionId: 'viewer',
+            worktreeId: 'wt',
+            status: 'idle',
+            statusVersion: 1,
+            activelyManaged: false,
+            waitingForInput: false,
+          },
+        ],
+        { requestedAt: 1_500 }
+      )
+      expect(useChatStore.getState().sendingSessionIds.viewer).toBeUndefined()
+    })
+
+    it('ends an unacknowledged local send once the grace window has passed', () => {
+      const store = useChatStore.getState()
+      store.addSendingSession('lost', 1_000)
+      store.applyRunStateSnapshot([], {
+        ownsSession: () => true,
+        requestedAt: 1_000 + 10_000,
+      })
+      expect(useChatStore.getState().sendingSessionIds.lost).toBeUndefined()
+    })
+
+    it('streamed output acknowledges a local send', () => {
+      const store = useChatStore.getState()
+      store.addSendingSession('streamed', 1_000)
+      store.setStreamingContent('streamed', 'partial reply')
+      const ended = store.applyRunStateSnapshot(
+        [
+          {
+            sessionId: 'streamed',
+            worktreeId: 'wt',
+            status: 'idle',
+            statusVersion: 3,
+            activelyManaged: false,
+            waitingForInput: false,
+          },
+        ],
+        { requestedAt: 1_500 }
+      )
+      expect(ended).toEqual(['streamed'])
+      const state = useChatStore.getState()
+      expect(state.sendingSessionIds.streamed).toBeUndefined()
+      expect(state.streamingContents.streamed).toBeUndefined()
+    })
+
+    it('does not show a resumable run as sending', () => {
+      const store = useChatStore.getState()
+      store.applyRunStateSnapshot(
+        [
+          {
+            sessionId: 'restarted',
+            worktreeId: 'wt',
+            status: 'resumable',
+            statusVersion: 2,
+            activelyManaged: false,
+            runId: 'run-1',
+            startedAt: 1_700,
+            waitingForInput: false,
+          },
+        ],
+        { ownsSession: () => true, requestedAt: Date.now() }
+      )
+      expect(useChatStore.getState().sendingSessionIds.restarted).toBeUndefined()
+      expect(useChatStore.getState().runStateVersions.restarted).toBe(2)
+    })
+
+    it('reports only ended sessions that still had streamed output', () => {
+      const store = useChatStore.getState()
+      store.addSendingSession('quiet', 1_000)
+      store.addSendingSession('loud', 1_000)
+      store.setStreamingContent('loud', 'partial')
+      const ended = store.applyRunStateSnapshot([], {
+        ownsSession: () => true,
+        requestedAt: 60_000,
+      })
+      expect(ended).toEqual(['loud'])
+      expect(useChatStore.getState().sendingSessionIds).toEqual({})
     })
 
     it('marks a run started on another client as sending with its start time and mode', () => {

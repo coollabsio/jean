@@ -31,6 +31,11 @@ vi.mock('@/lib/server-connections', () => ({
 vi.mock('@/hooks/useMainWindowEventListeners', () => ({
   applyCacheInvalidationKeys: vi.fn(),
 }))
+vi.mock('@/services/chat', () => ({
+  chatQueryKeys: {
+    session: (sessionId: string) => ['chat', 'session', sessionId] as const,
+  },
+}))
 
 import { useChatStore } from '@/store/chat-store'
 
@@ -124,6 +129,24 @@ describe('refreshRunStates', () => {
     const state = useChatStore.getState()
     expect(state.sendingSessionIds).toEqual({ other: true, opened: true })
     expect(state.runStateVersions.opened).toBe(9)
+  })
+
+  it('refetches a session whose streamed run the snapshot ended', async () => {
+    const store = useChatStore.getState()
+    store.addSendingSession('missed-done', 1)
+    store.setStreamingContent('missed-done', 'partial reply')
+    store.addSendingSession('silent', 1)
+    mockInvoke.mockResolvedValue([])
+    const queryClient = new QueryClient()
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
+
+    await refreshRunStates(queryClient)
+
+    expect(useChatStore.getState().sendingSessionIds).toEqual({})
+    expect(invalidate).toHaveBeenCalledTimes(1)
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ['chat', 'session', 'missed-done'],
+    })
   })
 
   it('throttles focus refreshes', async () => {

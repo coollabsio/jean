@@ -390,7 +390,8 @@ export default function useStreamingEvents({
           streamingContentBlocks,
         }
       })
-      addSendingSession(session_id)
+      // The sender marked itself before invoking; this covers other clients.
+      addSendingSession(session_id, undefined, false)
       if (execution_mode) {
         useChatStore.getState().setExecutingMode(session_id, execution_mode)
       }
@@ -542,7 +543,7 @@ export default function useStreamingEvents({
           .consumeStreamingReplayText(session_id, content) ?? ''
       if (!replayFilteredContent) return
       // Ensure session is marked as sending (recovers state after refresh)
-      addSendingSession(session_id)
+      addSendingSession(session_id, undefined, false)
       // Accumulate into buffer
       chunkBuffer[session_id] =
         (chunkBuffer[session_id] ?? '') + replayFilteredContent

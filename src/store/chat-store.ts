@@ -97,6 +97,7 @@ type RunStateSlice = Pick<
   | 'activeToolCalls'
   | 'sendingSessionIds'
   | 'sendStartedAt'
+  | 'localSendIds'
   | 'completedDurations'
   | 'streamingPlanApprovals'
   | 'executingModes'
@@ -126,6 +127,7 @@ function withRunEnded(state: RunStateSlice, sessionId: string): RunStateSlice {
     state.streamingPlanApprovals
   const { [sessionId]: _em, ...executingModes } = state.executingModes
   const { [sessionId]: _sa, ...sendStartedAt } = state.sendStartedAt
+  const { [sessionId]: _ls, ...localSendIds } = state.localSendIds
   return {
     ...state,
     streamingContents,
@@ -136,6 +138,7 @@ function withRunEnded(state: RunStateSlice, sessionId: string): RunStateSlice {
     streamingPlanApprovals,
     executingModes,
     sendStartedAt,
+    localSendIds,
     completedDurations:
       sendStarted > 0
         ? { ...state.completedDurations, [sessionId]: Date.now() - sendStarted }
@@ -151,6 +154,10 @@ function withRunLive(
   executionMode: string | undefined
 ): RunStateSlice {
   let next = state
+  if (next.localSendIds[sessionId]) {
+    const { [sessionId]: _ls, ...localSendIds } = next.localSendIds
+    next = { ...next, localSendIds }
+  }
   if (!next.sendingSessionIds[sessionId]) {
     const { [sessionId]: _done, ...completedDurations } =
       next.completedDurations
@@ -227,17 +234,47 @@ function withRunState(
             [sessionId]: runState.statusVersion,
           },
         }
-  if (runState.status === 'running' || runState.status === 'resumable') {
+  if (runState.status === 'running') {
     next = withRunLive(
       next,
       sessionId,
       runState.startedAt != null ? runState.startedAt * 1000 : undefined,
       runState.executionMode
     )
-  } else if ((next.sendStartedAt[sessionId] ?? 0) <= requestedAt) {
+  } else if (snapshotMayEndRun(next, sessionId, requestedAt)) {
     next = withRunEnded(next, sessionId)
   }
   return withWaitingForInput(next, sessionId, runState.waitingForInput)
+}
+
+/**
+ * How long a local send may go unacknowledged before a snapshot may end it.
+ * The backend's versioned `chat:user-turn` follows the send invoke within
+ * moments; this only has to outlast the per-session setup awaits that run
+ * between `addSendingSession` and that invoke.
+ */
+const LOCAL_SEND_ACK_GRACE_MS = 10_000
+
+/**
+ * A snapshot taken before this client's send started, or for a send the
+ * backend has not acknowledged yet, says nothing about that send. Streamed
+ * output or a versioned event is the acknowledgement; until one arrives the
+ * backend may simply not have received the prompt.
+ */
+function snapshotMayEndRun(
+  state: RunStateSlice,
+  sessionId: string,
+  requestedAt: number
+): boolean {
+  const sendStarted = state.sendStartedAt[sessionId] ?? 0
+  if (
+    state.localSendIds[sessionId] &&
+    !hasActiveStreamingState(state, sessionId) &&
+    requestedAt - sendStarted < LOCAL_SEND_ACK_GRACE_MS
+  ) {
+    return false
+  }
+  return sendStarted <= requestedAt
 }
 
 function compactReplayBlocks(blocks: ContentBlock[]): ContentBlock[] {
@@ -301,6 +338,10 @@ interface ChatUIState {
   // Timestamp of last addSendingSession call per session — used to protect new sends
   // from stale completion events arriving from a previous cancelled run
   sendStartedAt: Record<string, number>
+
+  // Sessions this client started a send for that the backend has not yet
+  // reported as running. A run-state snapshot never ends these.
+  localSendIds: Record<string, true>
 
   // Duration (ms) of the last completed run per session — set by completeSession
   completedDurations: Record<string, number>
@@ -595,7 +636,15 @@ interface ChatUIState {
   getWorktreePath: (worktreeId: string) => string | undefined
 
   // Actions - Session-based sending state
-  addSendingSession: (sessionId: string, startTime?: number) => void
+  /**
+   * `local` is false when the run was not started by this client (another
+   * client's send, a resumed run): snapshots may then end it at once.
+   */
+  addSendingSession: (
+    sessionId: string,
+    startTime?: number,
+    local?: boolean
+  ) => void
   removeSendingSession: (sessionId: string) => void
   isSending: (sessionId: string) => boolean
   setSessionNaming: (sessionId: string, isNaming: boolean) => void
@@ -929,11 +978,15 @@ interface ChatUIState {
     sessionId: string,
     version: number | null | undefined
   ) => boolean
-  /** Reconcile sending/streaming/waiting indicators from a backend snapshot. */
+  /**
+   * Reconcile sending/streaming/waiting indicators from a backend snapshot.
+   * Returns the sessions whose run it ended while streamed output was still
+   * on screen; the caller refetches those so the persisted reply replaces it.
+   */
   applyRunStateSnapshot: (
     states: RunState[],
     options: RunStateSnapshotOptions
-  ) => void
+  ) => string[]
 
   // Actions - Batch state transitions (single set() to avoid render cascades)
   /** Atomically clear all streaming state and mark session as reviewing */
@@ -997,6 +1050,7 @@ const SESSION_SCOPED_RECORD_KEYS = [
   'sendingSessionIds',
   'runStateVersions',
   'sendStartedAt',
+  'localSendIds',
   'completedDurations',
   'userInitiatedSessionIds',
   'waitingForInputSessionIds',
@@ -1160,6 +1214,7 @@ export const useChatStore = create<ChatUIState>()(
       runStateVersions: {},
       namingSessionIds: {},
       sendStartedAt: {},
+      localSendIds: {},
       completedDurations: {},
       userInitiatedSessionIds: {},
       waitingForInputSessionIds: {},
@@ -1829,7 +1884,7 @@ export const useChatStore = create<ChatUIState>()(
       getWorktreePath: worktreeId => get().worktreePaths[worktreeId],
 
       // Sending state (session-based)
-      addSendingSession: (sessionId, startTime) =>
+      addSendingSession: (sessionId, startTime, local = true) =>
         set(
           state => {
             // Guard: skip no-op updates to avoid re-renders on every streaming chunk
@@ -1853,6 +1908,9 @@ export const useChatStore = create<ChatUIState>()(
                 [sessionId]: true,
               },
               sendStartedAt: { ...state.sendStartedAt, [sessionId]: now },
+              ...(local
+                ? { localSendIds: { ...state.localSendIds, [sessionId]: true } }
+                : {}),
               completedDurations: restDurations,
             }
           },
@@ -1869,7 +1927,8 @@ export const useChatStore = create<ChatUIState>()(
               currentSending: Object.keys(state.sendingSessionIds),
             })
             const { [sessionId]: _, ...rest } = state.sendingSessionIds
-            return { sendingSessionIds: rest }
+            const { [sessionId]: _ls, ...localSendIds } = state.localSendIds
+            return { sendingSessionIds: rest, localSendIds }
           },
           undefined,
           'removeSendingSession'
@@ -4087,14 +4146,20 @@ export const useChatStore = create<ChatUIState>()(
           )
           return false
         }
-        if (known !== version) {
+        // A versioned event is the backend's acknowledgement of this session's
+        // run, so a later snapshot may end it.
+        if (known !== version || get().localSendIds[sessionId]) {
           set(
-            state => ({
-              runStateVersions: {
-                ...state.runStateVersions,
-                [sessionId]: version,
-              },
-            }),
+            state => {
+              const { [sessionId]: _ls, ...localSendIds } = state.localSendIds
+              return {
+                runStateVersions: {
+                  ...state.runStateVersions,
+                  [sessionId]: version,
+                },
+                localSendIds,
+              }
+            },
             undefined,
             'acceptRunStateVersion'
           )
@@ -4102,7 +4167,11 @@ export const useChatStore = create<ChatUIState>()(
         return true
       },
 
-      applyRunStateSnapshot: (states, { ownsSession, requestedAt }) =>
+      applyRunStateSnapshot: (states, { ownsSession, requestedAt }) => {
+        const before = get()
+        const wasSending = Object.keys(before.sendingSessionIds).filter(
+          sessionId => hasActiveStreamingState(before, sessionId)
+        )
         set(
           state => {
             let next: RunStateSlice = state
@@ -4110,7 +4179,7 @@ export const useChatStore = create<ChatUIState>()(
             if (ownsSession) {
               for (const sessionId of Object.keys(next.sendingSessionIds)) {
                 if (listed.has(sessionId) || !ownsSession(sessionId)) continue
-                if ((next.sendStartedAt[sessionId] ?? 0) > requestedAt) continue
+                if (!snapshotMayEndRun(next, sessionId, requestedAt)) continue
                 next = withRunEnded(next, sessionId)
               }
             }
@@ -4121,7 +4190,10 @@ export const useChatStore = create<ChatUIState>()(
           },
           undefined,
           'applyRunStateSnapshot'
-        ),
+        )
+        const after = get().sendingSessionIds
+        return wasSending.filter(sessionId => !after[sessionId])
+      },
 
       // Batch state transitions — single set() to avoid render cascades
       // Used by useStreamingEvents to atomically transition session state
@@ -4170,7 +4242,9 @@ export const useChatStore = create<ChatUIState>()(
             const { [sessionId]: _em, ...executingModes } = state.executingModes
             const { [sessionId]: _sa, ...sendStartedAtRest } =
               state.sendStartedAt
+            const { [sessionId]: _ls, ...localSendIds } = state.localSendIds
             return {
+              localSendIds,
               streamingContents,
               streamingContentBlocks,
               streamingReplayContentBlocks,
@@ -4236,7 +4310,9 @@ export const useChatStore = create<ChatUIState>()(
               state.deniedMessageContext
             const { [sessionId]: _sa, ...sendStartedAtRest } =
               state.sendStartedAt
+            const { [sessionId]: _ls, ...localSendIds } = state.localSendIds
             return {
+              localSendIds,
               streamingContents,
               streamingContentBlocks,
               streamingReplayContentBlocks,
@@ -4295,7 +4371,9 @@ export const useChatStore = create<ChatUIState>()(
             const { [sessionId]: _em, ...executingModes } = state.executingModes
             const { [sessionId]: _sa, ...sendStartedAtRest } =
               state.sendStartedAt
+            const { [sessionId]: _ls, ...localSendIds } = state.localSendIds
             return {
+              localSendIds,
               streamingContents,
               streamingReplayContentBlocks,
               sendingSessionIds,
@@ -4336,7 +4414,9 @@ export const useChatStore = create<ChatUIState>()(
               state.waitingForInputSessionIds
             const { [sessionId]: _sa, ...sendStartedAtRest } =
               state.sendStartedAt
+            const { [sessionId]: _ls, ...localSendIds } = state.localSendIds
             return {
+              localSendIds,
               streamingContents,
               streamingContentBlocks,
               streamingReplayContentBlocks,

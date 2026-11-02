@@ -5387,8 +5387,12 @@ pub fn initialize_runtime(context: &RuntimeContext) -> Result<(), String> {
     // Finish runs orphaned by a crash/reboot before any client connects.
     // Headless servers otherwise only recover on a full page load, so an
     // open web tab that just reconnects keeps showing the dead run as running.
-    if let Err(error) = chat::run_log::recover_incomplete_runs(context) {
-        log::warn!("Failed to recover incomplete runs: {error}");
+    // Runs whose detached host survived the restart are resumed here, by the
+    // server that owns them, so a headless server with no client (or only a
+    // native desktop connected remotely) keeps tailing them.
+    match chat::run_log::recover_incomplete_runs(context) {
+        Ok(recovered) => chat::resume_recovered_runs(context.clone(), recovered),
+        Err(error) => log::warn!("Failed to recover incomplete runs: {error}"),
     }
     let task_manager = background_tasks::BackgroundTaskManager::new(context.clone());
     task_manager.start();

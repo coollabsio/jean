@@ -128,6 +128,31 @@ visibility (throttled), and session open (that one id). Native desktop asks
 the local core and every online remote and scopes ids per server; Web Access
 asks its origin only.
 
+Three rules keep snapshots honest. `waitingForInput` in `run_state()` uses
+`SessionMetadata::has_pending_approval()` (Codex command, permission,
+user-input, MCP elicitation and dynamic tool requests, OpenCode and ACP
+approvals, permission denials), the same predicate the session payload uses,
+and every count is part of `run_state_signature()`, so a mid-turn approval
+badge survives a snapshot. Only `running` is live on the client; `resumable`
+means nobody is tailing the run yet, so its partial reply stays in the
+transcript. Each server resumes its own resumable runs at startup
+(`initialize_runtime` → `resume_recovered_runs` → `resume_session`), so a
+headless server with no client, or one reached only from a remote native
+desktop, picks up a surviving detached host; `resume_session` holds a
+per-session `ResumeGuard`, and a client's `check_resumable_sessions` call
+no-ops once the tail is registered. A snapshot that ends a run while streamed
+output is still on screen (its `chat:done` was missed) returns that session
+from `applyRunStateSnapshot`, and `refreshRunStates` refetches it so the
+persisted reply replaces the stream. A send this client started
+(`addSendingSession` sets `localSendIds`) is not ended by a snapshot until the
+backend acknowledges it with streamed output or a versioned event, or ten
+seconds pass; the open-session refresh otherwise lands between
+`addSendingSession` and the send invoke. Orphan repair
+(`recover_incomplete_runs_for`) reads, judges and writes each session under
+its metadata lock with the registry re-checked inside it, and resume tails
+finalize the run before they unregister, so a snapshot in that gap never
+marks a finished run crashed.
+
 ### Backend-Owned Long-Running Jobs
 
 Long-running operations that must survive web/mobile WebSocket disconnects

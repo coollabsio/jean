@@ -8667,11 +8667,84 @@ pub struct ResumeSessionResponse {
     pub run_count: usize,
 }
 
+/// Resume every run the startup repair found still alive. Runs on the shared
+/// runtime so startup is not blocked; a client's own `resume_session` call for
+/// the same session no-ops once the tail is registered.
+pub fn resume_recovered_runs(app: AppHandle, recovered: Vec<super::run_log::RecoveredRun>) {
+    let resumable = resumable_sessions(recovered);
+    if resumable.is_empty() {
+        return;
+    }
+    log::info!(
+        "Resuming {} session(s) with live detached runs after restart",
+        resumable.len()
+    );
+    tauri::async_runtime::spawn(async move {
+        for run in resumable {
+            match resume_session(app.clone(), run.session_id.clone(), run.worktree_id.clone()).await
+            {
+                Ok(response) if response.resumed => {
+                    log::info!(
+                        "Resumed session {} ({} run(s)) after restart",
+                        run.session_id,
+                        response.run_count
+                    );
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    log::warn!(
+                        "Failed to resume session {} after restart: {error}",
+                        run.session_id
+                    );
+                }
+            }
+        }
+    });
+}
+
+/// One entry per session with a run worth resuming; `resume_session` handles
+/// every run of that session itself.
+fn resumable_sessions(
+    recovered: Vec<super::run_log::RecoveredRun>,
+) -> Vec<super::run_log::RecoveredRun> {
+    let mut seen = std::collections::HashSet::new();
+    recovered
+        .into_iter()
+        .filter(|run| run.resumable && seen.insert(run.session_id.clone()))
+        .collect()
+}
+
+/// Sessions whose resume is between "metadata loaded" and "tail registered".
+/// The registry only knows a session once its tail registers, so two callers
+/// (startup resume and a client's `check_resumable_sessions`) need this to not
+/// both start a tail.
+static RESUMING_SESSIONS: once_cell::sync::Lazy<
+    std::sync::Mutex<std::collections::HashSet<String>>,
+> = once_cell::sync::Lazy::new(|| std::sync::Mutex::new(std::collections::HashSet::new()));
+
+struct ResumeGuard(String);
+
+impl ResumeGuard {
+    fn acquire(session_id: &str) -> Option<Self> {
+        RESUMING_SESSIONS
+            .lock()
+            .unwrap()
+            .insert(session_id.to_string())
+            .then(|| Self(session_id.to_string()))
+    }
+}
+
+impl Drop for ResumeGuard {
+    fn drop(&mut self) {
+        RESUMING_SESSIONS.lock().unwrap().remove(&self.0);
+    }
+}
+
 /// Resume a session that has resumable runs (detached processes still running).
 ///
-/// This is called when the frontend detects that a session has a "Resumable" run
-/// (process still running after app restart). It starts tailing the output file
-/// to continue receiving events.
+/// Called by the backend at startup for its own runs, and by a native client
+/// after `check_resumable_sessions`. It starts tailing the output file to
+/// continue receiving events.
 pub async fn resume_session(
     app: AppHandle,
     session_id: String,
@@ -8681,6 +8754,14 @@ pub async fn resume_session(
     use super::storage::save_metadata;
 
     log::trace!("Attempting to resume session: {session_id}");
+
+    let Some(_resume_guard) = ResumeGuard::acquire(&session_id) else {
+        log::trace!("Session {session_id} is already being resumed, skipping");
+        return Ok(ResumeSessionResponse {
+            resumed: false,
+            run_count: 0,
+        });
+    };
 
     // If this session is already being actively managed (tailed by send_chat_message),
     // skip resuming to avoid starting a duplicate tail that re-emits all events
@@ -8864,7 +8945,6 @@ pub async fn resume_session(
                     Ok(response) => (response.session_id, response.usage, response.cancelled),
                     Err(e) => {
                         log::error!("Resume Pi tail failed for run: {run_id_clone}, error: {e}");
-                        super::registry::unregister_process(&session_id_clone);
                         if let Ok(mut writer) =
                             RunLogWriter::resume(&app_clone, &session_id_clone, &run_id_clone)
                         {
@@ -8872,15 +8952,11 @@ pub async fn resume_session(
                                 log::error!("Failed to mark Pi run as crashed: {e}");
                             }
                         }
+                        super::registry::unregister_process(&session_id_clone);
                         emit_done(&app_clone, &session_id_clone, &worktree_id_clone);
                         return;
                     }
                 };
-
-                super::registry::unregister_process(&session_id_clone);
-                if cancelled {
-                    emit_done(&app_clone, &session_id_clone, &worktree_id_clone);
-                }
 
                 if let Ok(mut writer) =
                     RunLogWriter::resume(&app_clone, &session_id_clone, &run_id_clone)
@@ -8889,6 +8965,10 @@ pub async fn resume_session(
                     if let Err(e) = writer.complete(&assistant_message_id, None, usage.clone()) {
                         log::error!("Failed to mark resumed Pi run completed: {e}");
                     }
+                }
+                super::registry::unregister_process(&session_id_clone);
+                if cancelled {
+                    emit_done(&app_clone, &session_id_clone, &worktree_id_clone);
                 }
 
                 if !pi_session_id.is_empty() {
@@ -8940,7 +9020,6 @@ pub async fn resume_session(
                     &output_file,
                     pid,
                 );
-                super::registry::unregister_process(&session_id_clone);
                 match response {
                     Ok(response) => {
                         let response = super::antigravity::finish_antigravity_response(
@@ -8990,6 +9069,7 @@ pub async fn resume_session(
                         let _ = app_clone.emit_all(event_name, &event);
                     }
                 }
+                super::registry::unregister_process(&session_id_clone);
             });
             continue;
         }
@@ -9043,17 +9123,16 @@ pub async fn resume_session(
                     Ok(response) => response,
                     Err(error) => {
                         log::error!("Resume Kimi tail failed for run {run_id_clone}: {error}");
-                        super::registry::unregister_process(&session_id_clone);
                         if let Ok(mut writer) =
                             RunLogWriter::resume(&app_clone, &session_id_clone, &run_id_clone)
                         {
                             let _ = writer.crash();
                         }
+                        super::registry::unregister_process(&session_id_clone);
                         emit_done(&app_clone, &session_id_clone, &worktree_id_clone);
                         return;
                     }
                 };
-                super::registry::unregister_process(&session_id_clone);
                 let response = super::kimi::finish_kimi_response(
                     &app_clone,
                     &session_id_clone,
@@ -9061,10 +9140,6 @@ pub async fn resume_session(
                     execution_mode.as_deref(),
                     response,
                 );
-                if response.cancelled {
-                    emit_done(&app_clone, &session_id_clone, &worktree_id_clone);
-                }
-
                 if let Ok(mut writer) =
                     RunLogWriter::resume(&app_clone, &session_id_clone, &run_id_clone)
                 {
@@ -9074,6 +9149,10 @@ pub async fn resume_session(
                     {
                         log::error!("Failed to mark resumed Kimi run completed: {error}");
                     }
+                }
+                super::registry::unregister_process(&session_id_clone);
+                if response.cancelled {
+                    emit_done(&app_clone, &session_id_clone, &worktree_id_clone);
                 }
 
                 if !response.session_id.is_empty() {
@@ -9142,17 +9221,16 @@ pub async fn resume_session(
                     Ok(response) => response,
                     Err(error) => {
                         log::error!("Resume Muse tail failed for run {run_id_clone}: {error}");
-                        super::registry::unregister_process(&session_id_clone);
                         if let Ok(mut writer) =
                             RunLogWriter::resume(&app_clone, &session_id_clone, &run_id_clone)
                         {
                             let _ = writer.crash();
                         }
+                        super::registry::unregister_process(&session_id_clone);
                         emit_done(&app_clone, &session_id_clone, &worktree_id_clone);
                         return;
                     }
                 };
-                super::registry::unregister_process(&session_id_clone);
                 let response = super::muse::finish_muse_response(
                     &app_clone,
                     &session_id_clone,
@@ -9160,10 +9238,6 @@ pub async fn resume_session(
                     execution_mode.as_deref(),
                     response,
                 );
-                if response.cancelled {
-                    emit_done(&app_clone, &session_id_clone, &worktree_id_clone);
-                }
-
                 if let Ok(mut writer) =
                     RunLogWriter::resume(&app_clone, &session_id_clone, &run_id_clone)
                 {
@@ -9173,6 +9247,10 @@ pub async fn resume_session(
                     {
                         log::error!("Failed to mark resumed Muse run completed: {error}");
                     }
+                }
+                super::registry::unregister_process(&session_id_clone);
+                if response.cancelled {
+                    emit_done(&app_clone, &session_id_clone, &worktree_id_clone);
                 }
 
                 if !response.session_id.is_empty() {
@@ -9242,7 +9320,6 @@ pub async fn resume_session(
                             log::error!(
                                 "Resume Grok tail failed for run: {run_id_clone}, error: {e}"
                             );
-                            super::registry::unregister_process(&session_id_clone);
                             if let Ok(mut writer) =
                                 RunLogWriter::resume(&app_clone, &session_id_clone, &run_id_clone)
                             {
@@ -9250,6 +9327,7 @@ pub async fn resume_session(
                                     log::error!("Failed to mark Grok run as crashed: {e}");
                                 }
                             }
+                            super::registry::unregister_process(&session_id_clone);
                             let (event_name, event) =
                                 resumed_tail_error_event(&session_id_clone, &worktree_id_clone, &e);
                             let _ = app_clone.emit_all(event_name, &event);
@@ -9257,7 +9335,6 @@ pub async fn resume_session(
                         }
                     };
 
-                super::registry::unregister_process(&session_id_clone);
                 if cancelled {
                     // tail_grok_output does not emit chat:done for a cancel.
                     // Send the text already on disk so a client that missed the
@@ -9288,6 +9365,7 @@ pub async fn resume_session(
                         log::error!("Failed to finish resumed Grok run: {e}");
                     }
                 }
+                super::registry::unregister_process(&session_id_clone);
 
                 if !grok_session_id.is_empty() {
                     if let Err(e) =
@@ -9366,9 +9444,6 @@ pub async fn resume_session(
                 &output_file,
                 pid,
             );
-            // PID-scoped: never remove a newer run's registration.
-            super::registry::unregister_process_if_owned(&session_id_clone, pid);
-
             let response = match tail_result {
                 Ok(response) => response,
                 Err(e) => {
@@ -9380,6 +9455,8 @@ pub async fn resume_session(
                             log::error!("Failed to mark run as crashed: {e}");
                         }
                     }
+                    // PID-scoped: never remove a newer run's registration.
+                    super::registry::unregister_process_if_owned(&session_id_clone, pid);
                     // tail_claude_output already emitted chat:error for this.
                     return;
                 }
@@ -9429,6 +9506,10 @@ pub async fn resume_session(
                     log::trace!("Could not delete input file (may not exist): {e}");
                 }
             }
+            // The run is final on disk before the registry lets orphan repair
+            // look at it, so a snapshot in between never marks it crashed.
+            // PID-scoped: never remove a newer run's registration.
+            super::registry::unregister_process_if_owned(&session_id_clone, pid);
 
             // Exactly one terminal event: chat:error was already emitted for a
             // failed turn; otherwise chat:done (tail never emits it itself).
@@ -11342,6 +11423,107 @@ mod tests {
                 .status_version,
             1
         );
+    }
+
+    #[test]
+    fn orphan_repair_never_overwrites_a_run_a_tail_completed() {
+        let _registry = super::super::registry::TEST_LOCK.lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let app = AppHandle::new(temp.path().to_path_buf(), temp.path().to_path_buf()).unwrap();
+        run_state_session(&app, "tailed", RunStatus::Running, None);
+
+        // A live tail owns the session: repair must leave it alone.
+        assert!(super::super::registry::register_process(
+            "tailed".to_string(),
+            u32::MAX
+        ));
+        let recovered =
+            super::super::run_log::recover_incomplete_runs_for(&app, vec!["tailed".to_string()])
+                .unwrap();
+        assert!(recovered.is_empty());
+        assert_eq!(
+            load_metadata(&app, "tailed").unwrap().unwrap().runs[0].status,
+            RunStatus::Running
+        );
+
+        // The tail finalizes the run before it unregisters.
+        with_existing_metadata_mut(&app, "tailed", |metadata| {
+            metadata.runs[0].status = RunStatus::Completed;
+            metadata.runs[0].assistant_message_id = Some("reply".to_string());
+        })
+        .unwrap();
+        super::super::registry::cleanup_session_registrations("tailed");
+        let version_after_tail = load_metadata(&app, "tailed")
+            .unwrap()
+            .unwrap()
+            .status_version;
+
+        // Repair after the tail finished changes nothing, twice.
+        for _ in 0..2 {
+            let recovered = super::super::run_log::recover_incomplete_runs_for(
+                &app,
+                vec!["tailed".to_string()],
+            )
+            .unwrap();
+            assert!(recovered.is_empty());
+            let metadata = load_metadata(&app, "tailed").unwrap().unwrap();
+            assert_eq!(metadata.runs[0].status, RunStatus::Completed);
+            assert_eq!(
+                metadata.runs[0].assistant_message_id.as_deref(),
+                Some("reply")
+            );
+            assert_eq!(metadata.status_version, version_after_tail);
+        }
+    }
+
+    #[test]
+    fn startup_resume_targets_each_resumable_session_once() {
+        let recovered = vec![
+            recovered_run("a", true),
+            recovered_run("a", true),
+            recovered_run("b", false),
+            recovered_run("c", true),
+        ];
+        let targets: Vec<String> = resumable_sessions(recovered)
+            .into_iter()
+            .map(|run| run.session_id)
+            .collect();
+        assert_eq!(targets, vec!["a".to_string(), "c".to_string()]);
+    }
+
+    #[test]
+    fn resume_session_is_skipped_while_another_resume_holds_the_session() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let temp = tempfile::tempdir().unwrap();
+            let app = AppHandle::new(temp.path().to_path_buf(), temp.path().to_path_buf()).unwrap();
+            run_state_session(&app, "guarded", RunStatus::Resumable, Some("thread-1"));
+            let guard = ResumeGuard::acquire("guarded").unwrap();
+            let response = resume_session(app.clone(), "guarded".to_string(), "wt".to_string())
+                .await
+                .unwrap();
+            assert!(!response.resumed);
+            assert_eq!(
+                load_metadata(&app, "guarded").unwrap().unwrap().runs[0].status,
+                RunStatus::Resumable
+            );
+            drop(guard);
+            assert!(ResumeGuard::acquire("guarded").is_some());
+        });
+    }
+
+    fn recovered_run(session_id: &str, resumable: bool) -> super::super::run_log::RecoveredRun {
+        super::super::run_log::RecoveredRun {
+            session_id: session_id.to_string(),
+            worktree_id: "wt".to_string(),
+            run_id: format!("{session_id}-run"),
+            user_message: "hi".to_string(),
+            resumable,
+            execution_mode: None,
+            started_at: 1,
+        }
     }
 
     #[test]

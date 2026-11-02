@@ -6,7 +6,8 @@ import { getEnabledServerConnections } from '@/lib/remote-connections'
 import { serverConnectionManager } from '@/lib/server-connections'
 import { parseServerResourceKey } from '@/lib/server-resource'
 import { LOCAL_SERVER_ID, type ServerId } from '@/types/server-resource'
-import { useChatStore } from '@/store/chat-store'
+import { useChatStore, type RunStateSnapshotOptions } from '@/store/chat-store'
+import { chatQueryKeys } from '@/services/chat'
 import type { RunState } from '@/types/chat'
 import { logger } from '@/lib/logger'
 
@@ -53,7 +54,6 @@ export async function refreshRunStates(
     applyCacheInvalidationKeys(queryClient, ['sessions'])
   }
   const requestedAt = Date.now()
-  const store = useChatStore.getState()
 
   if (options.sessionIds) {
     const states = await invoke<RunState[]>('get_run_states', {
@@ -62,7 +62,7 @@ export async function refreshRunStates(
       logger.warn('Failed to fetch run states', { error })
       return [] as RunState[]
     })
-    store.applyRunStateSnapshot(states, { requestedAt })
+    applySnapshot(queryClient, states, { requestedAt })
     return
   }
 
@@ -72,7 +72,7 @@ export async function refreshRunStates(
       return null
     })
     if (states) {
-      store.applyRunStateSnapshot(states, {
+      applySnapshot(queryClient, states, {
         ownsSession: () => true,
         requestedAt,
       })
@@ -91,12 +91,32 @@ export async function refreshRunStates(
         return null
       })
       if (!states) return
-      useChatStore.getState().applyRunStateSnapshot(states, {
+      applySnapshot(queryClient, states, {
         ownsSession: ownsSessionOn(serverId),
         requestedAt,
       })
     })
   )
+}
+
+/**
+ * A run that ended while its streamed text was still on screen (its
+ * `chat:done` was missed) is refetched so the persisted reply takes the
+ * stream's place instead of leaving a gap.
+ */
+function applySnapshot(
+  queryClient: QueryClient,
+  states: RunState[],
+  options: RunStateSnapshotOptions
+): void {
+  const ended = useChatStore
+    .getState()
+    .applyRunStateSnapshot(states, options)
+  for (const sessionId of ended) {
+    void queryClient.invalidateQueries({
+      queryKey: chatQueryKeys.session(sessionId),
+    })
+  }
 }
 
 const FOCUS_REFRESH_MIN_INTERVAL_MS = 5_000

@@ -1477,6 +1477,21 @@ fn default_version() -> u32 {
 }
 
 impl SessionMetadata {
+    /// Any approval, permission, or user-input request a client shows as
+    /// "waiting" while the turn is still running. The run-state snapshot and
+    /// the session payload must agree on this, or a snapshot clears a badge
+    /// the session list just set.
+    pub fn has_pending_approval(&self) -> bool {
+        !self.pending_permission_denials.is_empty()
+            || !self.pending_codex_permission_requests.is_empty()
+            || !self.pending_opencode_permission_requests.is_empty()
+            || self.has_pending_acp_approval()
+            || !self.pending_codex_command_approval_requests.is_empty()
+            || !self.pending_codex_user_input_requests.is_empty()
+            || !self.pending_codex_mcp_elicitation_requests.is_empty()
+            || !self.pending_codex_dynamic_tool_call_requests.is_empty()
+    }
+
     pub fn has_pending_acp_approval(&self) -> bool {
         self.pending_acp_permission_requests.iter().any(|request| {
             self.runs.iter().any(|run| {
@@ -1517,22 +1532,13 @@ impl SessionMetadata {
                 RunStatus::Completed | RunStatus::Cancelled | RunStatus::Crashed
             )
         });
-        let has_pending_approval = !self.pending_permission_denials.is_empty()
-            || !self.pending_codex_permission_requests.is_empty()
-            || !self.pending_opencode_permission_requests.is_empty()
-            || self.has_pending_acp_approval()
-            || !self.pending_codex_command_approval_requests.is_empty()
-            || !self.pending_codex_user_input_requests.is_empty()
-            || !self.pending_codex_mcp_elicitation_requests.is_empty()
-            || !self.pending_codex_dynamic_tool_call_requests.is_empty();
-
         SessionUnreadSummary {
             updated_at: self.updated_at(),
             last_opened_at: self.last_opened_at,
             has_unread_activity: has_finished_run
                 || self.waiting_for_input
                 || self.has_pending_plan_waiting()
-                || has_pending_approval
+                || self.has_pending_approval()
                 || has_review_unread_activity(self.is_reviewing, self.review_results.as_ref()),
         }
     }
@@ -2474,6 +2480,25 @@ impl SessionMetadata {
         self.pending_plan_message_id.hash(&mut hasher);
         self.approved_plan_message_ids.hash(&mut hasher);
         self.pending_acp_permission_requests.len().hash(&mut hasher);
+        self.pending_permission_denials.len().hash(&mut hasher);
+        self.pending_codex_permission_requests
+            .len()
+            .hash(&mut hasher);
+        self.pending_opencode_permission_requests
+            .len()
+            .hash(&mut hasher);
+        self.pending_codex_command_approval_requests
+            .len()
+            .hash(&mut hasher);
+        self.pending_codex_user_input_requests
+            .len()
+            .hash(&mut hasher);
+        self.pending_codex_mcp_elicitation_requests
+            .len()
+            .hash(&mut hasher);
+        self.pending_codex_dynamic_tool_call_requests
+            .len()
+            .hash(&mut hasher);
         hasher.finish()
     }
 
@@ -2526,7 +2551,7 @@ impl SessionMetadata {
             execution_mode: live_run.and_then(|run| run.execution_mode.clone()),
             waiting_for_input: self.waiting_for_input
                 || self.has_pending_plan_waiting()
-                || self.has_pending_acp_approval(),
+                || self.has_pending_approval(),
             waiting_for_input_type: self.waiting_for_input_type.clone(),
         }
     }
@@ -2640,6 +2665,37 @@ mod tests {
         let empty = SessionMetadata::new("s".into(), "w".into(), "n".into(), 0).run_state(false);
         assert_eq!(empty.status, RunStateStatus::Idle);
         assert_eq!(empty.run_id, None);
+    }
+
+    #[test]
+    fn run_state_waiting_includes_pending_codex_requests_and_bumps_signature() {
+        let mut metadata = run_state_fixture(RunStatus::Running);
+        let before = metadata.run_state_signature();
+        assert!(!metadata.run_state(true).waiting_for_input);
+
+        metadata
+            .pending_codex_user_input_requests
+            .push(CodexUserInputRequest {
+                rpc_id: 1,
+                item_id: "item".into(),
+                questions: serde_json::json!([]),
+                thread_id: None,
+                turn_id: None,
+            });
+        assert!(metadata.run_state(true).waiting_for_input);
+        assert_ne!(metadata.run_state_signature(), before);
+
+        metadata.pending_codex_user_input_requests.clear();
+        metadata.pending_codex_command_approval_requests.push(
+            serde_json::from_value(serde_json::json!({
+                "rpc_id": 2,
+                "item_id": "cmd",
+                "thread_id": "t",
+                "turn_id": "u",
+            }))
+            .unwrap(),
+        );
+        assert!(metadata.run_state(false).waiting_for_input);
     }
 
     #[test]

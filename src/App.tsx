@@ -1409,7 +1409,8 @@ function App() {
             const store = useChatStore.getState()
             store.addSendingSession(
               session.session_id,
-              session.started_at * 1000
+              session.started_at * 1000,
+              false
             )
 
             let sessionSnapshot = queryClient.getQueryData<Session>(
