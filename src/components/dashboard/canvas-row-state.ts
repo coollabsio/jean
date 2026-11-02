@@ -1,6 +1,6 @@
 import type { CheckStatus, MergeableStatus } from '@/types/pr-status'
 
-/** The one state a compact (mobile) canvas row shows and is grouped by. */
+/** The one state a canvas row is grouped by. */
 export type CanvasRowState = 'waiting' | 'running' | 'idle'
 
 export const CANVAS_ROW_STATE_LABELS: Record<CanvasRowState, string> = {

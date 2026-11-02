@@ -307,6 +307,7 @@ type CanvasWorktreeDragState = WorktreeReorderDragState
 
 function SortableCanvasWorktreeSection({
   section,
+  rowState,
   disabled,
   isDragging,
   closestEdge,
@@ -314,6 +315,7 @@ function SortableCanvasWorktreeSection({
   children,
 }: {
   section: WorktreeSection
+  rowState: CanvasRowState
   disabled: boolean
   isDragging: boolean
   closestEdge: Edge | null
@@ -336,7 +338,8 @@ function SortableCanvasWorktreeSection({
             isWorktreeDragData(source.data) &&
             source.data.projectId === projectId &&
             source.data.scope === DRAG_SCOPE_CANVAS_WORKTREE_LIST &&
-            source.data.worktreeId !== section.worktree.id
+            source.data.worktreeId !== section.worktree.id &&
+            source.data.rowState === rowState
           )
         },
         getData: ({ input, element }) => {
@@ -369,13 +372,14 @@ function SortableCanvasWorktreeSection({
             projectId,
             worktreeId: section.worktree.id,
             scope: DRAG_SCOPE_CANVAS_WORKTREE_LIST,
+            rowState,
           }),
         })
       )
     }
 
     return combine(...cleanupFns)
-  }, [disabled, projectId, section.worktree.id])
+  }, [disabled, projectId, rowState, section.worktree.id])
 
   return (
     <div
@@ -1442,8 +1446,8 @@ export function ProjectCanvasView({
     [openWorktreeModal]
   )
 
-  // Build worktree sections with computed card data
-  const worktreeSections: WorktreeSection[] = useMemo(() => {
+  // Build worktree sections with computed card data, in sort-mode order
+  const orderedWorktreeSections: WorktreeSection[] = useMemo(() => {
     const result: WorktreeSection[] = []
     const latestActivityByWorktreeId = new Map<string, number>()
     const normalizedSearchQuery = searchQuery.trim().toLowerCase()
@@ -1542,11 +1546,8 @@ export function ProjectCanvasView({
     )
 
     result.push(...readySections)
-
-    // Mobile groups rows by state (Needs input, Running, Idle) like a mail inbox.
-    return isMobile ? sortByCanvasRowState(result, getSectionRowState) : result
+    return result
   }, [
-    isMobile,
     readyWorktrees,
     pendingWorktrees,
     sessionsByWorktreeId,
@@ -1557,6 +1558,13 @@ export function ProjectCanvasView({
     worktreeSortMode,
     activeFilterTab,
   ])
+
+  // Rows are grouped by state (Needs input, Running, Idle) like a mail inbox.
+  // The sort mode still decides the order inside each group.
+  const worktreeSections = useMemo(
+    () => sortByCanvasRowState(orderedWorktreeSections, getSectionRowState),
+    [orderedWorktreeSections]
+  )
 
   // Summary counts are independent of canvas search and the selected tab.
   const robotRows = useMemo(
@@ -1575,12 +1583,25 @@ export function ProjectCanvasView({
   const canvasReorderEnabled =
     !isMobile && activeFilterTab === 'all' && searchQuery.trim().length === 0
 
+  // Reorder against the ungrouped order: grouping is derived from live state
+  // and must not leak into the persisted manual order.
   const canvasDraggableIds = useMemo(
     () =>
-      worktreeSections.flatMap(section =>
+      orderedWorktreeSections.flatMap(section =>
         canManuallyReorderWorktree(section.worktree)
           ? [section.worktree.id]
           : []
+      ),
+    [orderedWorktreeSections]
+  )
+
+  const canvasRowStateById = useMemo(
+    () =>
+      new Map(
+        worktreeSections.map(section => [
+          section.worktree.id,
+          getSectionRowState(section),
+        ])
       ),
     [worktreeSections]
   )
@@ -1621,6 +1642,11 @@ export function ProjectCanvasView({
       const newIndex = canvasDraggableIds.indexOf(overId)
 
       if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) return
+      if (
+        canvasRowStateById.get(activeId) !== canvasRowStateById.get(overId)
+      ) {
+        return
+      }
 
       const reorderedDraggableIds = reorderWithClosestEdge({
         items: canvasDraggableIds,
@@ -1629,7 +1655,7 @@ export function ProjectCanvasView({
         closestEdgeOfTarget: closestEdge,
       })
       const nextDraggableIds = [...reorderedDraggableIds]
-      const fullOrderedIds = worktreeSections.map(section => {
+      const fullOrderedIds = orderedWorktreeSections.map(section => {
         const worktreeId = section.worktree.id
         if (!canvasDraggableIdSet.has(worktreeId)) return worktreeId
         return nextDraggableIds.shift() ?? worktreeId
@@ -1652,9 +1678,10 @@ export function ProjectCanvasView({
       canvasDraggableIdSet,
       canvasDraggableIds,
       canvasReorderEnabled,
+      canvasRowStateById,
+      orderedWorktreeSections,
       projectId,
       reorderWorktrees,
-      worktreeSections,
       worktrees,
       worktreeSortMode,
     ]
@@ -3745,9 +3772,10 @@ export function ProjectCanvasView({
                 let previousRowState: CanvasRowState | null = null
                 return worktreeSections.map(section => {
                   const currentIndex = cardIndex++
-                  const rowState = isMobile ? getSectionRowState(section) : null
+                  const rowState =
+                    canvasRowStateById.get(section.worktree.id) ?? 'idle'
                   const groupHeader =
-                    rowState && rowState !== previousRowState ? (
+                    rowState !== previousRowState ? (
                       <div
                         key={`group-${rowState}`}
                         className="px-3 pt-3 pb-1 text-2xs font-medium uppercase tracking-wide text-muted-foreground first:pt-0"
@@ -3767,6 +3795,7 @@ export function ProjectCanvasView({
                         {groupHeader}
                         <SortableCanvasWorktreeSection
                           section={section}
+                          rowState={rowState}
                           disabled={true}
                           isDragging={
                             canvasDragState.draggingId === section.worktree.id
@@ -3798,6 +3827,7 @@ export function ProjectCanvasView({
                       {groupHeader}
                       <SortableCanvasWorktreeSection
                         section={section}
+                        rowState={rowState}
                         disabled={isReorderDisabled}
                         isDragging={
                           canvasDragState.draggingId === section.worktree.id
