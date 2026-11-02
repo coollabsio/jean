@@ -179,7 +179,7 @@ export function OpenInButton({
             onClick={() => openAction(effectiveDefault)}
             aria-label={`Open in ${defaultLabel}`}
           >
-            <DefaultIcon className="size-3.5 @5xl/header:hidden" />
+            <DefaultIcon className="size-4 @5xl/header:hidden" />
             <span className="hidden @5xl/header:inline">
               Open in {defaultLabel}
             </span>
@@ -196,7 +196,7 @@ export function OpenInButton({
             className="h-full w-5 rounded-l-none border-0 px-0 text-primary-foreground/85 hover:bg-primary-foreground/10 hover:text-primary-foreground dark:text-muted-foreground dark:hover:text-foreground"
             aria-label="More open options"
           >
-            <ChevronDown className="h-3 w-3" />
+            <ChevronDown className="size-3" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
