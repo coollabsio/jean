@@ -10,6 +10,7 @@ import {
   type CSSProperties,
 } from 'react'
 import { cn } from '@/lib/utils'
+import { scheduleIdleWork } from '@/lib/idle'
 import { TitleBar } from '@/components/titlebar/TitleBar'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useIsTouchDevice } from '@/hooks/use-touch-device'
@@ -160,8 +161,10 @@ const ResolveConflictsDialog = lazy(() =>
     default: mod.ResolveConflictsDialog,
   }))
 )
+const loadNewSessionModeModal = () =>
+  import('@/components/chat/NewSessionModeModal')
 const NewSessionModeModal = lazy(() =>
-  import('@/components/chat/NewSessionModeModal').then(mod => ({
+  loadNewSessionModeModal().then(mod => ({
     default: mod.NewSessionModeModal,
   }))
 )
@@ -249,6 +252,11 @@ const UIStatePersistence = memo(function UIStatePersistence({
 
 export function MainWindow() {
   useTerminalThemeSync()
+  // Opening a new session is a hot path: fetch its lazy chunk before first use.
+  useEffect(
+    () => scheduleIdleWork(() => void loadNewSessionModeModal(), 3000),
+    []
+  )
   const isMaximized = useWindowMaximized()
   const { offset: toasterOffset, mobileOffset: toasterMobileOffset } =
     useToasterOffset()
