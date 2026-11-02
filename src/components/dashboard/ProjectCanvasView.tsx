@@ -780,7 +780,6 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
             <TerminalStatusIndicator
               worktreeId={worktree.id}
               iconSize="h-3 w-3"
-              variant="summary"
             />
           )}
         </div>

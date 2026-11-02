@@ -121,32 +121,4 @@ describe('useWorktreeTerminalStatus', () => {
 
     expect(screen.getByLabelText('2 active terminals')).toHaveTextContent('2')
   })
-
-  it('renders a readable terminal summary for the worktree viewer', () => {
-    const terminalId = useTerminalStore.getState().addTerminal('worktree-1')
-    useTerminalStore.getState().setTerminalRunning(terminalId, true)
-
-    render(
-      <TerminalStatusIndicator worktreeId="worktree-1" variant="summary" />
-    )
-
-    expect(screen.getByText('1 terminal running')).toBeInTheDocument()
-  })
-
-  it('includes failures alongside running terminals in the worktree summary', () => {
-    const runningId = useTerminalStore.getState().addTerminal('worktree-1')
-    const failedId = useTerminalStore
-      .getState()
-      .addTerminal('worktree-1', 'bun run dev')
-    useTerminalStore.getState().setTerminalRunning(runningId, true)
-    useTerminalStore.getState().setTerminalFailed(failedId, true)
-
-    render(
-      <TerminalStatusIndicator worktreeId="worktree-1" variant="summary" />
-    )
-
-    expect(
-      screen.getByText('1 terminal running · 1 failed')
-    ).toBeInTheDocument()
-  })
 })

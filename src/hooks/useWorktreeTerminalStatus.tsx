@@ -94,11 +94,9 @@ export function useWorktreeTerminalStatus(worktreeId: string) {
 export function TerminalStatusIndicator({
   worktreeId,
   iconSize = 'h-2.5 w-2.5',
-  variant = 'compact',
 }: {
   worktreeId: string
   iconSize?: string
-  variant?: 'compact' | 'summary'
 }) {
   const {
     activeTerminalCount,
@@ -125,25 +123,14 @@ export function TerminalStatusIndicator({
     <Tooltip>
       <TooltipTrigger asChild>
         <span
-          className={cn(
-            'inline-flex shrink-0 items-center text-muted-foreground',
-            variant === 'summary' ? 'gap-1 rounded px-2 py-0.5' : 'h-4 gap-0.5'
-          )}
+          className="inline-flex h-4 shrink-0 items-center gap-0.5 text-muted-foreground"
           aria-label={ariaLabel}
         >
           <Terminal className={cn('shrink-0', iconSize, statusColor)} />
-          {variant === 'summary' ? (
-            <span>
-              {activeTerminalCount > 0
-                ? `${activeTerminalCount} terminal${activeTerminalCount === 1 ? '' : 's'} running${failedTerminalCount > 0 ? ` · ${failedTerminalCount} failed` : ''}`
-                : `${failedTerminalCount} terminal${failedTerminalCount === 1 ? '' : 's'} failed`}
+          {activeTerminalCount > 1 && (
+            <span className="text-2xs leading-none tabular-nums">
+              {activeTerminalCount}
             </span>
-          ) : (
-            activeTerminalCount > 1 && (
-              <span className="text-2xs leading-none tabular-nums">
-                {activeTerminalCount}
-              </span>
-            )
           )}
         </span>
       </TooltipTrigger>
