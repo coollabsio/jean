@@ -9,6 +9,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { Layers } from '@/components/icons/reicon'
 
 interface SendCancelButtonProps {
   isSending: boolean
@@ -137,6 +138,13 @@ export function SendCancelButton({
     return cancelButton
   }
 
+  // On desktop, holding ⌘/Ctrl turns the button into its Mod+Enter action:
+  // send in the background and open a new session (see App.css).
+  const backgroundArmable = canSend && !isMobile
+  const backgroundShortcut = isClientMacOS
+    ? `${getModifierSymbol()}↵`
+    : `${getModifierSymbol()}+Enter`
+
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -151,14 +159,29 @@ export function SendCancelButton({
                   edgePrimary,
                   'bg-primary text-primary-foreground hover:bg-primary/90'
                 )
-              : 'text-muted-foreground hover:bg-muted/80 hover:text-foreground'
+              : 'text-muted-foreground hover:bg-muted/80 hover:text-foreground',
+            backgroundArmable && 'send-background-armable'
           )}
         >
-          <span>Send</span>
+          <span className="send-label">Send</span>
+          {backgroundArmable && (
+            <span
+              aria-hidden
+              className="send-background-label items-center gap-1.5"
+            >
+              <Layers className="h-3.5 w-3.5" />
+              <span>Send in background</span>
+              <Kbd className="h-4 bg-primary-foreground/15 text-2xs text-primary-foreground">
+                {backgroundShortcut}
+              </Kbd>
+            </span>
+          )}
         </button>
       </TooltipTrigger>
       <TooltipContent>
-        {isMobile ? 'Send message' : 'Send message (Enter)'}
+        {isMobile
+          ? 'Send message'
+          : `Send message (Enter) · Send in background (${backgroundShortcut})`}
       </TooltipContent>
     </Tooltip>
   )

@@ -653,6 +653,63 @@ html:not([data-mod-held]) [data-mod-hint] {
   display: none !important;
 }
 
+/* Send button while ⌘/Ctrl is held: Mod+Enter sends in the background. */
+.send-background-label {
+  display: none;
+}
+html[data-primary-mod-held] .send-background-armable {
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    0 2px 0 var(--btn-edge),
+    0 0 0 2px color-mix(in oklab, var(--primary) 30%, transparent),
+    0 0 14px color-mix(in oklab, var(--primary) 45%, transparent);
+}
+html[data-primary-mod-held] .send-background-armable .send-label {
+  display: none;
+}
+html[data-primary-mod-held] .send-background-armable .send-background-label {
+  display: inline-flex;
+  animation: send-background-in 160ms ease-out;
+}
+html[data-primary-mod-held] .send-background-armable::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    110deg,
+    transparent 30%,
+    color-mix(in oklab, var(--primary-foreground) 28%, transparent) 50%,
+    transparent 70%
+  );
+  transform: translateX(-100%);
+  animation: send-background-shimmer 1.6s ease-in-out infinite;
+}
+
+@keyframes send-background-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+}
+
+@keyframes send-background-shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-primary-mod-held] .send-background-armable::after,
+  html[data-primary-mod-held] .send-background-armable .send-background-label {
+    animation: none;
+  }
+  html[data-primary-mod-held] .send-background-armable::after {
+    display: none;
+  }
+}
+
 /* UI text styling - font-sans uses UI font preference */
 .font-sans {
   font-family: var(--font-family-sans) !important;

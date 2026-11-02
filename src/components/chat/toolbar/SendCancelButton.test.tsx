@@ -44,6 +44,25 @@ describe('SendCancelButton', () => {
     expect(
       screen.queryByRole('button', { name: /^yolo$/i })
     ).not.toBeInTheDocument()
+    // The only icon belongs to the ⌘-held "Send in background" label.
+    expect(container.querySelector('.send-label svg')).toBeNull()
+    expect(container.querySelector('.send-background-label')).toHaveTextContent(
+      'Send in background⌘↵'
+    )
+  })
+
+  it('does not offer the background send on mobile', () => {
+    runtime.isMobile = true
+    const { container } = render(
+      <SendCancelButton
+        isSending={false}
+        canSend
+        queuedMessageCount={0}
+        onCancel={vi.fn()}
+      />
+    )
+
+    expect(container.querySelector('.send-background-label')).toBeNull()
     expect(container.querySelector('svg')).toBeNull()
   })
 
