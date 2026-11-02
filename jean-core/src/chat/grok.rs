@@ -4377,6 +4377,13 @@ fn send_grok_acp_prompt(
             == 0
         {
             flush_coalesced_chunks(app, jean_session_id, worktree_id, &mut chunk_coalescer);
+            if !super::registry::is_process_running(jean_session_id) {
+                // Stopped by the user: hand back what already streamed so the
+                // turn stays in history as cancelled-with-content.
+                response.cancelled = true;
+                response.content = response.content.trim().to_string();
+                return Ok(response);
+            }
             return Err("Grok ACP exited before prompt completed".to_string());
         }
         let trimmed = line.trim();

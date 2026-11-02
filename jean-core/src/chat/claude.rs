@@ -220,8 +220,14 @@ pub struct UserTurnEvent {
     pub session_id: String,
     pub worktree_id: String,
     pub run_id: String,
+    /// Id of the user message this verdict is about. `chat:sending` carries
+    /// the same id, so a client can match the verdict to the send it made.
+    pub user_message_id: String,
     pub user_turn: super::types::UserTurnOutcome,
     pub restore_draft: bool,
+    /// The prompt stays in history but got no answer (provider rejection or
+    /// crash before output). The sender restores it to the composer too.
+    pub failed: bool,
     pub emitted_at_ms: u64,
     /// Run-state version of the final metadata, so clients drop a snapshot
     /// taken before this verdict.

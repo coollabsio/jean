@@ -74,6 +74,9 @@ import type {
 } from '@/types/chat'
 import {
   persistEnqueue,
+  bindOwnSend,
+  isVerdictForOtherSend,
+  markVerdictApplied,
   recordUserTurnOutcome,
   restoreLastSentPrompt,
   saveCancelledMessage,
@@ -334,15 +337,18 @@ export default function useStreamingEvents({
       session_id: string
       worktree_id: string
       user_message: string
+      user_message_id?: string
       execution_mode?: 'plan' | 'build' | 'yolo'
     }>('chat:sending', event => {
       const {
         session_id,
         worktree_id: wtId,
         user_message,
+        user_message_id,
         execution_mode,
       } = event.payload
       cancelledUntaggedSessionIds.delete(session_id)
+      if (user_message_id) bindOwnSend(session_id, user_message_id)
       // Check if THIS client initiated the send (sender calls addSendingSession
       // before sendMessage.mutate, so it's already in sendingSessionIds).
       const isSender = !!useChatStore.getState().sendingSessionIds[session_id]
@@ -2125,13 +2131,23 @@ export default function useStreamingEvents({
       const {
         session_id,
         worktree_id: eventWorktreeId,
+        run_id,
+        user_message_id,
         user_turn,
         restore_draft,
+        failed,
         emitted_at_ms,
         status_version,
       } = event.payload
       const store = useChatStore.getState()
       if (!store.acceptRunStateVersion(session_id, status_version)) return
+      if (isVerdictForOtherSend(session_id, user_message_id)) {
+        // This client's own send is a different one; its verdict comes later.
+        console.warn(
+          `[UserTurn] Ignoring outcome of another send for session=${session_id} run=${run_id}`
+        )
+        return
+      }
       const sendStarted = store.sendStartedAt[session_id] ?? 0
       if (sendStarted > emitted_at_ms) {
         // A newer send owns the composer and the cache tail.
@@ -2140,18 +2156,28 @@ export default function useStreamingEvents({
         )
         return
       }
+      if (!markVerdictApplied(session_id, run_id)) {
+        console.log(
+          `[UserTurn] Outcome already applied for session=${session_id} run=${run_id}`
+        )
+        return
+      }
       console.log(
-        `[UserTurn] session=${session_id} outcome=${user_turn} restore_draft=${restore_draft}`
+        `[UserTurn] session=${session_id} outcome=${user_turn} restore_draft=${restore_draft} failed=${failed === true}`
       )
       recordUserTurnOutcome(session_id, user_turn)
 
-      if (restore_draft) {
+      const restoreOwnPrompt = () => {
         const draftBefore = store.inputDrafts[session_id]
         restoreLastSentPrompt(session_id)
         const draftAfter = useChatStore.getState().inputDrafts[session_id]
         if (draftAfter && draftAfter !== draftBefore) {
           toast.info('Message restored to input')
         }
+      }
+
+      if (restore_draft) {
+        restoreOwnPrompt()
         // The prompt is not in history: drop the optimistic user turn, then
         // refetch so an in-flight fetch from chat:cancelled cannot bring it back.
         queryClient.setQueryData<Session>(
@@ -2162,6 +2188,10 @@ export default function useStreamingEvents({
             return { ...old, messages: old.messages.slice(0, -1) }
           }
         )
+      } else if (failed) {
+        // The prompt stays in history as the failed attempt; the sender still
+        // gets it back so a retry is one keystroke away.
+        restoreOwnPrompt()
       } else {
         store.clearLastSentMessage(session_id)
         store.clearLastSentAttachments(session_id)

@@ -8,7 +8,11 @@ import useStreamingEvents, {
 } from './useStreamingEvents'
 import { useChatStore } from '@/store/chat-store'
 import { preferencesQueryKeys } from '@/services/preferences'
-import { SEND_MESSAGE_MUTATION_KEY } from '@/services/chat'
+import {
+  SEND_MESSAGE_MUTATION_KEY,
+  beginOwnSend,
+  resetSendTracking,
+} from '@/services/chat'
 import type { AppPreferences } from '@/types/preferences'
 
 const {
@@ -86,6 +90,7 @@ function createWrapper(queryClient: QueryClient) {
 function setupListenMock() {
   vi.clearAllMocks()
   registeredListeners.clear()
+  resetSendTracking()
   mockInvoke.mockImplementation((command: string) =>
     command === 'list_pending_wakeups'
       ? Promise.resolve([])
@@ -814,6 +819,7 @@ describe('useStreamingEvents cancellation sanitization', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     registeredListeners.clear()
+    resetSendTracking()
 
     mockListen.mockImplementation(
       (eventName: string, callback: (event: { payload: unknown }) => void) => {
@@ -1420,16 +1426,33 @@ describe('useStreamingEvents cancellation sanitization', () => {
 
   const userTurn = (
     user_turn: 'withdrawn' | 'persisted',
-    emitted_at_ms = 2100
+    emitted_at_ms = 2100,
+    verdict: {
+      run_id?: string
+      user_message_id?: string
+      failed?: boolean
+    } = {}
   ) =>
     registeredListeners.get('chat:user-turn')?.({
       payload: {
         session_id: 'session-1',
         worktree_id: 'worktree-1',
-        run_id: 'run-1',
+        run_id: verdict.run_id ?? 'run-1',
+        user_message_id: verdict.user_message_id,
         user_turn,
         restore_draft: user_turn === 'withdrawn',
+        failed: verdict.failed ?? false,
         emitted_at_ms,
+      },
+    })
+
+  const sending = (user_message_id: string) =>
+    registeredListeners.get('chat:sending')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        user_message: 'cancel this',
+        user_message_id,
       },
     })
 
@@ -1533,6 +1556,110 @@ describe('useStreamingEvents cancellation sanitization', () => {
     expect(state.pendingImages['session-1']).toBeUndefined()
     expect(state.lastSentAttachments['session-1']).toBeUndefined()
     expect(messageIds(queryClient)).toEqual(['old-user', 'old-assistant'])
+  })
+
+  it('gives the prompt back and keeps the bubble when the backend reports a failed turn', async () => {
+    const info = vi.spyOn(toast, 'info').mockImplementation(() => 'id')
+    const queryClient = createQueryClient()
+    seedSendInFlight(queryClient)
+    await renderListeners(queryClient)
+
+    registeredListeners.get('chat:error')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        error: 'Usage limit reached',
+      },
+    })
+    userTurn('persisted', 2100, { failed: true })
+
+    const state = useChatStore.getState()
+    expect(messageIds(queryClient)).toEqual([
+      'old-user',
+      'old-assistant',
+      'current-user',
+    ])
+    expect(state.inputDrafts['session-1']).toBe('cancel this')
+    expect(state.pendingImages['session-1']).toEqual([sentImage])
+    expect(state.lastSentMessages['session-1']).toBeUndefined()
+    expect(state.lastSentAttachments['session-1']).toBeUndefined()
+    expect(info).toHaveBeenCalledWith('Message restored to input')
+    expect(
+      queryClient.getQueryState(['chat', 'session', 'session-1'])?.isInvalidated
+    ).toBe(true)
+  })
+
+  it('ignores a late verdict of the cancelled run while this client has a newer send in flight', async () => {
+    const queryClient = createQueryClient()
+    seedSendInFlight(queryClient)
+    await renderListeners(queryClient)
+
+    // The new send started (onMutate) but chat:sending has not named it yet.
+    beginOwnSend('session-1')
+    userTurn('withdrawn', 5000, {
+      run_id: 'run-old',
+      user_message_id: 'msg-old',
+    })
+
+    let state = useChatStore.getState()
+    expect(messageIds(queryClient)).toContain('current-user')
+    expect(state.inputDrafts['session-1']).toBe('')
+    expect(state.lastSentMessages['session-1']).toBe('cancel this')
+
+    // Named now; a verdict for another id is still not ours.
+    sending('msg-new')
+    userTurn('withdrawn', 5100, {
+      run_id: 'run-old',
+      user_message_id: 'msg-old',
+    })
+    state = useChatStore.getState()
+    expect(messageIds(queryClient)).toContain('current-user')
+    expect(state.lastSentMessages['session-1']).toBe('cancel this')
+
+    userTurn('withdrawn', 5200, {
+      run_id: 'run-new',
+      user_message_id: 'msg-new',
+    })
+    state = useChatStore.getState()
+    expect(messageIds(queryClient)).toEqual(['old-user', 'old-assistant'])
+    expect(state.inputDrafts['session-1']).toBe('cancel this')
+    expect(state.lastSentMessages['session-1']).toBeUndefined()
+  })
+
+  it('restores at once on an early withdrawn verdict and ignores the repeat for the same run', async () => {
+    const info = vi.spyOn(toast, 'info').mockImplementation(() => 'id')
+    const queryClient = createQueryClient()
+    seedSendInFlight(queryClient)
+    await renderListeners(queryClient)
+
+    cancelled()
+    userTurn('withdrawn', 2050)
+    expect(useChatStore.getState().inputDrafts['session-1']).toBe('cancel this')
+    expect(messageIds(queryClient)).toEqual(['old-user', 'old-assistant'])
+
+    // Another client's prompt lands before the send's teardown repeats the verdict.
+    queryClient.setQueryData(['chat', 'session', 'session-1'], {
+      id: 'session-1',
+      name: 'Test',
+      order: 0,
+      created_at: 1,
+      updated_at: 4,
+      messages: [
+        ...priorMessages,
+        { ...currentUser, id: 'other-client-user', content: 'from web' },
+      ],
+    })
+    useChatStore.getState().setInputDraft('session-1', 'cancel this, edited')
+    userTurn('withdrawn', 2600)
+
+    const state = useChatStore.getState()
+    expect(state.inputDrafts['session-1']).toBe('cancel this, edited')
+    expect(messageIds(queryClient)).toEqual([
+      'old-user',
+      'old-assistant',
+      'other-client-user',
+    ])
+    expect(info).toHaveBeenCalledTimes(1)
   })
 
   it('ignores a verdict for an older send once a newer send has started', async () => {

@@ -65,6 +65,27 @@ static DETACHED_SESSIONS: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new
 /// by a later `Drop` from the cancelled claim after a new claim was acquired.
 static ACTIVE_SENDS: Lazy<Mutex<HashMap<String, u64>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 static SEND_CLAIM_GENERATION: AtomicU64 = AtomicU64::new(1);
+/// Claim generation of sends whose process, cancel flag, or turn was registered.
+/// A cancel with nothing registered is a pre-start cancel only while the
+/// current claim never registered anything; otherwise the send is tearing down.
+static STARTED_SENDS: Lazy<Mutex<HashMap<String, u64>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+
+fn mark_send_started(session_id: &str) {
+    let active = lock_recover(&ACTIVE_SENDS, "ACTIVE_SENDS");
+    if let Some(generation) = active.get(session_id) {
+        lock_recover(&STARTED_SENDS, "STARTED_SENDS").insert(session_id.to_string(), *generation);
+    }
+}
+
+/// True when the current send of the session registered a process, flag, or turn.
+fn current_send_started(session_id: &str) -> bool {
+    let active = lock_recover(&ACTIVE_SENDS, "ACTIVE_SENDS");
+    let started = lock_recover(&STARTED_SENDS, "STARTED_SENDS");
+    matches!(
+        (active.get(session_id), started.get(session_id)),
+        (Some(a), Some(s)) if a == s
+    )
+}
 
 /// RAII claim on a session's send slot — released on drop (any return path).
 pub struct SendClaim {
@@ -92,6 +113,10 @@ impl Drop for SendClaim {
         let mut active = lock_recover(&ACTIVE_SENDS, "ACTIVE_SENDS");
         if active.get(&self.session_id) == Some(&self.generation) {
             active.remove(&self.session_id);
+        }
+        let mut started = lock_recover(&STARTED_SENDS, "STARTED_SENDS");
+        if started.get(&self.session_id) == Some(&self.generation) {
+            started.remove(&self.session_id);
         }
     }
 }
@@ -313,7 +338,9 @@ pub fn register_process(session_id: String, pid: u32) -> bool {
         "[Registry] Registering process pid={pid} for session={session_id}, registry_keys={:?}",
         registry.keys().collect::<Vec<_>>()
     );
-    registry.insert(session_id, pid);
+    registry.insert(session_id.clone(), pid);
+    drop(registry);
+    mark_send_started(&session_id);
     true
 }
 
@@ -375,13 +402,14 @@ pub fn register_cancel_flag(session_id: String, flag: Arc<AtomicBool>) -> bool {
     }
 
     lock_recover(&CANCEL_FLAGS, "CANCEL_FLAGS").insert(
-        session_id,
+        session_id.clone(),
         OpenCodeCancelEntry {
             flag,
             opencode_session_id: None,
             working_dir: None,
         },
     );
+    mark_send_started(&session_id);
     true
 }
 
@@ -461,7 +489,8 @@ pub fn register_codex_turn(session_id: String, thread_id: String, turn_id: Strin
     }
 
     lock_recover(&CODEX_TURN_REGISTRY, "CODEX_TURN_REGISTRY")
-        .insert(session_id, (thread_id, turn_id));
+        .insert(session_id.clone(), (thread_id, turn_id));
+    mark_send_started(&session_id);
     true
 }
 
@@ -653,6 +682,26 @@ mod tests {
         lock_recover(&CANCEL_FLAGS, "CANCEL_FLAGS").clear();
         lock_recover(&CODEX_TURN_REGISTRY, "CODEX_TURN_REGISTRY").clear();
         lock_recover(&ACTIVE_SENDS, "ACTIVE_SENDS").clear();
+        lock_recover(&STARTED_SENDS, "STARTED_SENDS").clear();
+    }
+
+    #[test]
+    fn a_send_that_registered_a_process_is_not_a_pre_start_cancel() {
+        let _guard = lock_recover(&TEST_LOCK, "TEST_LOCK");
+        clear_registries();
+
+        let claim = SendClaim::try_acquire("teardown").expect("claim");
+        assert!(!current_send_started("teardown"));
+        assert!(register_process("teardown".to_string(), u32::MAX));
+        unregister_process("teardown");
+        // Teardown: nothing registered any more, but this send did run.
+        assert!(current_send_started("teardown"));
+        drop(claim);
+
+        let next = SendClaim::try_acquire("teardown").expect("next claim");
+        assert!(!current_send_started("teardown"));
+        drop(next);
+        clear_registries();
     }
 
     #[test]
@@ -702,6 +751,60 @@ mod tests {
         assert!(!get_actively_managed_sessions().contains(session_id));
 
         clear_registries();
+    }
+
+    fn run_entry(
+        run_id: &str,
+        status: super::super::types::RunStatus,
+    ) -> super::super::types::RunEntry {
+        super::super::types::RunEntry {
+            run_id: run_id.to_string(),
+            user_message_id: format!("user-{run_id}"),
+            user_message: "prompt".to_string(),
+            model: None,
+            execution_mode: None,
+            thinking_level: None,
+            effort_level: None,
+            backend: None,
+            custom_profile_name: None,
+            started_at: 1,
+            ended_at: None,
+            status,
+            assistant_message_id: None,
+            cancelled: false,
+            provider_rejected: false,
+            recovered: false,
+            claude_session_id: None,
+            pid: None,
+            usage: None,
+            codex_thread_id: None,
+            codex_turn_id: None,
+            cursor_chat_id: None,
+            grok_session_id: None,
+            kimi_session_id: None,
+            devin_session_id: None,
+            antigravity_session_id: None,
+            muse_session_id: None,
+            checkpoint_id: None,
+        }
+    }
+
+    #[test]
+    fn pending_cancel_withdraws_only_the_run_still_preparing() {
+        use super::super::types::RunStatus;
+        let runs = vec![
+            run_entry("done", RunStatus::Completed),
+            run_entry("withdrawn-earlier", RunStatus::Cancelled),
+            run_entry("preparing", RunStatus::Running),
+        ];
+        assert_eq!(running_run_id_in(&runs).as_deref(), Some("preparing"));
+
+        let idle = vec![
+            run_entry("done", RunStatus::Completed),
+            run_entry("withdrawn-earlier", RunStatus::Cancelled),
+        ];
+        assert_eq!(running_run_id_in(&idle), None);
+        assert_eq!(running_run_id_in(&[]), None);
     }
 
     #[test]
@@ -1029,13 +1132,69 @@ pub fn cancel_process(
         pending.insert(session_id.to_string());
     }
 
+    // Nothing is registered now. If the current send registered something
+    // earlier, it is tearing down a turn that already ran: let send_chat_message
+    // report the real outcome instead of an early "withdrawn".
+    let unstarted_run = if current_send_started(session_id) {
+        None
+    } else {
+        running_run_id(app, session_id)
+    };
     // Try to mark run as cancelled (may not exist yet if still preparing, that's ok)
     let _ = run_log::mark_running_run_cancelled(app, session_id);
 
     // Emit cancelled event so frontend handles it immediately
     emit_cancelled_event(app, session_id, worktree_id);
+    if let Some(run_id) = unstarted_run {
+        emit_withdrawn_user_turn(app, session_id, worktree_id, &run_id);
+    }
 
     Ok(true)
+}
+
+/// The run the session is preparing, if any. Callers check first that the
+/// current send never registered a process, flag, or turn.
+fn running_run_id(app: &AppHandle, session_id: &str) -> Option<String> {
+    let metadata = storage::load_metadata(app, session_id).ok().flatten()?;
+    running_run_id_in(&metadata.runs)
+}
+
+fn running_run_id_in(runs: &[super::types::RunEntry]) -> Option<String> {
+    runs.iter()
+        .rev()
+        .find(|run| run.status == super::types::RunStatus::Running)
+        .map(|run| run.run_id.clone())
+}
+
+/// A pending cancel stops the run before its process exists, so the prompt
+/// is withdrawn no matter how the send's teardown ends. Say so now instead of
+/// after teardown; `send_chat_message` repeats the verdict for the same run
+/// and clients drop that duplicate by run id.
+fn emit_withdrawn_user_turn(app: &AppHandle, session_id: &str, worktree_id: &str, run_id: &str) {
+    let metadata = storage::load_metadata(app, session_id).ok().flatten();
+    let run = metadata
+        .as_ref()
+        .and_then(|metadata| metadata.find_run(run_id));
+    let event = super::claude::UserTurnEvent {
+        session_id: session_id.to_string(),
+        worktree_id: worktree_id.to_string(),
+        run_id: run_id.to_string(),
+        user_message_id: run
+            .map(|run| run.user_message_id.clone())
+            .unwrap_or_default(),
+        user_turn: super::types::UserTurnOutcome::Withdrawn,
+        restore_draft: true,
+        failed: false,
+        emitted_at_ms: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_millis() as u64)
+            .unwrap_or(0),
+        status_version: metadata.map_or(0, |metadata| metadata.status_version),
+    };
+    log::info!("[Registry] pending cancel withdraws session={session_id} run={run_id}");
+    if let Err(e) = app.emit_all("chat:user-turn", &event) {
+        log::error!("Failed to emit chat:user-turn event: {e}");
+    }
 }
 
 /// Cancel a running Claude process only if one is actively registered.

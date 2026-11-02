@@ -3213,14 +3213,12 @@ pub fn execute_opencode_http(
             opencode_session_id,
             post_start.elapsed().as_millis()
         );
-        return Ok(OpenCodeResponse {
-            content: String::new(),
-            session_id: opencode_session_id,
-            tool_calls: vec![],
-            content_blocks: vec![],
-            cancelled: true,
-            usage: None,
-        });
+        let (blocks, tool_calls) = _shared_sse_subscription.take_accumulated();
+        return Ok(cancelled_response_from_sse(
+            opencode_session_id,
+            blocks,
+            tool_calls,
+        ));
     };
     log::info!(
         "OpenCode: message POST finished jean_session={} opencode_session={} elapsed_ms={} status={}",
@@ -3560,6 +3558,33 @@ pub fn execute_opencode_http(
 /// Merge consecutive `ContentBlock::Thinking` entries into a single block.
 /// OpenCode emits separate reasoning parts (each with its own `part_id`),
 /// which would otherwise render as many individual "Thinking" items in the UI.
+/// The reply a stop leaves behind: whatever the shared SSE listener already
+/// streamed to clients. Returning it keeps the turn in history as
+/// cancelled-with-content; an empty reply would withdraw the prompt instead.
+fn cancelled_response_from_sse(
+    opencode_session_id: String,
+    blocks: Vec<ContentBlock>,
+    tool_calls: Vec<ToolCall>,
+) -> OpenCodeResponse {
+    let content_blocks = merge_consecutive_thinking(blocks);
+    let content = content_blocks
+        .iter()
+        .filter_map(|block| match block {
+            ContentBlock::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    OpenCodeResponse {
+        content,
+        session_id: opencode_session_id,
+        tool_calls,
+        content_blocks,
+        cancelled: true,
+        usage: None,
+    }
+}
+
 fn merge_consecutive_thinking(blocks: Vec<ContentBlock>) -> Vec<ContentBlock> {
     let mut result: Vec<ContentBlock> = Vec::with_capacity(blocks.len());
     for block in blocks {
@@ -4026,6 +4051,46 @@ mod tests {
     /// Serializes tests that mutate process-global `SHARED_SSE` maps so parallel
     /// test threads cannot clear each other's subscribers/parents mid-assertion.
     static SSE_TEST_GUARD: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+    #[test]
+    fn stop_after_streamed_output_keeps_the_partial_reply() {
+        let response = cancelled_response_from_sse(
+            "oc-1".to_string(),
+            vec![
+                ContentBlock::Thinking {
+                    thinking: "plan".to_string(),
+                },
+                ContentBlock::Text {
+                    text: "Partial ".to_string(),
+                },
+                ContentBlock::ToolUse {
+                    tool_call_id: "call-1".to_string(),
+                },
+                ContentBlock::Text {
+                    text: "reply".to_string(),
+                },
+            ],
+            vec![ToolCall {
+                id: "call-1".to_string(),
+                name: "read".to_string(),
+                input: serde_json::json!({}),
+                output: None,
+                parent_tool_use_id: None,
+                is_error: None,
+                subagent_usage: None,
+            }],
+        );
+
+        assert!(response.cancelled);
+        assert_eq!(response.content, "Partial reply");
+        assert_eq!(response.content_blocks.len(), 4);
+        assert_eq!(response.tool_calls.len(), 1);
+
+        let stopped_before_output =
+            cancelled_response_from_sse("oc-1".to_string(), Vec::new(), Vec::new());
+        assert!(stopped_before_output.content.is_empty());
+        assert!(stopped_before_output.content_blocks.is_empty());
+    }
 
     #[test]
     fn permission_policy_requires_confirmation_from_the_server() {

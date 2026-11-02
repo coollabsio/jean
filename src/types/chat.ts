@@ -674,8 +674,12 @@ export interface UserTurnEvent {
   session_id: string
   worktree_id: string
   run_id: string
+  /** Id of the user message the verdict is about; `chat:sending` carries the same id. */
+  user_message_id?: string
   user_turn: Exclude<UserTurnOutcome, 'not_accepted'>
   restore_draft: boolean
+  /** The prompt stays in history but got no answer; the sender gets it back in the composer. */
+  failed?: boolean
   emitted_at_ms: number
   /** Run-state version of the final metadata this verdict was read from. */
   status_version?: number

@@ -1548,8 +1548,9 @@ export function useMainWindowEventListeners() {
           'queue:returned',
           event => {
             const { sessionId, message } = event.payload
-            restoreReturnedQueuedMessage(sessionId, message.message)
-            toast.info('Queued message returned to input')
+            if (restoreReturnedQueuedMessage(sessionId, message)) {
+              toast.info('Queued message returned to input')
+            }
           }
         ),
 

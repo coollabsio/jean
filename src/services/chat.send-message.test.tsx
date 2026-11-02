@@ -5,13 +5,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   chatQueryKeys,
   recordUserTurnOutcome,
+  resetSendTracking,
   restoreLastSentPrompt,
   restoreReturnedQueuedMessage,
   upsertTurnAssistantMessage,
   useSendMessage,
 } from './chat'
 import { useChatStore } from '@/store/chat-store'
-import type { ChatMessage, Session } from '@/types/chat'
+import type { ChatMessage, QueuedMessage, Session } from '@/types/chat'
 
 const { mockInvoke } = vi.hoisted(() => ({ mockInvoke: vi.fn() }))
 
@@ -423,12 +424,35 @@ describe('restoreLastSentPrompt', () => {
 })
 
 describe('restoreReturnedQueuedMessage', () => {
+  const image = { id: 'image-1', path: '/tmp/image.png', filename: 'image.png' }
+  const queued = (overrides: Partial<QueuedMessage> = {}): QueuedMessage => ({
+    id: 'queued-1',
+    message: 'queued prompt',
+    pendingImages: [],
+    pendingFiles: [],
+    pendingSkills: [],
+    pendingTextFiles: [],
+    model: 'claude-sonnet-4-6',
+    provider: null,
+    executionMode: 'build',
+    thinkingLevel: 'off',
+    queuedAt: 1,
+    ...overrides,
+  })
+
   beforeEach(() => {
-    useChatStore.setState({ inputDrafts: {} })
+    resetSendTracking()
+    useChatStore.setState({
+      inputDrafts: {},
+      pendingImages: {},
+      pendingFiles: {},
+      pendingSkills: {},
+      pendingTextFiles: {},
+    })
   })
 
   it('puts the queued prompt into an empty composer', () => {
-    restoreReturnedQueuedMessage('session-1', 'queued prompt')
+    expect(restoreReturnedQueuedMessage('session-1', queued())).toBe(true)
     expect(useChatStore.getState().inputDrafts['session-1']).toBe(
       'queued prompt'
     )
@@ -436,9 +460,45 @@ describe('restoreReturnedQueuedMessage', () => {
 
   it('keeps a newer draft and appends the queued prompt below it', () => {
     useChatStore.setState({ inputDrafts: { 'session-1': 'typing now' } })
-    restoreReturnedQueuedMessage('session-1', 'queued prompt')
+    restoreReturnedQueuedMessage('session-1', queued())
     expect(useChatStore.getState().inputDrafts['session-1']).toBe(
       'typing now\n\nqueued prompt'
     )
+  })
+
+  it('brings the attachment chips back when the composer has none', () => {
+    restoreReturnedQueuedMessage(
+      'session-1',
+      queued({ pendingImages: [image] })
+    )
+    expect(useChatStore.getState().pendingImages['session-1']).toEqual([image])
+  })
+
+  it('leaves chips the user already attached alone', () => {
+    const mine = { ...image, id: 'image-mine' }
+    useChatStore.setState({ pendingImages: { 'session-1': [mine] } })
+    restoreReturnedQueuedMessage(
+      'session-1',
+      queued({ pendingImages: [image] })
+    )
+    expect(useChatStore.getState().pendingImages['session-1']).toEqual([mine])
+  })
+
+  it('restores the same returned prompt only once per client', () => {
+    expect(
+      restoreReturnedQueuedMessage(
+        'session-1',
+        queued({ pendingImages: [image] })
+      )
+    ).toBe(true)
+    expect(
+      restoreReturnedQueuedMessage(
+        'session-1',
+        queued({ pendingImages: [image] })
+      )
+    ).toBe(false)
+    const state = useChatStore.getState()
+    expect(state.inputDrafts['session-1']).toBe('queued prompt')
+    expect(state.pendingImages['session-1']).toEqual([image])
   })
 })

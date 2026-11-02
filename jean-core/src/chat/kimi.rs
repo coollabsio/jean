@@ -1425,6 +1425,19 @@ fn execute_kimi_child(
             .map_err(|error| format!("Failed to read Kimi ACP stream: {error}"))?
             == 0
         {
+            if !super::registry::is_process_running(options.jean_session_id) {
+                // Stopped by the user: hand back what already streamed so the
+                // turn stays in history as cancelled-with-content.
+                flush_kimi_chunks(
+                    options.app,
+                    options.jean_session_id,
+                    options.worktree_id,
+                    &mut chunk_coalescer,
+                );
+                response.cancelled = true;
+                response.content = response.content.trim().to_string();
+                return Ok(response);
+            }
             return Err("Kimi ACP exited before the turn completed".to_string());
         }
         let Ok(value) = serde_json::from_str::<Value>(line.trim()) else {

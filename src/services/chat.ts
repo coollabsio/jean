@@ -1560,18 +1560,104 @@ export function restoreLastSentPrompt(sessionId: string): boolean {
   return true
 }
 
+/** Ids of returned queued prompts this client already put back. */
+const returnedQueuedMessageIds = new Set<string>()
+
 /**
- * Put a queued prompt the backend could not run back into the composer. A
- * newer draft is kept and the prompt is appended below it.
+ * Put a queued prompt the backend could not run back into the composer, once
+ * per client. A newer draft is kept and the prompt is appended below it. The
+ * prompt's attachment chips come back only when the composer has none, so
+ * they never merge into a draft the user is still building. Returns whether
+ * anything was restored.
  */
 export function restoreReturnedQueuedMessage(
   sessionId: string,
-  message: string
-) {
-  if (!message.trim()) return
+  message: QueuedMessage
+): boolean {
+  if (returnedQueuedMessageIds.has(message.id)) return false
+  returnedQueuedMessageIds.add(message.id)
+  const images = message.pendingImages ?? []
+  const files = message.pendingFiles ?? []
+  const skills = message.pendingSkills ?? []
+  const textFiles = message.pendingTextFiles ?? []
+  const hasAttachments =
+    images.length + files.length + skills.length + textFiles.length > 0
+  if (!message.message.trim() && !hasAttachments) return false
   const store = useChatStore.getState()
-  const draft = store.inputDrafts[sessionId]?.trim()
-  store.setInputDraft(sessionId, draft ? `${draft}\n\n${message}` : message)
+  if (message.message.trim()) {
+    const draft = store.inputDrafts[sessionId]?.trim()
+    store.setInputDraft(
+      sessionId,
+      draft ? `${draft}\n\n${message.message}` : message.message
+    )
+  }
+  const composerHasChips =
+    store.getPendingImages(sessionId).length > 0 ||
+    store.getPendingFiles(sessionId).length > 0 ||
+    store.getPendingSkills(sessionId).length > 0 ||
+    store.getPendingTextFiles(sessionId).length > 0
+  if (hasAttachments && !composerHasChips) {
+    useChatStore.setState(state => ({
+      pendingImages: { ...state.pendingImages, [sessionId]: images },
+      pendingFiles: { ...state.pendingFiles, [sessionId]: files },
+      pendingSkills: { ...state.pendingSkills, [sessionId]: skills },
+      pendingTextFiles: { ...state.pendingTextFiles, [sessionId]: textFiles },
+    }))
+  }
+  return true
+}
+
+/**
+ * The send this client has in flight, keyed by session. The entry is `null`
+ * until `chat:sending` names the send's user message id. A `chat:user-turn`
+ * verdict belongs to this client only when that id matches; a verdict for an
+ * older run that lands after a new send started must not touch the new
+ * prompt. Without an entry (no send in flight, or after a reload) the verdict
+ * is judged by time alone.
+ */
+const ownSends = new Map<string, string | null>()
+
+export function beginOwnSend(sessionId: string) {
+  ownSends.set(sessionId, null)
+}
+
+export function bindOwnSend(sessionId: string, userMessageId: string) {
+  if (ownSends.get(sessionId) === null) ownSends.set(sessionId, userMessageId)
+}
+
+export function endOwnSend(sessionId: string) {
+  ownSends.delete(sessionId)
+}
+
+/** Whether the verdict is about another send while this client's own is unfinished. */
+export function isVerdictForOtherSend(
+  sessionId: string,
+  userMessageId: string | undefined
+): boolean {
+  if (!userMessageId) return false
+  const own = ownSends.get(sessionId)
+  return own !== undefined && own !== userMessageId
+}
+
+/**
+ * Run ids whose verdict this client already applied, keyed by session. The
+ * backend can state a verdict twice for one run (a pending cancel answers at
+ * once, the send's teardown answers again); the second is a no-op.
+ */
+const appliedVerdictRuns = new Map<string, string>()
+
+export function markVerdictApplied(sessionId: string, runId: string): boolean {
+  if (appliedVerdictRuns.get(sessionId) === runId) return false
+  appliedVerdictRuns.set(sessionId, runId)
+  return true
+}
+
+/** Forget per-client send tracking. Tests call this between cases. */
+export function resetSendTracking() {
+  ownSends.clear()
+  appliedVerdictRuns.clear()
+  returnedQueuedMessageIds.clear()
+  userTurnOutcomes.clear()
 }
 
 /**
@@ -1720,6 +1806,7 @@ export function useSendMessage() {
     }) => {
       console.log(`[SendMutation] onMutate sessionId=${sessionId}`)
       takeUserTurnOutcome(sessionId)
+      beginOwnSend(sessionId)
       // Cancel in-flight queries to avoid overwriting optimistic update
       await queryClient.cancelQueries({
         queryKey: chatQueryKeys.session(sessionId),
@@ -1802,6 +1889,7 @@ export function useSendMessage() {
       }
     },
     onSuccess: (response, { sessionId, worktreeId }, context) => {
+      endOwnSend(sessionId)
       console.log(
         `[SendMutation] onSuccess sessionId=${sessionId} cancelled=${response.cancelled}`,
         {
@@ -1874,6 +1962,7 @@ export function useSendMessage() {
     },
     onError: (error, variables, context) => {
       const { sessionId, worktreeId } = variables
+      endOwnSend(sessionId)
       // Check for cancellation - Tauri errors may not be Error instances
       // so we check both the stringified error and the message property
       const errorStr = String(error)

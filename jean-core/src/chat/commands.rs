@@ -91,29 +91,37 @@ fn emit_user_turn_outcome(
     run_id: &str,
 ) -> UserTurnOutcome {
     let metadata = load_metadata(app, session_id).ok().flatten();
-    let user_turn = metadata
+    let run = metadata
         .as_ref()
-        .and_then(|metadata| {
-            metadata
-                .find_run(run_id)
-                .map(super::types::RunEntry::user_turn_outcome)
-        })
-        .unwrap_or_else(|| {
-            log::warn!(
-                "[SendChat] run {run_id} missing when reporting user turn; treating as withdrawn"
-            );
-            UserTurnOutcome::Withdrawn
-        });
+        .and_then(|metadata| metadata.find_run(run_id));
+    if run.is_none() {
+        log::warn!(
+            "[SendChat] run {run_id} missing when reporting user turn; treating as withdrawn"
+        );
+    }
+    let user_turn = run.map_or(
+        UserTurnOutcome::Withdrawn,
+        super::types::RunEntry::user_turn_outcome,
+    );
     let event = super::claude::UserTurnEvent {
         session_id: session_id.to_string(),
         worktree_id: worktree_id.to_string(),
         run_id: run_id.to_string(),
+        user_message_id: run
+            .map(|run| run.user_message_id.clone())
+            .unwrap_or_default(),
         user_turn,
         restore_draft: user_turn.restore_draft(),
+        failed: run.is_some_and(super::types::RunEntry::user_turn_failed),
         emitted_at_ms: now_ms(),
-        status_version: metadata.map_or(0, |metadata| metadata.status_version),
+        status_version: metadata
+            .as_ref()
+            .map_or(0, |metadata| metadata.status_version),
     };
-    log::info!("[SendChat] user turn session={session_id} run={run_id} outcome={user_turn:?}");
+    log::info!(
+        "[SendChat] user turn session={session_id} run={run_id} outcome={user_turn:?} failed={}",
+        event.failed
+    );
     if let Err(e) = app.emit_all("chat:user-turn", &event) {
         log::error!("Failed to emit chat:user-turn event: {e}");
     }
@@ -2795,7 +2803,13 @@ pub async fn send_chat_message(
     backend: Option<String>,
     include_recap: Option<bool>,
 ) -> Result<ChatMessage, String> {
-    send_chat_message_inner(
+    let drain_target = (
+        app.clone(),
+        worktree_id.clone(),
+        worktree_path.clone(),
+        session_id.clone(),
+    );
+    let result = send_chat_message_inner(
         app,
         session_id,
         worktree_id,
@@ -2815,7 +2829,14 @@ pub async fn send_chat_message(
         include_recap,
     )
     .await
-    .map_err(|e| e.message)
+    .map_err(|e| e.message);
+    // Start the queue drain only after the inner call returned and released
+    // its send claim. A drain started while the claim is held sees the
+    // session as busy and stops, so queued prompts waited until the session
+    // was opened again.
+    let (app, worktree_id, worktree_path, session_id) = drain_target;
+    trigger_backend_queue_drain(app, worktree_id, worktree_path, session_id);
+    result
 }
 
 /// Every exit before `run_log::start_run` returns `NotAccepted`; every exit
@@ -3135,6 +3156,7 @@ async fn send_chat_message_inner(
             "session_id": session_id,
             "worktree_id": worktree_id,
             "user_message": message,
+            "user_message_id": user_message_id,
             "execution_mode": execution_mode,
         }),
     ) {
@@ -5421,12 +5443,6 @@ async fn send_chat_message_inner(
                 log::warn!("Failed to delete input file after thread error: {del_err}");
             }
             let user_turn = emit_user_turn_outcome(&app, &session_id, &worktree_id, &run_id);
-            trigger_backend_queue_drain(
-                app.clone(),
-                worktree_id.clone(),
-                worktree_path.clone(),
-                session_id.clone(),
-            );
             return Err(SendError {
                 message: e,
                 user_turn,
@@ -5481,12 +5497,6 @@ async fn send_chat_message_inner(
                 log::warn!("Failed to delete input file after thread panic: {del_err}");
             }
             let user_turn = emit_user_turn_outcome(&app, &session_id, &worktree_id, &run_id);
-            trigger_backend_queue_drain(
-                app.clone(),
-                worktree_id.clone(),
-                worktree_path.clone(),
-                session_id.clone(),
-            );
             return Err(SendError {
                 message: "CLI execution thread closed unexpectedly (possible crash or panic)"
                     .to_string(),
@@ -5667,12 +5677,6 @@ async fn send_chat_message_inner(
         }
         log::info!("[SendChat] EXIT session={session_id} reason=error_emitted");
         emit_user_turn_outcome(&app, &session_id, &worktree_id, &run_id);
-        trigger_backend_queue_drain(
-            app.clone(),
-            worktree_id.clone(),
-            worktree_path.clone(),
-            session_id.clone(),
-        );
         return Ok(ChatMessage {
             id: Uuid::new_v4().to_string(),
             session_id: session_id.clone(),
@@ -5768,12 +5772,6 @@ async fn send_chat_message_inner(
 
         log::info!("[SendChat] EXIT session={session_id} reason=cancelled_no_content");
         emit_user_turn_outcome(&app, &session_id, &worktree_id, &run_id);
-        trigger_backend_queue_drain(
-            app.clone(),
-            worktree_id.clone(),
-            worktree_path.clone(),
-            session_id.clone(),
-        );
         // Return a minimal cancelled message (not persisted, just for UI)
         return Ok(ChatMessage {
             id: Uuid::new_v4().to_string(),
@@ -6009,12 +6007,6 @@ async fn send_chat_message_inner(
     } else {
         log::info!("[SendChat] EXIT session={session_id} reason=success");
     }
-    trigger_backend_queue_drain(
-        app.clone(),
-        worktree_id.clone(),
-        worktree_path.clone(),
-        session_id.clone(),
-    );
     Ok(assistant_msg)
 }
 
@@ -11216,6 +11208,65 @@ mod tests {
             checkpoint_id: None,
         });
         super::super::storage::save_metadata(app, &metadata).unwrap();
+    }
+
+    #[test]
+    fn queue_drains_after_a_send_returns() {
+        let _registry = super::super::registry::TEST_LOCK.lock().unwrap();
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(queue_drains_after_a_send_returns_body());
+    }
+
+    async fn queue_drains_after_a_send_returns_body() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = AppHandle::new(temp.path().to_path_buf(), temp.path().to_path_buf()).unwrap();
+        run_state_session(&app, "queued", RunStatus::Completed, None);
+        with_existing_metadata_mut(&app, "queued", |metadata| {
+            metadata
+                .queued_messages
+                .push(serde_json::json!({ "id": "q1", "message": "queued prompt" }));
+        })
+        .unwrap();
+
+        // Fails after taking the send claim (no session index for this worktree).
+        let sent = send_chat_message(
+            app.clone(),
+            "queued".to_string(),
+            "wt-missing".to_string(),
+            temp.path().to_string_lossy().to_string(),
+            "hello".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await;
+        assert!(sent.is_err());
+
+        let mut queue_len = usize::MAX;
+        for _ in 0..100 {
+            queue_len = load_metadata(&app, "queued")
+                .unwrap()
+                .unwrap()
+                .queued_messages
+                .len();
+            if queue_len == 0 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert_eq!(queue_len, 0, "queued prompt was not taken by the drain");
     }
 
     #[test]

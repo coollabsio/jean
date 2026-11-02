@@ -2021,6 +2021,14 @@ impl RunEntry {
         }
     }
 
+    /// The prompt stays in history but the backend never answered it: a
+    /// provider rejection or a crash before any assistant output. The sender
+    /// gets the prompt back in the composer so a retry is one keystroke away.
+    pub fn user_turn_failed(&self) -> bool {
+        self.assistant_message_id.is_none()
+            && (self.provider_rejected || self.status == RunStatus::Crashed)
+    }
+
     pub fn renders_assistant_message(&self) -> bool {
         if !self.is_renderable_in_chat_history() {
             false
@@ -3583,6 +3591,17 @@ mod tests {
 
         let completed = finished_run(RunStatus::Completed, Some("asst"), false);
         assert_eq!(completed.user_turn_outcome(), UserTurnOutcome::Persisted);
+    }
+
+    #[test]
+    fn user_turn_failed_only_for_unanswered_rejections_and_crashes() {
+        assert!(finished_run(RunStatus::Cancelled, None, true).user_turn_failed());
+        assert!(finished_run(RunStatus::Crashed, None, false).user_turn_failed());
+
+        assert!(!finished_run(RunStatus::Cancelled, None, false).user_turn_failed());
+        assert!(!finished_run(RunStatus::Cancelled, Some("asst"), false).user_turn_failed());
+        assert!(!finished_run(RunStatus::Crashed, Some("asst"), false).user_turn_failed());
+        assert!(!finished_run(RunStatus::Completed, Some("asst"), false).user_turn_failed());
     }
 
     #[test]
