@@ -638,15 +638,36 @@ export interface ErrorEvent {
 
 /**
  * Event payload for cancellation from Rust (user pressed Escape).
- * undo_send only indicates whether the user turn should be removed from
- * history; a prompt with no streamed output may still be restored when false.
+ * Fires as soon as the process or turn is stopped, before the backend has
+ * decided what to do with the prompt. Stop rendering the live turn; the
+ * prompt's fate arrives in `chat:user-turn`.
  */
 export interface CancelledEvent {
   session_id: string
   worktree_id: string // Kept for backward compatibility
-  undo_send: boolean
   emitted_at_ms: number
   run_id?: string
+}
+
+/**
+ * What the backend did with the user's prompt once a send finished.
+ * `not_accepted` is never sent as an event: a rejected `send_chat_message`
+ * invoke means the backend never recorded the prompt.
+ */
+export type UserTurnOutcome = 'not_accepted' | 'withdrawn' | 'persisted'
+
+/**
+ * Event payload for `chat:user-turn`, the backend's final word on a send.
+ * Emitted once per accepted send after the run log is final. `restore_draft`
+ * is true when the prompt is not in history and belongs back in the composer.
+ */
+export interface UserTurnEvent {
+  session_id: string
+  worktree_id: string
+  run_id: string
+  user_turn: Exclude<UserTurnOutcome, 'not_accepted'>
+  restore_draft: boolean
+  emitted_at_ms: number
 }
 
 /**

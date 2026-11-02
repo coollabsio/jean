@@ -84,6 +84,22 @@ and reason; the toast is dismissed when the run ends (`chat:done`,
 `chat:error`, or `chat:cancelled`). The event is registered as replayable in
 the HTTP server so web access clients also receive it after a reconnect.
 
+**User turn outcome.** The backend owns a typed prompt from the moment
+`run_log::start_run` records it. `chat:cancelled` and `chat:error` are stop
+signals: they end the live turn in the UI but never decide what happens to the
+prompt. `send_chat_message` emits one `chat:user-turn` event at every exit after
+`start_run`, after the run log and session state are final, with
+`user_turn: "persisted" | "withdrawn"` derived from
+`RunEntry::user_turn_outcome()` (the same rule history rendering uses) and
+`restore_draft` (true for `withdrawn`). A rejected `send_chat_message` invoke
+means `not_accepted`: the prompt was never recorded. The frontend
+(`useStreamingEvents` `chat:user-turn` handler, `useSendMessage.onError`)
+restores the composer and drops the optimistic user message only on
+`not_accepted` or `withdrawn`; on `persisted` it leaves the composer alone and
+refetches. Internally `send_chat_message_inner` returns `SendError { message,
+user_turn }` so the backend queue drain requeues exactly the prompts the
+composer would restore.
+
 ### Backend-Owned Long-Running Jobs
 
 Long-running operations that must survive web/mobile WebSocket disconnects

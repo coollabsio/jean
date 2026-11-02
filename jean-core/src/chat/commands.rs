@@ -23,7 +23,7 @@ use super::storage::{
 use super::types::{
     AllSessionsEntry, AllSessionsResponse, Backend, ChatMessage, ClaudeContext, EffortLevel,
     LabelData, MessageRole, RunStatus, Session, SessionUnreadSummary, ThinkingLevel,
-    WorktreeSessions,
+    UserTurnOutcome, WorktreeSessions,
 };
 use crate::claude_cli::resolve_cli_binary;
 use crate::http_server::EmitExt;
@@ -48,6 +48,105 @@ fn resumed_tail_error_event(
             error: error.to_string(),
         },
     )
+}
+
+/// A failed send, tagged with what happened to the user's prompt.
+///
+/// `?` on a `String` error means the prompt was never recorded. Exits after
+/// `run_log::start_run` build this explicitly from the final run state.
+#[derive(Debug)]
+pub(crate) struct SendError {
+    pub message: String,
+    pub user_turn: UserTurnOutcome,
+    /// Another send owns the session. Retrying later can succeed.
+    pub busy: bool,
+}
+
+impl SendError {
+    fn busy() -> Self {
+        Self {
+            message: "Session already has an active request".to_string(),
+            user_turn: UserTurnOutcome::NotAccepted,
+            busy: true,
+        }
+    }
+}
+
+impl From<String> for SendError {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            user_turn: UserTurnOutcome::NotAccepted,
+            busy: false,
+        }
+    }
+}
+
+/// Read the run's final state and tell every client what happened to the
+/// prompt. Called once per send, after the run log and session are final.
+fn emit_user_turn_outcome(
+    app: &AppHandle,
+    session_id: &str,
+    worktree_id: &str,
+    run_id: &str,
+) -> UserTurnOutcome {
+    let metadata = load_metadata(app, session_id).ok().flatten();
+    let user_turn = metadata
+        .as_ref()
+        .and_then(|metadata| {
+            metadata
+                .find_run(run_id)
+                .map(super::types::RunEntry::user_turn_outcome)
+        })
+        .unwrap_or_else(|| {
+            log::warn!(
+                "[SendChat] run {run_id} missing when reporting user turn; treating as withdrawn"
+            );
+            UserTurnOutcome::Withdrawn
+        });
+    let event = super::claude::UserTurnEvent {
+        session_id: session_id.to_string(),
+        worktree_id: worktree_id.to_string(),
+        run_id: run_id.to_string(),
+        user_turn,
+        restore_draft: user_turn.restore_draft(),
+        emitted_at_ms: now_ms(),
+    };
+    log::info!("[SendChat] user turn session={session_id} run={run_id} outcome={user_turn:?}");
+    if let Err(e) = app.emit_all("chat:user-turn", &event) {
+        log::error!("Failed to emit chat:user-turn event: {e}");
+    }
+    user_turn
+}
+
+/// The run is recorded but nothing ran. Hide it and hand the prompt back.
+fn withdraw_unstarted_run(
+    app: &AppHandle,
+    writer: &mut run_log::RunLogWriter,
+    session_id: &str,
+    worktree_id: &str,
+    error: String,
+) -> SendError {
+    log::error!("[SendChat] EXIT session={session_id} reason=run_setup_failed error={error}");
+    if let Err(e) = writer.cancel(None, None) {
+        log::warn!("Failed to withdraw unstarted run: {e}");
+    }
+    if let Err(e) = run_log::delete_input_file(app, session_id, writer.run_id()) {
+        log::trace!("Could not delete input file of unstarted run: {e}");
+    }
+    let user_turn = emit_user_turn_outcome(app, session_id, worktree_id, writer.run_id());
+    SendError {
+        message: error,
+        user_turn,
+        busy: false,
+    }
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 const CODEX_DEFAULT_NOT_PLAN_MODE_PROMPT: &str = "\
@@ -1299,7 +1398,7 @@ async fn drain_backend_queue(
             "[QueueDrain] processing queued message session={session_id} message_id={queued_id}"
         );
 
-        if let Err(e) = send_chat_message(
+        let result = send_chat_message_inner(
             app.clone(),
             session_id.clone(),
             worktree_id.clone(),
@@ -1318,14 +1417,14 @@ async fn drain_backend_queue(
             request.backend,
             None,
         )
-        .await
-        {
-            // Lost a send race against a direct client send. Re-insert at the queue front so
-            // the message is NOT lost — the active run's completion re-triggers
-            // the drain and retries it.
-            if e.contains("already has an active request") {
+        .await;
+
+        let user_turn = match result {
+            Err(e) if e.busy => {
+                // Lost the send race. Put it back; the next run's completion
+                // re-triggers the drain.
                 log::warn!(
-                    "[QueueDrain] send race lost, requeueing at front session={session_id} message_id={queued_id}"
+                    "[QueueDrain] session busy, requeueing at front session={session_id} message_id={queued_id}"
                 );
                 let requeued = with_existing_metadata_mut(&app, &session_id, |metadata| {
                     metadata.queued_messages.insert(0, queued.clone());
@@ -1340,11 +1439,47 @@ async fn drain_backend_queue(
                 }
                 return;
             }
-            log::error!(
-                "[QueueDrain] queued message failed session={session_id} message_id={queued_id}: {e}"
-            );
+            Err(e) => {
+                log::error!(
+                    "[QueueDrain] queued message failed session={session_id} message_id={queued_id} outcome={:?}: {}",
+                    e.user_turn,
+                    e.message
+                );
+                e.user_turn
+            }
+            Ok(_) => latest_run_user_turn(&app, &session_id),
+        };
+
+        // The prompt is not in history (rejected, setup failed, or stopped
+        // before output). Hand it back to the composer instead of dropping it
+        // or retrying it forever.
+        if user_turn.restore_draft() {
+            app.emit_all(
+                "queue:returned",
+                &serde_json::json!({
+                    "sessionId": session_id,
+                    "worktreeId": worktree_id,
+                    "message": queued,
+                }),
+            )
+            .ok();
         }
     }
+}
+
+/// Outcome of the session's newest run. The drain holds the queue slot, so the
+/// newest run is the one it just sent.
+fn latest_run_user_turn(app: &AppHandle, session_id: &str) -> UserTurnOutcome {
+    load_metadata(app, session_id)
+        .ok()
+        .flatten()
+        .and_then(|metadata| {
+            metadata
+                .runs
+                .last()
+                .map(super::types::RunEntry::user_turn_outcome)
+        })
+        .unwrap_or(UserTurnOutcome::Persisted)
 }
 
 struct QueuedSendRequest {
@@ -2608,16 +2743,61 @@ pub async fn send_chat_message(
     backend: Option<String>,
     include_recap: Option<bool>,
 ) -> Result<ChatMessage, String> {
+    send_chat_message_inner(
+        app,
+        session_id,
+        worktree_id,
+        worktree_path,
+        message,
+        model,
+        execution_mode,
+        thinking_level,
+        effort_level,
+        parallel_execution_prompt,
+        ai_language,
+        allowed_tools,
+        mcp_config,
+        chrome_enabled,
+        custom_profile_name,
+        backend,
+        include_recap,
+    )
+    .await
+    .map_err(|e| e.message)
+}
+
+/// Every exit before `run_log::start_run` returns `NotAccepted`; every exit
+/// after it emits `chat:user-turn` from the run's final state.
+#[allow(clippy::too_many_arguments)]
+async fn send_chat_message_inner(
+    app: tauri::AppHandle,
+    session_id: String,
+    worktree_id: String,
+    worktree_path: String,
+    message: String,
+    model: Option<String>,
+    execution_mode: Option<String>,
+    thinking_level: Option<ThinkingLevel>,
+    effort_level: Option<EffortLevel>,
+    parallel_execution_prompt: Option<String>,
+    ai_language: Option<String>,
+    allowed_tools: Option<Vec<String>>,
+    mcp_config: Option<String>,
+    chrome_enabled: Option<bool>,
+    custom_profile_name: Option<String>,
+    backend: Option<String>,
+    include_recap: Option<bool>,
+) -> Result<ChatMessage, SendError> {
     log::info!("[SendChat] ENTRY session={session_id} worktree={worktree_id} model={model:?} execution_mode={execution_mode:?}");
     log::trace!("Sending chat message for session: {session_id}, worktree: {worktree_id}, model: {model:?}, execution_mode: {execution_mode:?}, thinking: {thinking_level:?}, effort: {effort_level:?}, allowed_tools: {allowed_tools:?}");
 
     // Validate inputs
     if message.trim().is_empty() {
-        return Err("Message cannot be empty".to_string());
+        return Err("Message cannot be empty".to_string().into());
     }
 
     if worktree_path.is_empty() {
-        return Err("Worktree path cannot be empty".to_string());
+        return Err("Worktree path cannot be empty".to_string().into());
     }
 
     clear_stale_pending_cancel_before_send(&session_id);
@@ -2629,7 +2809,7 @@ pub async fn send_chat_message(
         log::warn!(
             "[SendChat] REJECTED session={session_id} — already actively managed (duplicate send)"
         );
-        return Err("Session already has an active request".to_string());
+        return Err(SendError::busy());
     }
 
     // Drops after the claim below, so agent lists see the run end.
@@ -2642,7 +2822,7 @@ pub async fn send_chat_message(
         log::warn!(
             "[SendChat] REJECTED session={session_id} — concurrent send in flight (duplicate send)"
         );
-        return Err("Session already has an active request".to_string());
+        return Err(SendError::busy());
     };
 
     // Load sessions
@@ -2675,7 +2855,7 @@ pub async fn send_chat_message(
             if let Err(emit_err) = app.emit_all("chat:error", &error_event) {
                 log::error!("Failed to emit chat:error event: {emit_err}");
             }
-            return Err(e);
+            return Err(e.into());
         }
     }
 
@@ -2807,7 +2987,7 @@ pub async fn send_chat_message(
                 log::error!("Failed to emit chat:error event: {e}");
             }
 
-            return Err(error_msg);
+            return Err(error_msg.into());
         }
     };
 
@@ -3197,9 +3377,24 @@ pub async fn send_chat_message(
     }
 
     // Get file paths for detached execution
-    let input_file = run_log_writer.input_file_path()?;
-    let output_file = run_log_writer.output_file_path()?;
     let run_id = run_log_writer.run_id().to_string();
+    let run_files = run_log_writer.input_file_path().and_then(|input| {
+        run_log_writer
+            .output_file_path()
+            .map(|output| (input, output))
+    });
+    let (input_file, output_file) = match run_files {
+        Ok(files) => files,
+        Err(e) => {
+            return Err(withdraw_unstarted_run(
+                &app,
+                &mut run_log_writer,
+                &session_id,
+                &worktree_id,
+                e,
+            ))
+        }
+    };
 
     // Snapshot the worktree before the agent can modify files so the user can
     // review AI changes and restore individual files or the whole tree later.
@@ -3262,7 +3457,15 @@ pub async fn send_chat_message(
 
     // Write input file with the effective backend prompt. Hidden handoff context
     // is intentionally not stored as the visible user message in metadata.
-    run_log::write_input_file(&app, &session_id, &run_id, &message_for_backend)?;
+    if let Err(e) = run_log::write_input_file(&app, &session_id, &run_id, &message_for_backend) {
+        return Err(withdraw_unstarted_run(
+            &app,
+            &mut run_log_writer,
+            &session_id,
+            &worktree_id,
+            e,
+        ));
+    }
 
     // Use passed parameter for parallel execution prompt (None = disabled).
     // The agent prompt stays separate so turning fan-out off still injects the
@@ -3419,14 +3622,13 @@ pub async fn send_chat_message(
         if !super::registry::register_cancel_flag(session_id.clone(), flag.clone()) {
             // Already cancelled before we even started — bail out cleanly
             log::info!("[SendChat] EXIT session={session_id} reason=pre_cancelled_opencode");
-            if let Err(e) = run_log_writer.cancel(None, None) {
-                log::warn!("Failed to cancel run log for pre-cancelled OpenCode session: {e}");
-            }
-            // Remove the input file so the hidden handoff/history payload isn't retained on disk.
-            if let Err(e) = run_log::delete_input_file(&app, &session_id, &run_id) {
-                log::warn!("Failed to delete input file for pre-cancelled OpenCode session: {e}");
-            }
-            return Err("Request cancelled".to_string());
+            return Err(withdraw_unstarted_run(
+                &app,
+                &mut run_log_writer,
+                &session_id,
+                &worktree_id,
+                "Request cancelled".to_string(),
+            ));
         }
         Some(flag)
     } else {
@@ -5166,13 +5368,18 @@ pub async fn send_chat_message(
             if let Err(del_err) = run_log::delete_input_file(&app, &session_id, &run_id) {
                 log::warn!("Failed to delete input file after thread error: {del_err}");
             }
+            let user_turn = emit_user_turn_outcome(&app, &session_id, &worktree_id, &run_id);
             trigger_backend_queue_drain(
                 app.clone(),
                 worktree_id.clone(),
                 worktree_path.clone(),
                 session_id.clone(),
             );
-            return Err(e);
+            return Err(SendError {
+                message: e,
+                user_turn,
+                busy: false,
+            });
         }
         Err(_) => {
             log::info!("[SendChat] EXIT session={session_id} reason=thread_panic");
@@ -5221,15 +5428,19 @@ pub async fn send_chat_message(
             if let Err(del_err) = run_log::delete_input_file(&app, &session_id, &run_id) {
                 log::warn!("Failed to delete input file after thread panic: {del_err}");
             }
+            let user_turn = emit_user_turn_outcome(&app, &session_id, &worktree_id, &run_id);
             trigger_backend_queue_drain(
                 app.clone(),
                 worktree_id.clone(),
                 worktree_path.clone(),
                 session_id.clone(),
             );
-            return Err(
-                "CLI execution thread closed unexpectedly (possible crash or panic)".to_string(),
-            );
+            return Err(SendError {
+                message: "CLI execution thread closed unexpectedly (possible crash or panic)"
+                    .to_string(),
+                user_turn,
+                busy: false,
+            });
         }
     };
 
@@ -5403,6 +5614,7 @@ pub async fn send_chat_message(
             log::warn!("Failed to record provider rejection: {e}");
         }
         log::info!("[SendChat] EXIT session={session_id} reason=error_emitted");
+        emit_user_turn_outcome(&app, &session_id, &worktree_id, &run_id);
         trigger_backend_queue_drain(
             app.clone(),
             worktree_id.clone(),
@@ -5448,7 +5660,7 @@ pub async fn send_chat_message(
         }
 
         // Atomically update session: persist resume ID and remove user message for undo send
-        with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
+        if let Err(e) = with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
             if let Some(session) = sessions.find_session_mut(&session_id) {
                 // Persist resume ID so next run can resume context even after cancellation
                 if !resume_id_for_log.is_empty()
@@ -5496,9 +5708,14 @@ pub async fn send_chat_message(
                 }
             }
             Ok(())
-        })?;
+        }) {
+            log::error!(
+                "[SendChat] Failed to save session state after cancel session={session_id} (non-fatal): {e}"
+            );
+        }
 
         log::info!("[SendChat] EXIT session={session_id} reason=cancelled_no_content");
+        emit_user_turn_outcome(&app, &session_id, &worktree_id, &run_id);
         trigger_backend_queue_drain(
             app.clone(),
             worktree_id.clone(),
@@ -6272,9 +6489,7 @@ pub async fn cancel_chat_message(
         // No live process, but metadata may still say Running/Resumable after a
         // Jean crash. Finish those runs so the session stops showing as busy.
         match super::run_log::finish_orphaned_runs(&app, &session_id) {
-            Ok(true) => {
-                super::registry::emit_cancelled_event(&app, &session_id, &worktree_id, false)
-            }
+            Ok(true) => super::registry::emit_cancelled_event(&app, &session_id, &worktree_id),
             Ok(false) => {}
             Err(e) => log::warn!("Failed to finish orphaned runs for {session_id}: {e}"),
         }

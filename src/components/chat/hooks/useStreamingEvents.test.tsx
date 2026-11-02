@@ -1317,425 +1317,9 @@ describe('useStreamingEvents cancellation sanitization', () => {
     expect(useChatStore.getState().inputDrafts['session-1']).toBe('')
   })
 
-  it('restores text and images when an already-running prompt is cancelled before output', async () => {
-    const queryClient = createQueryClient()
-    const wrapper = createWrapper(queryClient)
-    const hiddenRunSession = {
-      id: 'session-1',
-      name: 'Test',
-      order: 0,
-      created_at: 1,
-      updated_at: 1,
-      messages: [],
-    }
-
-    mockInvoke.mockImplementation((command: string) => {
-      if (command === 'list_pending_wakeups') return Promise.resolve([])
-      if (command === 'get_session') return Promise.resolve(hiddenRunSession)
-      return Promise.resolve(undefined)
-    })
-
-    queryClient.setQueryData(['chat', 'session', 'session-1'], {
-      id: 'session-1',
-      name: 'Test',
-      order: 0,
-      created_at: 1,
-      updated_at: 1,
-      messages: [
-        {
-          id: 'current-user',
-          session_id: 'session-1',
-          role: 'user',
-          content: 'already running',
-          timestamp: 3,
-          tool_calls: [],
-        },
-      ],
-    })
-
-    useChatStore.setState({
-      streamingContents: {},
-      streamingContentBlocks: {},
-      streamingThinkingContent: {},
-      activeToolCalls: {},
-      sendingSessionIds: { 'session-1': true },
-      sendStartedAt: { 'session-1': 1000 },
-      sessionWorktreeMap: { 'session-1': 'worktree-1' },
-      worktreePaths: { 'worktree-1': '/tmp/worktree' },
-      lastSentMessages: { 'session-1': 'already running' },
-      lastSentAttachments: {
-        'session-1': {
-          images: [
-            {
-              id: 'image-1',
-              path: '/tmp/image.png',
-              filename: 'image.png',
-            },
-          ],
-          files: [],
-          textFiles: [],
-          skills: [],
-        },
-      },
-      pendingImages: {},
-      inputDrafts: { 'session-1': '' },
-    })
-
-    renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
-
-    await waitFor(() =>
-      expect(registeredListeners.has('chat:cancelled')).toBe(true)
-    )
-
-    registeredListeners.get('chat:cancelled')?.({
-      payload: {
-        session_id: 'session-1',
-        worktree_id: 'worktree-1',
-        undo_send: false,
-        emitted_at_ms: 2000,
-      },
-    })
-
-    const session = queryClient.getQueryData<{
-      messages: { id: string; role: string; content: string }[]
-    }>(['chat', 'session', 'session-1'])
-
-    expect(session?.messages.map(message => message.id)).not.toContain(
-      'current-user'
-    )
-    expect(useChatStore.getState().inputDrafts['session-1']).toBe(
-      'already running'
-    )
-    expect(useChatStore.getState().pendingImages['session-1']).toEqual([
-      {
-        id: 'image-1',
-        path: '/tmp/image.png',
-        filename: 'image.png',
-      },
-    ])
-    expect(
-      useChatStore.getState().lastSentAttachments['session-1']
-    ).toBeUndefined()
-    expect(useChatStore.getState().lastSentMessages['session-1']).toBe(
-      undefined
-    )
-    await waitFor(() =>
-      expect(mockInvoke).toHaveBeenCalledWith('get_session', {
-        sessionId: 'session-1',
-        worktreeId: 'worktree-1',
-        worktreePath: '/tmp/worktree',
-      })
-    )
-    expect(useChatStore.getState().inputDrafts['session-1']).toBe(
-      'already running'
-    )
-  })
-
-  it('does not show the prompt again while the backend still finalizes a no-output cancel', async () => {
-    const queryClient = createQueryClient()
-    const wrapper = createWrapper(queryClient)
-    const userMessage = {
-      id: 'current-user',
-      session_id: 'session-1',
-      role: 'user',
-      content: 'stop me',
-      timestamp: 3,
-      tool_calls: [],
-    }
-    const baseSession = {
-      id: 'session-1',
-      name: 'Test',
-      order: 0,
-      created_at: 1,
-      updated_at: 1,
-    }
-    // Before the worker finishes, the cancelled run still renders its prompt
-    // and an empty placeholder reply.
-    const finalizingSession = {
-      ...baseSession,
-      messages: [
-        userMessage,
-        {
-          id: 'pending-run-1',
-          session_id: 'session-1',
-          role: 'assistant',
-          content: '',
-          timestamp: 4,
-          tool_calls: [],
-          cancelled: true,
-        },
-      ],
-    }
-
-    mockInvoke.mockImplementation((command: string) => {
-      if (command === 'list_pending_wakeups') return Promise.resolve([])
-      if (command === 'get_session') return Promise.resolve(finalizingSession)
-      return Promise.resolve(undefined)
-    })
-
-    queryClient.setQueryData(['chat', 'session', 'session-1'], {
-      ...baseSession,
-      messages: [userMessage],
-    })
-
-    useChatStore.setState({
-      streamingContents: {},
-      streamingContentBlocks: {},
-      streamingThinkingContent: {},
-      activeToolCalls: {},
-      sendingSessionIds: { 'session-1': true },
-      sendStartedAt: { 'session-1': 1000 },
-      sessionWorktreeMap: { 'session-1': 'worktree-1' },
-      worktreePaths: { 'worktree-1': '/tmp/worktree' },
-      lastSentMessages: { 'session-1': 'stop me' },
-      inputDrafts: { 'session-1': '' },
-    })
-
-    renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
-
-    await waitFor(() =>
-      expect(registeredListeners.has('chat:cancelled')).toBe(true)
-    )
-
-    registeredListeners.get('chat:cancelled')?.({
-      payload: {
-        session_id: 'session-1',
-        worktree_id: 'worktree-1',
-        undo_send: false,
-        emitted_at_ms: 2000,
-      },
-    })
-
-    await waitFor(() =>
-      expect(mockInvoke).toHaveBeenCalledWith('get_session', {
-        sessionId: 'session-1',
-        worktreeId: 'worktree-1',
-        worktreePath: '/tmp/worktree',
-      })
-    )
-    await new Promise(resolve => setTimeout(resolve, 0))
-
-    const session = queryClient.getQueryData<{
-      messages: { id: string }[]
-    }>(['chat', 'session', 'session-1'])
-    expect(session?.messages).toEqual([])
-    expect(useChatStore.getState().inputDrafts['session-1']).toBe('stop me')
-  })
-
-  it('hydrates a persisted cancelled turn without restoring the sent prompt', async () => {
-    const queryClient = createQueryClient()
-    const wrapper = createWrapper(queryClient)
-    const hydratedSession = {
-      id: 'session-1',
-      name: 'Test',
-      order: 0,
-      created_at: 1,
-      updated_at: 4,
-      last_run_status: 'cancelled',
-      messages: [
-        {
-          id: 'current-user',
-          session_id: 'session-1',
-          role: 'user',
-          content: 'already running',
-          timestamp: 3,
-          tool_calls: [],
-        },
-        {
-          id: 'persisted-cancelled-assistant',
-          session_id: 'session-1',
-          role: 'assistant',
-          content: 'Persisted cancelled answer.',
-          timestamp: 4,
-          tool_calls: [],
-          content_blocks: [
-            { type: 'text', text: 'Persisted cancelled answer.' },
-          ],
-          cancelled: true,
-        },
-      ],
-    }
-
-    mockInvoke.mockImplementation((command: string) => {
-      if (command === 'list_pending_wakeups') return Promise.resolve([])
-      if (command === 'get_session') return Promise.resolve(hydratedSession)
-      return Promise.resolve(undefined)
-    })
-
-    queryClient.setQueryData(['chat', 'session', 'session-1'], {
-      id: 'session-1',
-      name: 'Test',
-      order: 0,
-      created_at: 1,
-      updated_at: 3,
-      messages: [
-        {
-          id: 'current-user',
-          session_id: 'session-1',
-          role: 'user',
-          content: 'already running',
-          timestamp: 3,
-          tool_calls: [],
-        },
-      ],
-    })
-
-    useChatStore.setState({
-      streamingContents: {},
-      streamingContentBlocks: {},
-      streamingThinkingContent: {},
-      activeToolCalls: {},
-      sendingSessionIds: { 'session-1': true },
-      sendStartedAt: { 'session-1': 1000 },
-      sessionWorktreeMap: { 'session-1': 'worktree-1' },
-      worktreePaths: { 'worktree-1': '/tmp/worktree' },
-      lastSentMessages: { 'session-1': 'already running' },
-      inputDrafts: { 'session-1': '' },
-    })
-
-    renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
-
-    await waitFor(() =>
-      expect(registeredListeners.has('chat:cancelled')).toBe(true)
-    )
-
-    registeredListeners.get('chat:cancelled')?.({
-      payload: {
-        session_id: 'session-1',
-        worktree_id: 'worktree-1',
-        undo_send: false,
-        emitted_at_ms: 2000,
-        run_id: 'run-with-persisted-output',
-      },
-    })
-
-    // Restore immediately because the client has not received any output yet.
-    expect(useChatStore.getState().inputDrafts['session-1']).toBe(
-      'already running'
-    )
-
-    await waitFor(() => {
-      const session = queryClient.getQueryData<{
-        messages: { id: string }[]
-      }>(['chat', 'session', 'session-1'])
-      expect(session?.messages.map(message => message.id)).toEqual([
-        'current-user',
-        'persisted-cancelled-assistant',
-      ])
-    })
-
-    expect(useChatStore.getState().inputDrafts['session-1'] ?? '').toBe('')
-  })
-
-  it('restores an instant-cancelled prompt while keeping prior history visible', async () => {
-    const queryClient = createQueryClient()
-    const wrapper = createWrapper(queryClient)
-
-    queryClient.setQueryData(['chat', 'session', 'session-1'], {
-      id: 'session-1',
-      name: 'Test',
-      order: 0,
-      created_at: 1,
-      updated_at: 1,
-      messages: [
-        {
-          id: 'old-user',
-          session_id: 'session-1',
-          role: 'user',
-          content: 'old prompt',
-          timestamp: 1,
-          tool_calls: [],
-        },
-        {
-          id: 'old-assistant',
-          session_id: 'session-1',
-          role: 'assistant',
-          content: 'old answer',
-          timestamp: 2,
-          tool_calls: [],
-        },
-        {
-          id: 'current-user',
-          session_id: 'session-1',
-          role: 'user',
-          content: 'cancel this',
-          timestamp: 3,
-          tool_calls: [],
-        },
-      ],
-    })
-
-    useChatStore.setState({
-      streamingContents: {},
-      streamingContentBlocks: {},
-      streamingThinkingContent: {},
-      activeToolCalls: {},
-      sendingSessionIds: { 'session-1': true },
-      sendStartedAt: { 'session-1': 1000 },
-      sessionWorktreeMap: { 'session-1': 'worktree-1' },
-      worktreePaths: { 'worktree-1': '/tmp/worktree' },
-      lastSentMessages: { 'session-1': 'cancel this' },
-      lastSentAttachments: {
-        'session-1': {
-          images: [
-            {
-              id: 'image-1',
-              path: '/tmp/image.png',
-              filename: 'image.png',
-            },
-          ],
-          files: [],
-          textFiles: [],
-          skills: [],
-        },
-      },
-      pendingImages: {},
-      inputDrafts: { 'session-1': '' },
-    })
-
-    renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
-
-    await waitFor(() =>
-      expect(registeredListeners.has('chat:cancelled')).toBe(true)
-    )
-
-    registeredListeners.get('chat:cancelled')?.({
-      payload: {
-        session_id: 'session-1',
-        worktree_id: 'worktree-1',
-        undo_send: true,
-        emitted_at_ms: 2000,
-      },
-    })
-
-    const session = queryClient.getQueryData<{
-      messages: { id: string; role: string; content: string }[]
-    }>(['chat', 'session', 'session-1'])
-
-    expect(session?.messages.map(message => message.id)).toEqual([
-      'old-user',
-      'old-assistant',
-    ])
-    expect(useChatStore.getState().inputDrafts['session-1']).toBe('cancel this')
-    expect(useChatStore.getState().pendingImages['session-1']).toEqual([
-      {
-        id: 'image-1',
-        path: '/tmp/image.png',
-        filename: 'image.png',
-      },
-    ])
-    expect(useChatStore.getState().lastSentMessages['session-1']).toBe(
-      undefined
-    )
-    expect(useChatStore.getState().isSessionReviewing('session-1')).toBe(false)
-    expect(mockInvoke).not.toHaveBeenCalledWith(
-      'get_session',
-      expect.anything()
-    )
-  })
-
-  // Backend may not have saved the cancelled prompt yet, or saved only the
-  // prompt. Either way, the earlier reply must not clear the restored draft.
+  // The prompt's fate is the backend's call. chat:cancelled only ends the live
+  // turn; chat:user-turn says whether the prompt stays in history or returns
+  // to the composer, and a rejected invoke means it was never recorded.
   const priorMessages = [
     {
       id: 'old-user',
@@ -1762,179 +1346,21 @@ describe('useStreamingEvents cancellation sanitization', () => {
     timestamp: 3,
     tool_calls: [],
   }
+  const sentImage = {
+    id: 'image-1',
+    path: '/tmp/image.png',
+    filename: 'image.png',
+  }
 
-  it.each([
-    ['without the cancelled prompt', priorMessages],
-    ['with only the cancelled prompt', [...priorMessages, currentUser]],
-  ])(
-    'keeps the restored draft when the backend has an earlier reply %s',
-    async (_label, backendMessages) => {
-      const queryClient = createQueryClient()
-      const wrapper = createWrapper(queryClient)
-
-      mockInvoke.mockImplementation((command: string) => {
-        if (command === 'list_pending_wakeups') return Promise.resolve([])
-        if (command === 'get_session')
-          return Promise.resolve({
-            id: 'session-1',
-            name: 'Test',
-            order: 0,
-            created_at: 1,
-            updated_at: 3,
-            messages: backendMessages,
-          })
-        return Promise.resolve(undefined)
-      })
-
-      queryClient.setQueryData(['chat', 'session', 'session-1'], {
-        id: 'session-1',
-        name: 'Test',
-        order: 0,
-        created_at: 1,
-        updated_at: 3,
-        messages: [...priorMessages, currentUser],
-      })
-
-      useChatStore.setState({
-        streamingContents: {},
-        streamingContentBlocks: {},
-        streamingThinkingContent: {},
-        activeToolCalls: {},
-        sendingSessionIds: { 'session-1': true },
-        sendStartedAt: { 'session-1': 1000 },
-        sessionWorktreeMap: { 'session-1': 'worktree-1' },
-        worktreePaths: { 'worktree-1': '/tmp/worktree' },
-        lastSentMessages: { 'session-1': 'cancel this' },
-        inputDrafts: { 'session-1': '' },
-      })
-
-      renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
-
-      await waitFor(() =>
-        expect(registeredListeners.has('chat:cancelled')).toBe(true)
-      )
-
-      mockInvoke.mockClear()
-      registeredListeners.get('chat:cancelled')?.({
-        payload: {
-          session_id: 'session-1',
-          worktree_id: 'worktree-1',
-          undo_send: false,
-          emitted_at_ms: 2000,
-          run_id: `run-${backendMessages.length}`,
-        },
-      })
-
-      expect(useChatStore.getState().inputDrafts['session-1']).toBe(
-        'cancel this'
-      )
-
-      await waitFor(() =>
-        expect(mockInvoke).toHaveBeenCalledWith('get_session', {
-          sessionId: 'session-1',
-          worktreeId: 'worktree-1',
-          worktreePath: '/tmp/worktree',
-        })
-      )
-      await new Promise(resolve => setTimeout(resolve, 0))
-
-      expect(useChatStore.getState().inputDrafts['session-1']).toBe(
-        'cancel this'
-      )
-    }
-  )
-
-  it('hydrates persisted cancelled output without clearing a newer input draft', async () => {
-    const queryClient = createQueryClient()
-    const wrapper = createWrapper(queryClient)
-
-    const hydratedSession = {
-      id: 'session-1',
-      name: 'Test',
-      order: 0,
-      created_at: 1,
-      updated_at: 4,
-      last_run_status: 'cancelled',
-      messages: [
-        {
-          id: 'old-user',
-          session_id: 'session-1',
-          role: 'user',
-          content: 'old prompt',
-          timestamp: 1,
-          tool_calls: [],
-        },
-        {
-          id: 'old-assistant',
-          session_id: 'session-1',
-          role: 'assistant',
-          content: 'old answer',
-          timestamp: 2,
-          tool_calls: [],
-        },
-        {
-          id: 'current-user',
-          session_id: 'session-1',
-          role: 'user',
-          content: 'cancel this after output persisted',
-          timestamp: 3,
-          tool_calls: [],
-        },
-        {
-          id: 'persisted-cancelled-assistant',
-          session_id: 'session-1',
-          role: 'assistant',
-          content: 'Persisted cancelled answer.',
-          timestamp: 4,
-          tool_calls: [],
-          content_blocks: [
-            { type: 'text', text: 'Persisted cancelled answer.' },
-          ],
-          cancelled: true,
-        },
-      ],
-    }
-
-    mockInvoke.mockImplementation((command: string) => {
-      if (command === 'list_pending_wakeups') return Promise.resolve([])
-      if (command === 'get_session') return Promise.resolve(hydratedSession)
-      return Promise.resolve(undefined)
-    })
-
+  function seedSendInFlight(queryClient: QueryClient, inputDraft = '') {
     queryClient.setQueryData(['chat', 'session', 'session-1'], {
       id: 'session-1',
       name: 'Test',
       order: 0,
       created_at: 1,
       updated_at: 3,
-      messages: [
-        {
-          id: 'old-user',
-          session_id: 'session-1',
-          role: 'user',
-          content: 'old prompt',
-          timestamp: 1,
-          tool_calls: [],
-        },
-        {
-          id: 'old-assistant',
-          session_id: 'session-1',
-          role: 'assistant',
-          content: 'old answer',
-          timestamp: 2,
-          tool_calls: [],
-        },
-        {
-          id: 'current-user',
-          session_id: 'session-1',
-          role: 'user',
-          content: 'cancel this after output persisted',
-          timestamp: 3,
-          tool_calls: [],
-        },
-      ],
+      messages: [...priorMessages, currentUser],
     })
-
     useChatStore.setState({
       streamingContents: {},
       streamingContentBlocks: {},
@@ -1944,59 +1370,187 @@ describe('useStreamingEvents cancellation sanitization', () => {
       sendStartedAt: { 'session-1': 1000 },
       sessionWorktreeMap: { 'session-1': 'worktree-1' },
       worktreePaths: { 'worktree-1': '/tmp/worktree' },
-      lastSentMessages: {
-        'session-1': 'cancel this after output persisted',
+      lastSentMessages: { 'session-1': 'cancel this' },
+      lastSentArgs: {
+        'session-1': {
+          sessionId: 'session-1',
+          worktreeId: 'worktree-1',
+          worktreePath: '/tmp/worktree',
+          message: 'cancel this\n\n[Image attached: /tmp/image.png]',
+        },
       },
-      inputDrafts: { 'session-1': 'keep this draft' },
+      lastSentAttachments: {
+        'session-1': {
+          images: [sentImage],
+          files: [],
+          textFiles: [],
+          skills: [],
+        },
+      },
+      pendingImages: {},
+      inputDrafts: { 'session-1': inputDraft },
     })
+  }
 
-    renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
+  const messageIds = (queryClient: QueryClient) =>
+    queryClient
+      .getQueryData<{
+        messages: { id: string }[]
+      }>(['chat', 'session', 'session-1'])
+      ?.messages.map(message => message.id)
 
+  async function renderListeners(queryClient: QueryClient) {
+    renderHook(() => useStreamingEvents({ queryClient }), {
+      wrapper: createWrapper(queryClient),
+    })
     await waitFor(() =>
-      expect(registeredListeners.has('chat:cancelled')).toBe(true)
+      expect(registeredListeners.has('chat:user-turn')).toBe(true)
     )
+  }
 
+  const cancelled = (emitted_at_ms = 2000) =>
     registeredListeners.get('chat:cancelled')?.({
       payload: {
         session_id: 'session-1',
         worktree_id: 'worktree-1',
-        undo_send: false,
-        emitted_at_ms: 2000,
-        run_id: 'run-with-persisted-output',
+        emitted_at_ms,
+        run_id: 'run-1',
       },
     })
 
-    await waitFor(() =>
-      expect(mockInvoke).toHaveBeenCalledWith('get_session', {
-        sessionId: 'session-1',
-        worktreeId: 'worktree-1',
-        worktreePath: '/tmp/worktree',
-      })
-    )
-
-    await waitFor(() => {
-      const session = queryClient.getQueryData<{
-        messages: {
-          id: string
-          role: string
-          content: string
-          cancelled?: boolean
-        }[]
-      }>(['chat', 'session', 'session-1'])
-
-      expect(session?.messages.map(message => message.id)).toEqual([
-        'old-user',
-        'old-assistant',
-        'current-user',
-        'persisted-cancelled-assistant',
-      ])
-      expect(session?.messages[3]?.content).toBe('Persisted cancelled answer.')
-      expect(session?.messages[3]?.cancelled).toBe(true)
+  const userTurn = (
+    user_turn: 'withdrawn' | 'persisted',
+    emitted_at_ms = 2100
+  ) =>
+    registeredListeners.get('chat:user-turn')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        run_id: 'run-1',
+        user_turn,
+        restore_draft: user_turn === 'withdrawn',
+        emitted_at_ms,
+      },
     })
 
-    expect(useChatStore.getState().inputDrafts['session-1']).toBe(
-      'keep this draft'
-    )
+  it('ends the live turn on chat:cancelled without deciding the prompt', async () => {
+    const queryClient = createQueryClient()
+    seedSendInFlight(queryClient)
+    await renderListeners(queryClient)
+
+    cancelled()
+
+    const state = useChatStore.getState()
+    expect(state.sendingSessionIds['session-1']).toBeUndefined()
+    expect(messageIds(queryClient)).toEqual([
+      'old-user',
+      'old-assistant',
+      'current-user',
+    ])
+    expect(state.inputDrafts['session-1']).toBe('')
+    expect(state.lastSentMessages['session-1']).toBe('cancel this')
+    expect(state.pendingImages['session-1']).toBeUndefined()
+  })
+
+  it('restores text and images and drops the optimistic turn when the backend withdraws the prompt', async () => {
+    const queryClient = createQueryClient()
+    seedSendInFlight(queryClient)
+    await renderListeners(queryClient)
+
+    cancelled()
+    userTurn('withdrawn')
+
+    const state = useChatStore.getState()
+    expect(messageIds(queryClient)).toEqual(['old-user', 'old-assistant'])
+    expect(state.inputDrafts['session-1']).toBe('cancel this')
+    expect(state.pendingImages['session-1']).toEqual([sentImage])
+    expect(state.lastSentMessages['session-1']).toBeUndefined()
+    expect(state.lastSentAttachments['session-1']).toBeUndefined()
+    expect(
+      queryClient.getQueryState(['chat', 'session', 'session-1'])?.isInvalidated
+    ).toBe(true)
+  })
+
+  it('keeps the prompt and leaves the composer alone when the backend persists a rejected turn', async () => {
+    const queryClient = createQueryClient()
+    seedSendInFlight(queryClient)
+    await renderListeners(queryClient)
+
+    registeredListeners.get('chat:error')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        error: 'Provider rejected the request',
+      },
+    })
+    userTurn('persisted')
+
+    const state = useChatStore.getState()
+    expect(messageIds(queryClient)).toEqual([
+      'old-user',
+      'old-assistant',
+      'current-user',
+    ])
+    expect(state.inputDrafts['session-1']).toBe('')
+    expect(state.pendingImages['session-1']).toBeUndefined()
+    expect(state.lastSentMessages['session-1']).toBeUndefined()
+    expect(state.lastSentAttachments['session-1']).toBeUndefined()
+    expect(
+      queryClient.getQueryState(['chat', 'session', 'session-1'])?.isInvalidated
+    ).toBe(true)
+  })
+
+  it('keeps the prompt visible after chat:error until the backend reports the turn', async () => {
+    const queryClient = createQueryClient()
+    seedSendInFlight(queryClient)
+    await renderListeners(queryClient)
+
+    registeredListeners.get('chat:error')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        error: 'boom',
+      },
+    })
+
+    const state = useChatStore.getState()
+    expect(messageIds(queryClient)).toContain('current-user')
+    expect(state.inputDrafts['session-1']).toBe('')
+    expect(state.lastSentMessages['session-1']).toBe('cancel this')
+    expect(state.errors['session-1']).toBe('boom')
+  })
+
+  it('keeps newer typing when a withdrawn prompt would be restored', async () => {
+    const queryClient = createQueryClient()
+    seedSendInFlight(queryClient, 'newer draft')
+    await renderListeners(queryClient)
+
+    cancelled()
+    userTurn('withdrawn')
+
+    const state = useChatStore.getState()
+    expect(state.inputDrafts['session-1']).toBe('newer draft')
+    expect(state.pendingImages['session-1']).toBeUndefined()
+    expect(state.lastSentAttachments['session-1']).toBeUndefined()
+    expect(messageIds(queryClient)).toEqual(['old-user', 'old-assistant'])
+  })
+
+  it('ignores a verdict for an older send once a newer send has started', async () => {
+    const queryClient = createQueryClient()
+    seedSendInFlight(queryClient)
+    useChatStore.setState({ sendStartedAt: { 'session-1': 3000 } })
+    await renderListeners(queryClient)
+
+    userTurn('withdrawn', 2100)
+
+    const state = useChatStore.getState()
+    expect(messageIds(queryClient)).toEqual([
+      'old-user',
+      'old-assistant',
+      'current-user',
+    ])
+    expect(state.inputDrafts['session-1']).toBe('')
+    expect(state.lastSentMessages['session-1']).toBe('cancel this')
   })
 
   it('ignores late chunks from a cancelled run after the same session starts a new run', async () => {

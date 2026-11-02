@@ -9,7 +9,7 @@ import { useChatStore } from '@/store/chat-store'
 import { isPanelTerminal, useTerminalStore } from '@/store/terminal-store'
 import { useBrowserStore } from '@/store/browser-store'
 import { projectsQueryKeys } from '@/services/projects'
-import { chatQueryKeys } from '@/services/chat'
+import { chatQueryKeys, restoreReturnedQueuedMessage } from '@/services/chat'
 import { MCP_SERVERS_KEY } from '@/services/mcp'
 import { claudeCliQueryKeys } from '@/services/claude-cli'
 import type {
@@ -1539,6 +1539,17 @@ export function useMainWindowEventListeners() {
                 [sessionId]: queue,
               },
             }))
+          }
+        ),
+
+        // The backend queue drain could not run a queued prompt. It is not in
+        // history, so it comes back to the composer.
+        listen<{ sessionId: string; message: QueuedMessage }>(
+          'queue:returned',
+          event => {
+            const { sessionId, message } = event.payload
+            restoreReturnedQueuedMessage(sessionId, message.message)
+            toast.info('Queued message returned to input')
           }
         ),
 

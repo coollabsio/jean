@@ -4,6 +4,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   chatQueryKeys,
+  recordUserTurnOutcome,
+  restoreLastSentPrompt,
+  restoreReturnedQueuedMessage,
   upsertTurnAssistantMessage,
   useSendMessage,
 } from './chat'
@@ -305,6 +308,40 @@ describe('useSendMessage completion', () => {
     expect(state.lastSentMessages['session-1']).toBeUndefined()
   })
 
+  it('keeps history and the composer when the backend recorded the prompt before failing', async () => {
+    const { hook, session } = setup([message('u1', 'user', 'first question')])
+    useChatStore.setState({
+      inputDrafts: {},
+      lastSentMessages: { 'session-1': 'second question' },
+    } as never)
+    mockInvoke.mockImplementation(() => {
+      // The backend reports the turn before the invoke rejects.
+      recordUserTurnOutcome('session-1', 'persisted')
+      return Promise.reject('CLI execution thread closed unexpectedly')
+    })
+
+    await act(async () => {
+      await expect(
+        hook.result.current.mutateAsync({
+          sessionId: 'session-1',
+          worktreeId: 'worktree-1',
+          worktreePath: '/tmp/worktree-1',
+          message: 'second question',
+          backend: 'claude',
+        })
+      ).rejects.toBe('CLI execution thread closed unexpectedly')
+    })
+
+    expect(contents(session()?.messages)).toEqual([
+      'first question',
+      'second question',
+    ])
+    expect(useChatStore.getState().inputDrafts['session-1']).toBeUndefined()
+    expect(
+      useChatStore.getState().sendingSessionIds['session-1']
+    ).toBeUndefined()
+  })
+
   it('keeps newer typing and drops stale attachments after a rejected send', async () => {
     const { hook } = setup([])
     useChatStore.setState({
@@ -338,5 +375,70 @@ describe('useSendMessage completion', () => {
     expect(state.inputDrafts['session-1']).toBe('newer draft')
     expect(state.pendingImages['session-1']).toBeUndefined()
     expect(state.lastSentAttachments['session-1']).toBeUndefined()
+  })
+})
+
+describe('restoreLastSentPrompt', () => {
+  beforeEach(() => {
+    useChatStore.setState({
+      inputDrafts: {},
+      lastSentMessages: {},
+      lastSentArgs: {},
+      lastSentAttachments: {},
+    })
+  })
+
+  it('does not restore an earlier finished send when this client did not send the withdrawn prompt', () => {
+    useChatStore.setState({
+      lastSentArgs: {
+        'session-1': {
+          sessionId: 'session-1',
+          worktreeId: 'wt-1',
+          worktreePath: '/wt',
+          message: 'prompt A, already in history',
+        },
+      },
+    })
+
+    expect(restoreLastSentPrompt('session-1')).toBe(false)
+    expect(useChatStore.getState().inputDrafts['session-1']).toBeUndefined()
+  })
+
+  it('restores the unfinished send of this client', () => {
+    useChatStore.setState({
+      lastSentMessages: { 'session-1': 'prompt B' },
+      lastSentArgs: {
+        'session-1': {
+          sessionId: 'session-1',
+          worktreeId: 'wt-1',
+          worktreePath: '/wt',
+          message: 'prompt B',
+        },
+      },
+    })
+
+    expect(restoreLastSentPrompt('session-1')).toBe(true)
+    expect(useChatStore.getState().inputDrafts['session-1']).toBe('prompt B')
+  })
+})
+
+describe('restoreReturnedQueuedMessage', () => {
+  beforeEach(() => {
+    useChatStore.setState({ inputDrafts: {} })
+  })
+
+  it('puts the queued prompt into an empty composer', () => {
+    restoreReturnedQueuedMessage('session-1', 'queued prompt')
+    expect(useChatStore.getState().inputDrafts['session-1']).toBe(
+      'queued prompt'
+    )
+  })
+
+  it('keeps a newer draft and appends the queued prompt below it', () => {
+    useChatStore.setState({ inputDrafts: { 'session-1': 'typing now' } })
+    restoreReturnedQueuedMessage('session-1', 'queued prompt')
+    expect(useChatStore.getState().inputDrafts['session-1']).toBe(
+      'typing now\n\nqueued prompt'
+    )
   })
 })

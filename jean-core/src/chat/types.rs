@@ -1867,6 +1867,28 @@ pub enum RunStatus {
     Resumable,
 }
 
+/// What happened to the user's prompt once a send finished.
+///
+/// The composer restores the typed text exactly when the prompt is not in
+/// history. `NotAccepted` is never carried by an event: a rejected
+/// `send_chat_message` invoke means the backend never recorded the prompt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UserTurnOutcome {
+    /// Rejected before a run was recorded.
+    NotAccepted,
+    /// A run was recorded, then hidden from history.
+    Withdrawn,
+    /// The prompt stays in history, with or without assistant output.
+    Persisted,
+}
+
+impl UserTurnOutcome {
+    pub fn restore_draft(self) -> bool {
+        self != Self::Persisted
+    }
+}
+
 /// Metadata for a single Claude CLI execution (stored in manifest)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunEntry {
@@ -1985,6 +2007,17 @@ impl RunEntry {
             2 // user + assistant (incl. partial output still in the run log)
         } else {
             1 // user only (no assistant output yet)
+        }
+    }
+
+    /// Outcome of the user turn once the run log is final. Derived from the
+    /// same rule history rendering uses, so the event can never disagree
+    /// with what a reload shows.
+    pub fn user_turn_outcome(&self) -> UserTurnOutcome {
+        if self.is_renderable_in_chat_history() {
+            UserTurnOutcome::Persisted
+        } else {
+            UserTurnOutcome::Withdrawn
         }
     }
 
@@ -3239,6 +3272,88 @@ mod tests {
 
         assert!(metadata.find_run("run-1").is_some());
         assert!(metadata.find_run("run-nonexistent").is_none());
+    }
+
+    fn finished_run(
+        status: RunStatus,
+        assistant_message_id: Option<&str>,
+        provider_rejected: bool,
+    ) -> RunEntry {
+        RunEntry {
+            run_id: "run-1".to_string(),
+            user_message_id: "user-1".to_string(),
+            user_message: "do the thing".to_string(),
+            model: None,
+            execution_mode: None,
+            thinking_level: None,
+            effort_level: None,
+            backend: Some(Backend::Claude),
+            custom_profile_name: None,
+            started_at: 1,
+            ended_at: Some(2),
+            status: status.clone(),
+            assistant_message_id: assistant_message_id.map(str::to_string),
+            cancelled: status == RunStatus::Cancelled,
+            provider_rejected,
+            recovered: false,
+            claude_session_id: None,
+            pid: None,
+            usage: None,
+            codex_thread_id: None,
+            codex_turn_id: None,
+            cursor_chat_id: None,
+            grok_session_id: None,
+            kimi_session_id: None,
+            devin_session_id: None,
+            antigravity_session_id: None,
+            muse_session_id: None,
+            checkpoint_id: None,
+        }
+    }
+
+    #[test]
+    fn user_turn_outcome_follows_history_visibility() {
+        let cancelled_before_output = finished_run(RunStatus::Cancelled, None, false);
+        assert_eq!(
+            cancelled_before_output.user_turn_outcome(),
+            UserTurnOutcome::Withdrawn
+        );
+        assert!(cancelled_before_output.user_turn_outcome().restore_draft());
+
+        let cancelled_with_output = finished_run(RunStatus::Cancelled, Some("asst"), false);
+        assert_eq!(
+            cancelled_with_output.user_turn_outcome(),
+            UserTurnOutcome::Persisted
+        );
+
+        let provider_rejected = finished_run(RunStatus::Cancelled, None, true);
+        assert_eq!(
+            provider_rejected.user_turn_outcome(),
+            UserTurnOutcome::Persisted
+        );
+        assert!(!provider_rejected.user_turn_outcome().restore_draft());
+
+        let crashed = finished_run(RunStatus::Crashed, None, false);
+        assert_eq!(crashed.user_turn_outcome(), UserTurnOutcome::Persisted);
+
+        let completed = finished_run(RunStatus::Completed, Some("asst"), false);
+        assert_eq!(completed.user_turn_outcome(), UserTurnOutcome::Persisted);
+    }
+
+    #[test]
+    fn user_turn_outcome_serializes_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&UserTurnOutcome::NotAccepted).unwrap(),
+            "\"not_accepted\""
+        );
+        assert_eq!(
+            serde_json::to_string(&UserTurnOutcome::Withdrawn).unwrap(),
+            "\"withdrawn\""
+        );
+        assert_eq!(
+            serde_json::to_string(&UserTurnOutcome::Persisted).unwrap(),
+            "\"persisted\""
+        );
     }
 
     #[test]

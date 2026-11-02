@@ -2418,7 +2418,6 @@ fn process_turn_events(
             &CancelledEvent {
                 session_id: session_id.to_string(),
                 worktree_id: worktree_id.to_string(),
-                undo_send: false,
                 emitted_at_ms,
                 run_id: Some(run_id.to_string()),
             },

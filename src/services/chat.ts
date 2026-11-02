@@ -32,6 +32,7 @@ import type {
   QueuedMessageEdit,
   Backend,
   PinnedTable,
+  UserTurnOutcome,
 } from '@/types/chat'
 import { isTauri, projectsQueryKeys } from '@/services/projects'
 import { hasBackendTransport } from '@/lib/environment'
@@ -1463,7 +1464,7 @@ export function upsertTurnAssistantMessage(
  * text and the attachment chips; the wire message would instead inline them
  * as `[Image attached: ...]` refs.
  */
-function restoreRejectedSend(sessionId: string, sentMessage: string) {
+export function restoreRejectedSend(sessionId: string, sentMessage: string) {
   const store = useChatStore.getState()
   const typed = store.lastSentMessages[sessionId]
   const hasAttachments = !!store.lastSentAttachments[sessionId]
@@ -1481,6 +1482,58 @@ function restoreRejectedSend(sessionId: string, sentMessage: string) {
     store.clearLastSentAttachments(sessionId)
   }
   store.clearLastSentMessage(sessionId)
+}
+
+/**
+ * Put this client's last send back into the composer. Returns false when this
+ * client has no unfinished send for the session (another client or the
+ * backend queue sent it). `lastSentArgs` outlives its send, so it is only
+ * trusted while `lastSentMessages` marks the send as unfinished.
+ */
+export function restoreLastSentPrompt(sessionId: string): boolean {
+  const store = useChatStore.getState()
+  const typed = store.lastSentMessages[sessionId]
+  if (typed === undefined) return false
+  restoreRejectedSend(
+    sessionId,
+    store.lastSentArgs[sessionId]?.message ?? typed
+  )
+  return true
+}
+
+/**
+ * Put a queued prompt the backend could not run back into the composer. A
+ * newer draft is kept and the prompt is appended below it.
+ */
+export function restoreReturnedQueuedMessage(
+  sessionId: string,
+  message: string
+) {
+  if (!message.trim()) return
+  const store = useChatStore.getState()
+  const draft = store.inputDrafts[sessionId]?.trim()
+  store.setInputDraft(sessionId, draft ? `${draft}\n\n${message}` : message)
+}
+
+/**
+ * The backend's verdict on the prompt of the send in flight, keyed by session.
+ * `chat:user-turn` records it; `useSendMessage.onError` reads it so a rejected
+ * invoke after an accepted run does not restore a prompt that is already in
+ * history. Absent means the invoke was rejected before acceptance.
+ */
+const userTurnOutcomes = new Map<string, UserTurnOutcome>()
+
+export function recordUserTurnOutcome(
+  sessionId: string,
+  outcome: UserTurnOutcome
+) {
+  userTurnOutcomes.set(sessionId, outcome)
+}
+
+export function takeUserTurnOutcome(sessionId: string): UserTurnOutcome {
+  const outcome = userTurnOutcomes.get(sessionId) ?? 'not_accepted'
+  userTurnOutcomes.delete(sessionId)
+  return outcome
 }
 
 /**
@@ -1607,6 +1660,7 @@ export function useSendMessage() {
       backend,
     }) => {
       console.log(`[SendMutation] onMutate sessionId=${sessionId}`)
+      takeUserTurnOutcome(sessionId)
       // Cancel in-flight queries to avoid overwriting optimistic update
       await queryClient.cancelQueries({
         queryKey: chatQueryKeys.session(sessionId),
@@ -1844,19 +1898,13 @@ export function useSendMessage() {
         return
       }
 
-      // Check if CLI produced streaming content before the error.
-      // If so, the CLI likely ran — don't destroy the conversation by
-      // rolling back to pre-send state. Instead, refetch from disk (#209).
-      const hasStreamedContent =
-        !!useChatStore.getState().streamingContents[sessionId]
-      if (hasStreamedContent) {
-        logger.warn(
-          'Error after CLI produced content, refetching instead of rollback',
-          {
-            sessionId,
-            error: errorMessage,
-          }
-        )
+      // The backend recorded the prompt before it failed (crashed run or a
+      // provider rejection). History owns it; refetch instead of rolling back.
+      if (takeUserTurnOutcome(sessionId) === 'persisted') {
+        logger.warn('Error after the prompt was recorded, refetching', {
+          sessionId,
+          error: errorMessage,
+        })
         setError(sessionId, errorMessage || 'Unknown error occurred')
         queryClient.invalidateQueries({
           queryKey: chatQueryKeys.session(sessionId),
@@ -1870,7 +1918,8 @@ export function useSendMessage() {
         return
       }
 
-      // Real errors with no streamed content — rollback to previous state
+      // Rejected before acceptance (or withdrawn): the prompt is not in
+      // history, so put it back and roll the cache back to the pre-send state.
       setError(sessionId, errorMessage || 'Unknown error occurred')
 
       // The composer is cleared before the async mutation starts.

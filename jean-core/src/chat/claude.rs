@@ -192,15 +192,33 @@ pub struct ErrorEvent {
     pub error: String,
 }
 
-/// Payload for cancelled events sent to frontend
+/// Payload for cancelled events sent to frontend.
+///
+/// Emitted as soon as the process or turn is stopped, before the run log is
+/// final. It only tells the client to stop rendering the live turn; what
+/// happened to the user's prompt arrives later in `chat:user-turn`.
 #[derive(serde::Serialize, Clone)]
 pub struct CancelledEvent {
     pub session_id: String,
     pub worktree_id: String, // Kept for backward compatibility
-    pub undo_send: bool,     // True when the user turn should be removed from history
     pub emitted_at_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
+}
+
+/// Payload for `chat:user-turn`, the final word on a finished send.
+///
+/// Emitted once by `send_chat_message` after the run log and session state are
+/// final, at every exit that follows `start_run`. `restore_draft` is true when
+/// the prompt is not in history and the composer should get it back.
+#[derive(serde::Serialize, Clone)]
+pub struct UserTurnEvent {
+    pub session_id: String,
+    pub worktree_id: String,
+    pub run_id: String,
+    pub user_turn: super::types::UserTurnOutcome,
+    pub restore_draft: bool,
+    pub emitted_at_ms: u64,
 }
 
 /// Payload for tool block position events sent to frontend

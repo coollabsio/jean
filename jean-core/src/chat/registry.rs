@@ -122,12 +122,7 @@ fn lock_recover<'a, T>(mutex: &'a Mutex<T>, name: &str) -> std::sync::MutexGuard
     }
 }
 
-pub(crate) fn emit_cancelled_event(
-    app: &AppHandle,
-    session_id: &str,
-    worktree_id: &str,
-    undo_send: bool,
-) {
+pub(crate) fn emit_cancelled_event(app: &AppHandle, session_id: &str, worktree_id: &str) {
     let emitted_at_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
@@ -140,7 +135,6 @@ pub(crate) fn emit_cancelled_event(
     let event = CancelledEvent {
         session_id: session_id.to_string(),
         worktree_id: worktree_id.to_string(),
-        undo_send,
         emitted_at_ms,
         run_id,
     };
@@ -918,7 +912,7 @@ pub fn cancel_process(
             if let Err(e) = run_log::mark_running_run_cancelled(app, session_id) {
                 log::warn!("Failed to mark run as cancelled in manifest: {e}");
             }
-            emit_cancelled_event(app, session_id, worktree_id, false);
+            emit_cancelled_event(app, session_id, worktree_id);
             return Ok(true);
         }
         log::trace!("Cancelling Claude process group {pid} for session: {session_id}");
@@ -957,7 +951,7 @@ pub fn cancel_process(
         }
 
         // Emit cancelled event for responsive UI
-        emit_cancelled_event(app, session_id, worktree_id, false);
+        emit_cancelled_event(app, session_id, worktree_id);
 
         return Ok(true);
     }
@@ -981,7 +975,7 @@ pub fn cancel_process(
             log::warn!("Failed to mark run as cancelled in manifest: {e}");
         }
 
-        emit_cancelled_event(app, session_id, worktree_id, false);
+        emit_cancelled_event(app, session_id, worktree_id);
 
         return Ok(true);
     }
@@ -1018,10 +1012,8 @@ pub fn cancel_process(
             log::warn!("Failed to mark run as cancelled in manifest: {e}");
         }
 
-        // Emit cancelled event with undo_send=false — content may have already
-        // streamed to the frontend via SSE events. The frontend will decide
-        // based on actual streamed content whether to undo or preserve.
-        emit_cancelled_event(app, session_id, worktree_id, false);
+        // Stop signal only; send_chat_message reports the prompt's fate later.
+        emit_cancelled_event(app, session_id, worktree_id);
 
         return Ok(true);
     }
@@ -1038,7 +1030,7 @@ pub fn cancel_process(
     let _ = run_log::mark_running_run_cancelled(app, session_id);
 
     // Emit cancelled event so frontend handles it immediately
-    emit_cancelled_event(app, session_id, worktree_id, true);
+    emit_cancelled_event(app, session_id, worktree_id);
 
     Ok(true)
 }
@@ -1074,7 +1066,7 @@ pub fn cancel_process_if_running(
             if let Err(e) = run_log::mark_running_run_cancelled(app, session_id) {
                 log::warn!("Failed to mark run as cancelled in manifest: {e}");
             }
-            emit_cancelled_event(app, session_id, worktree_id, false);
+            emit_cancelled_event(app, session_id, worktree_id);
             return Ok(true);
         }
         log::trace!("Cancelling Claude process group {pid} for session: {session_id}");
@@ -1094,7 +1086,7 @@ pub fn cancel_process_if_running(
             log::warn!("Failed to mark run as cancelled in manifest: {e}");
         }
 
-        emit_cancelled_event(app, session_id, worktree_id, false);
+        emit_cancelled_event(app, session_id, worktree_id);
 
         return Ok(true);
     }
@@ -1120,7 +1112,7 @@ pub fn cancel_process_if_running(
             log::warn!("Failed to mark run as cancelled in manifest: {e}");
         }
 
-        emit_cancelled_event(app, session_id, worktree_id, false);
+        emit_cancelled_event(app, session_id, worktree_id);
 
         return Ok(true);
     }
@@ -1150,7 +1142,7 @@ pub fn cancel_process_if_running(
         // Match the regular OpenCode cancel path: streamed SSE content may already
         // exist, so let the frontend decide whether to restore or preserve based on
         // actual partial output rather than forcing undo-send.
-        emit_cancelled_event(app, session_id, worktree_id, false);
+        emit_cancelled_event(app, session_id, worktree_id);
 
         return Ok(true);
     }

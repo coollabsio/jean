@@ -49,6 +49,7 @@ import type {
   DoneEvent,
   ErrorEvent,
   CancelledEvent,
+  UserTurnEvent,
   ThinkingEvent,
   PermissionDeniedEvent,
   CodexCommandApprovalRequestEvent,
@@ -73,6 +74,8 @@ import type {
 } from '@/types/chat'
 import {
   persistEnqueue,
+  recordUserTurnOutcome,
+  restoreLastSentPrompt,
   saveCancelledMessage,
   upsertTurnAssistantMessage,
 } from '@/services/chat'
@@ -1761,17 +1764,11 @@ export default function useStreamingEvents({
       clearLivePermissionRequests(session_id)
       toast.dismiss(backendRetryToastId(session_id))
 
-      // Store error for inline display and restore input
-      const {
-        lastSentMessages,
-        streamingContents,
-        activeToolCalls,
-        setInputDraft,
-        clearLastSentMessage,
-        setError,
-        activeWorktreeId,
-        activeSessionIds,
-      } = useChatStore.getState()
+      // Store error for inline display. The prompt's fate is not decided
+      // here: a rejected invoke restores it, chat:user-turn keeps or
+      // withdraws it.
+      const { setError, activeWorktreeId, activeSessionIds } =
+        useChatStore.getState()
 
       // Check if this session is currently being viewed
       // Look up the worktree from sessionWorktreeMap since ErrorEvent may not have it
@@ -1825,49 +1822,6 @@ export default function useStreamingEvents({
       // Set error state for inline display
       setError(session_id, displayError)
 
-      // Check if CLI produced streaming content BEFORE clearing state.
-      // If content or tool calls were streamed, the CLI ran — don't remove the
-      // user message or rollback, as the conversation is persisted on disk (#209).
-      const hasStreamedContent =
-        !!streamingContents[session_id] ||
-        (activeToolCalls[session_id]?.length ?? 0) > 0
-
-      // Restore the input that failed so user can retry
-      const lastMessage = lastSentMessages[session_id]
-      if (lastMessage && !hasStreamedContent) {
-        setInputDraft(session_id, lastMessage)
-        clearLastSentMessage(session_id)
-
-        // Remove the optimistic user message from query cache
-        queryClient.setQueryData<Session>(
-          chatQueryKeys.session(session_id),
-          old => {
-            if (!old?.messages?.length) return old
-            // Find last user message matching the failed content
-            let lastUserIdx = -1
-            for (let i = old.messages.length - 1; i >= 0; i--) {
-              if (
-                old.messages[i]?.role === 'user' &&
-                old.messages[i]?.content === lastMessage
-              ) {
-                lastUserIdx = i
-                break
-              }
-            }
-            if (lastUserIdx === -1) return old
-            const newMessages = [...old.messages]
-            newMessages.splice(lastUserIdx, 1)
-            return { ...old, messages: newMessages }
-          }
-        )
-      } else if (lastMessage) {
-        // Had streaming content — don't restore to input, just clear tracking
-        clearLastSentMessage(session_id)
-      }
-
-      // Restore attachments that were cleared on send
-      useChatStore.getState().restoreAttachments(session_id)
-
       // Optimistically update last_run_status BEFORE clearing state (same pattern as chat:done)
       queryClient.setQueryData<Session>(
         chatQueryKeys.session(session_id),
@@ -1907,16 +1861,16 @@ export default function useStreamingEvents({
       queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
     })
 
-    // Handle cancellation (user pressed Cmd+Option+Backspace / Ctrl+Alt+Backspace).
-    // Cancelled turns are removed from the visible chat timeline; run logs and
-    // metadata may still retain them for diagnostics.
+    // Handle cancellation (stop button / shortcut). This fires as soon as the
+    // process or turn is stopped, before the backend has finished the run log:
+    // end the live turn and keep whatever already streamed. Whether the prompt
+    // stays in history or comes back to the composer arrives in chat:user-turn.
     const unlistenCancelled = listen<CancelledEvent>(
       'chat:cancelled',
       event => {
         const {
           session_id,
           worktree_id: eventWorktreeId,
-          undo_send,
           emitted_at_ms,
           run_id: eventRunId,
         } = event.payload
@@ -1940,7 +1894,7 @@ export default function useStreamingEvents({
         }
 
         console.log(
-          `[Cancelled] chat:cancelled received session=${session_id} undo_send=${undo_send}`,
+          `[Cancelled] chat:cancelled received session=${session_id}`,
           {
             currentSending: Object.keys(
               useChatStore.getState().sendingSessionIds
@@ -2014,55 +1968,6 @@ export default function useStreamingEvents({
         // Clear compacting state (safety net)
         useChatStore.getState().setCompacting(session_id, false)
 
-        // Restore the prompt and its attachments when cancellation produced no
-        // visible assistant output. Some backends report undo_send=false as soon
-        // as a process or turn is registered, before it produces any output.
-        const hasToolCalls = toolCalls && toolCalls.length > 0
-        const hasText = sanitizedContent.trim().length > 0
-        const hasThinking = !!streamingThinkingContent[session_id]
-        const hasContentBlocks =
-          !!sanitizedContentBlocks && sanitizedContentBlocks.length > 0
-        const hasContent =
-          hasToolCalls || hasText || hasThinking || hasContentBlocks
-        const hasQueuedMessages =
-          (useChatStore.getState().messageQueues[session_id] ?? []).length > 0
-        const hasCurrentDraft = !!useChatStore
-          .getState()
-          .inputDrafts[session_id]?.trim()
-        const sentMessage = useChatStore.getState().lastSentMessages[session_id]
-        const shouldRestoreMessage =
-          !hasContent && !hasQueuedMessages && !hasCurrentDraft
-        const shouldHydrateCancelledFromBackend = !undo_send && !hasContent
-        // Assistant replies from earlier turns, known before this cancel.
-        const priorAssistantIds = new Set(
-          (
-            queryClient.getQueryData<Session>(chatQueryKeys.session(session_id))
-              ?.messages ?? []
-          )
-            .filter(message => message.role === 'assistant')
-            .map(message => message.id)
-        )
-
-        const removeLatestUserMessageFromCache = () => {
-          queryClient.setQueryData<Session>(
-            chatQueryKeys.session(session_id),
-            old => {
-              if (!old) return old
-              const messages = [...old.messages]
-              const lastIndex = messages.length - 1
-              if (messages[lastIndex]?.role === 'user') {
-                messages.splice(lastIndex, 1)
-              }
-              return { ...old, messages }
-            }
-          )
-        }
-
-        // Update TanStack Query cache FIRST (before clearing Zustand streaming state)
-        // so StreamingMessage unmount does not flicker. undo_send removes the
-        // optimistic user turn; a live no-output cancel keeps it visible and
-        // restores the draft. Partial output stays in history, marked cancelled.
-
         // Optimistically update last_run_status so "restored session" indicator hides
         queryClient.setQueryData<Session>(
           chatQueryKeys.session(session_id),
@@ -2085,52 +1990,17 @@ export default function useStreamingEvents({
           )
         }
 
-        if (shouldRestoreMessage) {
-          // Restore message to input and optimistically undo the sent message.
-          // This keeps cancel UX immediate while backend state catches up.
-          const {
-            lastSentMessages,
-            inputDrafts,
-            setInputDraft,
-            clearLastSentMessage,
-          } = useChatStore.getState()
-          const lastMessage = lastSentMessages[session_id]
-          const currentDraft = inputDrafts[session_id] ?? ''
-
-          if (lastMessage) {
-            // Only restore if input is empty (user hasn't typed new content)
-            if (!currentDraft.trim()) {
-              setInputDraft(session_id, lastMessage)
-              // Restore any attachments that were sent with the message
-              useChatStore.getState().restoreAttachments(session_id)
-              toast.info('Message restored to input')
-            } else {
-              useChatStore.getState().clearLastSentAttachments(session_id)
-            }
-            clearLastSentMessage(session_id)
-
-            // undo_send means the prompt never entered the run history. A
-            // normal live cancellation keeps the user turn visible while the
-            // draft is restored for retry.
-            if (undo_send || !hasContent) removeLatestUserMessageFromCache()
-          } else {
-            useChatStore.getState().clearLastSentAttachments(session_id)
-            if (undo_send || !hasContent) removeLatestUserMessageFromCache()
-          }
-        } else {
-          // Partial response exists — keep the prompt + streamed partial output
-          // (text and tool calls) visible in history, marked cancelled. Attachments
-          // were consumed, don't restore. Clear lastSentMessage so a later
-          // chat:error (e.g., codex turn.failed emitted after interrupt) can't fall
-          // back to restoring the prompt once streamingContents has been wiped by
-          // cancelSession().
-          useChatStore.getState().clearLastSentAttachments(session_id)
-          useChatStore.getState().clearLastSentMessage(session_id)
-
-          // Keep the partial assistant output (text + tool calls) visible in
-          // history, marked cancelled. Append it optimistically to the cache so it
-          // survives StreamingMessage unmounting, and persist it to the run JSONL
-          // so it also survives an app reload.
+        // Keep the partial assistant output (text + tool calls) visible in
+        // history, marked cancelled. Append it to the cache before the
+        // streaming state is cleared so StreamingMessage unmount does not
+        // flicker, and persist it to the run JSONL for in-process backends
+        // whose partial output the backend does not write on cancel.
+        const hasToolCalls = !!toolCalls && toolCalls.length > 0
+        const hasText = sanitizedContent.trim().length > 0
+        const hasThinking = !!streamingThinkingContent[session_id]
+        const hasContentBlocks =
+          !!sanitizedContentBlocks && sanitizedContentBlocks.length > 0
+        if (hasToolCalls || hasText || hasThinking || hasContentBlocks) {
           const cancelledAssistant: ChatMessage = {
             id: `cancelled-${session_id}-${emitted_at_ms}`,
             session_id,
@@ -2176,16 +2046,6 @@ export default function useStreamingEvents({
         }
 
         // NOW batch-clear all streaming state in a single Zustand set()
-        // This happens AFTER cancelled messages have been removed from cache,
-        // preventing flicker.
-        console.log(
-          `[Cancelled] about to cancelSession session=${session_id} shouldRestore=${shouldRestoreMessage}`,
-          {
-            currentSending: Object.keys(
-              useChatStore.getState().sendingSessionIds
-            ),
-          }
-        )
         useChatStore.getState().cancelSession(session_id)
         if (eventRunId) {
           const runIds = cancelledRunIds.get(session_id) ?? new Set<string>()
@@ -2214,49 +2074,6 @@ export default function useStreamingEvents({
             queryClient.invalidateQueries({
               queryKey: chatQueryKeys.sessions(resolvedWorktreeId),
             })
-            if (shouldHydrateCancelledFromBackend) {
-              // Only output of the cancelled turn counts. A reply from an
-              // earlier turn must not retract the restored draft. Without
-              // such output, keep the local undo: the backend still shows the
-              // prompt until its worker finishes the cancel, so applying that
-              // copy makes the prompt reappear and then vanish again.
-              const hasCancelledTurnOutput = (session: Session) => {
-                const lastMessage = session.messages.at(-1)
-                return (
-                  lastMessage?.role === 'assistant' &&
-                  !priorAssistantIds.has(lastMessage.id) &&
-                  hasMeaningfulAssistantPayload(
-                    lastMessage.content,
-                    lastMessage.content_blocks,
-                    lastMessage.tool_calls
-                  )
-                )
-              }
-              void hydrateCompletedSessionFromBackend(
-                queryClient,
-                session_id,
-                resolvedWorktreeId,
-                hasCancelledTurnOutput
-              ).then(session => {
-                if (!session) return
-
-                // A backend can persist output before its stream reaches the
-                // client. In that case, keep the persisted turn and retract only
-                // the draft that this cancellation restored. Never clear newer
-                // text that the user entered after cancelling.
-                const store = useChatStore.getState()
-                if (
-                  sentMessage &&
-                  store.inputDrafts[session_id] === sentMessage
-                ) {
-                  store.clearInputDraft(session_id)
-                  store.clearPendingImages(session_id)
-                  store.clearPendingFiles(session_id)
-                  store.clearPendingTextFiles(session_id)
-                  store.clearPendingSkills(session_id)
-                }
-              })
-            }
           }
           queryClient.invalidateQueries({
             queryKey: chatQueryKeys.unreadSessionCount(),
@@ -2285,6 +2102,64 @@ export default function useStreamingEvents({
         }
       }
     )
+
+    // The backend's final word on the prompt of a finished send. Emitted once
+    // per accepted send after the run log is final. Only this event decides
+    // whether the typed prompt returns to the composer.
+    const unlistenUserTurn = listen<UserTurnEvent>('chat:user-turn', event => {
+      const {
+        session_id,
+        worktree_id: eventWorktreeId,
+        user_turn,
+        restore_draft,
+        emitted_at_ms,
+      } = event.payload
+      const store = useChatStore.getState()
+      const sendStarted = store.sendStartedAt[session_id] ?? 0
+      if (sendStarted > emitted_at_ms) {
+        // A newer send owns the composer and the cache tail.
+        console.warn(
+          `[UserTurn] Ignoring stale outcome for session=${session_id} emitted_at_ms=${emitted_at_ms} send_started_at=${sendStarted}`
+        )
+        return
+      }
+      console.log(
+        `[UserTurn] session=${session_id} outcome=${user_turn} restore_draft=${restore_draft}`
+      )
+      recordUserTurnOutcome(session_id, user_turn)
+
+      if (restore_draft) {
+        const draftBefore = store.inputDrafts[session_id]
+        restoreLastSentPrompt(session_id)
+        const draftAfter = useChatStore.getState().inputDrafts[session_id]
+        if (draftAfter && draftAfter !== draftBefore) {
+          toast.info('Message restored to input')
+        }
+        // The prompt is not in history: drop the optimistic user turn, then
+        // refetch so an in-flight fetch from chat:cancelled cannot bring it back.
+        queryClient.setQueryData<Session>(
+          chatQueryKeys.session(session_id),
+          old => {
+            if (!old) return old
+            if (old.messages.at(-1)?.role !== 'user') return old
+            return { ...old, messages: old.messages.slice(0, -1) }
+          }
+        )
+      } else {
+        store.clearLastSentMessage(session_id)
+        store.clearLastSentAttachments(session_id)
+      }
+
+      queryClient.invalidateQueries({
+        queryKey: chatQueryKeys.session(session_id),
+      })
+      const worktreeId = store.sessionWorktreeMap[session_id] || eventWorktreeId
+      if (worktreeId) {
+        queryClient.invalidateQueries({
+          queryKey: chatQueryKeys.sessions(worktreeId),
+        })
+      }
+    })
 
     // Handle context compaction events
     const unlistenCompacting = listen<CompactingEvent>(
@@ -2532,6 +2407,7 @@ export default function useStreamingEvents({
       unlistenDone.then(f => f())
       unlistenError.then(f => f())
       unlistenCancelled.then(f => f())
+      unlistenUserTurn.then(f => f())
       unlistenCompacting.then(f => f())
       unlistenCompacted.then(f => f())
       unlistenBackendRetry.then(f => f())
