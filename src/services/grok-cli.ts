@@ -3,7 +3,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { invoke, invokeForOptionalServer } from '@/lib/transport'
+import { invokeForOptionalServer } from '@/lib/transport'
 import { logger } from '@/lib/logger'
 import { toast } from 'sonner'
 import { hasBackendTransport } from '@/lib/environment'
@@ -152,13 +152,17 @@ export function useGrokCliAuth(options?: { enabled?: boolean }) {
  * Hook to fetch current Grok subscription / Build usage (OAuth accounts).
  */
 export function useGrokUsage(options?: { enabled?: boolean }) {
+  const serverId = useOptionalSettingsTargetServerId()
   return useQuery({
-    queryKey: grokCliQueryKeys.usage(),
+    queryKey: [...grokCliQueryKeys.usage(), serverId ?? 'local'],
     queryFn: async (): Promise<GrokUsageSnapshot> => {
       if (!isTauri()) {
         throw new Error('Grok usage is only available when connected to Jean')
       }
-      return invoke<GrokUsageSnapshot>('get_grok_usage')
+      return invokeForOptionalServer<GrokUsageSnapshot>(
+        serverId,
+        'get_grok_usage'
+      )
     },
     enabled: options?.enabled ?? true,
     staleTime: query => getUsageStaleTime(query.state.data),

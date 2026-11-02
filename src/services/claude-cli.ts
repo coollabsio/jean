@@ -6,11 +6,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import {
-  invoke,
-  invokeForOptionalServer,
-  useWsConnectionStatus,
-} from '@/lib/transport'
+import { invokeForOptionalServer, useWsConnectionStatus } from '@/lib/transport'
 import { listen } from '@/lib/transport'
 import { toast } from 'sonner'
 import { useCallback, useEffect, useState } from 'react'
@@ -186,13 +182,17 @@ export function useClaudeCliAuth(options?: { enabled?: boolean }) {
  * Hook to fetch current Claude usage.
  */
 export function useClaudeUsage(options?: { enabled?: boolean }) {
+  const serverId = useOptionalSettingsTargetServerId()
   return useQuery({
-    queryKey: claudeCliQueryKeys.usage(),
+    queryKey: [...claudeCliQueryKeys.usage(), serverId ?? 'local'],
     queryFn: async (): Promise<ClaudeUsageSnapshot> => {
       if (!isTauri()) {
         throw new Error('Claude usage is only available in Tauri context')
       }
-      return invoke<ClaudeUsageSnapshot>('get_claude_usage')
+      return invokeForOptionalServer<ClaudeUsageSnapshot>(
+        serverId,
+        'get_claude_usage'
+      )
     },
     enabled: options?.enabled ?? true,
     staleTime: query => getUsageStaleTime(query.state.data),

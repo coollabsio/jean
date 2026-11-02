@@ -11,11 +11,7 @@ import {
   useQueryClient,
   type QueryClient,
 } from '@tanstack/react-query'
-import {
-  invoke,
-  invokeForOptionalServer,
-  useWsConnectionStatus,
-} from '@/lib/transport'
+import { invokeForOptionalServer, useWsConnectionStatus } from '@/lib/transport'
 import { listen } from '@/lib/transport'
 import { toast } from 'sonner'
 import { useCallback, useEffect, useState } from 'react'
@@ -177,13 +173,17 @@ export function useCodexCliAuth(options?: { enabled?: boolean }) {
  * Hook to fetch current Codex usage.
  */
 export function useCodexUsage(options?: { enabled?: boolean }) {
+  const serverId = useOptionalSettingsTargetServerId()
   return useQuery({
-    queryKey: codexCliQueryKeys.usage(),
+    queryKey: [...codexCliQueryKeys.usage(), serverId ?? 'local'],
     queryFn: async (): Promise<CodexUsageSnapshot> => {
       if (!isTauri()) {
         throw new Error('Codex usage is only available in Tauri context')
       }
-      return invoke<CodexUsageSnapshot>('get_codex_usage')
+      return invokeForOptionalServer<CodexUsageSnapshot>(
+        serverId,
+        'get_codex_usage'
+      )
     },
     enabled: options?.enabled ?? true,
     staleTime: query => getUsageStaleTime(query.state.data),
@@ -200,7 +200,10 @@ export async function installCodexUsageUpdateListener(
   queryClient: QueryClient
 ): Promise<() => void> {
   return listen<CodexUsageSnapshot>('codex-cli:usage-updated', event => {
-    queryClient.setQueryData(codexCliQueryKeys.usage(), event.payload)
+    queryClient.setQueryData(
+      [...codexCliQueryKeys.usage(), 'local'],
+      event.payload
+    )
   })
 }
 

@@ -86,9 +86,9 @@ describe('Codex usage update listener', () => {
     const cleanup = await installCodexUsageUpdateListener(queryClient)
     capturedHandler?.({ payload: snapshot })
 
-    expect(queryClient.getQueryData(codexCliQueryKeys.usage())).toEqual(
-      snapshot
-    )
+    expect(
+      queryClient.getQueryData([...codexCliQueryKeys.usage(), 'local'])
+    ).toEqual(snapshot)
     cleanup()
     expect(unlisten).toHaveBeenCalledTimes(1)
   })
