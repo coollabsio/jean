@@ -176,8 +176,12 @@ export interface ContextMentionPopoverHandle {
   moveUp: () => void
   moveDown: () => void
   selectCurrent: (investigate?: boolean) => void
-  /** Investigates the checked items; returns false when none are checked */
-  investigateChecked: (separate: boolean) => boolean
+  /**
+   * Investigates the checked items; returns false when none are checked.
+   * Mod+Enter starts one session per item; Mod+Shift+Enter (`oneSession`)
+   * starts one session for all of them.
+   */
+  investigateChecked: (oneSession: boolean) => boolean
 }
 
 interface ContextMentionPopoverProps {
@@ -427,11 +431,11 @@ export function ContextMentionPopover({
 
   const investigateLabels = getInvestigateLabels([...checkedItems.values()])
 
-  // Mod+Enter: one new session; Mod+Shift+Enter: one session per item
+  // Mod+Enter: one session per item; Mod+Shift+Enter: one new session
   const investigateChecked = useCallback(
-    (separate: boolean) => {
+    (oneSession: boolean) => {
       if (!onInvestigateInNewSession || checkedItems.size === 0) return false
-      handleInvestigateChecked(separate && checkedItems.size > 1)
+      handleInvestigateChecked(!oneSession && checkedItems.size > 1)
       return true
     },
     [checkedItems.size, handleInvestigateChecked, onInvestigateInNewSession]
@@ -823,12 +827,12 @@ export function ContextMentionPopover({
             secondaryActionLabel={investigateLabels.separate}
             onSecondaryAction={() => handleInvestigateChecked(true)}
             actionKbd={
-              showKeyboardHints ? `${getModifierSymbol()}+Enter` : undefined
-            }
-            secondaryActionKbd={
               showKeyboardHints
                 ? `${getModifierSymbol()}+Shift+Enter`
                 : undefined
+            }
+            secondaryActionKbd={
+              showKeyboardHints ? `${getModifierSymbol()}+Enter` : undefined
             }
             onInvestigate={() => handleInvestigateChecked(false)}
             className="pb-2.5"

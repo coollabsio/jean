@@ -1,4 +1,4 @@
-import { Loader2, Wand2 } from '@/components/icons/reicon'
+import { Loader2 } from '@/components/icons/reicon'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 import { cn } from '@/lib/utils'
@@ -9,7 +9,7 @@ export interface BulkInvestigateBarProps {
   noun?: string
   /** Replaces the default "Investigate N items in background" label */
   actionLabel?: string
-  /** Optional second action shown after the main button */
+  /** Optional second action shown after the main button; it becomes the primary (highlighted) button */
   secondaryActionLabel?: string
   onSecondaryAction?: () => void
   /** Keyboard shortcut hints shown inside the action buttons */
@@ -34,6 +34,7 @@ export function BulkInvestigateBar({
   onInvestigate,
   className,
 }: BulkInvestigateBarProps) {
+  const hasSecondary = Boolean(secondaryActionLabel && onSecondaryAction)
   return (
     <div
       className={cn(
@@ -57,34 +58,38 @@ export function BulkInvestigateBar({
       </div>
       <Button
         size="sm"
+        variant={hasSecondary ? 'outline' : 'default'}
         className="w-full h-10 sm:h-8 sm:w-auto sm:ml-auto"
         disabled={isLoading}
         onClick={onInvestigate}
       >
-        {isLoading ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : (
-          <Wand2 className="h-4 w-4 text-current" />
-        )}
+        {isLoading && <Loader2 className="h-4 w-4 animate-spin" />}
         {isLoading
           ? 'Starting…'
           : (actionLabel ?? `Investigate ${count} ${noun} in background`)}
         {actionKbd && !isLoading && (
-          <Kbd className="bg-primary-foreground/15 text-current">
+          <Kbd
+            className={cn(
+              !hasSecondary && 'bg-primary-foreground/15 text-current'
+            )}
+          >
             {actionKbd}
           </Kbd>
         )}
       </Button>
-      {secondaryActionLabel && onSecondaryAction && (
+      {hasSecondary && (
         <Button
           size="sm"
-          variant="outline"
           className="w-full h-10 sm:h-8 sm:w-auto"
           disabled={isLoading}
           onClick={onSecondaryAction}
         >
           {secondaryActionLabel}
-          {secondaryActionKbd && <Kbd>{secondaryActionKbd}</Kbd>}
+          {secondaryActionKbd && (
+            <Kbd className="bg-primary-foreground/15 text-current">
+              {secondaryActionKbd}
+            </Kbd>
+          )}
         </Button>
       )}
     </div>

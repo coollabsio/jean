@@ -695,7 +695,7 @@ describe('ContextMentionPopover', () => {
     expect(issueCheckbox).not.toBeChecked()
 
     fireEvent.keyDown(issueCheckbox, { key: ' ' })
-    fireEvent.keyDown(search, { key: 'Enter', ctrlKey: true, shiftKey: true })
+    fireEvent.keyDown(search, { key: 'Enter', ctrlKey: true })
     expect(onInvestigateInNewSession).toHaveBeenCalledWith(
       [items[1], items[0]],
       true
@@ -703,7 +703,7 @@ describe('ContextMentionPopover', () => {
     expect(onSelectContext).not.toHaveBeenCalled()
   })
 
-  it('investigates checked items in one session with Mod+Enter', () => {
+  it('investigates checked items in one session with Mod+Shift+Enter', () => {
     const onInvestigateInNewSession = vi.fn()
     render(
       <ContextMentionPopover
@@ -720,7 +720,7 @@ describe('ContextMentionPopover', () => {
 
     const checkbox = screen.getByRole('checkbox', { name: 'Select #123' })
     fireEvent.click(checkbox)
-    fireEvent.keyDown(checkbox, { key: 'Enter', metaKey: true })
+    fireEvent.keyDown(checkbox, { key: 'Enter', metaKey: true, shiftKey: true })
     expect(onInvestigateInNewSession).toHaveBeenCalledWith([items[0]], false)
   })
 
