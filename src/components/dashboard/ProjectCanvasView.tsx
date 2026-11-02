@@ -567,21 +567,11 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
   const unpushedCount =
     gitStatus?.unpushed_count ?? worktree.cached_unpushed_count ?? 0
 
-  // Diff stats: branch diff + uncommitted for non-base; uncommitted only for base
-  const branchDiffAdded =
-    gitStatus?.branch_diff_added ?? worktree.cached_branch_diff_added ?? 0
-  const branchDiffRemoved =
-    gitStatus?.branch_diff_removed ?? worktree.cached_branch_diff_removed ?? 0
-  const uncommittedAdded =
+  // Diff stats: only uncommitted changes (committed branch diff is hidden)
+  const diffAdded =
     gitStatus?.uncommitted_added ?? worktree.cached_uncommitted_added ?? 0
-  const uncommittedRemoved =
+  const diffRemoved =
     gitStatus?.uncommitted_removed ?? worktree.cached_uncommitted_removed ?? 0
-  const diffAdded = isBase
-    ? uncommittedAdded
-    : branchDiffAdded + uncommittedAdded
-  const diffRemoved = isBase
-    ? uncommittedRemoved
-    : branchDiffRemoved + uncommittedRemoved
 
   const pickRemoteOrRun = useRemotePicker(worktree.path)
 
@@ -642,13 +632,9 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
 
   const openDiff = useCallback(() => {
     onDiffClick?.(
-      getCanvasDiffRequest(
-        worktree,
-        defaultBranch,
-        isBase ? 'uncommitted' : 'branch'
-      )
+      getCanvasDiffRequest(worktree, defaultBranch, 'uncommitted')
     )
-  }, [onDiffClick, isBase, worktree, defaultBranch])
+  }, [onDiffClick, worktree, defaultBranch])
 
   const handleDiffClick = useCallback(
     (e: React.MouseEvent) => {
