@@ -618,6 +618,8 @@ export interface GitPushResponse {
 
 /** A single finding from an AI code review */
 export interface ReviewFinding {
+  /** Stable finding number (H1, M2, L3). Missing in older results and CodeRabbit. */
+  id?: string
   /** Severity level of the finding */
   severity: 'critical' | 'warning' | 'suggestion'
   /** Primary category for the issue */
@@ -635,10 +637,14 @@ export interface ReviewFinding {
     | 'repo_standard'
   /** Model confidence in the finding */
   confidence?: 'high' | 'medium'
+  /** Whether the reviewer confirmed the issue itself */
+  verified?: boolean
   /** Whether this finding should block approval */
   blocking?: boolean
-  /** Whether the issue was introduced or materially worsened by the diff */
+  /** Regression (true) or old bug that also exists in the base branch (false) */
   introduced_by_diff?: boolean
+  /** How the behavior worked on the base branch (regressions only) */
+  base_behavior?: string
   /** File path where the finding applies */
   file: string
   /** Line number if applicable */
@@ -661,6 +667,12 @@ export interface ReviewResponse {
   findings: ReviewFinding[]
   /** Overall review verdict */
   approval_status: 'approved' | 'changes_requested' | 'needs_discussion'
+  /** Intended changes that need a release note */
+  release_notes?: string[]
+  /** Reviewed areas that looked correct */
+  looked_correct?: string[]
+  /** Suggested order of work, each step starting with finding id(s) */
+  suggested_order?: string[]
 }
 
 export interface ReviewResultEntry {

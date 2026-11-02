@@ -89,11 +89,11 @@ function getSeverityConfig(severity: string): {
 } {
   switch (severity) {
     case 'critical':
-      return { variant: 'danger', label: 'Critical' }
+      return { variant: 'danger', label: 'High' }
     case 'warning':
-      return { variant: 'warning', label: 'Warning' }
+      return { variant: 'warning', label: 'Medium' }
     case 'suggestion':
-      return { variant: 'info', label: 'Suggestion' }
+      return { variant: 'info', label: 'Low' }
     case 'praise':
       return { variant: 'success', label: 'Praise' }
     default:
@@ -126,6 +126,35 @@ function sortFindingsBySeverity(
     )
 }
 
+const SEVERITY_ID_PREFIX: Record<string, string> = {
+  critical: 'H',
+  warning: 'M',
+  suggestion: 'L',
+}
+
+/**
+ * Finding numbers (H1, M2, L3) keyed by original index. Uses the reviewer's
+ * ids when every finding has one; otherwise numbers each severity in order
+ * (older results and CodeRabbit have no ids).
+ */
+export function getFindingIds(
+  sorted: { finding: ReviewFinding; originalIndex: number }[]
+): Map<number, string> {
+  const ids = new Map<number, string>()
+  const useReviewerIds = sorted.every(({ finding }) => finding.id?.trim())
+  const counters: Record<string, number> = {}
+  for (const { finding, originalIndex } of sorted) {
+    if (useReviewerIds) {
+      ids.set(originalIndex, (finding.id ?? '').trim())
+      continue
+    }
+    const prefix = SEVERITY_ID_PREFIX[finding.severity] ?? 'L'
+    counters[prefix] = (counters[prefix] ?? 0) + 1
+    ids.set(originalIndex, `${prefix}${counters[prefix]}`)
+  }
+  return ids
+}
+
 function formatReviewMetadata(value: string): string {
   return value
     .split('_')
@@ -137,16 +166,23 @@ function isFixableFinding(finding: ReviewFinding): boolean {
   return (finding.severity as string) !== 'praise'
 }
 
-function formatFindingMessage(finding: ReviewFinding): string {
+function formatBaseBehavior(finding: ReviewFinding): string {
+  return finding.base_behavior?.trim()
+    ? `\n**Base branch behavior:** ${finding.base_behavior.trim()}\n`
+    : ''
+}
+
+function formatFindingMessage(finding: ReviewFinding, id: string): string {
   const suggestionToApply = finding.suggestion ?? ''
   return `Fix the following code review finding:
 
+**Finding:** ${id}
 **File:** ${finding.file}
 **Line:** ${finding.line ?? 'N/A'}
 **Issue:** ${finding.title}
 
 ${finding.description}
-
+${formatBaseBehavior(finding)}
 **Suggested fix:**
 ${suggestionToApply || '(Please determine the best fix)'}
 
@@ -154,19 +190,19 @@ Please apply this fix to the file.`
 }
 
 function formatCombinedFindingsMessage(
-  findings: { finding: ReviewFinding }[]
+  findings: { finding: ReviewFinding; id: string }[]
 ): string {
   return `Fix the following ${findings.length} code review findings:
 
 ${findings
   .map(
-    ({ finding }, i) => `
-### ${i + 1}. ${finding.title}
+    ({ finding, id }) => `
+### ${id}. ${finding.title}
 **File:** ${finding.file}
 **Line:** ${finding.line ?? 'N/A'}
 
 ${finding.description}
-
+${formatBaseBehavior(finding)}
 **Suggested fix:**
 ${finding.suggestion ?? '(Please determine the best fix)'}
 `
@@ -193,6 +229,41 @@ function ReviewHeader({ children }: { children: React.ReactNode }) {
         Review Findings
       </span>
       {children}
+    </div>
+  )
+}
+
+const REPORT_SECTIONS = [
+  { key: 'suggested_order', title: 'Suggested Order' },
+  { key: 'release_notes', title: 'Release Notes' },
+  { key: 'looked_correct', title: 'Looked Correct' },
+] as const
+
+/** Report sections that the pre-release review shows after its tables */
+function ReviewReportSections({ review }: { review: ReviewResponse }) {
+  const sections = REPORT_SECTIONS.map(section => ({
+    ...section,
+    items: (review[section.key] ?? []).filter(item => item.trim()),
+  })).filter(section => section.items.length > 0)
+  if (sections.length === 0) return null
+
+  return (
+    <div className="space-y-3 border-t px-4 py-3">
+      {sections.map(section => (
+        <section key={section.key} aria-label={section.title}>
+          <h4 className="mb-1 text-xs font-medium text-muted-foreground">
+            {section.title}
+          </h4>
+          <ul className="list-disc space-y-0.5 pl-4 text-xs leading-relaxed text-foreground/90 select-text">
+            {section.items.map((item, index) => (
+              // Items are plain strings and can repeat, so include the index.
+              <li key={`${index}:${item}`} className="break-words">
+                {item}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
     </div>
   )
 }
@@ -298,6 +369,11 @@ export function ReviewResultsPanel({
     [reviewResults]
   )
 
+  const findingIds = useMemo(
+    () => getFindingIds(sortedFindings),
+    [sortedFindings]
+  )
+
   const fixableIndices = useMemo(
     () =>
       sortedFindings.flatMap(({ finding, originalIndex }) =>
@@ -383,11 +459,13 @@ export function ReviewResultsPanel({
   )
 
   const getSelectedFindings = useCallback(() => {
-    return sortedFindings.filter(
-      ({ finding, originalIndex }) =>
-        selected.has(originalIndex) && isFixableFinding(finding)
-    )
-  }, [sortedFindings, selected])
+    return sortedFindings
+      .filter(
+        ({ finding, originalIndex }) =>
+          selected.has(originalIndex) && isFixableFinding(finding)
+      )
+      .map(item => ({ ...item, id: findingIds.get(item.originalIndex) ?? '' }))
+  }, [findingIds, sortedFindings, selected])
 
   const reviewFixOptions = useMemo((): ReviewFixOptions | undefined => {
     if (!selectedReviewEntry) return undefined
@@ -430,7 +508,9 @@ export function ReviewResultsPanel({
     try {
       markSelectedFixed(selectedFindings.map(f => f.originalIndex))
       onSendFix(
-        selectedFindings.map(({ finding }) => formatFindingMessage(finding)),
+        selectedFindings.map(({ finding, id }) =>
+          formatFindingMessage(finding, id)
+        ),
         fixExecutionMode,
         reviewFixOptions
       )
@@ -594,21 +674,24 @@ export function ReviewResultsPanel({
       </ReviewHeader>
 
       {!hasFindings ? (
-        <Empty className="p-6 md:p-6">
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <FileCode />
-            </EmptyMedia>
-            <EmptyTitle className="text-sm">
-              No specific findings, code looks good
-            </EmptyTitle>
-            {reviewResults.summary && (
-              <EmptyDescription className="text-xs">
-                {reviewResults.summary}
-              </EmptyDescription>
-            )}
-          </EmptyHeader>
-        </Empty>
+        <ScrollArea className="min-h-0 flex-1">
+          <Empty className="p-6 md:p-6">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <FileCode />
+              </EmptyMedia>
+              <EmptyTitle className="text-sm">
+                No specific findings, code looks good
+              </EmptyTitle>
+              {reviewResults.summary && (
+                <EmptyDescription className="text-xs">
+                  {reviewResults.summary}
+                </EmptyDescription>
+              )}
+            </EmptyHeader>
+          </Empty>
+          <ReviewReportSections review={reviewResults} />
+        </ScrollArea>
       ) : (
         <>
           {/* Selection controls */}
@@ -655,6 +738,7 @@ export function ReviewResultsPanel({
                 const isActive = safeActiveIndex === listIndex
                 const canSelect = isFixableFinding(finding)
                 const lineInfo = finding.line ? `:${finding.line}` : ''
+                const findingId = findingIds.get(originalIndex)
 
                 return (
                   // react-doctor-disable-next-line react-doctor/no-static-element-interactions -- pointer mirror of the panel's handlePanelKeyDown roving navigation; checkbox/expand are real controls
@@ -695,6 +779,9 @@ export function ReviewResultsPanel({
                             ) : (
                               <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
                             )}
+                            <span className="shrink-0 font-mono text-xs font-medium text-muted-foreground">
+                              {findingId}
+                            </span>
                             <p className="min-w-0 flex-1 truncate text-sm text-foreground">
                               {finding.title}
                             </p>
@@ -713,6 +800,32 @@ export function ReviewResultsPanel({
                                 {formatReviewMetadata(finding.category)}
                               </span>
                             )}
+                            {finding.introduced_by_diff !== undefined && (
+                              <span
+                                className={cn(
+                                  'shrink-0',
+                                  finding.introduced_by_diff
+                                    ? 'text-warning'
+                                    : 'text-muted-foreground/70'
+                                )}
+                              >
+                                {finding.introduced_by_diff
+                                  ? 'Regression'
+                                  : 'Old bug'}
+                              </span>
+                            )}
+                            {finding.verified !== undefined && (
+                              <span
+                                className={cn(
+                                  'shrink-0',
+                                  finding.verified
+                                    ? 'text-success'
+                                    : 'text-muted-foreground/70'
+                                )}
+                              >
+                                {finding.verified ? 'Verified' : 'Unverified'}
+                              </span>
+                            )}
                           </div>
                         </button>
 
@@ -729,6 +842,17 @@ export function ReviewResultsPanel({
                                 </h4>
                                 <p className="break-words text-sm leading-relaxed text-foreground/90 select-text">
                                   {finding.failure_scenario}
+                                </p>
+                              </div>
+                            )}
+
+                            {finding.base_behavior?.trim() && (
+                              <div>
+                                <h4 className="mb-1 text-xs font-medium text-muted-foreground">
+                                  Base Branch Behavior
+                                </h4>
+                                <p className="break-words text-sm leading-relaxed text-foreground/90 select-text">
+                                  {finding.base_behavior}
                                 </p>
                               </div>
                             )}
@@ -756,11 +880,6 @@ export function ReviewResultsPanel({
                                   Blocking
                                 </Badge>
                               )}
-                              {finding.introduced_by_diff === true && (
-                                <Badge variant="subtle" className="text-2xs">
-                                  Introduced by diff
-                                </Badge>
-                              )}
                             </div>
                           </div>
                         )}
@@ -770,6 +889,7 @@ export function ReviewResultsPanel({
                 )
               })}
             </div>
+            <ReviewReportSections review={reviewResults} />
           </ScrollArea>
 
           {/* Summary */}

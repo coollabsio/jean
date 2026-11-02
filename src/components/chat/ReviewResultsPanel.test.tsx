@@ -79,12 +79,132 @@ describe('ReviewResultsPanel', () => {
     expect(screen.getByText('Correctness')).toBeInTheDocument()
     expect(screen.getByText('High confidence')).toBeInTheDocument()
     expect(screen.getByText('Blocking')).toBeInTheDocument()
-    expect(screen.getByText('Introduced by diff')).toBeInTheDocument()
+    expect(screen.getByText('Regression')).toBeInTheDocument()
     expect(screen.getByText('Failure Scenario')).toBeInTheDocument()
     expect(
       screen.getByText('When value is null, rendering throws.')
     ).toBeInTheDocument()
     expect(screen.queryByText(/praise/i)).not.toBeInTheDocument()
+  })
+
+  it('shows the pre-release report: ids, verification, base behavior, and sections', async () => {
+    const onSendFix = vi.fn()
+    const reviewResults: ReviewResponse = {
+      summary: 'Pre-release style review.',
+      approval_status: 'changes_requested',
+      findings: [
+        {
+          id: 'M1',
+          severity: 'warning',
+          verified: false,
+          introduced_by_diff: false,
+          base_behavior: '',
+          file: 'src/old.ts',
+          title: 'Old timeout bug',
+          description: 'Timeout is ignored.',
+        },
+        {
+          id: 'H1',
+          severity: 'critical',
+          verified: true,
+          introduced_by_diff: true,
+          base_behavior: 'The base branch kept existing values on upgrade.',
+          file: 'src/upgrade.ts',
+          title: 'Upgrade drops values',
+          description: 'Values are reset.',
+        },
+      ],
+      release_notes: ['New default theme'],
+      looked_correct: ['Auth checks'],
+      suggested_order: ['H1: blocks release', 'M1: low risk'],
+    }
+    useChatStore.getState().setReviewResults('session-1', reviewResults)
+
+    render(<ReviewResultsPanel sessionId="session-1" onSendFix={onSendFix} />)
+
+    const highRow = screen.getByTestId('review-finding-row-1')
+    expect(within(highRow).getByText('H1')).toBeInTheDocument()
+    expect(within(highRow).getByText('High')).toBeInTheDocument()
+    expect(within(highRow).getByText('Regression')).toBeInTheDocument()
+    expect(within(highRow).getByText('Verified')).toBeInTheDocument()
+    const oldRow = screen.getByTestId('review-finding-row-0')
+    expect(within(oldRow).getByText('Old bug')).toBeInTheDocument()
+    expect(within(oldRow).getByText('Unverified')).toBeInTheDocument()
+
+    await userEvent.click(
+      within(highRow).getByRole('button', { name: /upgrade drops values/i })
+    )
+    expect(
+      screen.getByText('The base branch kept existing values on upgrade.')
+    ).toBeInTheDocument()
+
+    expect(
+      within(screen.getByRole('region', { name: 'Suggested Order' })).getByText(
+        'H1: blocks release'
+      )
+    ).toBeInTheDocument()
+    expect(
+      within(screen.getByRole('region', { name: 'Release Notes' })).getByText(
+        'New default theme'
+      )
+    ).toBeInTheDocument()
+    expect(
+      within(screen.getByRole('region', { name: 'Looked Correct' })).getByText(
+        'Auth checks'
+      )
+    ).toBeInTheDocument()
+
+    await userEvent.click(
+      screen.getByRole('button', { name: /send to chat \(2\)/i })
+    )
+    const message = onSendFix.mock.calls[0]?.[0] as string
+    expect(message).toContain('### H1. Upgrade drops values')
+    expect(message).toContain(
+      '**Base branch behavior:** The base branch kept existing values on upgrade.'
+    )
+    expect(message).toContain('### M1. Old timeout bug')
+    expect(message.indexOf('H1.')).toBeLessThan(message.indexOf('M1.'))
+  })
+
+  it('numbers findings by severity when the reviewer gave no ids', () => {
+    useChatStore.getState().setReviewResults('session-1', {
+      summary: 'Legacy result.',
+      approval_status: 'changes_requested',
+      findings: [
+        {
+          severity: 'suggestion',
+          file: 'a.ts',
+          title: 'Low one',
+          description: 'd',
+        },
+        {
+          severity: 'critical',
+          file: 'b.ts',
+          title: 'High one',
+          description: 'd',
+        },
+        {
+          severity: 'critical',
+          file: 'c.ts',
+          title: 'High two',
+          description: 'd',
+        },
+      ],
+    })
+
+    render(<ReviewResultsPanel sessionId="session-1" />)
+
+    expect(
+      within(screen.getByTestId('review-finding-row-1')).getByText('H1')
+    ).toBeInTheDocument()
+    expect(
+      within(screen.getByTestId('review-finding-row-2')).getByText('H2')
+    ).toBeInTheDocument()
+    expect(
+      within(screen.getByTestId('review-finding-row-0')).getByText('L1')
+    ).toBeInTheDocument()
+    expect(screen.queryByText('Regression')).not.toBeInTheDocument()
+    expect(screen.queryByText('Verified')).not.toBeInTheDocument()
   })
 
   it('shows a running indicator while the review is in progress', () => {
@@ -186,9 +306,7 @@ describe('ReviewResultsPanel', () => {
       ],
     } as never)
 
-    const { rerender } = render(
-      <ReviewResultsPanel sessionId="session-1" />
-    )
+    const { rerender } = render(<ReviewResultsPanel sessionId="session-1" />)
     await userEvent.click(screen.getByRole('combobox'))
     await userEvent.click(
       screen.getByRole('option', { name: 'Claude · claude-fable-5' })
