@@ -34,7 +34,6 @@ import {
   type CloseConfirmMode,
 } from './CloseWorktreeDialog'
 import { useChatStore } from '@/store/chat-store'
-import { isSessionEmpty } from '@/components/projects/worktree-close-decision'
 import { useTerminalStore } from '@/store/terminal-store'
 import { useBrowserStore } from '@/store/browser-store'
 import { useUIStore } from '@/store/ui-store'
@@ -83,11 +82,15 @@ import {
   type SessionCardData,
 } from './session-card-utils'
 import {
-  resolveModalSessionId,
+  decideSessionClose,
   isActiveSessionGone,
+  openSessions,
+  resolveActiveSessionId,
+  selectNeighborAfterClose,
   sessionsForTabBar,
   sortSessionCardsForTabs,
-} from './session-tab-order'
+  type SessionCloseDecision,
+} from './session-lifecycle'
 import { useCanvasStoreState } from './hooks/useCanvasStoreState'
 import {
   ContextMenu,
@@ -348,12 +351,12 @@ export const SessionChatModal = memo(function SessionChatModal({
     missingActiveSessionFailed,
     missingActiveSession
   )
-  const currentSessionId = resolveModalSessionId(
-    activeSessionId,
-    sessions.map(session => session.id),
-    sessionsData?.active_session_id,
-    activeSessionGone
-  )
+  const currentSessionId = resolveActiveSessionId({
+    current: activeSessionId,
+    currentGone: activeSessionGone,
+    backendActive: sessionsData?.active_session_id,
+    listedIds: sessions.map(session => session.id),
+  })
   const tabSessions = useMemo(
     () =>
       sessionsForTabBar(
@@ -602,24 +605,6 @@ export const SessionChatModal = memo(function SessionChatModal({
   // Ref is updated after sortedSessions is computed (below).
   const sortedSessionsRef = useRef<Session[]>([])
 
-  const selectVisualNeighbor = useCallback(
-    (closedId: string) => {
-      const activeId = useChatStore.getState().activeSessionIds[worktreeId]
-      if (activeId !== closedId) return // Only switch if closing the active tab
-      const sorted = sortedSessionsRef.current
-      const idx = sorted.findIndex(s => s.id === closedId)
-      if (idx === -1) return
-      // Left neighbor first, then right
-      const left = idx > 0 ? sorted[idx - 1] : undefined
-      const right = idx < sorted.length - 1 ? sorted[idx + 1] : undefined
-      const nextId = left?.id ?? right?.id ?? null
-      if (nextId) {
-        useChatStore.getState().setActiveSession(worktreeId, nextId)
-      }
-    },
-    [worktreeId]
-  )
-
   // CMD+W: close the active session tab, or close modal if last tab
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)
   const [closeConfirmMode, setCloseConfirmMode] =
@@ -632,37 +617,56 @@ export const SessionChatModal = memo(function SessionChatModal({
     setCloseConfirmOpen(false)
   }, [])
 
-  // Delete a session tab, asking for confirmation first.
-  const removeSessionTab = useCallback(
-    (session: Session) => {
-      const activeSessions = tabSessions.filter(s => !s.archived_at)
-      const sessionIsEmpty = isSessionEmpty(
-        session,
-        useChatStore.getState().inputDrafts
-      )
-      // Confirm any non-empty session. Only confirming the last tab allowed
-      // held/cascade closes to wipe chats without a prompt (issue #56). Empty
-      // sessions (no messages and no unsent draft) close immediately.
-      const needsConfirm = !sessionIsEmpty
-
-      const action = () => {
-        if (activeSessions.length > 1) {
-          selectVisualNeighbor(session.id)
+  // Run a close decision. The neighbor is picked when the close runs, after
+  // any confirmation, from the tab order at that moment. When the last
+  // session closes, the mutation selects the backend-created empty session.
+  const applyCloseDecision = useCallback(
+    (decision: SessionCloseDecision, sessionId: string | null) => {
+      if (decision === 'noop') return
+      if (decision === 'confirm-worktree') {
+        setCloseConfirmMode('worktree')
+        pendingCloseAction.current = () => {
+          onRequestCloseWorktree()
+          onClose()
         }
-        // The mutation selects the backend-created empty session after success
-        // when this was the last session.
-        handleDeleteSession(session.id)
+        setCloseConfirmOpen(true)
+        return
       }
-
-      if (needsConfirm) {
+      if (!sessionId) return
+      const closeTab = () => {
+        const { activeSessionIds, setActiveSession } = useChatStore.getState()
+        const nextId = selectNeighborAfterClose(
+          openSessions(sortedSessionsRef.current).map(s => s.id),
+          sessionId,
+          activeSessionIds[worktreeId]
+        )
+        if (nextId) setActiveSession(worktreeId, nextId)
+        handleDeleteSession(sessionId)
+      }
+      if (decision === 'confirm-session') {
         setCloseConfirmMode('session')
-        pendingCloseAction.current = action
+        pendingCloseAction.current = closeTab
         setCloseConfirmOpen(true)
       } else {
-        action()
+        closeTab()
       }
     },
-    [tabSessions, handleDeleteSession, selectVisualNeighbor]
+    [handleDeleteSession, onClose, onRequestCloseWorktree, worktreeId]
+  )
+
+  // Delete a session tab, asking for confirmation first when it has content.
+  const removeSessionTab = useCallback(
+    (session: Session) => {
+      const decision = decideSessionClose({
+        target: session,
+        sessions: tabSessions,
+        inputDrafts: useChatStore.getState().inputDrafts,
+        onLastSession: 'close-session',
+        isServer,
+      })
+      applyCloseDecision(decision, session.id)
+    },
+    [tabSessions, isServer, applyCloseDecision]
   )
 
   const handleTabAuxClick = useCallback(
@@ -679,40 +683,19 @@ export const SessionChatModal = memo(function SessionChatModal({
     if (!isOpen) return
     const handler = (e: Event) => {
       e.stopImmediatePropagation()
-      const activeSessions = tabSessions.filter(s => !s.archived_at)
-      if (activeSessions.length === 0) {
-        // A server has one fixed base session: never close it.
-        if (isServer) return
-        const closeWorktree = () => {
-          onRequestCloseWorktree()
-          onClose()
-        }
-        setCloseConfirmMode('worktree')
-        pendingCloseAction.current = closeWorktree
-        setCloseConfirmOpen(true)
-        return
-      }
-      const currentSession = tabSessions.find(s => s.id === currentSessionId)
-      const sessionIsEmpty =
-        !currentSession ||
-        isSessionEmpty(currentSession, useChatStore.getState().inputDrafts)
-      const action = () => {
-        if (activeSessions.length <= 1) {
-          if (currentSessionId) {
-            handleDeleteSession(currentSessionId)
-          }
-        } else if (currentSessionId) {
-          selectVisualNeighbor(currentSessionId)
-          handleDeleteSession(currentSessionId)
-        }
-      }
-      if (!sessionIsEmpty) {
-        setCloseConfirmMode('session')
-        pendingCloseAction.current = action
-        setCloseConfirmOpen(true)
-      } else {
-        action()
-      }
+      const target = currentSessionId
+        ? (tabSessions.find(s => s.id === currentSessionId) ?? {
+            id: currentSessionId,
+          })
+        : null
+      const decision = decideSessionClose({
+        target,
+        sessions: tabSessions,
+        inputDrafts: useChatStore.getState().inputDrafts,
+        onLastSession: 'close-session',
+        isServer,
+      })
+      applyCloseDecision(decision, currentSessionId)
     }
     window.addEventListener('close-session-or-worktree', handler, {
       capture: true,
@@ -721,16 +704,7 @@ export const SessionChatModal = memo(function SessionChatModal({
       window.removeEventListener('close-session-or-worktree', handler, {
         capture: true,
       })
-  }, [
-    isOpen,
-    tabSessions,
-    currentSessionId,
-    handleDeleteSession,
-    selectVisualNeighbor,
-    onRequestCloseWorktree,
-    onClose,
-    isServer,
-  ])
+  }, [isOpen, tabSessions, currentSessionId, applyCloseDecision, isServer])
 
   // Listen for toggle-session-label event (CMD+S)
   useEffect(() => {
@@ -842,7 +816,7 @@ export const SessionChatModal = memo(function SessionChatModal({
     [sortedCards]
   )
 
-  // Keep ref in sync for selectVisualNeighbor (declared above sortedSessions)
+  // Keep ref in sync for applyCloseDecision (declared above sortedSessions)
   useEffect(() => {
     sortedSessionsRef.current = sortedSessions
   }, [sortedSessions])

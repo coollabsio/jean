@@ -33,7 +33,10 @@ import {
 import { WorkingWaveform } from '@/components/ui/status-indicator'
 import { isNativeApp } from '@/lib/environment'
 import { formatShortcutDisplay } from '@/types/keybindings'
-import { mergeSessionIntoWorktreeSessions } from '@/components/chat/session-tab-order'
+import {
+  decideSessionClose,
+  mergeSessionIntoWorktreeSessions,
+} from '@/components/chat/session-lifecycle'
 import { useChatStore } from '@/store/chat-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
@@ -46,7 +49,6 @@ import {
 import { invoke } from '@/lib/transport'
 import { SwipeActionRow } from '@/components/ui/swipe-action-row'
 import { CloseWorktreeDialog } from '@/components/chat/CloseWorktreeDialog'
-import { decideSessionRowClose } from './worktree-close-decision'
 import {
   setRecentSessionPinned,
   useRecentSessionPins,
@@ -331,11 +333,13 @@ export function RecentWorktreesList({
         worktreePath: row.worktree.path,
         includeMessageCounts: false,
       })
-      const decision = decideSessionRowClose(
-        row.session,
+      const decision = decideSessionClose({
+        target: row.session,
         sessions,
-        useChatStore.getState().inputDrafts
-      )
+        inputDrafts: useChatStore.getState().inputDrafts,
+        onLastSession: 'confirm-worktree',
+      })
+      if (decision === 'noop') return
       if (decision === 'close-session') closeRow(row, 'session')
       else
         setCloseTarget({

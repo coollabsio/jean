@@ -23,7 +23,11 @@ import { SidebarSessionContextMenu } from './SidebarSessionContextMenu'
 import { StatusGroupContextMenu } from './StatusGroupContextMenu'
 import { visibleWorktreeIds } from './sidebar-context-menu'
 import { middleClickClose } from '@/lib/middle-click'
-import { isSessionEmpty } from './worktree-close-decision'
+import {
+  decideSessionClose,
+  openSessions,
+  resolveActiveSessionId,
+} from '@/components/chat/session-lifecycle'
 import { useRenameWorktree, useWorktrees } from '@/services/projects'
 import { useCloseSession, useRenameSession, useSessions } from '@/services/chat'
 import { isAskUserQuestion, isPlanToolCall, type Session } from '@/types/chat'
@@ -606,11 +610,12 @@ export const WorktreeItem = memo(function WorktreeItem({
     useChatStore.getState().clearActiveWorktree()
 
     // Open session modal with the first active session
-    const sessions = sessionsData?.sessions ?? []
-    const activeSessions = sessions.filter(s => !s.archived_at)
-    const activeSessionId =
-      useChatStore.getState().activeSessionIds[worktree.id]
-    const targetSessionId = activeSessionId ?? activeSessions[0]?.id
+    const targetSessionId =
+      resolveActiveSessionId({
+        current: useChatStore.getState().activeSessionIds[worktree.id],
+        backendActive: sessionsData?.active_session_id,
+        listedIds: openSessions(sessionsData?.sessions ?? []).map(s => s.id),
+      }) ?? undefined
     if (targetSessionId) {
       useChatStore.getState().setActiveSession(worktree.id, targetSessionId)
     }
@@ -638,6 +643,7 @@ export const WorktreeItem = memo(function WorktreeItem({
     worktree.id,
     worktree.path,
     sessionsData?.sessions,
+    sessionsData?.active_session_id,
     selectProject,
     selectWorktree,
   ])
@@ -652,13 +658,18 @@ export const WorktreeItem = memo(function WorktreeItem({
   // session tab: non-empty sessions confirm first, empty ones close at once.
   const handleSessionRemove = useCallback(
     (session: Session) => {
-      if (isSessionEmpty(session, useChatStore.getState().inputDrafts)) {
-        handleDeleteSession(session.id)
-      } else {
+      const decision = decideSessionClose({
+        target: session,
+        sessions: sessionList ?? [session],
+        inputDrafts: useChatStore.getState().inputDrafts,
+        onLastSession: 'close-session',
+      })
+      if (decision === 'close-session') handleDeleteSession(session.id)
+      else if (decision === 'confirm-session') {
         setCloseConfirm({ mode: 'session', sessionId: session.id })
       }
     },
-    [handleDeleteSession]
+    [handleDeleteSession, sessionList]
   )
 
   const handleDoubleClick = useCallback(

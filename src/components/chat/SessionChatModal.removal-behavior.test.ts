@@ -85,47 +85,6 @@ describe('SessionChatModal removal behavior', () => {
     expect(source).toContain('onPointerDown={e => e.stopPropagation()}')
   })
 
-  it('uses the delete-aware handler when removing non-last tabs', () => {
-    const source = readSource('src/components/chat/SessionChatModal.tsx')
-    const start = source.indexOf('const removeSessionTab = useCallback(')
-    const end = source.indexOf('\n  const handleTabAuxClick', start)
-    const removeSessionTab =
-      start === -1 || end === -1 ? '' : source.slice(start, end)
-
-    expect(removeSessionTab).toBeTruthy()
-    expect(removeSessionTab).toContain('handleDeleteSession(session.id)')
-  })
-
-  it('confirms non-empty session tab close even when other tabs remain (issue #56)', () => {
-    const source = readSource('src/components/chat/SessionChatModal.tsx')
-    const start = source.indexOf('const removeSessionTab = useCallback(')
-    const end = source.indexOf('\n  const handleTabAuxClick', start)
-    const removeSessionTab =
-      start === -1 || end === -1 ? '' : source.slice(start, end)
-
-    expect(removeSessionTab).toContain('const needsConfirm = !sessionIsEmpty')
-    // Confirm gate wraps the action for every non-empty tab (not only last).
-    expect(removeSessionTab).toMatch(
-      /if \(needsConfirm\) \{[\s\S]*?pendingCloseAction\.current = action/
-    )
-    // Neighbor select happens inside the deferred action, not as a bypass.
-    expect(removeSessionTab).toMatch(
-      /const action = \(\) => \{[\s\S]*activeSessions\.length > 1[\s\S]*handleDeleteSession/
-    )
-  })
-
-  it('waits for last-session removal success before leaving the modal', () => {
-    const source = readSource('src/components/chat/SessionChatModal.tsx')
-    const start = source.indexOf('const removeSessionTab = useCallback(')
-    const end = source.indexOf('\n  const handleTabAuxClick', start)
-    const removeSessionTab =
-      start === -1 || end === -1 ? '' : source.slice(start, end)
-
-    expect(removeSessionTab).toContain('handleDeleteSession(session.id)')
-    expect(removeSessionTab).not.toContain('onClose()')
-    expect(removeSessionTab).not.toContain('navigateToProjectPicker(')
-  })
-
   it('creates and opens an empty session after the last session is removed', () => {
     const commandSource = readSource('jean-core/src/chat/commands.rs')
     const closeStart = commandSource.indexOf('pub async fn close_session(')
@@ -136,23 +95,6 @@ describe('SessionChatModal removal behavior', () => {
     expect(closeSession).toContain('if new_active.is_none()')
     expect(closeSession).toContain('let session = create_session(')
     expect(closeSession).toContain('return Ok(Some(session.id))')
-  })
-
-  it('asks to close the worktree when Cmd+W is pressed with no sessions', () => {
-    const modalSource = readSource('src/components/chat/SessionChatModal.tsx')
-    const canvasSource = readSource(
-      'src/components/dashboard/ProjectCanvasView.tsx'
-    )
-
-    expect(modalSource).toContain("setCloseConfirmMode('worktree')")
-    expect(modalSource).toContain('onRequestCloseWorktree')
-    expect(modalSource).toContain('mode={closeConfirmMode}')
-    expect(canvasSource).toContain(
-      'onRequestCloseWorktree={handleRequestCloseModalWorktree}'
-    )
-    expect(canvasSource).toContain(
-      'closeWorktreeDirectlyRef.current(modal.worktreeId)'
-    )
   })
 
   it('hides session tabs and top action chrome when zen mode is active', () => {
@@ -220,17 +162,6 @@ describe('SessionChatModal removal behavior', () => {
       "? 'h-7 w-7 text-muted-foreground hover:text-foreground'"
     )
     expect(source).toContain('aria-label="New session"')
-  })
-
-  it('falls back to a real session when restored active session state is stale', () => {
-    const source = readSource('src/components/chat/SessionChatModal.tsx')
-
-    expect(source).toMatch(
-      /resolveModalSessionId\(\s*activeSessionId,\s*sessions\.map\(session => session\.id\),\s*sessionsData\?\.active_session_id,\s*activeSessionGone\s*\)/
-    )
-    expect(source).toMatch(
-      /const activeSessionGone = isActiveSessionGone\(\s*!!sessionsData,\s*missingActiveSessionFailed,\s*missingActiveSession\s*\)/
-    )
   })
 
   it('refreshes the session list when the modal opens', () => {

@@ -158,6 +158,7 @@ import {
   flattenGroups,
   isActionableWaitingStatus,
 } from '@/components/chat/session-card-utils'
+import { resolveActiveSessionId } from '@/components/chat/session-lifecycle'
 import { WorktreeSetupCard } from '@/components/chat/WorktreeSetupCard'
 import { ScriptsSubmenu } from '@/components/open-in/ScriptsButton'
 import { useCanvasStoreState } from '@/components/chat/hooks/useCanvasStoreState'
@@ -635,9 +636,7 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
   }, [])
 
   const openDiff = useCallback(() => {
-    onDiffClick?.(
-      getCanvasDiffRequest(worktree, defaultBranch, 'uncommitted')
-    )
+    onDiffClick?.(getCanvasDiffRequest(worktree, defaultBranch, 'uncommitted'))
   }, [onDiffClick, worktree, defaultBranch])
 
   const handleDiffClick = useCallback(
@@ -1326,12 +1325,20 @@ export function ProjectCanvasView({
 
   // Build a Map of worktree ID -> session data for stable lookups
   const sessionsByWorktreeId = useMemo(() => {
-    const map = new Map<string, { sessions: Session[]; isLoading: boolean }>()
+    const map = new Map<
+      string,
+      {
+        sessions: Session[]
+        activeSessionId: string | null
+        isLoading: boolean
+      }
+    >()
     for (const query of sessionQueries) {
       const worktreeId = query.data?.worktree_id
       if (worktreeId) {
         map.set(worktreeId, {
           sessions: query.data?.sessions ?? [],
+          activeSessionId: query.data?.active_session_id ?? null,
           isLoading: query.isLoading,
         })
       }
@@ -1642,9 +1649,7 @@ export function ProjectCanvasView({
       const newIndex = canvasDraggableIds.indexOf(overId)
 
       if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) return
-      if (
-        canvasRowStateById.get(activeId) !== canvasRowStateById.get(overId)
-      ) {
+      if (canvasRowStateById.get(activeId) !== canvasRowStateById.get(overId)) {
         return
       }
 
@@ -2236,8 +2241,14 @@ export function ProjectCanvasView({
       const autoOpen = useUIStore.getState().consumeAutoOpenSession(worktreeId)
       if (!autoOpen.shouldOpen) continue
 
-      // Use specific session if provided, otherwise fall back to first session
-      const targetSession = sessionData.sessions[0]
+      const autoOpenSessionId = resolveActiveSessionId({
+        current: null,
+        backendActive: sessionData.activeSessionId,
+        listedIds: sessionData.sessions.map(session => session.id),
+      })
+      const targetSession = sessionData.sessions.find(
+        session => session.id === autoOpenSessionId
+      )
 
       if (worktree && targetSession) {
         // Find the index in flatCards for keyboard selection
@@ -2295,15 +2306,17 @@ export function ProjectCanvasView({
     // First: check lastOpenedPerProject for this project
     const lastOpened = lastOpenedPerProject[projectId]
     if (lastOpened) {
-      const worktreeSessions =
-        sessionsByWorktreeIdRef.current.get(lastOpened.worktreeId)?.sessions ??
-        []
-      const hasSavedSession = worktreeSessions.some(
-        session => session.id === lastOpened.sessionId
+      const worktreeSessions = sessionsByWorktreeIdRef.current.get(
+        lastOpened.worktreeId
       )
-      resolvedLastOpenedSessionId = hasSavedSession
-        ? lastOpened.sessionId
-        : (worktreeSessions[0]?.id ?? null)
+      const listedIds =
+        worktreeSessions?.sessions.map(session => session.id) ?? []
+      resolvedLastOpenedSessionId = resolveActiveSessionId({
+        current: lastOpened.sessionId,
+        currentGone: !listedIds.includes(lastOpened.sessionId),
+        backendActive: worktreeSessions?.activeSessionId,
+        listedIds,
+      })
 
       for (const fc of flatCards) {
         if (!fc.card || fc.isPending) continue
@@ -2415,9 +2428,12 @@ export function ProjectCanvasView({
       const { activeSessionIds, setActiveSession, setLastOpenedForProject } =
         useChatStore.getState()
       const existingSessionId = activeSessionIds[worktreeId]
-      const firstSessionId =
-        sessionsByWorktreeIdRef.current.get(worktreeId)?.sessions[0]?.id
-      const targetSessionId = existingSessionId ?? firstSessionId
+      const worktreeSessions = sessionsByWorktreeIdRef.current.get(worktreeId)
+      const targetSessionId = resolveActiveSessionId({
+        current: existingSessionId,
+        backendActive: worktreeSessions?.activeSessionId,
+        listedIds: worktreeSessions?.sessions.map(session => session.id) ?? [],
+      })
 
       if (targetSessionId) {
         if (!existingSessionId) {

@@ -42,6 +42,10 @@ import { clearSessionScrollState } from '@/components/chat/session-scroll-state'
 import { isNativeTerminalBackend } from '@/lib/native-cli-session'
 import { getResumeArgs } from '@/components/chat/session-card-utils'
 import {
+  openSessions,
+  resolveActiveAfterCloseSuccess,
+} from '@/components/chat/session-lifecycle'
+import {
   bareCommandForBackend,
   isBareCliCommand,
   preferResolvedCliCommand,
@@ -1156,15 +1160,16 @@ export function useCloseSession() {
       clearSessionScrollState(sessionId)
       cleanupSessionTerminalForRemovedSession(worktreeId, sessionId)
 
-      // Switch to the new active session — but only if the caller hasn't already
-      // picked a neighbor (e.g. SessionChatModal sets it based on visual tab order)
-      if (newActiveId) {
-        const currentActive =
-          useChatStore.getState().activeSessionIds[worktreeId]
-        if (!currentActive || currentActive === sessionId) {
-          useChatStore.getState().setActiveSession(worktreeId, newActiveId)
-        }
-      } else {
+      // Switch to the new active session, unless the caller already picked a
+      // neighbor (SessionChatModal selects one from the visual tab order).
+      const next = resolveActiveAfterCloseSuccess(
+        useChatStore.getState().activeSessionIds[worktreeId],
+        sessionId,
+        newActiveId
+      )
+      if (next.kind === 'select') {
+        useChatStore.getState().setActiveSession(worktreeId, next.sessionId)
+      } else if (next.kind === 'clear') {
         // Keep the worktree modal open and let it render its empty state.
         useChatStore.setState(state => {
           if (!(worktreeId in state.activeSessionIds)) return state
@@ -1229,10 +1234,7 @@ export function useCloseSessionOrWorktreeKeybinding(
       return
     }
 
-    // Deleted sessions keep archived_at until the backend purges them
-    const sessionCount = sessionsData.sessions.filter(
-      s => !s.archived_at
-    ).length
+    const sessionCount = openSessions(sessionsData.sessions).length
 
     logger.debug('Deleting session', {
       sessionId: activeSessionId,

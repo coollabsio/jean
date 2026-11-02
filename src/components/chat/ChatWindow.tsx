@@ -237,7 +237,7 @@ import {
   shouldShowCodeReviewLoadingPanel,
   shouldShowReviewFullWidth,
 } from './session-card-utils'
-import { resolveInitialActiveSessionId } from './session-tab-order'
+import { resolveActiveSessionId } from './session-lifecycle'
 
 interface ForkSessionToWorktreeResponse {
   worktree: Worktree
@@ -537,20 +537,24 @@ const ChatWindowContent = memo(function ChatWindowContent({
     const currentActive = store.activeSessionIds[activeWorktreeId]
     const sessions = sessionsData.sessions
     if (!sessions) return
-    const targetSession = resolveInitialActiveSessionId(
-      currentActive,
-      sessionsData.active_session_id,
-      sessions.map(session => session.id)
-    )
-    if (targetSession) {
+    const targetSession = resolveActiveSessionId({
+      current: currentActive,
+      backendActive: sessionsData.active_session_id,
+      listedIds: sessions.map(session => session.id),
+    })
+    if (targetSession && targetSession !== currentActive) {
       store.setActiveSession(activeWorktreeId, targetSession)
     }
   }, [sessionsData, activeWorktreeId, isSessionsFetching, uiStateInitialized])
 
   // Use backend's active session if store doesn't have one yet
-  if (!activeSessionId && sessionsData?.sessions?.length) {
+  if (sessionsData?.sessions) {
     activeSessionId =
-      sessionsData.active_session_id ?? sessionsData.sessions[0]?.id
+      resolveActiveSessionId({
+        current: activeSessionId,
+        backendActive: sessionsData.active_session_id,
+        listedIds: sessionsData.sessions.map(session => session.id),
+      }) ?? undefined
   }
 
   // Defer tab changes only inside one worktree. Deferring the session ID alone
@@ -1871,8 +1875,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
   }, [activeSessionId, getMcpConfig, sendMessageNow])
 
   const handlePreReleaseReview = useCallback(() => {
-    const baseBranch =
-      gitStatus?.base_branch ?? worktree?.base_branch ?? 'main'
+    const baseBranch = gitStatus?.base_branch ?? worktree?.base_branch ?? 'main'
     const baseRemote =
       gitStatus?.base_remote ?? worktree?.base_remote ?? 'origin'
     const message = (

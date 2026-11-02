@@ -402,8 +402,9 @@ fn default_keybindings() -> std::collections::HashMap<String, String> {
 Closing a worktree, or a session that has messages or an unsent draft, always
 shows `CloseWorktreeDialog` first. This applies to Cmd/Ctrl+W, the tab X button,
 middle-clicks, and the session menu. No preference or held modifier skips the
-dialog. Empty sessions close at once (`isSessionEmpty` in
-`src/components/projects/worktree-close-decision.ts`).
+dialog. Empty sessions close at once. Every surface asks `decideSessionClose`
+in `src/components/chat/session-lifecycle.ts`, which also owns active-session
+selection and the neighbor picked after a tab closes.
 
 ## Shift+Enter in the embedded terminal
 
