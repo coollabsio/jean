@@ -111,7 +111,12 @@ import {
   projectsQueryKeys,
   type PackageScript,
 } from '@/services/projects'
-import { chatQueryKeys, cancelChatMessage } from '@/services/chat'
+import {
+  chatQueryKeys,
+  cancelChatMessage,
+  prefetchWorktreeDefaultSession,
+} from '@/services/chat'
+import { useHoverIntent } from '@/hooks/useHoverIntent'
 import {
   useDependabotAlerts,
   useGitHubIssues,
@@ -624,6 +629,10 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
   const handleRowClick = useCallback(() => {
     onRowClick?.(worktree, rowIndex)
   }, [onRowClick, worktree, rowIndex])
+  const queryClient = useQueryClient()
+  const rowHover = useHoverIntent(() => {
+    void prefetchWorktreeDefaultSession(queryClient, worktree.id, worktree.path)
+  })
 
   const handleSetLabels = useCallback(() => {
     onSetLabels?.(worktree)
@@ -861,6 +870,8 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
       )}
       style={disableTextSelection ? { WebkitTouchCallout: 'none' } : undefined}
       onClick={onRowClick ? handleRowClick : undefined}
+      onPointerEnter={onRowClick ? () => rowHover.start(undefined) : undefined}
+      onPointerLeave={onRowClick ? rowHover.cancel : undefined}
       onKeyDown={e => {
         if (!onRowClick) return
         if (e.key === 'Enter' || e.key === ' ') {

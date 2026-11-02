@@ -45,6 +45,7 @@ import { getResumeArgs } from '@/components/chat/session-card-utils'
 import {
   openSessions,
   resolveActiveAfterCloseSuccess,
+  resolveActiveSessionId,
 } from '@/components/chat/session-lifecycle'
 import {
   bareCommandForBackend,
@@ -386,6 +387,36 @@ export function useChatHistory(
 // Session Queries (new multi-tab support)
 // ============================================================================
 
+const SESSIONS_STALE_TIME = 1000 * 60 * 5 // enables instant tab bar rendering from cache
+const SESSIONS_GC_TIME = 1000 * 60 * 2
+const SESSION_STALE_TIME = 1000 * 60 * 5 // enables instant session switching from cache
+const SESSION_GC_TIME = 1000 * 60 * 5
+
+async function fetchWorktreeSessions(
+  worktreeId: string | null,
+  worktreePath: string | null,
+  includeMessageCounts: boolean
+): Promise<WorktreeSessions> {
+  if (!hasBackendTransport() || !worktreeId || !worktreePath) {
+    // An empty success is cached for the stale time and hides every tab.
+    throw new Error('Session list is not available yet')
+  }
+
+  try {
+    logger.debug('Loading sessions', { worktreeId, includeMessageCounts })
+    const sessions = await invoke<WorktreeSessions>('get_sessions', {
+      worktreeId,
+      worktreePath,
+      includeMessageCounts,
+    })
+    logger.info('Sessions loaded', { count: sessions.sessions.length })
+    return sessions
+  } catch (error) {
+    logger.error('Failed to load sessions', { error, worktreeId })
+    return preserveQueryCacheOnError(error)
+  }
+}
+
 /**
  * Hook to get all sessions for a worktree (for tab bar display)
  */
@@ -400,29 +431,11 @@ export function useSessions(
     queryKey: includeMessageCounts
       ? [...chatQueryKeys.sessions(worktreeId ?? ''), 'with-counts']
       : chatQueryKeys.sessions(worktreeId ?? ''),
-    queryFn: async (): Promise<WorktreeSessions> => {
-      if (!hasBackendTransport() || !worktreeId || !worktreePath) {
-        // An empty success is cached for the stale time and hides every tab.
-        throw new Error('Session list is not available yet')
-      }
-
-      try {
-        logger.debug('Loading sessions', { worktreeId, includeMessageCounts })
-        const sessions = await invoke<WorktreeSessions>('get_sessions', {
-          worktreeId,
-          worktreePath,
-          includeMessageCounts,
-        })
-        logger.info('Sessions loaded', { count: sessions.sessions.length })
-        return sessions
-      } catch (error) {
-        logger.error('Failed to load sessions', { error, worktreeId })
-        return preserveQueryCacheOnError(error)
-      }
-    },
+    queryFn: () =>
+      fetchWorktreeSessions(worktreeId, worktreePath, includeMessageCounts),
     enabled: !!worktreeId && !!worktreePath,
-    staleTime: 1000 * 60 * 5, // 5 minutes - enables instant tab bar rendering from cache
-    gcTime: 1000 * 60 * 2,
+    staleTime: SESSIONS_STALE_TIME,
+    gcTime: SESSIONS_GC_TIME,
     refetchOnMount: options?.refetchOnMount ?? true, // Modal openings must also refresh cached empty lists
   })
 }
@@ -748,71 +761,117 @@ export function useSession(
 
   return useQuery({
     queryKey: chatQueryKeys.session(sessionId ?? ''),
-    queryFn: async (): Promise<Session | null> => {
-      if (
-        !hasBackendTransport() ||
-        !sessionId ||
-        !worktreeId ||
-        !worktreePath
-      ) {
-        return null
-      }
-
-      try {
-        logger.debug('[useSession] fetching from disk', { sessionId })
-        const session = await invoke<Session>('get_session', {
-          worktreeId,
-          worktreePath,
-          sessionId,
-        })
-        logger.info('[useSession] loaded', {
-          sessionId,
-          messageCount: session.messages.length,
-          totalRuns: session.total_runs,
-          loadedFromRun: session.loaded_run_start_index,
-          backend: session.backend,
-        })
-
-        // Preserve optimistic messages from sendMessage.onMutate that the
-        // backend hasn't persisted yet (race: refetchOnMount fires before
-        // the send_chat_message invoke writes the user message to disk).
-        const cached = queryClient.getQueryData<Session>(
-          chatQueryKeys.session(sessionId)
-        )
-        const cachedIncludesCancelledAssistant = cached?.messages.some(
-          message => message.role === 'assistant' && message.cancelled
-        )
-        const shouldPreserveCachedMessages =
-          cached &&
-          cached.messages.length > session.messages.length &&
-          !cachedIncludesCancelledAssistant &&
-          useChatStore.getState().sendingSessionIds[sessionId]
-
-        if (cached && shouldPreserveCachedMessages) {
-          logger.warn(
-            '[useSession] preserving cached messages over fresh fetch',
-            {
-              sessionId,
-              cachedCount: cached.messages.length,
-              diskCount: session.messages.length,
-            }
-          )
-          return { ...session, messages: cached.messages }
-        }
-
-        return session
-      } catch (error) {
-        logger.warn('[useSession] FAILED to load session', { error, sessionId })
-        return preserveQueryCacheOnError(error)
-      }
-    },
+    queryFn: () =>
+      fetchSession(queryClient, sessionId, worktreeId, worktreePath),
     enabled: !!sessionId && !!worktreeId && !!worktreePath,
-    staleTime: 1000 * 60 * 5, // 5 minutes - enables instant session switching from cache
-    gcTime: 1000 * 60 * 5,
+    staleTime: SESSION_STALE_TIME,
+    gcTime: SESSION_GC_TIME,
     // Respects staleTime; cross-client sync handled by cache:invalidate broadcast
     // from Rust after send_chat_message completes (JSONL fully written).
     refetchOnMount: true,
   })
+}
+
+async function fetchSession(
+  queryClient: QueryClient,
+  sessionId: string | null,
+  worktreeId: string | null,
+  worktreePath: string | null
+): Promise<Session | null> {
+  if (!hasBackendTransport() || !sessionId || !worktreeId || !worktreePath) {
+    return null
+  }
+
+  try {
+    logger.debug('[useSession] fetching from disk', { sessionId })
+    const session = await invoke<Session>('get_session', {
+      worktreeId,
+      worktreePath,
+      sessionId,
+    })
+    logger.info('[useSession] loaded', {
+      sessionId,
+      messageCount: session.messages.length,
+      totalRuns: session.total_runs,
+      loadedFromRun: session.loaded_run_start_index,
+      backend: session.backend,
+    })
+
+    // Preserve optimistic messages from sendMessage.onMutate that the
+    // backend hasn't persisted yet (race: refetchOnMount fires before
+    // the send_chat_message invoke writes the user message to disk).
+    const cached = queryClient.getQueryData<Session>(
+      chatQueryKeys.session(sessionId)
+    )
+    const cachedIncludesCancelledAssistant = cached?.messages.some(
+      message => message.role === 'assistant' && message.cancelled
+    )
+    const shouldPreserveCachedMessages =
+      cached &&
+      cached.messages.length > session.messages.length &&
+      !cachedIncludesCancelledAssistant &&
+      useChatStore.getState().sendingSessionIds[sessionId]
+
+    if (cached && shouldPreserveCachedMessages) {
+      logger.warn('[useSession] preserving cached messages over fresh fetch', {
+        sessionId,
+        cachedCount: cached.messages.length,
+        diskCount: session.messages.length,
+      })
+      return { ...session, messages: cached.messages }
+    }
+
+    return session
+  } catch (error) {
+    logger.warn('[useSession] FAILED to load session', { error, sessionId })
+    return preserveQueryCacheOnError(error)
+  }
+}
+
+/** Warm the session cache (e.g. on hover) so opening the session is instant. */
+export function prefetchSession(
+  queryClient: QueryClient,
+  sessionId: string,
+  worktreeId: string,
+  worktreePath: string
+): Promise<void> {
+  return queryClient.prefetchQuery({
+    queryKey: chatQueryKeys.session(sessionId),
+    queryFn: () =>
+      fetchSession(queryClient, sessionId, worktreeId, worktreePath),
+    staleTime: SESSION_STALE_TIME,
+    gcTime: SESSION_GC_TIME,
+  })
+}
+
+/**
+ * Warm the session list and the session a worktree opens by default, using
+ * the same choice as the open path (store active id → backend active → first).
+ */
+export async function prefetchWorktreeDefaultSession(
+  queryClient: QueryClient,
+  worktreeId: string,
+  worktreePath: string
+): Promise<void> {
+  let sessions: WorktreeSessions
+  try {
+    sessions = await queryClient.ensureQueryData({
+      queryKey: chatQueryKeys.sessions(worktreeId),
+      queryFn: () => fetchWorktreeSessions(worktreeId, worktreePath, false),
+      staleTime: SESSIONS_STALE_TIME,
+      gcTime: SESSIONS_GC_TIME,
+    })
+  } catch {
+    return
+  }
+  const sessionId = resolveActiveSessionId({
+    current: useChatStore.getState().activeSessionIds[worktreeId],
+    backendActive: sessions.active_session_id,
+    listedIds: openSessions(sessions.sessions).map(session => session.id),
+  })
+  if (sessionId) {
+    await prefetchSession(queryClient, sessionId, worktreeId, worktreePath)
+  }
 }
 
 // ============================================================================

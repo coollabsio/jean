@@ -40,7 +40,12 @@ import {
 import { useChatStore } from '@/store/chat-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
-import { chatQueryKeys, useCloseSession } from '@/services/chat'
+import {
+  chatQueryKeys,
+  prefetchSession,
+  useCloseSession,
+} from '@/services/chat'
+import { useHoverIntent } from '@/hooks/useHoverIntent'
 import {
   fetchRecentWorktrees,
   useCloseBaseSessionClean,
@@ -289,6 +294,14 @@ export function RecentWorktreesList({
     },
     [isMobile, queryClient, selectProject, selectWorktree]
   )
+  const rowHover = useHoverIntent((row: RecentWorktreeItem) => {
+    void prefetchSession(
+      queryClient,
+      row.session.id,
+      row.worktree.id,
+      row.worktree.path
+    )
+  })
 
   // Mobile swipe close follows the CMD+W session row rules
   const { mutate: closeSession } = useCloseSession()
@@ -489,6 +502,8 @@ export function RecentWorktreesList({
           <div
             className={`relative flex w-full cursor-pointer flex-col gap-y-1 rounded-lg py-2.5 pl-3 pr-3 text-left transition-[background-color,box-shadow,color] hover:bg-muted/30 hover:text-foreground has-[:focus-visible]:ring-1 has-[:focus-visible]:ring-ring ${isCurrent ? 'bg-muted/50 text-foreground shadow' : 'bg-transparent text-muted-foreground'}`}
             onClick={() => handleOpen(row)}
+            onPointerEnter={() => rowHover.start(row)}
+            onPointerLeave={rowHover.cancel}
           >
             <Tooltip>
               <TooltipTrigger asChild>

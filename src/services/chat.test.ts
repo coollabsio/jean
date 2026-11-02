@@ -22,6 +22,7 @@ import {
   canReconnectSession,
   isDuplicateSendError,
   prefetchSessions,
+  prefetchWorktreeDefaultSession,
   reconnectNativeCliSession,
   touchRecentSessionCaches,
 } from './chat'
@@ -400,5 +401,88 @@ describe('reconnectNativeCliSession', () => {
         .getState()
         .terminals['wt-1']?.some(terminal => terminal.id === 'old-terminal')
     ).toBe(false)
+  })
+})
+
+describe('prefetchWorktreeDefaultSession', () => {
+  const sessionStub = (id: string, archived = false) => ({
+    id,
+    name: id,
+    order: 0,
+    created_at: 0,
+    updated_at: 0,
+    messages: [],
+    archived_at: archived ? 1 : null,
+  })
+
+  beforeEach(async () => {
+    useChatStore.setState({ activeSessionIds: {} })
+    const { invoke } = await import('@/lib/transport')
+    ;(invoke as ReturnType<typeof vi.fn>).mockReset()
+  })
+
+  it('loads the backend-active session the worktree opens by default', async () => {
+    const { invoke } = await import('@/lib/transport')
+    const invokeMock = invoke as ReturnType<typeof vi.fn>
+    invokeMock.mockImplementation(async (command: string, args: unknown) => {
+      if (command === 'get_sessions') {
+        return {
+          worktree_id: 'wt-1',
+          sessions: [sessionStub('s-1'), sessionStub('s-2')],
+          active_session_id: 's-2',
+        }
+      }
+      if (command === 'get_session') {
+        const { sessionId } = args as { sessionId: string }
+        return { ...sessionStub(sessionId), messages: [{ id: 'm-1' }] }
+      }
+      throw new Error(`unexpected ${command}`)
+    })
+    const queryClient = new QueryClient()
+
+    await prefetchWorktreeDefaultSession(queryClient, 'wt-1', '/tmp/wt-1')
+
+    expect(
+      queryClient.getQueryData<Session>(['chat', 'session', 's-2'])?.messages
+    ).toHaveLength(1)
+    expect(queryClient.getQueryData(['chat', 'session', 's-1'])).toBeUndefined()
+  })
+
+  it('prefers the session the user last had open and reuses a cached list', async () => {
+    const { invoke } = await import('@/lib/transport')
+    const invokeMock = invoke as ReturnType<typeof vi.fn>
+    invokeMock.mockImplementation(async (_command: string, args: unknown) => ({
+      ...sessionStub((args as { sessionId: string }).sessionId),
+    }))
+    const queryClient = new QueryClient()
+    queryClient.setQueryData(['chat', 'sessions', 'wt-1'], {
+      worktree_id: 'wt-1',
+      sessions: [sessionStub('s-1'), sessionStub('s-2')],
+      active_session_id: 's-2',
+    })
+    useChatStore.setState({ activeSessionIds: { 'wt-1': 's-1' } })
+
+    await prefetchWorktreeDefaultSession(queryClient, 'wt-1', '/tmp/wt-1')
+
+    expect(invokeMock).toHaveBeenCalledTimes(1)
+    expect(invokeMock).toHaveBeenCalledWith('get_session', {
+      worktreeId: 'wt-1',
+      worktreePath: '/tmp/wt-1',
+      sessionId: 's-1',
+    })
+  })
+
+  it('does nothing when the session list fails to load', async () => {
+    const { invoke } = await import('@/lib/transport')
+    const invokeMock = invoke as ReturnType<typeof vi.fn>
+    invokeMock.mockRejectedValue(new Error('offline'))
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+
+    await expect(
+      prefetchWorktreeDefaultSession(queryClient, 'wt-1', '/tmp/wt-1')
+    ).resolves.toBeUndefined()
+    expect(invokeMock).toHaveBeenCalledTimes(1)
   })
 })

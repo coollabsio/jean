@@ -29,7 +29,15 @@ import {
   resolveActiveSessionId,
 } from '@/components/chat/session-lifecycle'
 import { useRenameWorktree, useWorktrees } from '@/services/projects'
-import { useCloseSession, useRenameSession, useSessions } from '@/services/chat'
+import {
+  prefetchSession,
+  prefetchWorktreeDefaultSession,
+  useCloseSession,
+  useRenameSession,
+  useSessions,
+} from '@/services/chat'
+import { useQueryClient } from '@tanstack/react-query'
+import { useHoverIntent } from '@/hooks/useHoverIntent'
 import { isAskUserQuestion, isPlanToolCall, type Session } from '@/types/chat'
 import {
   createSessionCardDataCache,
@@ -147,6 +155,10 @@ const WorktreeSessionList = memo(function WorktreeSessionList({
       node.select()
     }
   }, [])
+  const queryClient = useQueryClient()
+  const sessionHover = useHoverIntent((sessionId: string) => {
+    void prefetchSession(queryClient, sessionId, worktreeId, worktreePath)
+  })
 
   const [labelSessionId, setLabelSessionId] = useState<string | null>(null)
   const currentLabel = useChatStore(state =>
@@ -244,6 +256,8 @@ const WorktreeSessionList = memo(function WorktreeSessionList({
                       e.stopPropagation()
                       onSessionSelect(card.session.id)
                     }}
+                    onPointerEnter={() => sessionHover.start(card.session.id)}
+                    onPointerLeave={sessionHover.cancel}
                     {...middleClickClose(() =>
                       onSessionMiddleClose(card.session)
                     )}
@@ -335,6 +349,10 @@ export const WorktreeItem = memo(function WorktreeItem({
   // Fetch sessions to check for persisted unanswered questions
   const { data: sessionsData } = useSessions(worktree.id, worktree.path)
   const sessionList = sessionsData?.sessions
+  const queryClient = useQueryClient()
+  const worktreeHover = useHoverIntent(() => {
+    void prefetchWorktreeDefaultSession(queryClient, worktree.id, worktree.path)
+  })
 
   // Key of this worktree's currently-sending sessions, used to recompute the
   // persisted pending-question/plan memos below. Only scans this worktree's
@@ -788,6 +806,8 @@ export const WorktreeItem = memo(function WorktreeItem({
               : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
           )}
           onClick={handleClick}
+          onPointerEnter={() => worktreeHover.start(undefined)}
+          onPointerLeave={worktreeHover.cancel}
           onKeyDown={e => {
             if (e.key === 'Enter' || e.key === ' ') {
               e.preventDefault()

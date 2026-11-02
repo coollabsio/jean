@@ -39,6 +39,7 @@ import { useBrowserStore } from '@/store/browser-store'
 import { useUIStore } from '@/store/ui-store'
 import { useProjectsStore } from '@/store/projects-store'
 import {
+  prefetchSession,
   useSessions,
   useSession,
   useClearSessionHistory,
@@ -47,6 +48,8 @@ import {
   useCloseSession,
 } from '@/services/chat'
 import { usePreferences } from '@/services/preferences'
+import { useQueryClient } from '@tanstack/react-query'
+import { useHoverIntent } from '@/hooks/useHoverIntent'
 import { LOCAL_SERVER_ID } from '@/types/server-resource'
 import { usePackageScripts, type PackageScript } from '@/services/projects'
 import { useGitHubPRs } from '@/services/github'
@@ -724,6 +727,13 @@ export const SessionChatModal = memo(function SessionChatModal({
     onClose()
   }, [isServer, onClose])
 
+  const queryClient = useQueryClient()
+  const tabHover = useHoverIntent((sessionId: string) => {
+    if (worktreeId && worktreePath) {
+      void prefetchSession(queryClient, sessionId, worktreeId, worktreePath)
+    }
+  })
+
   const handleTabClick = useCallback(
     (sessionId: string) => {
       if (renamingSessionId === sessionId) return
@@ -1345,6 +1355,8 @@ export const SessionChatModal = memo(function SessionChatModal({
                             data-session-id={session.id}
                             role="presentation"
                             onClick={() => handleTabClick(session.id)}
+                            onPointerEnter={() => tabHover.start(session.id)}
+                            onPointerLeave={tabHover.cancel}
                             onAuxClick={e => handleTabAuxClick(e, session)}
                             onDoubleClick={() =>
                               handleStartRenameImmediate(
