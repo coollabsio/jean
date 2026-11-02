@@ -1025,6 +1025,25 @@ fn git_push_needs_upstream_retry(stderr: &str) -> bool {
         || stderr.contains("push.default is set to simple")
 }
 
+/// The remote branch has commits that HEAD does not have, so a plain push
+/// cannot fast-forward it.
+fn git_push_rejected_as_behind(stderr: &str) -> bool {
+    stderr.contains("(non-fast-forward)") || stderr.contains("(fetch first)")
+}
+
+fn git_push_plain(repo_path: &str, remote: &str) -> Result<String, String> {
+    let output = wsl_aware_command("git", Some(Path::new(repo_path)))
+        .args(["push", remote])
+        .output()
+        .map_err(|e| format!("Failed to run git push: {e}"))?;
+
+    if output.status.success() {
+        Ok(push_output_text(&output))
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).to_string())
+    }
+}
+
 fn current_upstream(repo_path: &str) -> Option<(String, String)> {
     let output = wsl_aware_command("git", Some(Path::new(repo_path)))
         .args(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])
@@ -1068,6 +1087,10 @@ fn git_push_set_upstream(repo_path: &str, remote: &str) -> Result<String, String
 /// `push.default=simple` because the upstream branch name differs. Publish with
 /// `-u <remote> HEAD` whenever upstream is missing or not the same-named branch
 /// on the selected remote.
+///
+/// When the remote branch has commits that HEAD does not have (for example a
+/// PR merged into it on GitHub), merge them and push again, as `git pull`
+/// would. Merge conflicts are returned as an error and nothing is pushed.
 pub fn git_push(repo_path: &str, remote: Option<&str>) -> Result<String, String> {
     let remote = remote.unwrap_or("origin");
     log::trace!("Pushing to {remote} in {repo_path}");
@@ -1084,26 +1107,27 @@ pub fn git_push(repo_path: &str, remote: Option<&str>) -> Result<String, String>
         return git_push_set_upstream(repo_path, remote);
     }
 
-    let output = wsl_aware_command("git", Some(Path::new(repo_path)))
-        .args(["push", remote])
-        .output()
-        .map_err(|e| format!("Failed to run git push: {e}"))?;
-
-    if output.status.success() {
-        let result = push_output_text(&output);
-        log::trace!("Successfully pushed to {remote}");
-        Ok(result)
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-        if git_push_needs_upstream_retry(&stderr) {
-            log::trace!("Push failed due to upstream config, retrying with -u {remote} HEAD");
-            return git_push_set_upstream(repo_path, remote);
+    let stderr = match git_push_plain(repo_path, remote) {
+        Ok(result) => {
+            log::trace!("Successfully pushed to {remote}");
+            return Ok(result);
         }
+        Err(stderr) => stderr,
+    };
 
-        log::error!("Failed to push to {remote}: {stderr}");
-        Err(stderr)
+    if git_push_needs_upstream_retry(&stderr) {
+        log::trace!("Push failed due to upstream config, retrying with -u {remote} HEAD");
+        return git_push_set_upstream(repo_path, remote);
     }
+
+    if git_push_rejected_as_behind(&stderr) {
+        log::trace!("{remote}/{current_branch} has new commits; merging them before push");
+        git_pull(repo_path, &current_branch, Some(remote))?;
+        return git_push_plain(repo_path, remote);
+    }
+
+    log::error!("Failed to push to {remote}: {stderr}");
+    Err(stderr)
 }
 
 /// Result of a PR-aware push operation
@@ -3355,6 +3379,66 @@ mod tests {
                       To choose either option permanently, see push.default in git-config.\n\
                       fatal: push.default is set to simple";
         assert!(git_push_needs_upstream_retry(stderr));
+    }
+
+    #[test]
+    fn test_git_push_rejected_as_behind_detects_non_fast_forward() {
+        assert!(git_push_rejected_as_behind(
+            " ! [rejected]        fixes -> fixes (non-fast-forward)"
+        ));
+        assert!(git_push_rejected_as_behind(
+            " ! [rejected]        fixes -> fixes (fetch first)"
+        ));
+        assert!(!git_push_rejected_as_behind(
+            "remote: Permission to owner/repo.git denied to user."
+        ));
+    }
+
+    #[test]
+    fn test_git_push_merges_new_remote_commits_then_pushes() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let remote = root.join("remote.git");
+        let mine = root.join("mine");
+        let theirs = root.join("theirs");
+        run_git(
+            root,
+            &["init", "--bare", "--initial-branch", "main", "remote.git"],
+        );
+        for clone in [&mine, &theirs] {
+            run_git(
+                root,
+                &["clone", remote.to_str().unwrap(), clone.to_str().unwrap()],
+            );
+            run_git(clone, &["config", "user.email", "test@example.com"]);
+            run_git(clone, &["config", "user.name", "Test"]);
+        }
+        std::fs::write(mine.join("base.txt"), "base\n").unwrap();
+        run_git(&mine, &["add", "."]);
+        run_git(&mine, &["commit", "-m", "base"]);
+        run_git(&mine, &["push", "-u", "origin", "main"]);
+        run_git(&theirs, &["pull", "origin", "main"]);
+        run_git(&theirs, &["branch", "--set-upstream-to", "origin/main"]);
+
+        std::fs::write(theirs.join("theirs.txt"), "theirs\n").unwrap();
+        run_git(&theirs, &["add", "."]);
+        run_git(&theirs, &["commit", "-m", "theirs"]);
+        run_git(&theirs, &["push"]);
+        std::fs::write(mine.join("mine.txt"), "mine\n").unwrap();
+        run_git(&mine, &["add", "."]);
+        run_git(&mine, &["commit", "-m", "mine"]);
+
+        git_push(mine.to_str().unwrap(), None).expect("push after merge");
+
+        let files = std::process::Command::new("git")
+            .args(["ls-tree", "--name-only", "main"])
+            .current_dir(&remote)
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&files.stdout),
+            "base.txt\nmine.txt\ntheirs.txt\n"
+        );
     }
 
     #[test]
