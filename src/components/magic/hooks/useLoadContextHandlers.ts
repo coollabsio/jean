@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import { invoke } from '@/lib/transport'
+import { isSameServerResource } from '@/lib/server-resource'
 import { toast } from 'sonner'
 import {
   loadIssueContext,
@@ -871,6 +872,11 @@ export function useLoadContextHandlers({
 
       if (session.id === activeSessionId) {
         toast.error('Cannot inject the current session into itself')
+        return
+      }
+
+      if (!isSameServerResource(session.id, activeSessionId)) {
+        toast.error('Cannot inject a session from another Jean server')
         return
       }
 

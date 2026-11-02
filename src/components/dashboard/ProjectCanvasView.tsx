@@ -163,7 +163,10 @@ import {
   flattenGroups,
   isActionableWaitingStatus,
 } from '@/components/chat/session-card-utils'
-import { resolveActiveSessionId } from '@/components/chat/session-lifecycle'
+import {
+  resolveActiveSessionId,
+  resolvePersistedActiveSessionId,
+} from '@/components/chat/session-lifecycle'
 import { WorktreeSetupCard } from '@/components/chat/WorktreeSetupCard'
 import { ScriptsSubmenu } from '@/components/open-in/ScriptsButton'
 import { useCanvasStoreState } from '@/components/chat/hooks/useCanvasStoreState'
@@ -2313,6 +2316,7 @@ export function ProjectCanvasView({
     let targetIndex = -1
     let shouldAutoOpenModal = false
     let resolvedLastOpenedSessionId: string | null = null
+    let lastOpenedPickIsTemporary = false
 
     // First: check lastOpenedPerProject for this project
     const lastOpened = lastOpenedPerProject[projectId]
@@ -2322,12 +2326,16 @@ export function ProjectCanvasView({
       )
       const listedIds =
         worktreeSessions?.sessions.map(session => session.id) ?? []
-      resolvedLastOpenedSessionId = resolveActiveSessionId({
+      const selection = {
         current: lastOpened.sessionId,
         currentGone: !listedIds.includes(lastOpened.sessionId),
         backendActive: worktreeSessions?.activeSessionId,
         listedIds,
-      })
+      }
+      resolvedLastOpenedSessionId = resolveActiveSessionId(selection)
+      lastOpenedPickIsTemporary =
+        resolvedLastOpenedSessionId !== null &&
+        resolvePersistedActiveSessionId(selection) === null
 
       for (const fc of flatCards) {
         if (!fc.card || fc.isPending) continue
@@ -2410,14 +2418,19 @@ export function ProjectCanvasView({
 
       // Auto-open SessionChatModal for the last opened session
       if (shouldAutoOpenModal && !suppressRestoreAutoOpen) {
-        const sessionIdToOpen =
-          lastOpened && targetCard.worktreeId === lastOpened.worktreeId
-            ? (resolvedLastOpenedSessionId ?? targetCard.card.session.id)
-            : targetCard.card.session.id
+        const isLastOpenedWorktree =
+          !!lastOpened && targetCard.worktreeId === lastOpened.worktreeId
+        const sessionIdToOpen = isLastOpenedWorktree
+          ? (resolvedLastOpenedSessionId ?? targetCard.card.session.id)
+          : targetCard.card.session.id
 
-        useChatStore
-          .getState()
-          .setActiveSession(targetCard.worktreeId, sessionIdToOpen)
+        // The modal resolves a temporary pick itself and again after the
+        // list refetch; storing it would outlive the refetch.
+        if (!(isLastOpenedWorktree && lastOpenedPickIsTemporary)) {
+          useChatStore
+            .getState()
+            .setActiveSession(targetCard.worktreeId, sessionIdToOpen)
+        }
         openWorktreeModal(targetCard.worktreeId, targetCard.worktreePath)
       }
     }

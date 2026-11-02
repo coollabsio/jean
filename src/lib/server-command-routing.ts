@@ -206,13 +206,17 @@ export function resolveServerCommand(
  *   ignores it), or use `invokeForServer` / `invokeForOptionalServer`.
  * - `fanOut`: the array argument can hold resources of several servers. Each
  *   owning server receives its own items.
+ * - `routeBy`: only these keys name the owning server. Other ids are data;
+ *   their scope is stripped only when they belong to that same server.
  *
  * `server-command-routing.test.ts` fails when a dispatch command reads an
  * owner-looking key that neither the key scan nor this table covers.
  */
 export const COMMAND_OWNERS: Record<
   string,
-  { owner: readonly string[] } | { fanOut: string }
+  | { owner: readonly string[] }
+  | { fanOut: string }
+  | { routeBy: readonly string[] }
 > = {
   read_file_content: { owner: ['sessionId', 'worktreeId', 'projectId'] },
   read_file_base64: { owner: ['sessionId', 'worktreeId', 'projectId'] },
@@ -236,6 +240,7 @@ export const COMMAND_OWNERS: Record<
   decide_agent_approval: { owner: ['agentId'] },
   install_agent_template: { owner: ['agentId'] },
   revert_agent_change: { owner: ['agentId'] },
+  attach_session_reference: { routeBy: ['targetSessionId'] },
   reorder_projects: { fanOut: 'projectIds' },
   set_sessions_last_opened_bulk: { fanOut: 'sessionIds' },
   get_run_states: { fanOut: 'sessionIds' },
@@ -300,6 +305,19 @@ export function routeServerCommand(
         args: { ...args, [spec.fanOut]: items },
       }))
     }
+  }
+
+  if (spec && 'routeBy' in spec && args) {
+    const owner = resolveServerCommand(
+      Object.fromEntries(spec.routeBy.map(key => [key, args[key]]))
+    )
+    if (!owner) return [{ serverId: null, args }]
+    return [
+      {
+        serverId: owner.serverId,
+        args: { ...stripServerScope(owner.serverId, args), ...owner.args },
+      },
+    ]
   }
 
   const routed = args ? resolveServerCommand(args) : null

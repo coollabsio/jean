@@ -549,6 +549,45 @@ describe('server command routing', () => {
     ])
   })
 
+  it('routes a session reference by its local target, not its remote source', () => {
+    expect(
+      routeServerCommand('attach_session_reference', {
+        targetSessionId: 'target',
+        sourceSessionId: 'remote-1:source',
+      })
+    ).toEqual([
+      {
+        serverId: null,
+        args: { targetSessionId: 'target', sourceSessionId: 'remote-1:source' },
+      },
+    ])
+  })
+
+  it('routes a session reference to its remote target with a local source', () => {
+    expect(
+      routeServerCommand('attach_session_reference', {
+        targetSessionId: 'remote-1:target',
+        sourceSessionId: 'source',
+      })
+    ).toEqual([
+      {
+        serverId: 'remote-1',
+        args: { targetSessionId: 'target', sourceSessionId: 'source' },
+      },
+    ])
+    expect(
+      routeServerCommand('attach_session_reference', {
+        targetSessionId: 'remote-1:target',
+        sourceSessionId: 'remote-2:source',
+      })
+    ).toEqual([
+      {
+        serverId: 'remote-1',
+        args: { targetSessionId: 'target', sourceSessionId: 'remote-2:source' },
+      },
+    ])
+  })
+
   it('names the fix when a path command has no owner', () => {
     expect(() =>
       routeServerCommand('read_file_content', { path: '/srv/a.ts' })

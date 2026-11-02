@@ -235,7 +235,10 @@ import {
   shouldShowCodeReviewLoadingPanel,
   shouldShowReviewFullWidth,
 } from './session-card-utils'
-import { resolveActiveSessionId } from './session-lifecycle'
+import {
+  resolveActiveSessionId,
+  resolvePersistedActiveSessionId,
+} from './session-lifecycle'
 
 interface ForkSessionToWorktreeResponse {
   worktree: Worktree
@@ -535,7 +538,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
     const currentActive = store.activeSessionIds[activeWorktreeId]
     const sessions = sessionsData.sessions
     if (!sessions) return
-    const targetSession = resolveActiveSessionId({
+    const targetSession = resolvePersistedActiveSessionId({
       current: currentActive,
       backendActive: sessionsData.active_session_id,
       listedIds: sessions.map(session => session.id),

@@ -9,6 +9,7 @@ import {
   openSessions,
   resolveActiveAfterCloseSuccess,
   resolveActiveSessionId,
+  resolvePersistedActiveSessionId,
   selectNeighborAfterClose,
   sessionsForTabBar,
   sortSessionCardsForTabs,
@@ -136,6 +137,39 @@ describe('resolveActiveSessionId', () => {
 
   it('falls back to the first session when the current session is gone', () => {
     expect(resolve('deleted', ['first'], null, true)).toBe('first')
+  })
+})
+
+describe('resolvePersistedActiveSessionId', () => {
+  const resolve = (
+    current: string | undefined,
+    listedIds: string[],
+    backendActive: string | null = null,
+    currentGone = false
+  ) =>
+    resolvePersistedActiveSessionId({
+      current,
+      currentGone,
+      backendActive,
+      listedIds,
+    })
+
+  it('stores nothing while the backend active session is not listed yet', () => {
+    expect(resolve(undefined, ['first'], 'new')).toBeNull()
+    expect(resolve('deleted', ['first'], 'new', true)).toBeNull()
+  })
+
+  it('stores the backend active session once the refetched list has it', () => {
+    expect(resolve(undefined, ['first', 'new'], 'new')).toBe('new')
+  })
+
+  it('keeps the current session even when the backend session is unlisted', () => {
+    expect(resolve('mine', ['first'], 'new')).toBe('mine')
+  })
+
+  it('stores the first session when the backend names none', () => {
+    expect(resolve(undefined, ['first', 'second'])).toBe('first')
+    expect(resolve(undefined, [])).toBeNull()
   })
 })
 

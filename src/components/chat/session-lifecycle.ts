@@ -79,6 +79,24 @@ export function resolveActiveSessionId({
 }
 
 /**
+ * The session to write to the store, or null when nothing should be written
+ * yet. A backend active session missing from the cached list means the list
+ * is behind it (the backend just created or switched to it). Showing the first
+ * listed session meanwhile is fine, but storing it would keep that temporary
+ * pick after the list refetch.
+ */
+export function resolvePersistedActiveSessionId(
+  input: Parameters<typeof resolveActiveSessionId>[0]
+): string | null {
+  const { current, currentGone = false, backendActive, listedIds } = input
+  const keepsCurrent = !!current && !currentGone
+  if (!keepsCurrent && backendActive && !listedIds.includes(backendActive)) {
+    return null
+  }
+  return resolveActiveSessionId(input)
+}
+
+/**
  * The tab to select when `closedId` closes: its left neighbor, else its right
  * neighbor, in the visible tab order. Closing an inactive tab keeps the
  * selection, and closing the only tab leaves the choice to the backend.

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  isSameServerResource,
   parseServerResourceKey,
   serverResourceKey,
   toRawLocalResourceId,
@@ -19,6 +20,13 @@ describe('server resource identity', () => {
     expect(toRawLocalResourceId('remote-a:session-1')).toBe(
       'remote-a:session-1'
     )
+  })
+
+  it('compares resource owners, treating raw ids as local', () => {
+    expect(isSameServerResource('s1', 'local:s2')).toBe(true)
+    expect(isSameServerResource('remote-a:s1', 'remote-a:s2')).toBe(true)
+    expect(isSameServerResource('s1', 'remote-a:s2')).toBe(false)
+    expect(isSameServerResource('remote-a:s1', 'remote-b:s2')).toBe(false)
   })
 
   it('parses a composite key', () => {
