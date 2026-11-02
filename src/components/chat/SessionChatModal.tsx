@@ -86,6 +86,7 @@ import {
 } from './session-card-utils'
 import {
   resolveModalSessionId,
+  isActiveSessionGone,
   sessionsForTabBar,
   sortSessionCardsForTabs,
 } from './session-tab-order'
@@ -347,9 +348,13 @@ export const SessionChatModal = memo(function SessionChatModal({
       worktreePath || null
     )
   // A deleted session keeps its id in the store (persisted UI state, other
-  // clients). Once the list has loaded and the direct lookup fails, fall back
-  // to a listed session so one tab is always selected.
-  const activeSessionGone = !!sessionsData && missingActiveSessionFailed
+  // clients). Once the list has loaded and the direct lookup fails or returns
+  // an archived session, fall back to a listed session.
+  const activeSessionGone = isActiveSessionGone(
+    !!sessionsData,
+    missingActiveSessionFailed,
+    missingActiveSession
+  )
   const currentSessionId = resolveModalSessionId(
     activeSessionId,
     sessions.map(session => session.id),

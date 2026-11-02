@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Session } from '@/types/chat'
 import type { SessionCardData } from './session-card-utils'
 import {
+  isActiveSessionGone,
   mergeSessionIntoWorktreeSessions,
   resolveInitialActiveSessionId,
   resolveModalSessionId,
@@ -161,6 +162,28 @@ describe('resolveInitialActiveSessionId', () => {
     expect(
       resolveInitialActiveSessionId(undefined, null, ['first', 'second'])
     ).toBe('first')
+  })
+})
+
+describe('isActiveSessionGone', () => {
+  it('treats an archived (closed) session as gone', () => {
+    const closed = { ...session('closed', 1), archived_at: 123 }
+
+    expect(isActiveSessionGone(true, false, closed)).toBe(true)
+  })
+
+  it('treats a failed lookup as gone', () => {
+    expect(isActiveSessionGone(true, true, undefined)).toBe(true)
+  })
+
+  it('keeps a live session that the list does not include yet', () => {
+    expect(isActiveSessionGone(true, false, session('open', 1))).toBe(false)
+  })
+
+  it('keeps the session while the list is still loading', () => {
+    const closed = { ...session('closed', 1), archived_at: 123 }
+
+    expect(isActiveSessionGone(false, true, closed)).toBe(false)
   })
 })
 

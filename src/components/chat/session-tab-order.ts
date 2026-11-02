@@ -33,6 +33,20 @@ export function sortSessionCardsForTabs(
 }
 
 /**
+ * The store's active session is gone when the list has loaded and the direct
+ * lookup failed or returned an archived session. Closed sessions stay on disk
+ * (archived) until purge, so `get_session` still returns them.
+ */
+export function isActiveSessionGone(
+  listLoaded: boolean,
+  lookupFailed: boolean,
+  lookupSession: Session | null | undefined
+): boolean {
+  if (!listLoaded) return false
+  return lookupFailed || lookupSession?.archived_at != null
+}
+
+/**
  * Resolve which session ChatWindow should mount in SessionChatModal.
  *
  * Keep the store's active session while session-list queries refresh. A

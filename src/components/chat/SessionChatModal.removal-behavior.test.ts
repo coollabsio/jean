@@ -228,8 +228,8 @@ describe('SessionChatModal removal behavior', () => {
     expect(source).toMatch(
       /resolveModalSessionId\(\s*activeSessionId,\s*sessions\.map\(session => session\.id\),\s*sessionsData\?\.active_session_id,\s*activeSessionGone\s*\)/
     )
-    expect(source).toContain(
-      'const activeSessionGone = !!sessionsData && missingActiveSessionFailed'
+    expect(source).toMatch(
+      /const activeSessionGone = isActiveSessionGone\(\s*!!sessionsData,\s*missingActiveSessionFailed,\s*missingActiveSession\s*\)/
     )
   })
 
