@@ -9,7 +9,6 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { useIsMobile } from '@/hooks/use-mobile'
-import { Layers } from '@/components/icons/reicon'
 
 interface SendCancelButtonProps {
   isSending: boolean
@@ -169,7 +168,6 @@ export function SendCancelButton({
               aria-hidden
               className="send-background-label items-center gap-1.5"
             >
-              <Layers className="h-3.5 w-3.5" />
               <span>Send in background</span>
               <Kbd className="h-4 bg-primary-foreground/15 text-2xs text-primary-foreground">
                 {backgroundShortcut}
