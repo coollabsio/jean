@@ -10,9 +10,16 @@ describe('web running-session bootstrap', () => {
     )
   })
 
-  it('does not clear the authoritative web bootstrap running-session set during recovery', () => {
+  it('leaves the sending set to the run-state snapshot during recovery', () => {
+    // check_resumable_sessions can omit a live run whose metadata is briefly
+    // unavailable; the backend snapshot (applyRunStateSnapshot) owns clears.
+    const recovery = source.slice(
+      source.indexOf("invoke<ResumableSession[]>('check_resumable_sessions')"),
+      source.indexOf('clearConnectionSwitch()')
+    )
+    expect(recovery).not.toMatch(/removeSendingSession\(sessionId\)/)
     expect(source).toMatch(
-      /const resumableIds = new Set[\s\S]*?if \(!webBackend\) \{[\s\S]*?removeSendingSession\(sessionId\)[\s\S]*?\}/
+      /applyRunStateSnapshot\(data\.runStates \?\? \[\], \{[\s\S]*?ownsSession: \(\) => true,/
     )
   })
 

@@ -28,9 +28,11 @@ import { QuitConfirmationDialog } from '@/components/layout/QuitConfirmationDial
 import { setServerPlatform } from '@/lib/platform'
 import { projectsQueryKeys } from '@/services/projects'
 import { chatQueryKeys } from '@/services/chat'
-import { reconcileSessionsAfterReconnect } from '@/services/session-reconcile'
+import {
+  refreshRunStates,
+  refreshRunStatesOnFocus,
+} from '@/services/run-states'
 import { serverConnectionManager } from '@/lib/server-connections'
-import { parseServerResourceKey } from '@/lib/server-resource'
 import { invalidateMcpServers } from '@/services/mcp'
 import { mergeWorktreesPreservingOptimistic } from '@/lib/worktree-list-cache'
 import type { Session, WorktreeSessions } from '@/types/chat'
@@ -519,11 +521,15 @@ function App() {
         // turn without pending approvals should not show approve buttons.
         // Keep waiting when the running turn itself is paused on mid-turn
         // approvals (Codex command/permission prompts — issue #626).
-        if (data.runningSessions?.length) {
-          const runningSessionIds = new Set(data.runningSessions)
-          for (const sessionId of data.runningSessions) {
-            runningSessionIds.add(sessionId)
-          }
+        const runningSessionIds = new Set(
+          (data.runStates ?? [])
+            .filter(
+              runState =>
+                runState.status === 'running' || runState.status === 'resumable'
+            )
+            .map(runState => runState.sessionId)
+        )
+        if (runningSessionIds.size > 0) {
           const filteredReviewingUpdates = Object.fromEntries(
             Object.entries(reviewingUpdates).filter(
               ([sessionId]) => !runningSessionIds.has(sessionId)
@@ -644,66 +650,19 @@ function App() {
           }
         }
       }
-      // Replace sendingSessionIds with exactly the server's running sessions.
-      // This clears sessions that finished while the page was closed and restores
-      // sessions that are still running — server is source of truth.
-      const runningSendingIds: Record<string, boolean> = {}
-      const runningSendStartedAt: Record<string, number> = {}
-      if (data.runningSessions?.length) {
-        const knownStartedAt = useChatStore.getState().sendStartedAt
-        for (const sessionId of data.runningSessions) {
-          runningSendingIds[sessionId] = true
-          // Sessions outside the bootstrapped worktrees (e.g. agent sessions)
-          // are absent from sessionsByWorktree; fall back to the focused
-          // session payload, then to the start time this client already knew.
-          const startedAt =
-            (data.sessionsByWorktree
-              ? Object.values(data.sessionsByWorktree)
-                  .flatMap(ws => (ws as WorktreeSessions).sessions)
-                  .find(session => session.id === sessionId)
-                  ?.last_run_started_at
-              : undefined) ??
-            (data.activeSessions?.[sessionId] as Session | undefined)
-              ?.last_run_started_at
-          if (startedAt) {
-            runningSendStartedAt[sessionId] = startedAt * 1000
-          } else if (knownStartedAt[sessionId] != null) {
-            runningSendStartedAt[sessionId] = knownStartedAt[sessionId]
-          }
-        }
+      // The backend is the source of truth for what is running. This clears
+      // sessions that finished while the page was closed and restores the
+      // ones still running, with their persisted start times.
+      beginSessionStateHydration()
+      try {
+        useChatStore.getState().applyRunStateSnapshot(data.runStates ?? [], {
+          ownsSession: () => true,
+          requestedAt: Date.now(),
+        })
+      } finally {
+        endSessionStateHydration()
       }
-      useChatStore.setState(state => {
-        const current = state.sendingSessionIds
-        const currentSendStartedAt = state.sendStartedAt
-        // Check if anything actually changed to avoid unnecessary re-renders
-        const currentKeys = Object.keys(current)
-        const newKeys = Object.keys(runningSendingIds)
-        const currentStartKeys = Object.keys(currentSendStartedAt).filter(
-          key => runningSendingIds[key]
-        )
-        const newStartKeys = Object.keys(runningSendStartedAt)
-        if (
-          currentKeys.length === newKeys.length &&
-          newKeys.every(k => current[k]) &&
-          currentStartKeys.length === newStartKeys.length &&
-          newStartKeys.every(
-            k => currentSendStartedAt[k] === runningSendStartedAt[k]
-          )
-        ) {
-          return state
-        }
-        return {
-          sendingSessionIds: runningSendingIds,
-          sendStartedAt: {
-            ...Object.fromEntries(
-              Object.entries(currentSendStartedAt).filter(
-                ([sessionId]) => !runningSendingIds[sessionId]
-              )
-            ),
-            ...runningSendStartedAt,
-          },
-        }
-      })
+      const runningSendingIds = useChatStore.getState().sendingSessionIds
 
       for (const { sessionId, message } of runningSnapshotMessages) {
         // Only lift the snapshot into the live stream when this client already
@@ -960,17 +919,19 @@ function App() {
 
     // Native desktop keeps its shell across remote socket drops, so a run
     // that finished during the gap would stay "sending" (no reload resync).
-    if (isNativeApp()) void reconcileSessionsAfterReconnect(queryClient)
+    if (isNativeApp()) {
+      void refreshRunStates(queryClient, { invalidateSessions: true })
+    }
   }, [wsConnected, queryClient, webBackend])
 
   // Same resync for every enabled remote server in native multi-server mode.
   useEffect(
     () =>
       serverConnectionManager.onRemoteReconnect(serverId => {
-        void reconcileSessionsAfterReconnect(
-          queryClient,
-          sessionId => parseServerResourceKey(sessionId)?.serverId === serverId
-        )
+        void refreshRunStates(queryClient, {
+          serverId,
+          invalidateSessions: true,
+        })
       }),
     [queryClient]
   )
@@ -980,11 +941,26 @@ function App() {
   useEffect(() => {
     let unlisten: (() => void) | undefined
     void listen('ws:resync', () => {
-      void reconcileSessionsAfterReconnect(queryClient)
+      void refreshRunStates(queryClient, { invalidateSessions: true })
     }).then(fn => {
       unlisten = fn
     })
     return () => unlisten?.()
+  }, [queryClient])
+
+  // Run-state events can be missed while the window is hidden or the socket
+  // silently stalls. Resync from the backend snapshot when the user comes back.
+  useEffect(() => {
+    const onFocus = () => refreshRunStatesOnFocus(queryClient)
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') onFocus()
+    }
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
   }, [queryClient])
 
   // Add native-app class to body for desktop-only CSS (cursor, user-select, etc.)
@@ -1419,20 +1395,6 @@ function App() {
         .then(async resumable => {
           if (!hasPreloadedData()) {
             queryClient.invalidateQueries({ queryKey: chatQueryKeys.all })
-          }
-
-          const { sendingSessionIds, removeSendingSession } =
-            useChatStore.getState()
-          const resumableIds = new Set(resumable.map(r => r.session_id))
-          // Web bootstrap already restored the registry's authoritative running
-          // set. Recovery can omit a live run when its metadata snapshot is
-          // temporarily unavailable, so only reconcile stale local state here.
-          if (!webBackend) {
-            for (const sessionId of Object.keys(sendingSessionIds)) {
-              if (!resumableIds.has(sessionId)) {
-                removeSendingSession(sessionId)
-              }
-            }
           }
 
           if (resumable.length === 0) return

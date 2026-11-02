@@ -44,7 +44,11 @@ import type {
   RecentWorktreesResponse,
 } from '@/types/projects'
 import { isFolder } from '@/types/projects'
-import type { AllSessionsResponse, WorktreeSessions } from '@/types/chat'
+import type {
+  AllSessionsResponse,
+  RunState,
+  WorktreeSessions,
+} from '@/types/chat'
 import { useProjectsStore } from '@/store/projects-store'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
@@ -306,7 +310,8 @@ export function useProjects() {
 export interface ProjectBootstrap {
   worktrees: Worktree[]
   sessionsByWorktree: Record<string, WorktreeSessions>
-  runningSessions: string[]
+  /** Live run states of this project's sessions; any other project session is idle. */
+  runStates: RunState[]
 }
 
 /**
@@ -357,45 +362,9 @@ export async function fetchAndSeedProjectBootstrap(
 
   // A native remote-server switch does not reload App, so reconcile the
   // running indicators from this server-owned project snapshot here.
-  const runningSessionIds = new Set(bootstrap.runningSessions ?? [])
-  const runningStartTimes: Record<string, number> = {}
-  for (const sessions of Object.values(sessionsByWorktree)) {
-    for (const session of sessions.sessions) {
-      if (runningSessionIds.has(session.id) && session.last_run_started_at) {
-        runningStartTimes[session.id] = session.last_run_started_at * 1000
-      }
-    }
-  }
-  useChatStore.setState(state => {
-    const sendingSessionIds = Object.fromEntries(
-      Object.entries(state.sendingSessionIds).filter(
-        ([sessionId]) => !projectSessionIds.has(sessionId)
-      )
-    )
-    const sendStartedAt = Object.fromEntries(
-      Object.entries(state.sendStartedAt).filter(
-        ([sessionId]) => !projectSessionIds.has(sessionId)
-      )
-    )
-    for (const sessionId of runningSessionIds) {
-      if (!projectSessionIds.has(sessionId)) continue
-      sendingSessionIds[sessionId] = true
-      const startedAt =
-        runningStartTimes[sessionId] ?? state.sendStartedAt[sessionId]
-      if (startedAt) sendStartedAt[sessionId] = startedAt
-    }
-    const currentIds = Object.keys(state.sendingSessionIds)
-    const nextIds = Object.keys(sendingSessionIds)
-    const currentStartIds = Object.keys(state.sendStartedAt)
-    const nextStartIds = Object.keys(sendStartedAt)
-    const changed =
-      currentIds.length !== nextIds.length ||
-      nextIds.some(sessionId => !state.sendingSessionIds[sessionId]) ||
-      currentStartIds.length !== nextStartIds.length ||
-      nextStartIds.some(
-        sessionId => state.sendStartedAt[sessionId] !== sendStartedAt[sessionId]
-      )
-    return changed ? { sendingSessionIds, sendStartedAt } : state
+  useChatStore.getState().applyRunStateSnapshot(bootstrap.runStates ?? [], {
+    ownsSession: sessionId => projectSessionIds.has(sessionId),
+    requestedAt: Date.now(),
   })
 
   logger.info('Project bootstrap loaded', {

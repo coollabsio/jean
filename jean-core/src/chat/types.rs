@@ -2245,6 +2245,15 @@ pub struct SessionMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scheduled_wakeup: Option<ScheduledWakeup>,
 
+    /// Monotonic counter of run-state transitions. Bumped by the storage
+    /// layer whenever [`SessionMetadata::run_state_signature`] changes between
+    /// the on-disk copy and the copy being written, so every transition path
+    /// (start, complete, cancel, crash, orphan repair, recovery, waiting
+    /// flags) is covered without per-site bookkeeping. Clients drop any
+    /// run-state event or snapshot older than the version they already hold.
+    #[serde(default)]
+    pub status_version: u64,
+
     /// Storage format version for migrations
     #[serde(default = "default_manifest_version")]
     pub version: u32,
@@ -2252,6 +2261,56 @@ pub struct SessionMetadata {
 
 fn default_manifest_version() -> u32 {
     1
+}
+
+/// Version and run-state signature of a metadata copy, captured before a
+/// mutation so the write path can decide whether the version must advance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RunStateStamp {
+    pub version: u64,
+    pub signature: u64,
+}
+
+/// Lifecycle of a session's latest run as the backend sees it right now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunStateStatus {
+    /// A process or send is managed by this backend instance.
+    Running,
+    /// The last run never finished and no process is managed here; a client
+    /// must call `resume_session` to tail it.
+    Resumable,
+    Cancelled,
+    Error,
+    Idle,
+}
+
+impl RunStateStatus {
+    pub fn is_live(self) -> bool {
+        matches!(self, Self::Running | Self::Resumable)
+    }
+}
+
+/// Versioned run-state snapshot for one session. Built only by
+/// [`SessionMetadata::run_state`], shared by `get_session_status`,
+/// `get_run_states`, and the web bootstrap payload.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunState {
+    pub session_id: String,
+    pub worktree_id: String,
+    pub status: RunStateStatus,
+    pub status_version: u64,
+    pub actively_managed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_mode: Option<String>,
+    pub waiting_for_input: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiting_for_input_type: Option<String>,
 }
 
 // ============================================================================
@@ -2385,7 +2444,82 @@ impl SessionMetadata {
             review_activity_at: None,
             runs: vec![],
             scheduled_wakeup: None,
+            status_version: 0,
             version: 1,
+        }
+    }
+
+    /// Hash of everything a client's running/waiting indicators depend on.
+    /// Two copies with equal signatures need no version bump.
+    pub fn run_state_signature(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        for run in &self.runs {
+            run.run_id.hash(&mut hasher);
+            std::mem::discriminant(&run.status).hash(&mut hasher);
+            run.cancelled.hash(&mut hasher);
+            run.provider_rejected.hash(&mut hasher);
+            run.assistant_message_id.is_some().hash(&mut hasher);
+        }
+        self.waiting_for_input.hash(&mut hasher);
+        self.waiting_for_input_type.hash(&mut hasher);
+        self.pending_plan_message_id.hash(&mut hasher);
+        self.approved_plan_message_ids.hash(&mut hasher);
+        self.pending_acp_permission_requests.len().hash(&mut hasher);
+        hasher.finish()
+    }
+
+    pub fn run_state_stamp(&self) -> RunStateStamp {
+        RunStateStamp {
+            version: self.status_version,
+            signature: self.run_state_signature(),
+        }
+    }
+
+    /// Version this copy must carry when written over `prior`. Never lower
+    /// than either side; one higher when the run state differs.
+    pub fn next_status_version(&self, prior: Option<RunStateStamp>) -> u64 {
+        let Some(prior) = prior else {
+            return self.status_version;
+        };
+        let base = prior.version.max(self.status_version);
+        if prior.signature == self.run_state_signature() {
+            base
+        } else {
+            base + 1
+        }
+    }
+
+    /// The run-state snapshot clients reconcile against. `actively_managed`
+    /// is the registry's view and wins over persisted status.
+    pub fn run_state(&self, actively_managed: bool) -> RunState {
+        let latest_run = self.runs.last();
+        let status = if actively_managed {
+            RunStateStatus::Running
+        } else {
+            match latest_run.map(|run| &run.status) {
+                Some(RunStatus::Running) | Some(RunStatus::Resumable) => RunStateStatus::Resumable,
+                Some(RunStatus::Cancelled) => RunStateStatus::Cancelled,
+                Some(RunStatus::Crashed) => RunStateStatus::Error,
+                Some(RunStatus::Completed) | None => RunStateStatus::Idle,
+            }
+        };
+        let live_run = latest_run.filter(|run| {
+            status.is_live() && matches!(run.status, RunStatus::Running | RunStatus::Resumable)
+        });
+        RunState {
+            session_id: self.id.clone(),
+            worktree_id: self.worktree_id.clone(),
+            status,
+            status_version: self.status_version,
+            actively_managed,
+            run_id: latest_run.map(|run| run.run_id.clone()),
+            started_at: live_run.map(|run| run.started_at),
+            execution_mode: live_run.and_then(|run| run.execution_mode.clone()),
+            waiting_for_input: self.waiting_for_input
+                || self.has_pending_plan_waiting()
+                || self.has_pending_acp_approval(),
+            waiting_for_input_type: self.waiting_for_input_type.clone(),
         }
     }
 
@@ -2427,6 +2561,117 @@ impl SessionMetadata {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn run_state_fixture(status: RunStatus) -> SessionMetadata {
+        let mut metadata = SessionMetadata::new(
+            "sess-1".to_string(),
+            "wt-1".to_string(),
+            "Test".to_string(),
+            0,
+        );
+        metadata.status_version = 7;
+        metadata.runs.push(RunEntry {
+            run_id: "run-1".to_string(),
+            user_message_id: "msg-1".to_string(),
+            user_message: "Hello".to_string(),
+            model: None,
+            execution_mode: Some("build".to_string()),
+            thinking_level: None,
+            effort_level: None,
+            backend: None,
+            custom_profile_name: None,
+            started_at: 1700,
+            ended_at: None,
+            status,
+            assistant_message_id: None,
+            cancelled: false,
+            provider_rejected: false,
+            recovered: false,
+            claude_session_id: None,
+            pid: None,
+            usage: None,
+            codex_thread_id: None,
+            codex_turn_id: None,
+            cursor_chat_id: None,
+            grok_session_id: None,
+            kimi_session_id: None,
+            devin_session_id: None,
+            antigravity_session_id: None,
+            muse_session_id: None,
+            checkpoint_id: None,
+        });
+        metadata
+    }
+
+    #[test]
+    fn run_state_follows_registry_then_persisted_status() {
+        let running = run_state_fixture(RunStatus::Running).run_state(true);
+        assert_eq!(running.status, RunStateStatus::Running);
+        assert_eq!(running.status_version, 7);
+        assert_eq!(running.run_id.as_deref(), Some("run-1"));
+        assert_eq!(running.started_at, Some(1700));
+        assert_eq!(running.execution_mode.as_deref(), Some("build"));
+        assert!(running.actively_managed);
+
+        let orphaned = run_state_fixture(RunStatus::Running).run_state(false);
+        assert_eq!(orphaned.status, RunStateStatus::Resumable);
+        assert_eq!(orphaned.started_at, Some(1700));
+
+        let cancelled = run_state_fixture(RunStatus::Cancelled).run_state(false);
+        assert_eq!(cancelled.status, RunStateStatus::Cancelled);
+        assert_eq!(cancelled.started_at, None);
+        assert_eq!(cancelled.execution_mode, None);
+
+        let crashed = run_state_fixture(RunStatus::Crashed).run_state(false);
+        assert_eq!(crashed.status, RunStateStatus::Error);
+
+        let idle = run_state_fixture(RunStatus::Completed).run_state(false);
+        assert_eq!(idle.status, RunStateStatus::Idle);
+        assert_eq!(idle.run_id.as_deref(), Some("run-1"));
+
+        let empty = SessionMetadata::new("s".into(), "w".into(), "n".into(), 0).run_state(false);
+        assert_eq!(empty.status, RunStateStatus::Idle);
+        assert_eq!(empty.run_id, None);
+    }
+
+    #[test]
+    fn run_state_serializes_camel_case_contract() {
+        let json =
+            serde_json::to_value(run_state_fixture(RunStatus::Running).run_state(true)).unwrap();
+        assert_eq!(json["sessionId"], "sess-1");
+        assert_eq!(json["worktreeId"], "wt-1");
+        assert_eq!(json["status"], "running");
+        assert_eq!(json["statusVersion"], 7);
+        assert_eq!(json["runId"], "run-1");
+        assert_eq!(json["startedAt"], 1700);
+        assert_eq!(json["executionMode"], "build");
+        assert_eq!(json["waitingForInput"], false);
+    }
+
+    #[test]
+    fn next_status_version_advances_only_on_run_state_change() {
+        let mut metadata = run_state_fixture(RunStatus::Running);
+        let prior = metadata.run_state_stamp();
+
+        metadata.name = "Renamed".to_string();
+        assert_eq!(metadata.next_status_version(Some(prior)), 7);
+
+        metadata.runs[0].status = RunStatus::Completed;
+        assert_eq!(metadata.next_status_version(Some(prior)), 8);
+
+        metadata.waiting_for_input = true;
+        let mut stale_copy = metadata.clone();
+        stale_copy.status_version = 2;
+        // A stale in-memory copy written over a newer disk copy never lowers it.
+        assert_eq!(
+            stale_copy.next_status_version(Some(RunStateStamp {
+                version: 9,
+                signature: prior.signature
+            })),
+            10
+        );
+        assert_eq!(metadata.next_status_version(None), 7);
+    }
 
     #[test]
     fn session_metadata_ignores_removed_provider_account_id() {

@@ -360,7 +360,7 @@ describe('server command routing', () => {
       decorateServerResult('r1', 'bootstrap_project', {
         worktrees: [{ id: 'w1', project_id: 'p1', name: 'Worktree' }],
         sessionsByWorktree: { w1: { sessions: [{ id: 's1' }] } },
-        runningSessions: ['s1'],
+        runStates: [{ sessionId: 's1', worktreeId: 'w1', status: 'running' }],
       })
     ).toEqual({
       worktrees: [
@@ -377,8 +377,25 @@ describe('server command routing', () => {
           sessions: [{ id: 'r1:s1', serverId: 'r1', resourceId: 's1' }],
         },
       },
-      runningSessions: ['r1:s1'],
+      runStates: [
+        { sessionId: 'r1:s1', worktreeId: 'r1:w1', status: 'running' },
+      ],
     })
+  })
+
+  it('scopes run-state snapshot identities', () => {
+    expect(
+      decorateServerResult('r1', 'get_run_states', [
+        { sessionId: 's1', worktreeId: 'w1', status: 'idle', statusVersion: 2 },
+      ])
+    ).toEqual([
+      {
+        sessionId: 'r1:s1',
+        worktreeId: 'r1:w1',
+        status: 'idle',
+        statusVersion: 2,
+      },
+    ])
   })
 
   it('decorates session mutation responses and their owner references', () => {

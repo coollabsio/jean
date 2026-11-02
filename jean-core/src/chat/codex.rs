@@ -2420,6 +2420,7 @@ fn process_turn_events(
                 worktree_id: worktree_id.to_string(),
                 emitted_at_ms,
                 run_id: Some(run_id.to_string()),
+                status_version: None,
             },
         );
     }

@@ -1078,6 +1078,13 @@ export default function useStreamingEvents({
     const unlistenDone = listen<DoneEvent>('chat:done', event => {
       const sessionId = event.payload.session_id
       const worktreeId = event.payload.worktree_id
+      if (
+        !useChatStore
+          .getState()
+          .acceptRunStateVersion(sessionId, event.payload.status_version)
+      ) {
+        return
+      }
       clearLivePermissionRequests(sessionId)
       toast.dismiss(backendRetryToastId(sessionId))
 
@@ -1873,7 +1880,15 @@ export default function useStreamingEvents({
           worktree_id: eventWorktreeId,
           emitted_at_ms,
           run_id: eventRunId,
+          status_version: eventStatusVersion,
         } = event.payload
+        if (
+          !useChatStore
+            .getState()
+            .acceptRunStateVersion(session_id, eventStatusVersion)
+        ) {
+          return
+        }
         clearLivePermissionRequests(session_id)
         toast.dismiss(backendRetryToastId(session_id))
 
@@ -2113,8 +2128,10 @@ export default function useStreamingEvents({
         user_turn,
         restore_draft,
         emitted_at_ms,
+        status_version,
       } = event.payload
       const store = useChatStore.getState()
+      if (!store.acceptRunStateVersion(session_id, status_version)) return
       const sendStarted = store.sendStartedAt[session_id] ?? 0
       if (sendStarted > emitted_at_ms) {
         // A newer send owns the composer and the cache tail.

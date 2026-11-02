@@ -145,10 +145,8 @@ import { OpenCodePermissionsRequest } from './OpenCodePermissionsRequest'
 import { CodexMcpElicitationRequest as CodexMcpElicitationRequestCard } from './CodexMcpElicitationRequest'
 import { CodexDynamicToolCallRequest as CodexDynamicToolCallRequestCard } from './CodexDynamicToolCallRequest'
 import { SetupScriptOutput } from './SetupScriptOutput'
-import {
-  selectSessionRenderTarget,
-  shouldClearStaleSessionStream,
-} from './session-render-target'
+import { selectSessionRenderTarget } from './session-render-target'
+import { refreshRunStates } from '@/services/run-states'
 import { isFirstWorktreeSession } from './setup-script-visibility'
 import { TodoWidget } from './TodoWidget'
 import { AgentWidget } from './AgentWidget'
@@ -584,44 +582,13 @@ const ChatWindowContent = memo(function ChatWindowContent({
     sessionRenderTarget.worktreePath
   )
 
-  // A background remote socket reconnects without reloading the desktop UI.
-  // If chat:done was missed during that gap, persisted history is complete but
-  // the old Zustand stream remains mounted. Reconcile it when the authoritative
-  // session response proves that the assistant turn finished.
+  // Opening a session asks the backend for that session's run state, so a
+  // turn that started or finished elsewhere (another client, a remote server,
+  // a missed event) shows correctly without waiting for the next event.
   useEffect(() => {
-    if (!deferredSessionId || !session || isSessionSwitching) return
-    const lastMessage = session.messages.at(-1)
-    const store = useChatStore.getState()
-    if (
-      shouldClearStaleSessionStream({
-        isSending: !!store.sendingSessionIds[deferredSessionId],
-        lastRunStatus: session.last_run_status,
-        lastMessageRole: lastMessage?.role,
-        lastMessageId: lastMessage?.id,
-      })
-    ) {
-      store.completeSession(deferredSessionId)
-    }
-  }, [deferredSessionId, session, isSessionSwitching])
-
-  // After a web reload, sessions outside the bootstrap snapshot (e.g. agent
-  // sessions) are marked sending without a start time, so the timer shows 0s.
-  // Seed it from the persisted run start.
-  useEffect(() => {
-    if (!deferredSessionId || !session || isSessionSwitching) return
-    if (session.last_run_status !== 'running' || !session.last_run_started_at)
-      return
-    const store = useChatStore.getState()
-    if (
-      !store.sendingSessionIds[deferredSessionId] ||
-      store.sendStartedAt[deferredSessionId] != null
-    )
-      return
-    store.addSendingSession(
-      deferredSessionId,
-      session.last_run_started_at * 1000
-    )
-  }, [deferredSessionId, session, isSessionSwitching])
+    if (!deferredSessionId || isSessionSwitching) return
+    void refreshRunStates(queryClient, { sessionIds: [deferredSessionId] })
+  }, [deferredSessionId, isSessionSwitching, queryClient])
 
   const hasReviewResults = useChatStore(state =>
     deferredSessionId ? !!state.reviewResults[deferredSessionId] : false
@@ -2979,17 +2946,6 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                   activityHint={agentStatus}
                                   isSending={isSending}
                                   sendStartedAt={sendStartedAt}
-                                  restoredRunStatus={
-                                    !isSending &&
-                                    !isWaitingForInput &&
-                                    !hasPendingQuestions &&
-                                    !isSessionReviewing
-                                      ? session?.last_run_status
-                                      : undefined
-                                  }
-                                  restoredExecutionMode={
-                                    session?.last_run_execution_mode
-                                  }
                                   completedDurationMs={completedDurationMs}
                                 />
                               </div>

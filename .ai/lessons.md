@@ -30,6 +30,7 @@
 - Guard Zustand mutations against no-op updates so unchanged values do not notify all subscribers.
 - Serialize preference patches that fire in parallel. Local `patch_preferences` is load-merge-save and remote patches carry an expected revision, so concurrent patches lose keys or conflict.
 - Test timing-sensitive close, reopen, refresh, and restoration paths, not only the persistence call.
+- The backend owns run and prompt outcomes. Emit the decision (with a persisted status version) after it is final; never let the client infer it from stream timing, and reconcile from one snapshot command instead of per-signal patches.
 
 ## Verify behavior at system boundaries
 

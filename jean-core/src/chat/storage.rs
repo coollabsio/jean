@@ -8,8 +8,8 @@ use once_cell::sync::Lazy;
 use tauri::AppHandle;
 
 use super::types::{
-    SavedContextsMetadata, Session, SessionIndexEntry, SessionMetadata, WorktreeIndex,
-    WorktreeSessions,
+    RunStateStamp, SavedContextsMetadata, Session, SessionIndexEntry, SessionMetadata,
+    WorktreeIndex, WorktreeSessions,
 };
 
 // ============================================================================
@@ -285,10 +285,33 @@ fn load_metadata_internal(
     Ok(Some(metadata))
 }
 
-/// Save session metadata (internal, no locking - atomic write)
-fn save_metadata_internal(app: &AppHandle, metadata: &SessionMetadata) -> Result<(), String> {
+/// Save session metadata (internal, no locking - atomic write).
+///
+/// `prior` is the stamp of the copy this write replaces. The status version
+/// advances here, and only here, when the run state differs from that copy,
+/// so no transition site can forget to bump it and a stale in-memory copy can
+/// never lower it.
+fn save_metadata_internal(
+    app: &AppHandle,
+    metadata: &SessionMetadata,
+    prior: Option<RunStateStamp>,
+) -> Result<(), String> {
     let _pasted_files_guard = PASTED_FILES_LOCK.lock().unwrap();
-    save_metadata_file(app, metadata)
+    let version = metadata.next_status_version(prior);
+    if version == metadata.status_version {
+        return save_metadata_file(app, metadata);
+    }
+    let mut stamped = metadata.clone();
+    stamped.status_version = version;
+    save_metadata_file(app, &stamped)
+}
+
+/// Stamp of the metadata currently on disk, for a write that did not load it.
+fn on_disk_run_state_stamp(app: &AppHandle, session_id: &str) -> Option<RunStateStamp> {
+    load_metadata_internal(app, session_id)
+        .ok()
+        .flatten()
+        .map(|metadata| metadata.run_state_stamp())
 }
 
 fn save_metadata_file(app: &AppHandle, metadata: &SessionMetadata) -> Result<(), String> {
@@ -365,7 +388,8 @@ pub fn load_mcp_session_metadata(
             metadata
         });
         metadata.worktree_id = worktree.id.clone();
-        save_metadata_internal(app, &metadata)?;
+        let prior = metadata.run_state_stamp();
+        save_metadata_internal(app, &metadata, Some(prior))?;
         return Ok(Some(metadata));
     }
 
@@ -377,7 +401,8 @@ pub fn save_metadata(app: &AppHandle, metadata: &SessionMetadata) -> Result<(), 
     {
         let lock = get_metadata_lock(&metadata.id);
         let _guard = lock.lock().unwrap();
-        save_metadata_internal(app, metadata)?;
+        let prior = on_disk_run_state_stamp(app, &metadata.id);
+        save_metadata_internal(app, metadata, prior)?;
     }
     update_session_index_unread_summary(app, metadata)
 }
@@ -400,8 +425,9 @@ where
         let mut metadata = load_metadata_internal(app, session_id)?
             .ok_or_else(|| format!("Session {session_id} not found"))?;
         let previous_summary = metadata.to_unread_summary();
+        let prior = metadata.run_state_stamp();
         let result = f(&mut metadata);
-        save_metadata_internal(app, &metadata)?;
+        save_metadata_internal(app, &metadata, Some(prior))?;
         (result, previous_summary, metadata)
     };
 
@@ -433,6 +459,9 @@ where
         let previous_summary = existing_metadata
             .as_ref()
             .map(SessionMetadata::to_unread_summary);
+        let prior = existing_metadata
+            .as_ref()
+            .map(SessionMetadata::run_state_stamp);
         let mut metadata = existing_metadata.unwrap_or_else(|| {
             SessionMetadata::new(
                 session_id.to_string(),
@@ -443,7 +472,7 @@ where
         });
 
         let result = f(&mut metadata)?;
-        save_metadata_internal(app, &metadata)?;
+        save_metadata_internal(app, &metadata, prior)?;
         (result, previous_summary, metadata)
     };
 
@@ -1124,7 +1153,9 @@ where
         let lock = get_metadata_lock(&session.id);
         let _guard = lock.lock().unwrap();
 
-        let mut metadata = load_metadata_internal(app, &session.id)?.unwrap_or_else(|| {
+        let existing = load_metadata_internal(app, &session.id)?;
+        let prior = existing.as_ref().map(SessionMetadata::run_state_stamp);
+        let mut metadata = existing.unwrap_or_else(|| {
             SessionMetadata::new(
                 session.id.clone(),
                 worktree_id.to_string(),
@@ -1134,7 +1165,7 @@ where
         });
 
         metadata.update_from_session(session);
-        save_metadata_internal(app, &metadata)?;
+        save_metadata_internal(app, &metadata, prior)?;
     }
 
     Ok(result)
@@ -1222,10 +1253,11 @@ pub fn move_session(
         ));
     }
 
+    let prior = metadata.run_state_stamp();
     move_session_between_indexes(&mut source, &mut target, &mut metadata, session_id)?;
     save_index_internal(app, &source)?;
     save_index_internal(app, &target)?;
-    save_metadata_internal(app, &metadata)?;
+    save_metadata_internal(app, &metadata, Some(prior))?;
     Ok(())
 }
 
@@ -1298,8 +1330,9 @@ pub fn restore_base_sessions(
         let metadata_lock = get_metadata_lock(&entry.id);
         let _metadata_guard = metadata_lock.lock().unwrap();
         if let Some(mut metadata) = load_metadata_internal(app, &entry.id)? {
+            let prior = metadata.run_state_stamp();
             metadata.worktree_id = new_worktree_id.to_string();
-            save_metadata_internal(app, &metadata)?;
+            save_metadata_internal(app, &metadata, Some(prior))?;
         }
     }
 
@@ -1410,6 +1443,143 @@ pub fn save_saved_contexts_metadata(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chat::types::RunStatus;
+
+    fn running_run(run_id: &str) -> crate::chat::types::RunEntry {
+        crate::chat::types::RunEntry {
+            run_id: run_id.to_string(),
+            user_message_id: format!("{run_id}-user"),
+            user_message: "hi".to_string(),
+            model: None,
+            execution_mode: None,
+            thinking_level: None,
+            effort_level: None,
+            backend: None,
+            custom_profile_name: None,
+            started_at: 1,
+            ended_at: None,
+            status: RunStatus::Running,
+            assistant_message_id: None,
+            cancelled: false,
+            provider_rejected: false,
+            recovered: false,
+            claude_session_id: None,
+            pid: None,
+            usage: None,
+            codex_thread_id: None,
+            codex_turn_id: None,
+            cursor_chat_id: None,
+            grok_session_id: None,
+            kimi_session_id: None,
+            devin_session_id: None,
+            antigravity_session_id: None,
+            muse_session_id: None,
+            checkpoint_id: None,
+        }
+    }
+
+    #[test]
+    fn status_version_bumps_on_every_persisted_transition_and_survives_reload() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = AppHandle::new(temp.path().to_path_buf(), temp.path().to_path_buf()).unwrap();
+        // Create through the index so the session-sync path below finds it.
+        with_sessions_mut(&app, "", "wt", |sessions| {
+            let mut session = Session::new(
+                "Session".to_string(),
+                1,
+                super::super::types::Backend::Claude,
+            );
+            session.id = "s1".to_string();
+            sessions.sessions.push(session);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(
+            load_metadata(&app, "s1").unwrap().unwrap().status_version,
+            0
+        );
+
+        // start_run shape: closure path appends a running run.
+        with_existing_metadata_mut(&app, "s1", |m| m.runs.push(running_run("r1"))).unwrap();
+        assert_eq!(
+            load_metadata(&app, "s1").unwrap().unwrap().status_version,
+            1
+        );
+
+        // Unrelated edit through the same path: no bump.
+        with_existing_metadata_mut(&app, "s1", |m| m.name = "Renamed".into()).unwrap();
+        assert_eq!(
+            load_metadata(&app, "s1").unwrap().unwrap().status_version,
+            1
+        );
+
+        // complete / cancel / crash shape.
+        with_existing_metadata_mut(&app, "s1", |m| {
+            m.runs[0].status = RunStatus::Completed;
+            m.runs[0].assistant_message_id = Some("a1".into());
+        })
+        .unwrap();
+        assert_eq!(
+            load_metadata(&app, "s1").unwrap().unwrap().status_version,
+            2
+        );
+
+        // Waiting flag persisted through the load-then-save path.
+        let mut copy = load_metadata(&app, "s1").unwrap().unwrap();
+        copy.waiting_for_input = true;
+        save_metadata(&app, &copy).unwrap();
+        assert_eq!(
+            load_metadata(&app, "s1").unwrap().unwrap().status_version,
+            3
+        );
+
+        // with_metadata_mut (run writer path) on an existing session.
+        with_metadata_mut(&app, "s1", "wt", "Session", 0, |m| {
+            m.runs.push(running_run("r2"));
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(
+            load_metadata(&app, "s1").unwrap().unwrap().status_version,
+            4
+        );
+
+        // Session sync path (UI state written back through with_sessions_mut).
+        with_sessions_mut(&app, "", "wt", |sessions| {
+            let session = sessions.find_session_mut("s1").unwrap();
+            session.waiting_for_input = false;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(
+            load_metadata(&app, "s1").unwrap().unwrap().status_version,
+            5
+        );
+    }
+
+    #[test]
+    fn status_version_never_goes_backwards_from_a_stale_copy() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = AppHandle::new(temp.path().to_path_buf(), temp.path().to_path_buf()).unwrap();
+        let mut metadata = SessionMetadata::new("s1".into(), "wt".into(), "Session".into(), 0);
+        metadata.runs.push(running_run("r1"));
+        save_metadata(&app, &metadata).unwrap();
+        let stale = load_metadata(&app, "s1").unwrap().unwrap();
+
+        with_existing_metadata_mut(&app, "s1", |m| m.runs[0].status = RunStatus::Cancelled)
+            .unwrap();
+        with_existing_metadata_mut(&app, "s1", |m| m.waiting_for_input = true).unwrap();
+        let newest = load_metadata(&app, "s1").unwrap().unwrap().status_version;
+        assert_eq!(newest, stale.status_version + 2);
+
+        // A writer holding the stale copy rewrites it unchanged: the on-disk
+        // run state differs from this copy, so the version still advances.
+        save_metadata(&app, &stale).unwrap();
+        assert_eq!(
+            load_metadata(&app, "s1").unwrap().unwrap().status_version,
+            newest + 1
+        );
+    }
 
     #[test]
     fn restoring_base_sessions_updates_metadata_owner() {
@@ -1451,8 +1621,9 @@ mod tests {
         with_sessions_mut(&app, "", "wt", |sessions| {
             // A run writer updates the other session while this mutation runs.
             let mut metadata = load_metadata_internal(&app, &other_id).unwrap().unwrap();
+            let prior = metadata.run_state_stamp();
             metadata.claude_session_id = Some("written-by-run".to_string());
-            save_metadata_internal(&app, &metadata).unwrap();
+            save_metadata_internal(&app, &metadata, Some(prior)).unwrap();
 
             sessions.find_session_mut(&renamed_id).unwrap().name = "Renamed".to_string();
             Ok(())

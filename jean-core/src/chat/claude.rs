@@ -204,6 +204,10 @@ pub struct CancelledEvent {
     pub emitted_at_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
+    /// Session run-state version when known. Cancel fires before the run log
+    /// is final, so the registry sends the version it can read at that time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_version: Option<u64>,
 }
 
 /// Payload for `chat:user-turn`, the final word on a finished send.
@@ -219,6 +223,9 @@ pub struct UserTurnEvent {
     pub user_turn: super::types::UserTurnOutcome,
     pub restore_draft: bool,
     pub emitted_at_ms: u64,
+    /// Run-state version of the final metadata, so clients drop a snapshot
+    /// taken before this verdict.
+    pub status_version: u64,
 }
 
 /// Payload for tool block position events sent to frontend

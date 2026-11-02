@@ -588,6 +588,13 @@ export interface DoneEvent {
   worktree_id: string // Kept for backward compatibility
   /** True when a Codex/Opencode plan-mode run completed with content */
   waiting_for_plan?: boolean
+  /** Run this event closes, when the emitter knows it. */
+  run_id?: string
+  /**
+   * Session run-state version after the run log was persisted. Absent from
+   * backend modules that emit before Jean's metadata is final.
+   */
+  status_version?: number | null
   /**
    * Authoritative final assistant text from the backend (e.g. Grok).
    * When present, prefer this over streamed chunk accumulation so
@@ -647,6 +654,8 @@ export interface CancelledEvent {
   worktree_id: string // Kept for backward compatibility
   emitted_at_ms: number
   run_id?: string
+  /** Run-state version at cancel time, before the run log is final. */
+  status_version?: number
 }
 
 /**
@@ -668,6 +677,36 @@ export interface UserTurnEvent {
   user_turn: Exclude<UserTurnOutcome, 'not_accepted'>
   restore_draft: boolean
   emitted_at_ms: number
+  /** Run-state version of the final metadata this verdict was read from. */
+  status_version?: number
+}
+
+/** Lifecycle of a session's latest run as the owning backend sees it. */
+export type RunStateStatus =
+  | 'running'
+  | 'resumable'
+  | 'cancelled'
+  | 'error'
+  | 'idle'
+
+/**
+ * Versioned run-state snapshot from `get_run_states`, `/api/init`
+ * (`runStates`) and `bootstrap_project`. `statusVersion` is per session and
+ * monotonic across backend restarts; a client drops anything older than the
+ * version it already applied.
+ */
+export interface RunState {
+  sessionId: string
+  worktreeId: string
+  status: RunStateStatus
+  statusVersion: number
+  activelyManaged: boolean
+  runId?: string
+  /** Unix seconds; present only while the run is live. */
+  startedAt?: number
+  executionMode?: string
+  waitingForInput: boolean
+  waitingForInputType?: string | null
 }
 
 /**

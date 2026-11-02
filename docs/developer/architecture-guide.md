@@ -100,6 +100,34 @@ refetches. Internally `send_chat_message_inner` returns `SendError { message,
 user_turn }` so the backend queue drain requeues exactly the prompts the
 composer would restore.
 
+**Versioned run state.** The backend is the single source of run state. Each
+`SessionMetadata` carries `status_version: u64`, bumped in one place:
+`storage.rs` `save_metadata_internal` compares the on-disk copy's
+`run_state_signature()` (per-run status, cancel and assistant flags, waiting
+flags) with the copy being written and advances the version when they differ,
+never below either side. Every transition path (`start_run`, complete, cancel,
+crash, `finish_orphaned_runs`, `recover_incomplete_runs`, resume, waiting-flag
+updates, session sync) persists through that path, so none can forget to bump
+it, and a stale in-memory copy cannot lower it. `SessionMetadata::run_state()`
+builds the `RunState` snapshot (`status: running | resumable | cancelled |
+error | idle`, `statusVersion`, `runId`, `startedAt`, `executionMode`,
+`waitingForInput`); `get_session_status` and `get_run_states(sessionIds?)`
+share it. With no ids, `get_run_states` repairs orphaned runs
+(`recover_incomplete_runs_for`, idempotent) and returns only live sessions, so
+a client treats every other session it owns as idle; `/api/init` ships the
+same list as `runStates` and `bootstrap_project` as `runStates`. `chat:done`
+(central emit), `chat:cancelled`, and `chat:user-turn` carry `status_version`
+where the emitter can read it. Frontend: `chat-store` keeps
+`runStateVersions`; `acceptRunStateVersion` drops versioned events older than
+what was applied, `applyRunStateSnapshot` reconciles sending, streaming,
+executing-mode, and waiting indicators from a snapshot (a local send that
+started after the snapshot was requested is left to its own events).
+`services/run-states.ts` `refreshRunStates` runs on socket connect and
+reconnect, remote reconnect (that server only), `ws:resync`, window focus and
+visibility (throttled), and session open (that one id). Native desktop asks
+the local core and every online remote and scopes ids per server; Web Access
+asks its origin only.
+
 ### Backend-Owned Long-Running Jobs
 
 Long-running operations that must survive web/mobile WebSocket disconnects

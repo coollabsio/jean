@@ -22,7 +22,7 @@ use super::storage::{
 };
 use super::types::{
     AllSessionsEntry, AllSessionsResponse, Backend, ChatMessage, ClaudeContext, EffortLevel,
-    LabelData, MessageRole, RunStatus, Session, SessionUnreadSummary, ThinkingLevel,
+    LabelData, MessageRole, RunState, RunStatus, Session, SessionUnreadSummary, ThinkingLevel,
     UserTurnOutcome, WorktreeSessions,
 };
 use crate::claude_cli::resolve_cli_binary;
@@ -111,6 +111,7 @@ fn emit_user_turn_outcome(
         user_turn,
         restore_draft: user_turn.restore_draft(),
         emitted_at_ms: now_ms(),
+        status_version: metadata.map_or(0, |metadata| metadata.status_version),
     };
     log::info!("[SendChat] user turn session={session_id} run={run_id} outcome={user_turn:?}");
     if let Err(e) = app.emit_all("chat:user-turn", &event) {
@@ -850,23 +851,16 @@ pub async fn get_session_status(
     let metadata = load_metadata(&app, &session_id)?
         .ok_or_else(|| format!("Unknown sessionId: {session_id}"))?;
     let latest_run = metadata.runs.last();
-    let actively_managed = crate::chat::registry::is_session_actively_managed(&session_id);
-    let status = if actively_managed {
-        "running"
-    } else {
-        match latest_run.map(|run| &run.status) {
-            Some(RunStatus::Running) | Some(RunStatus::Resumable) => "resumable",
-            Some(RunStatus::Cancelled) => "cancelled",
-            Some(RunStatus::Crashed) => "error",
-            Some(RunStatus::Completed) | None => "idle",
-        }
-    };
+    let state = metadata.run_state(crate::chat::registry::is_session_actively_managed(
+        &session_id,
+    ));
 
     Ok(serde_json::json!({
         "sessionId": session_id,
         "worktreeId": metadata.worktree_id,
-        "status": status,
-        "activelyManaged": actively_managed,
+        "status": state.status,
+        "statusVersion": state.status_version,
+        "activelyManaged": state.actively_managed,
         "backend": metadata.backend,
         "selectedModel": metadata.selected_model,
         "selectedProvider": metadata.selected_provider,
@@ -885,6 +879,64 @@ pub async fn get_session_status(
             "recovered": run.recovered,
         })),
     }))
+}
+
+/// Versioned run-state snapshot clients reconcile their running/waiting
+/// indicators from. `None` returns every session whose last run is unfinished
+/// plus every session the registry manages; a client treats any other session
+/// as idle. Orphaned runs are repaired before reading so a crashed run never
+/// reports as running.
+pub async fn get_run_states(
+    app: AppHandle,
+    session_ids: Option<Vec<String>>,
+) -> Result<Vec<RunState>, String> {
+    let explicit = session_ids.is_some();
+    let session_ids = match session_ids {
+        Some(ids) => ids,
+        None => super::storage::list_all_session_ids(&app)?,
+    };
+    let managed = super::registry::get_actively_managed_sessions();
+    let mut loaded = Vec::with_capacity(session_ids.len());
+    let mut to_repair = Vec::new();
+    for session_id in session_ids {
+        match load_metadata(&app, &session_id) {
+            Ok(Some(metadata)) => {
+                // Only an unmanaged session with an unfinished run can be an
+                // orphan; everything else is already in its final state.
+                let unfinished = metadata
+                    .runs
+                    .iter()
+                    .any(|run| matches!(run.status, RunStatus::Running | RunStatus::Resumable));
+                if unfinished && !managed.contains(&session_id) {
+                    to_repair.push(session_id.clone());
+                }
+                loaded.push(metadata);
+            }
+            Ok(None) => {}
+            Err(e) => log::warn!("get_run_states: skipping {session_id}: {e}"),
+        }
+    }
+    if !to_repair.is_empty() {
+        if let Err(e) = super::run_log::recover_incomplete_runs_for(&app, to_repair.clone()) {
+            log::warn!("get_run_states: orphan repair failed: {e}");
+        }
+        for metadata in &mut loaded {
+            if !to_repair.contains(&metadata.id) {
+                continue;
+            }
+            if let Ok(Some(repaired)) = load_metadata(&app, &metadata.id) {
+                *metadata = repaired;
+            }
+        }
+    }
+    Ok(loaded
+        .into_iter()
+        .map(|metadata| {
+            let actively_managed = managed.contains(&metadata.id);
+            metadata.run_state(actively_managed)
+        })
+        .filter(|state| explicit || state.status.is_live())
+        .collect())
 }
 
 /// List all sessions across all worktrees and projects
@@ -5935,18 +5987,25 @@ async fn send_chat_message_inner(
         Backend::Claude | Backend::Codex | Backend::Devin
     ) && !was_cancelled
     {
+        let status_version = load_metadata(&app, &session_id)
+            .ok()
+            .flatten()
+            .map(|metadata| metadata.status_version);
         let _ = app.emit_all(
             "chat:done",
             &serde_json::json!({
                 "session_id": session_id,
                 "worktree_id": worktree_id,
                 "waiting_for_plan": is_plan_mode_with_content,
+                "run_id": run_id,
+                "status_version": status_version,
             }),
         );
     }
 
     if was_cancelled {
         log::info!("[SendChat] EXIT session={session_id} reason=cancelled_with_content");
+        emit_user_turn_outcome(&app, &session_id, &worktree_id, &run_id);
     } else {
         log::info!("[SendChat] EXIT session={session_id} reason=success");
     }
@@ -11113,6 +11172,126 @@ pub async fn respond_opencode_permission(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn run_state_session(
+        app: &AppHandle,
+        session_id: &str,
+        status: RunStatus,
+        codex_thread_id: Option<&str>,
+    ) {
+        let mut metadata = super::super::types::SessionMetadata::new(
+            session_id.to_string(),
+            "wt".to_string(),
+            "Session".to_string(),
+            0,
+        );
+        metadata.runs.push(super::super::types::RunEntry {
+            run_id: format!("{session_id}-run"),
+            user_message_id: format!("{session_id}-user"),
+            user_message: "hi".to_string(),
+            model: None,
+            execution_mode: Some("build".to_string()),
+            thinking_level: None,
+            effort_level: None,
+            backend: None,
+            custom_profile_name: None,
+            started_at: 10,
+            ended_at: None,
+            status,
+            assistant_message_id: None,
+            cancelled: false,
+            provider_rejected: false,
+            recovered: false,
+            claude_session_id: None,
+            pid: None,
+            usage: None,
+            codex_thread_id: codex_thread_id.map(str::to_string),
+            codex_turn_id: None,
+            cursor_chat_id: None,
+            grok_session_id: None,
+            kimi_session_id: None,
+            devin_session_id: None,
+            antigravity_session_id: None,
+            muse_session_id: None,
+            checkpoint_id: None,
+        });
+        super::super::storage::save_metadata(app, &metadata).unwrap();
+    }
+
+    #[test]
+    fn get_run_states_without_ids_returns_only_live_sessions_after_repair() {
+        // Sync test: the registry lock must not be held across a real await.
+        let _registry = super::super::registry::TEST_LOCK.lock().unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        runtime.block_on(get_run_states_without_ids_body());
+    }
+
+    async fn get_run_states_without_ids_body() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = AppHandle::new(temp.path().to_path_buf(), temp.path().to_path_buf()).unwrap();
+        run_state_session(&app, "managed", RunStatus::Running, None);
+        run_state_session(&app, "orphaned", RunStatus::Running, None);
+        run_state_session(&app, "resumable", RunStatus::Running, Some("thread-1"));
+        run_state_session(&app, "finished", RunStatus::Completed, None);
+        assert!(super::super::registry::register_process(
+            "managed".to_string(),
+            u32::MAX
+        ));
+
+        let states = get_run_states(app.clone(), None).await.unwrap();
+        super::super::registry::cleanup_session_registrations("managed");
+
+        let mut listed: Vec<(&str, super::super::types::RunStateStatus)> = states
+            .iter()
+            .map(|state| (state.session_id.as_str(), state.status))
+            .collect();
+        listed.sort_by(|a, b| a.0.cmp(b.0));
+        assert_eq!(
+            listed,
+            vec![
+                ("managed", super::super::types::RunStateStatus::Running),
+                ("resumable", super::super::types::RunStateStatus::Resumable),
+            ]
+        );
+        let managed = states.iter().find(|s| s.session_id == "managed").unwrap();
+        assert_eq!(managed.run_id.as_deref(), Some("managed-run"));
+        assert_eq!(managed.started_at, Some(10));
+        assert_eq!(managed.execution_mode.as_deref(), Some("build"));
+
+        // The orphan was repaired on read: crashed, version bumped, reported
+        // as an error only when asked for explicitly.
+        let orphan = load_metadata(&app, "orphaned").unwrap().unwrap();
+        assert_eq!(orphan.runs[0].status, RunStatus::Crashed);
+        assert_eq!(orphan.status_version, 1);
+        let explicit = get_run_states(
+            app.clone(),
+            Some(vec!["orphaned".to_string(), "finished".to_string()]),
+        )
+        .await
+        .unwrap();
+        assert_eq!(explicit.len(), 2);
+        assert_eq!(
+            explicit[0].status,
+            super::super::types::RunStateStatus::Error
+        );
+        assert_eq!(explicit[0].status_version, 1);
+        assert_eq!(
+            explicit[1].status,
+            super::super::types::RunStateStatus::Idle
+        );
+
+        // Idempotent: a second read repairs nothing further.
+        let _ = get_run_states(app.clone(), None).await.unwrap();
+        assert_eq!(
+            load_metadata(&app, "orphaned")
+                .unwrap()
+                .unwrap()
+                .status_version,
+            1
+        );
+    }
 
     #[test]
     fn permission_policy_capabilities_never_escalate_unknown_modes() {

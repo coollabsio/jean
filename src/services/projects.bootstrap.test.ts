@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { QueryClient } from '@tanstack/react-query'
 
 const invoke = vi.fn()
-const setChatState = vi.fn()
+const applyRunStateSnapshot = vi.fn()
 
 vi.mock('@/lib/transport', () => ({
   invoke: (...args: unknown[]) => invoke(...args),
@@ -24,13 +24,18 @@ vi.mock('@/services/chat', () => ({
 }))
 
 vi.mock('@/store/chat-store', () => ({
-  useChatStore: { setState: (...args: unknown[]) => setChatState(...args) },
+  useChatStore: {
+    getState: () => ({
+      applyRunStateSnapshot: (...args: unknown[]) =>
+        applyRunStateSnapshot(...args),
+    }),
+  },
 }))
 
 describe('fetchAndSeedProjectBootstrap', () => {
   beforeEach(() => {
     invoke.mockReset()
-    setChatState.mockReset()
+    applyRunStateSnapshot.mockReset()
   })
 
   it('seeds worktrees and session list caches from one bootstrap_project call', async () => {
@@ -56,7 +61,17 @@ describe('fetchAndSeedProjectBootstrap', () => {
           version: 2,
         },
       },
-      runningSessions: ['s-1'],
+      runStates: [
+        {
+          sessionId: 's-1',
+          worktreeId: 'wt-1',
+          status: 'running',
+          statusVersion: 3,
+          activelyManaged: true,
+          startedAt: 100,
+          waitingForInput: false,
+        },
+      ],
     })
 
     const worktrees = await fetchAndSeedProjectBootstrap('proj-1', queryClient)
@@ -81,19 +96,15 @@ describe('fetchAndSeedProjectBootstrap', () => {
       worktree_id: 'wt-1',
       sessions: [{ id: 's-1', name: 'Chat', last_run_started_at: 100 }],
     })
-    const updateSending = setChatState.mock.calls[0]?.[0]
-    expect(
-      updateSending({
-        sendingSessionIds: { stale: true },
-        sendStartedAt: { stale: 50_000 },
-      })
-    ).toEqual({
-      sendingSessionIds: { stale: true, 's-1': true },
-      sendStartedAt: { stale: 50_000, 's-1': 100_000 },
-    })
+    const [states, options] = applyRunStateSnapshot.mock.calls[0] ?? []
+    expect(states).toEqual([
+      expect.objectContaining({ sessionId: 's-1', status: 'running' }),
+    ])
+    expect(options.ownsSession('s-1')).toBe(true)
+    expect(options.ownsSession('stale')).toBe(false)
   })
 
-  it('clears stale running state only for sessions in the bootstrapped project', async () => {
+  it('scopes the run-state snapshot to sessions in the bootstrapped project', async () => {
     const { fetchAndSeedProjectBootstrap } = await import('./projects')
     invoke.mockResolvedValueOnce({
       worktrees: [],
@@ -104,20 +115,17 @@ describe('fetchAndSeedProjectBootstrap', () => {
           version: 2,
         },
       },
-      runningSessions: [],
+      runStates: [],
     })
 
     await fetchAndSeedProjectBootstrap('proj-1', new QueryClient())
 
-    const updateSending = setChatState.mock.calls[0]?.[0]
-    expect(
-      updateSending({
-        sendingSessionIds: { 's-1': true, other: true },
-        sendStartedAt: { 's-1': 100_000, other: 50_000 },
-      })
-    ).toEqual({
-      sendingSessionIds: { other: true },
-      sendStartedAt: { other: 50_000 },
-    })
+    const [states, options] = applyRunStateSnapshot.mock.calls[0] ?? []
+    expect(states).toEqual([])
+    // 's-1' is in the project and absent from the snapshot: idle. 'other'
+    // belongs to another project and must be left alone.
+    expect(options.ownsSession('s-1')).toBe(true)
+    expect(options.ownsSession('other')).toBe(false)
+    expect(options.requestedAt).toBeTypeOf('number')
   })
 })

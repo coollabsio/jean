@@ -127,9 +127,11 @@ pub(crate) fn emit_cancelled_event(app: &AppHandle, session_id: &str, worktree_i
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0);
-    let run_id = super::storage::load_metadata(app, session_id)
+    let metadata = super::storage::load_metadata(app, session_id)
         .ok()
-        .flatten()
+        .flatten();
+    let run_id = metadata
+        .as_ref()
         .and_then(|metadata| metadata.runs.last().map(|run| run.run_id.clone()));
 
     let event = CancelledEvent {
@@ -137,6 +139,7 @@ pub(crate) fn emit_cancelled_event(app: &AppHandle, session_id: &str, worktree_i
         worktree_id: worktree_id.to_string(),
         emitted_at_ms,
         run_id,
+        status_version: metadata.map(|metadata| metadata.status_version),
     };
     if let Err(e) = app.emit_all("chat:cancelled", &event) {
         log::error!("Failed to emit chat:cancelled event: {e}");

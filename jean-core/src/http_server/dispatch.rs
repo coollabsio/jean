@@ -1304,6 +1304,11 @@ pub async fn dispatch_command(
             let result = crate::chat::get_session_status(app.clone(), session_id).await?;
             to_value(result)
         }
+        "get_run_states" => {
+            let session_ids: Option<Vec<String>> = field_opt(&args, "sessionIds", "session_ids")?;
+            let result = crate::chat::get_run_states(app.clone(), session_ids).await?;
+            to_value(result)
+        }
         "list_all_sessions" => {
             let result = crate::chat::list_all_sessions(app.clone()).await?;
             to_value(result)

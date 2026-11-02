@@ -2129,4 +2129,154 @@ describe('ChatStore', () => {
       ).toEqual(['saved-1:0'])
     })
   })
+
+  describe('run state snapshot', () => {
+    beforeEach(() => {
+      useChatStore.setState({
+        runStateVersions: {},
+        executingModes: {},
+      })
+    })
+
+    it('clears a stuck sending session that the backend reports idle', () => {
+      const store = useChatStore.getState()
+      store.addSendingSession('stuck', 1_000)
+      store.setStreamingContent('stuck', 'partial')
+      store.applyRunStateSnapshot(
+        [
+          {
+            sessionId: 'stuck',
+            worktreeId: 'wt',
+            status: 'idle',
+            statusVersion: 4,
+            activelyManaged: false,
+            waitingForInput: false,
+          },
+        ],
+        { requestedAt: 5_000 }
+      )
+      const state = useChatStore.getState()
+      expect(state.sendingSessionIds.stuck).toBeUndefined()
+      expect(state.streamingContents.stuck).toBeUndefined()
+      expect(state.sendStartedAt.stuck).toBeUndefined()
+      expect(state.runStateVersions.stuck).toBe(4)
+    })
+
+    it('clears an owned sending session absent from a full snapshot', () => {
+      const store = useChatStore.getState()
+      store.addSendingSession('finished-elsewhere', 1_000)
+      store.addSendingSession('other-server:busy', 1_000)
+      store.applyRunStateSnapshot([], {
+        ownsSession: id => !id.includes(':'),
+        requestedAt: 5_000,
+      })
+      const state = useChatStore.getState()
+      expect(state.sendingSessionIds['finished-elsewhere']).toBeUndefined()
+      expect(state.sendingSessionIds['other-server:busy']).toBe(true)
+    })
+
+    it('marks a run started on another client as sending with its start time and mode', () => {
+      useChatStore.getState().applyRunStateSnapshot(
+        [
+          {
+            sessionId: 'remote-run',
+            worktreeId: 'wt',
+            status: 'running',
+            statusVersion: 2,
+            activelyManaged: true,
+            runId: 'run-1',
+            startedAt: 1_700,
+            executionMode: 'yolo',
+            waitingForInput: false,
+          },
+        ],
+        { ownsSession: () => true, requestedAt: Date.now() }
+      )
+      const state = useChatStore.getState()
+      expect(state.sendingSessionIds['remote-run']).toBe(true)
+      expect(state.sendStartedAt['remote-run']).toBe(1_700_000)
+      expect(state.executingModes['remote-run']).toBe('yolo')
+      expect(state.runStateVersions['remote-run']).toBe(2)
+    })
+
+    it('ignores a snapshot older than the version already applied', () => {
+      const store = useChatStore.getState()
+      expect(store.acceptRunStateVersion('s', 7)).toBe(true)
+      store.addSendingSession('s', 1_000)
+      store.applyRunStateSnapshot(
+        [
+          {
+            sessionId: 's',
+            worktreeId: 'wt',
+            status: 'idle',
+            statusVersion: 6,
+            activelyManaged: false,
+            waitingForInput: false,
+          },
+        ],
+        { ownsSession: () => true, requestedAt: 5_000 }
+      )
+      expect(useChatStore.getState().sendingSessionIds.s).toBe(true)
+      expect(useChatStore.getState().runStateVersions.s).toBe(7)
+    })
+
+    it('rejects stale versioned events and accepts unversioned ones', () => {
+      const store = useChatStore.getState()
+      expect(store.acceptRunStateVersion('s', 3)).toBe(true)
+      expect(store.acceptRunStateVersion('s', 2)).toBe(false)
+      expect(store.acceptRunStateVersion('s', 3)).toBe(true)
+      expect(store.acceptRunStateVersion('s', undefined)).toBe(true)
+      expect(store.acceptRunStateVersion('s', 9)).toBe(true)
+      expect(useChatStore.getState().runStateVersions.s).toBe(9)
+    })
+
+    it('leaves a local send that started after the snapshot was requested', () => {
+      const store = useChatStore.getState()
+      store.addSendingSession('fresh', 6_000)
+      store.applyRunStateSnapshot([], {
+        ownsSession: () => true,
+        requestedAt: 5_000,
+      })
+      expect(useChatStore.getState().sendingSessionIds.fresh).toBe(true)
+    })
+
+    it('sets and clears waiting-for-input from the snapshot', () => {
+      const base = {
+        sessionId: 'w',
+        worktreeId: 'wt',
+        status: 'idle' as const,
+        activelyManaged: false,
+      }
+      useChatStore.getState().applyRunStateSnapshot(
+        [
+          {
+            ...base,
+            statusVersion: 1,
+            waitingForInput: true,
+            waitingForInputType: 'plan',
+          },
+        ],
+        { requestedAt: Date.now() }
+      )
+      expect(useChatStore.getState().waitingForInputSessionIds.w).toBe(true)
+      useChatStore
+        .getState()
+        .applyRunStateSnapshot(
+          [{ ...base, statusVersion: 2, waitingForInput: false }],
+          { requestedAt: Date.now() }
+        )
+      expect(
+        useChatStore.getState().waitingForInputSessionIds.w
+      ).toBeUndefined()
+    })
+
+    it('returns the same state object when nothing changes', () => {
+      const before = useChatStore.getState()
+      before.applyRunStateSnapshot([], {
+        ownsSession: () => true,
+        requestedAt: Date.now(),
+      })
+      expect(useChatStore.getState()).toBe(before)
+    })
+  })
 })

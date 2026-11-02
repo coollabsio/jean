@@ -2596,3 +2596,84 @@ describe('useStreamingEvents backend retry', () => {
     expect(dismiss).toHaveBeenCalledWith('backend-retry-session-1')
   })
 })
+
+describe('useStreamingEvents run-state versions', () => {
+  beforeEach(() => {
+    setupListenMock()
+    useChatStore.setState({
+      sendingSessionIds: {},
+      sendStartedAt: {},
+      runStateVersions: {},
+      streamingContents: {},
+      waitingForInputSessionIds: {},
+    })
+  })
+
+  it('drops a chat:done older than the run state already applied', async () => {
+    const queryClient = createQueryClient()
+    renderHook(() => useStreamingEvents({ queryClient }), {
+      wrapper: createWrapper(queryClient),
+    })
+    await waitFor(() => expect(registeredListeners.has('chat:done')).toBe(true))
+
+    const store = useChatStore.getState()
+    store.addSendingSession('session-1', Date.now() - 10_000)
+    // A snapshot already told this client the newer run is live (version 5).
+    store.applyRunStateSnapshot(
+      [
+        {
+          sessionId: 'session-1',
+          worktreeId: 'worktree-1',
+          status: 'running',
+          statusVersion: 5,
+          activelyManaged: true,
+          waitingForInput: false,
+        },
+      ],
+      { requestedAt: Date.now() }
+    )
+
+    registeredListeners.get('chat:done')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        status_version: 4,
+      },
+    })
+    expect(useChatStore.getState().sendingSessionIds['session-1']).toBe(true)
+
+    registeredListeners.get('chat:done')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        status_version: 6,
+      },
+    })
+    const state = useChatStore.getState()
+    expect(state.sendingSessionIds['session-1']).toBeUndefined()
+    expect(state.runStateVersions['session-1']).toBe(6)
+  })
+
+  it('drops a chat:cancelled older than the run state already applied', async () => {
+    const queryClient = createQueryClient()
+    renderHook(() => useStreamingEvents({ queryClient }), {
+      wrapper: createWrapper(queryClient),
+    })
+    await waitFor(() =>
+      expect(registeredListeners.has('chat:cancelled')).toBe(true)
+    )
+    const store = useChatStore.getState()
+    store.addSendingSession('session-1', Date.now() - 10_000)
+    expect(store.acceptRunStateVersion('session-1', 3)).toBe(true)
+
+    registeredListeners.get('chat:cancelled')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        emitted_at_ms: Date.now(),
+        status_version: 2,
+      },
+    })
+    expect(useChatStore.getState().sendingSessionIds['session-1']).toBe(true)
+  })
+})

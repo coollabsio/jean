@@ -1035,8 +1035,18 @@ async fn init_handler(Query(params): Query<WsAuth>, State(state): State<AppState
         }
     }
 
-    let running_sessions = crate::chat::registry::get_running_sessions();
-    response["runningSessions"] = serde_json::to_value(&running_sessions).unwrap_or_default();
+    let run_states = crate::chat::get_run_states(state.app.clone(), None)
+        .await
+        .unwrap_or_else(|e| {
+            log::error!("Failed to load run states for /api/init: {e}");
+            Vec::new()
+        });
+    response["runStates"] = serde_json::to_value(&run_states).unwrap_or_default();
+    let running_sessions: Vec<String> = run_states
+        .iter()
+        .filter(|run_state| run_state.actively_managed)
+        .map(|run_state| run_state.session_id.clone())
+        .collect();
 
     // Replay events: only for running sessions that are also focused (in
     // active_sessions), capped at the last N events per session. The WebSocket

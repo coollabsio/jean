@@ -3443,9 +3443,18 @@ pub struct RecoveredRun {
 /// Check for and recover incomplete runs across all sessions
 /// Called on app startup to handle crashed runs from previous session
 pub fn recover_incomplete_runs(app: &tauri::AppHandle) -> Result<Vec<RecoveredRun>, String> {
+    let session_ids = list_all_session_ids(app)?;
+    recover_incomplete_runs_for(app, session_ids)
+}
+
+/// Same repair as [`recover_incomplete_runs`], limited to the given sessions.
+/// Idempotent: a repaired session is left unchanged by a second pass.
+pub fn recover_incomplete_runs_for(
+    app: &tauri::AppHandle,
+    session_ids: Vec<String>,
+) -> Result<Vec<RecoveredRun>, String> {
     use super::detached::is_process_alive;
 
-    let session_ids = list_all_session_ids(app)?;
     let mut recovered = Vec::new();
 
     // Sessions with active process/cancel-flag registrations are currently

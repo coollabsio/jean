@@ -25,6 +25,7 @@ import {
   type CodexMcpElicitationRequest,
   type CodexDynamicToolCallRequest,
   type ExecutionMode,
+  type RunState,
   type SendMessageArgs,
   type PermissionMode,
   type LabelData,
@@ -70,6 +71,173 @@ function hasActiveStreamingState(
     (state.streamingContentBlocks[sessionId]?.length ?? 0) > 0 ||
     (state.activeToolCalls[sessionId]?.length ?? 0) > 0
   )
+}
+
+/** Backend-owned facts about one session's run, as the store consumes them. */
+export interface RunStateSnapshotOptions {
+  /**
+   * Sessions this snapshot is authoritative for. An owned session that is
+   * sending here but absent from the snapshot finished while this client was
+   * not listening. Omit when the snapshot covers only requested ids.
+   */
+  ownsSession?: (sessionId: string) => boolean
+  /**
+   * When the snapshot was requested. A local send that started after that is
+   * newer than the snapshot and is left alone; the backend's own
+   * `chat:sending` and `chat:done` settle it.
+   */
+  requestedAt: number
+}
+
+type RunStateSlice = Pick<
+  ChatUIState,
+  | 'streamingContents'
+  | 'streamingContentBlocks'
+  | 'streamingReplayContentBlocks'
+  | 'activeToolCalls'
+  | 'sendingSessionIds'
+  | 'sendStartedAt'
+  | 'completedDurations'
+  | 'streamingPlanApprovals'
+  | 'executingModes'
+  | 'waitingForInputSessionIds'
+  | 'runStateVersions'
+>
+
+/** The session's run is over: drop every live-turn indicator. */
+function withRunEnded(state: RunStateSlice, sessionId: string): RunStateSlice {
+  if (
+    !(sessionId in state.sendingSessionIds) &&
+    !hasActiveStreamingState(state, sessionId) &&
+    !(sessionId in state.executingModes) &&
+    !(sessionId in state.sendStartedAt)
+  ) {
+    return state
+  }
+  const sendStarted = state.sendStartedAt[sessionId] ?? 0
+  const { [sessionId]: _sc, ...streamingContents } = state.streamingContents
+  const { [sessionId]: _sb, ...streamingContentBlocks } =
+    state.streamingContentBlocks
+  const { [sessionId]: _srb, ...streamingReplayContentBlocks } =
+    state.streamingReplayContentBlocks
+  const { [sessionId]: _tc, ...activeToolCalls } = state.activeToolCalls
+  const { [sessionId]: _ss, ...sendingSessionIds } = state.sendingSessionIds
+  const { [sessionId]: _sp, ...streamingPlanApprovals } =
+    state.streamingPlanApprovals
+  const { [sessionId]: _em, ...executingModes } = state.executingModes
+  const { [sessionId]: _sa, ...sendStartedAt } = state.sendStartedAt
+  return {
+    ...state,
+    streamingContents,
+    streamingContentBlocks,
+    streamingReplayContentBlocks,
+    activeToolCalls,
+    sendingSessionIds,
+    streamingPlanApprovals,
+    executingModes,
+    sendStartedAt,
+    completedDurations:
+      sendStarted > 0
+        ? { ...state.completedDurations, [sessionId]: Date.now() - sendStarted }
+        : state.completedDurations,
+  }
+}
+
+/** The session's run is live on the backend: show it as sending. */
+function withRunLive(
+  state: RunStateSlice,
+  sessionId: string,
+  startedAtMs: number | undefined,
+  executionMode: string | undefined
+): RunStateSlice {
+  let next = state
+  if (!next.sendingSessionIds[sessionId]) {
+    const { [sessionId]: _done, ...completedDurations } =
+      next.completedDurations
+    next = {
+      ...next,
+      sendingSessionIds: { ...next.sendingSessionIds, [sessionId]: true },
+      sendStartedAt: {
+        ...next.sendStartedAt,
+        [sessionId]: startedAtMs ?? next.sendStartedAt[sessionId] ?? Date.now(),
+      },
+      completedDurations,
+    }
+  } else if (startedAtMs != null && next.sendStartedAt[sessionId] == null) {
+    next = {
+      ...next,
+      sendStartedAt: { ...next.sendStartedAt, [sessionId]: startedAtMs },
+    }
+  }
+  const mode = toExecutionMode(executionMode)
+  if (mode && next.executingModes[sessionId] !== mode) {
+    next = {
+      ...next,
+      executingModes: { ...next.executingModes, [sessionId]: mode },
+    }
+  }
+  return next
+}
+
+function toExecutionMode(mode: string | undefined): ExecutionMode | undefined {
+  return mode === 'plan' || mode === 'build' || mode === 'yolo'
+    ? mode
+    : undefined
+}
+
+function withWaitingForInput(
+  state: RunStateSlice,
+  sessionId: string,
+  waiting: boolean
+): RunStateSlice {
+  if (!!state.waitingForInputSessionIds[sessionId] === waiting) return state
+  if (waiting) {
+    return {
+      ...state,
+      waitingForInputSessionIds: {
+        ...state.waitingForInputSessionIds,
+        [sessionId]: true,
+      },
+    }
+  }
+  const { [sessionId]: _w, ...waitingForInputSessionIds } =
+    state.waitingForInputSessionIds
+  return { ...state, waitingForInputSessionIds }
+}
+
+/**
+ * Fold one backend run state into the slice. Returns the same object when
+ * the state is older than what this client already applied.
+ */
+function withRunState(
+  state: RunStateSlice,
+  runState: RunState,
+  requestedAt: number
+): RunStateSlice {
+  const { sessionId } = runState
+  const known = state.runStateVersions[sessionId]
+  if (known != null && runState.statusVersion < known) return state
+  let next =
+    known === runState.statusVersion
+      ? state
+      : {
+          ...state,
+          runStateVersions: {
+            ...state.runStateVersions,
+            [sessionId]: runState.statusVersion,
+          },
+        }
+  if (runState.status === 'running' || runState.status === 'resumable') {
+    next = withRunLive(
+      next,
+      sessionId,
+      runState.startedAt != null ? runState.startedAt * 1000 : undefined,
+      runState.executionMode
+    )
+  } else if ((next.sendStartedAt[sessionId] ?? 0) <= requestedAt) {
+    next = withRunEnded(next, sessionId)
+  }
+  return withWaitingForInput(next, sessionId, runState.waitingForInput)
 }
 
 function compactReplayBlocks(blocks: ContentBlock[]): ContentBlock[] {
@@ -122,6 +290,10 @@ interface ChatUIState {
 
   // Set of session IDs currently sending (supports multiple concurrent sessions)
   sendingSessionIds: Record<string, boolean>
+
+  // Highest backend run-state version applied per session. Events and
+  // snapshots carrying a lower version are stale and ignored.
+  runStateVersions: Record<string, number>
 
   // Session IDs whose AI-generated names are pending
   namingSessionIds: Record<string, boolean>
@@ -747,6 +919,22 @@ interface ChatUIState {
       }
     | undefined
 
+  // Actions - Backend run state (the backend is the source of truth)
+  /**
+   * Record a versioned run-state event. Returns false when the event is older
+   * than the version already applied, so the caller drops it. Unversioned
+   * events (no `version`) are always accepted.
+   */
+  acceptRunStateVersion: (
+    sessionId: string,
+    version: number | null | undefined
+  ) => boolean
+  /** Reconcile sending/streaming/waiting indicators from a backend snapshot. */
+  applyRunStateSnapshot: (
+    states: RunState[],
+    options: RunStateSnapshotOptions
+  ) => void
+
   // Actions - Batch state transitions (single set() to avoid render cascades)
   /** Atomically clear all streaming state and mark session as reviewing */
   completeSession: (sessionId: string) => void
@@ -807,6 +995,7 @@ const SESSION_SCOPED_RECORD_KEYS = [
   'hiddenTableChecklists',
   'pinnedTables',
   'sendingSessionIds',
+  'runStateVersions',
   'sendStartedAt',
   'completedDurations',
   'userInitiatedSessionIds',
@@ -968,6 +1157,7 @@ export const useChatStore = create<ChatUIState>()(
       pinnedTables: {},
       worktreePaths: {},
       sendingSessionIds: {},
+      runStateVersions: {},
       namingSessionIds: {},
       sendStartedAt: {},
       completedDurations: {},
@@ -3887,6 +4077,51 @@ export const useChatStore = create<ChatUIState>()(
 
       getDeniedMessageContext: sessionId =>
         get().deniedMessageContext[sessionId],
+
+      acceptRunStateVersion: (sessionId, version) => {
+        if (version == null) return true
+        const known = get().runStateVersions[sessionId]
+        if (known != null && version < known) {
+          console.warn(
+            `[Store] stale run state ignored session=${sessionId} version=${version} known=${known}`
+          )
+          return false
+        }
+        if (known !== version) {
+          set(
+            state => ({
+              runStateVersions: {
+                ...state.runStateVersions,
+                [sessionId]: version,
+              },
+            }),
+            undefined,
+            'acceptRunStateVersion'
+          )
+        }
+        return true
+      },
+
+      applyRunStateSnapshot: (states, { ownsSession, requestedAt }) =>
+        set(
+          state => {
+            let next: RunStateSlice = state
+            const listed = new Set(states.map(runState => runState.sessionId))
+            if (ownsSession) {
+              for (const sessionId of Object.keys(next.sendingSessionIds)) {
+                if (listed.has(sessionId) || !ownsSession(sessionId)) continue
+                if ((next.sendStartedAt[sessionId] ?? 0) > requestedAt) continue
+                next = withRunEnded(next, sessionId)
+              }
+            }
+            for (const runState of states) {
+              next = withRunState(next, runState, requestedAt)
+            }
+            return next === state ? state : next
+          },
+          undefined,
+          'applyRunStateSnapshot'
+        ),
 
       // Batch state transitions — single set() to avoid render cascades
       // Used by useStreamingEvents to atomically transition session state

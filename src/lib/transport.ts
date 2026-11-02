@@ -21,6 +21,7 @@ import {
 } from './remote-connections'
 import { getSshTransportEndpoint } from './ssh-tunnel-endpoint'
 import type { ServerId } from '@/types/server-resource'
+import type { RunState } from '@/types/chat'
 import {
   prepareRemoteEditorOpenArgs,
   prepareRemoteTerminalOpenArgs,
@@ -655,7 +656,7 @@ export interface InitialData {
   worktreesByProject?: Record<string, unknown[]>
   sessionsByWorktree?: Record<string, unknown> // worktreeId -> WorktreeSessions
   activeSessions?: Record<string, unknown> // sessionId -> Session (with messages)
-  runningSessions?: string[] // sessionIds with active CLI processes
+  runStates?: RunState[] // versioned run state of every live session
   replayEvents?: BootstrapEvent[]
   preferences?: unknown
   uiState?: unknown

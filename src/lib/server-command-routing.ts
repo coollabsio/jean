@@ -238,6 +238,7 @@ export const COMMAND_OWNERS: Record<
   revert_agent_change: { owner: ['agentId'] },
   reorder_projects: { fanOut: 'projectIds' },
   set_sessions_last_opened_bulk: { fanOut: 'sessionIds' },
+  get_run_states: { fanOut: 'sessionIds' },
   set_all_worktrees_for_polling: { fanOut: 'worktrees' },
   set_pr_worktrees_for_polling: { fanOut: 'worktrees' },
 }
@@ -318,6 +319,20 @@ export function stripServerScope(
     // Mixed or ambiguous ownership: send the arguments exactly as they arrived.
     return args
   }
+}
+
+/** Run states name their session and worktree by raw id; scope both. */
+function decorateRunStates(serverId: ServerId, value: unknown): unknown {
+  if (!Array.isArray(value)) return value
+  return value.map(item => {
+    if (!item || typeof item !== 'object') return item
+    const runState = item as Record<string, unknown>
+    return {
+      ...runState,
+      sessionId: scopedId(serverId, runState.sessionId),
+      worktreeId: scopedId(serverId, runState.worktreeId),
+    }
+  })
 }
 
 function scopedId(serverId: ServerId, resourceId: unknown): unknown {
@@ -550,6 +565,9 @@ export function decorateServerResult<T>(
   if (command === 'get_sessions') {
     return decorateWorktreeSessions(serverId, value) as T
   }
+  if (command === 'get_run_states') {
+    return decorateRunStates(serverId, value) as T
+  }
   if (command === 'bootstrap_project' && value && typeof value === 'object') {
     const bootstrap = value as Record<string, unknown>
     const sessions = bootstrap.sessionsByWorktree as
@@ -565,11 +583,7 @@ export function decorateServerResult<T>(
       : sessions
     return {
       ...bootstrap,
-      runningSessions: Array.isArray(bootstrap.runningSessions)
-        ? bootstrap.runningSessions.map(sessionId =>
-            scopedId(serverId, sessionId)
-          )
-        : bootstrap.runningSessions,
+      runStates: decorateRunStates(serverId, bootstrap.runStates),
       worktrees: Array.isArray(bootstrap.worktrees)
         ? bootstrap.worktrees.map(worktree =>
             decorateWorktree(serverId, worktree)
