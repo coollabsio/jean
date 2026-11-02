@@ -916,8 +916,7 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
                     {worktree.pr_number && (
                       <>
                         <span className="text-border">·</span>
-                        <GitPullRequestArrow className="h-2.5 w-2.5" />#
-                        {worktree.pr_number}
+                        <span>#{worktree.pr_number}</span>
                       </>
                     )}
                     {worktree.security_alert_number && (
@@ -973,8 +972,7 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
                   {worktree.pr_number && (
                     <>
                       <span className="text-border">·</span>
-                      <GitPullRequestArrow className="h-2.5 w-2.5 shrink-0" />#
-                      {worktree.pr_number}
+                      <span>#{worktree.pr_number}</span>
                     </>
                   )}
                   {worktree.security_alert_number && (

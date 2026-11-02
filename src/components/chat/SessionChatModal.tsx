@@ -12,8 +12,6 @@ import {
 } from 'react'
 import {
   GitBranchPlus,
-  GitMerge,
-  GitPullRequest,
   GitPullRequestArrow,
   Globe,
   Plus,
@@ -186,15 +184,10 @@ function HeaderPrLink({ worktree }: { worktree: Worktree }) {
           type="button"
           onClick={() => void openExternal(prUrl)}
           className={cn(
-            'inline-flex shrink-0 cursor-pointer items-center gap-0.5 text-xs font-medium leading-none transition-opacity hover:opacity-70',
+            'inline-flex shrink-0 cursor-pointer items-center text-xs font-medium leading-none transition-opacity hover:opacity-70',
             display?.className ?? 'text-muted-foreground'
           )}
         >
-          {status === 'merged' ? (
-            <GitMerge className="h-3 w-3" />
-          ) : (
-            <GitPullRequest className="h-3 w-3" />
-          )}
           #{worktree.pr_number}
         </button>
       </TooltipTrigger>
