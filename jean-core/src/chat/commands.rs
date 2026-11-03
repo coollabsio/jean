@@ -3495,6 +3495,9 @@ async fn send_chat_message_inner(
         log::error!("Failed to emit cache:invalidate for recent sessions: {e}");
     }
 
+    // Drop an auth failure left over from an earlier turn of this session.
+    super::auth_failure::take_auth_failure(&session_id);
+
     // Get file paths for detached execution
     let run_id = run_log_writer.run_id().to_string();
     let run_files = run_log_writer.input_file_path().and_then(|input| {
@@ -5717,7 +5720,14 @@ async fn send_chat_message_inner(
         unified_response.cancelled = true;
     }
     if unified_response.error_emitted && !has_assistant_payload && !unified_response.cancelled {
-        if let Err(e) = run_log_writer.reject_without_output() {
+        // Not logged in: the user must log in and resend, so withdraw the
+        // prompt (back to the composer) instead of keeping a failed attempt.
+        let finish = if super::auth_failure::take_auth_failure(&session_id) {
+            run_log_writer.cancel(None, None)
+        } else {
+            run_log_writer.reject_without_output()
+        };
+        if let Err(e) = finish {
             log::warn!("Failed to record provider rejection: {e}");
         }
         log::info!("[SendChat] EXIT session={session_id} reason=error_emitted");
@@ -9528,9 +9538,14 @@ pub async fn resume_session(
                 let resume_sid = Some(response.session_id.as_str()).filter(|id| !id.is_empty());
                 let finish = if completed {
                     writer.complete(&assistant_message_id, resume_sid, response.usage.clone())
-                } else if response.error_emitted && !has_payload && !response.cancelled {
+                } else if response.error_emitted
+                    && !has_payload
+                    && !response.cancelled
+                    && !super::auth_failure::take_auth_failure(&session_id_clone)
+                {
                     // Same as send: a provider rejection before output keeps the
-                    // user request. User cancel still goes through cancel().
+                    // user request (auth failures are withdrawn below). User
+                    // cancel still goes through cancel().
                     writer.reject_without_output()
                 } else {
                     // Process died or the user cancelled. Keep partial output

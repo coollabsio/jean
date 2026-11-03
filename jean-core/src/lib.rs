@@ -5397,6 +5397,7 @@ pub fn initialize_runtime(context: &RuntimeContext) -> Result<(), String> {
     let task_manager = background_tasks::BackgroundTaskManager::new(context.clone());
     task_manager.start();
     context.manage(task_manager);
+    chat::auth_failure::start_auth_failure_listener(context);
     auto_fix::scheduler::start_auto_fix_scheduler(context.clone());
     // Agents keep working without clients: open their database and start the loop.
     match agents::init(context) {
