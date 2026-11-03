@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { McpServersPane } from './McpServersPane'
-import { invoke } from '@/lib/transport'
+import { invoke, invokeForOptionalServer } from '@/lib/transport'
 import { toast } from 'sonner'
 
 const mocks = vi.hoisted(() => ({
@@ -14,11 +14,13 @@ const mocks = vi.hoisted(() => ({
     backend: string
     config: Record<string, unknown>
     disabled: boolean
+    scope?: string
   }[],
 }))
 
 vi.mock('@/lib/transport', () => ({
   invoke: vi.fn(),
+  invokeForOptionalServer: vi.fn(),
   listen: vi.fn(async () => vi.fn()),
 }))
 
@@ -67,7 +69,11 @@ vi.mock('@/services/mcp', () => ({
     isFetching: false,
     refetchAll: vi.fn(),
   }),
-  groupServersByBackend: vi.fn(() => ({})),
+  groupServersByBackend: vi.fn((servers: { backend: string }[]) => {
+    const grouped: Record<string, { backend: string }[]> = {}
+    for (const server of servers) (grouped[server.backend] ??= []).push(server)
+    return grouped
+  }),
   isAutoLoadedMcpBackend: vi.fn(() => false),
   mcpKey: vi.fn((backend: string, name: string) => `${backend}:${name}`),
   migrateLegacyMcpKeys: vi.fn((keys: string[]) => ({
@@ -260,6 +266,67 @@ describe('McpServersPane Jean MCP install', () => {
     expect(screen.queryAllByRole('switch')).toHaveLength(0)
     expect(mocks.patchPreferencesMutate).not.toHaveBeenCalledWith(
       expect.objectContaining({ jean_mcp_enabled: false })
+    )
+  })
+})
+
+describe('McpServersPane remove server', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(invoke).mockResolvedValue(snippet)
+    vi.mocked(invokeForOptionalServer).mockResolvedValue(
+      '/home/me/.codex/config.toml'
+    )
+    mocks.mcpServers = [
+      {
+        name: 'orbit',
+        backend: 'codex',
+        config: {},
+        disabled: false,
+        scope: 'user',
+      },
+      {
+        name: 'repo-tool',
+        backend: 'codex',
+        config: {},
+        disabled: false,
+        scope: 'project',
+      },
+      {
+        name: 'jean',
+        backend: 'codex',
+        config: {},
+        disabled: false,
+        scope: 'user',
+      },
+    ]
+  })
+
+  it('offers removal only for user-scope servers and sends the backend and name', async () => {
+    const user = userEvent.setup()
+    renderPane()
+
+    expect(screen.getByRole('button', { name: 'Remove orbit' })).toBeTruthy()
+    expect(
+      screen.queryByRole('button', { name: 'Remove repo-tool' })
+    ).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Remove jean' })).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: 'Remove orbit' }))
+    await user.click(screen.getByRole('button', { name: 'Remove' }))
+
+    await waitFor(() =>
+      expect(invokeForOptionalServer).toHaveBeenCalledWith(
+        expect.anything(),
+        'remove_mcp_server',
+        { backend: 'codex', name: 'orbit' }
+      )
+    )
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        'Removed orbit from /home/me/.codex/config.toml',
+        expect.anything()
+      )
     )
   })
 })

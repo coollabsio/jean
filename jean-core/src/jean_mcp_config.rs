@@ -1646,6 +1646,188 @@ fn install_remote_at(
     })
 }
 
+pub async fn remove_mcp_server(backend: String, name: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let home = dirs::home_dir().ok_or("Home directory unavailable")?;
+        let (path, key) = remote_config_target(&home, &backend)?;
+        remove_server_at(&path, key, &backend, &name)?;
+        Ok(path.to_string_lossy().to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn remove_server_at(path: &Path, key: &str, backend: &str, name: &str) -> Result<(), String> {
+    let target = crate::platform::resolve_write_target(path)?;
+    let not_found = || {
+        format!(
+            "Server {name} is not in {}. Remove it with the {backend} CLI.",
+            target.display()
+        )
+    };
+    with_config_lock(&target, || {
+        let content = read_optional(&target)?;
+        let updated = if matches!(backend, "codex" | "grok") {
+            let mut doc = content
+                .parse::<toml_edit::DocumentMut>()
+                .map_err(|e| e.to_string())?;
+            let removed = doc
+                .get_mut(key)
+                .and_then(|item| item.as_table_like_mut())
+                .and_then(|servers| servers.remove(name));
+            if removed.is_none() {
+                return Err(not_found());
+            }
+            remove_name_from_disabled_mcp_servers(&mut doc, name);
+            doc.to_string()
+        } else {
+            remove_jsonc_object_property(&content, key, name)?.ok_or_else(not_found)?
+        };
+        crate::platform::write_file_atomically_with_backup(&target, updated.as_bytes())?;
+        Ok(())
+    })
+}
+
+/// Removes `container_key.server_key` by source span so comments elsewhere survive.
+/// Returns `Ok(None)` when the property does not exist.
+fn remove_jsonc_object_property(
+    input: &str,
+    container_key: &str,
+    server_key: &str,
+) -> Result<Option<String>, String> {
+    if input.trim().is_empty() {
+        return Ok(None);
+    }
+    validate_jsonc(input, Path::new("input config"))?;
+    let root =
+        find_root_object(input).ok_or_else(|| "Config root must be an object".to_string())?;
+    let Some(container) = find_property(input, root.open + 1, root.close, container_key) else {
+        return Ok(None);
+    };
+    let container_value = find_value_span(input, container.value_start)
+        .ok_or_else(|| format!("Could not locate {container_key} value"))?;
+    if byte_at(input, container_value.start) != Some(b'{') {
+        return Ok(None);
+    }
+    let Some(property) = find_property(
+        input,
+        container_value.start + 1,
+        container_value.end - 1,
+        server_key,
+    ) else {
+        return Ok(None);
+    };
+
+    let bytes = input.as_bytes();
+    let mut start = property.key_start;
+    while start > 0 && bytes[start - 1].is_ascii_whitespace() {
+        start -= 1;
+    }
+    let after = skip_ws_comments(input, property.value_end);
+    let (start, end) = if byte_at(input, after) == Some(b',') {
+        (start, after + 1)
+    } else if start > 0 && bytes[start - 1] == b',' {
+        (start - 1, property.value_end)
+    } else {
+        (start, property.value_end)
+    };
+    let out = format!("{}{}", &input[..start], &input[end..]);
+    validate_jsonc(&out, Path::new("updated config"))?;
+    Ok(Some(out))
+}
+
+#[cfg(test)]
+mod remove_tests {
+    use super::*;
+
+    #[test]
+    fn jsonc_remove_keeps_neighbours_and_comments() {
+        let input = "{\n  // keep\n  \"mcpServers\": {\n    \"a\": {\"url\": \"x\"},\n    \"b\": {\"url\": \"y\"}\n  }\n}\n";
+        let first = remove_jsonc_object_property(input, "mcpServers", "a")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            first,
+            "{\n  // keep\n  \"mcpServers\": {\n    \"b\": {\"url\": \"y\"}\n  }\n}\n"
+        );
+        let last = remove_jsonc_object_property(input, "mcpServers", "b")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            last,
+            "{\n  // keep\n  \"mcpServers\": {\n    \"a\": {\"url\": \"x\"}\n  }\n}\n"
+        );
+        let only = remove_jsonc_object_property(&last, "mcpServers", "a")
+            .unwrap()
+            .unwrap();
+        assert_eq!(only, "{\n  // keep\n  \"mcpServers\": {\n  }\n}\n");
+        serde_json::from_str::<serde_json::Value>(&strip_jsonc_comments(&only)).unwrap();
+        assert!(remove_jsonc_object_property(input, "mcpServers", "missing")
+            .unwrap()
+            .is_none());
+        assert!(remove_jsonc_object_property("", "mcpServers", "a")
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn remove_round_trips_remote_install_for_every_backend() {
+        for backend in [
+            "claude",
+            "codex",
+            "opencode",
+            "cursor",
+            "grok",
+            "kimi",
+            "antigravity",
+            "muse",
+            "devin",
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("config");
+            let key = if matches!(backend, "codex" | "grok" | "muse") {
+                "mcp_servers"
+            } else if backend == "opencode" {
+                "mcp"
+            } else {
+                "mcpServers"
+            };
+            let initial = if matches!(backend, "codex" | "grok") {
+                "# Keep me\nother = true\n"
+            } else {
+                "{\n// Keep me\n\"other\":true\n}"
+            };
+            std::fs::write(&path, initial).unwrap();
+            for server in ["orbit", "second"] {
+                install_remote_at(
+                    &path,
+                    key,
+                    backend,
+                    server,
+                    "https://orbit.coollabs.io/mcp",
+                    &HashMap::new(),
+                )
+                .unwrap();
+            }
+            remove_server_at(&path, key, backend, "orbit").unwrap();
+            let content = std::fs::read_to_string(&path).unwrap();
+            assert!(content.contains("Keep me"), "{backend}: {content}");
+            assert!(!content.contains("orbit\""), "{backend}: {content}");
+            assert!(
+                !content.contains("mcp_servers.orbit]"),
+                "{backend}: {content}"
+            );
+            assert!(content.contains("second"), "{backend}: {content}");
+            assert!(
+                remove_server_at(&path, key, backend, "orbit")
+                    .unwrap_err()
+                    .contains("is not in"),
+                "{backend}"
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod remote_tests {
     use super::*;

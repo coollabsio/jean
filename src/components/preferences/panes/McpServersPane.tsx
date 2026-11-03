@@ -1,4 +1,8 @@
-import { AddMcpEndpoint } from '@/components/mcp/AddMcpEndpoint'
+import {
+  AddMcpEndpoint,
+  EDITABLE_MCP_BACKENDS,
+} from '@/components/mcp/AddMcpEndpoint'
+import { RemoveMcpServerButton } from '@/components/mcp/RemoveMcpServerButton'
 import React, { useEffect, useMemo } from 'react'
 import {
   CheckCircle,
@@ -333,6 +337,16 @@ export const McpServersPane: React.FC = () => {
                           ? 'automatic'
                           : server.scope}
                     </span>
+                    {server.scope === 'user' &&
+                      EDITABLE_MCP_BACKENDS.has(backend) &&
+                      !jeanMcpMode(server.name, server.config) && (
+                        <RemoveMcpServerButton
+                          backend={backend}
+                          serverName={server.name}
+                          serverId={serverId}
+                          onRemoved={checkHealth}
+                        />
+                      )}
                   </div>
                 ))}
               </div>

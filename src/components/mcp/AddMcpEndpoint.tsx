@@ -14,7 +14,8 @@ import { invalidateAllMcpServers } from '@/services/mcp'
 import type { CliBackend } from '@/types/preferences'
 import { McpSignInButton } from './McpSignInButton'
 
-const supported = new Set<CliBackend>([
+/** Backends whose user-level MCP config Jean can edit. */
+export const EDITABLE_MCP_BACKENDS = new Set<CliBackend>([
   'claude',
   'codex',
   'opencode',
@@ -51,7 +52,7 @@ export function AddMcpEndpoint({
   const [excluded, setExcluded] = useState<CliBackend[]>([])
   const [busy, setBusy] = useState(false)
   const [results, setResults] = useState<Result[]>([])
-  const backends = installedBackends.filter(b => supported.has(b))
+  const backends = installedBackends.filter(b => EDITABLE_MCP_BACKENDS.has(b))
   const selected = backends.filter(b => !excluded.includes(b))
   let suggestedName = ''
   try {
