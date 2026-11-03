@@ -604,10 +604,10 @@ function formatCodexWebSearchExpanded(
 // min-h ensures consistent baseline regardless of inline-content height (pill vs no-pill).
 // When open, the row sticks to the top of the chat viewport (0.5rem below the
 // header) so it can be closed without scrolling back. It stays inside its own
-// block, so it scrolls away with the expanded content. Opaque bg: content must not show through.
-// Stronger bg + ring + shadow so the stuck row stands out from the chat bg and other tool rows.
+// block, so it scrolls away with the expanded content. Opaque bg (same look as
+// the closed bg-muted/30 row) so content does not show through when stuck.
 const TOOL_CALL_ROW_STICKY_OPEN_CLASS =
-  'data-[state=open]:sticky data-[state=open]:top-[calc(var(--chat-top-inset,0px)+0.5rem)] data-[state=open]:z-10 data-[state=open]:bg-[color-mix(in_oklab,var(--muted)_70%,var(--background))] data-[state=open]:hover:bg-[color-mix(in_oklab,var(--muted)_85%,var(--background))] data-[state=open]:inset-ring-1 data-[state=open]:inset-ring-foreground/20 data-[state=open]:shadow-md data-[state=open]:shadow-black/30'
+  'data-[state=open]:sticky data-[state=open]:top-[calc(var(--chat-top-inset,0px)+0.5rem)] data-[state=open]:z-10 data-[state=open]:bg-[color-mix(in_oklab,var(--muted)_30%,var(--background))] data-[state=open]:hover:bg-[color-mix(in_oklab,var(--muted)_50%,var(--background))]'
 
 export const TOOL_CALL_ROW_CLASS = `tool-call-row focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring flex min-h-9 w-full items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-muted-foreground bg-muted/30 hover:bg-muted/50 select-none min-w-0 ${TOOL_CALL_ROW_STICKY_OPEN_CLASS}`
 
