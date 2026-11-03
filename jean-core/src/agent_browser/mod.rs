@@ -22,10 +22,21 @@ pub const MCP_SERVER_NAME: &str = "agent-browser";
 /// npm package name for agent-browser.
 pub const NPM_PACKAGE: &str = "agent-browser";
 
-/// Explicit latest tag is required for updates. A plain `npm install
-/// agent-browser` keeps the existing package.json caret range, and npm treats
-/// `^0.37.1` as `<0.38.0` for a pre-1.0 package.
-const NPM_INSTALL_SPEC: &str = "agent-browser@latest";
+/// Jean installs only releases at least this old. Most compromised npm
+/// releases are found and removed within this time.
+const MIN_RELEASE_AGE: chrono::TimeDelta = chrono::TimeDelta::days(3);
+
+/// Repository whose release workflow must have built the npm package.
+const SOURCE_REPOSITORY: &str = "https://github.com/vercel-labs/agent-browser";
+
+/// Serializes installs: the native app, Web Access clients, and startup can
+/// all request one, and they share one npm prefix.
+static INSTALL_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Chrome for Testing builds to keep after `agent-browser install`. The
+/// previous build stays because browsers started before the install still run
+/// from it.
+const KEPT_CHROME_BUILDS: usize = 2;
 
 /// Jean-managed npm install directory under app data.
 pub const CLI_DIR_NAME: &str = "agent-browser-cli";
@@ -453,26 +464,7 @@ pub async fn check_agent_browser_update(
     }
 
     let npm_path = crate::prerequisites::require_npm("agent-browser update check")?;
-    let output = host_cli_command(&npm_path, None)
-        .args(["view", NPM_PACKAGE, "version", "--json"])
-        .output()
-        .map_err(|error| format!("Failed to check agent-browser updates: {error}"))?;
-    if !output.status.success() {
-        let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(format!(
-            "Failed to check agent-browser updates: {}",
-            if error.is_empty() {
-                "npm returned an error"
-            } else {
-                &error
-            }
-        ));
-    }
-
-    let raw = String::from_utf8_lossy(&output.stdout);
-    let latest = serde_json::from_str::<String>(raw.trim())
-        .unwrap_or_else(|_| raw.trim().trim_matches('"').to_string());
-    let latest_version = (!latest.is_empty()).then_some(latest);
+    let latest_version = Some(fetch_settled_release(&npm_path)?);
     let update_available = resolved
         .version
         .as_deref()
@@ -487,19 +479,252 @@ pub async fn check_agent_browser_update(
     })
 }
 
-fn is_newer_version(latest: &str, current: &str) -> bool {
-    fn parts(version: &str) -> Vec<u64> {
-        version
-            .trim()
-            .trim_start_matches(|character: char| !character.is_ascii_digit())
-            .split(['.', '-', '+'])
-            .map_while(|part| part.parse::<u64>().ok())
-            .collect()
-    }
+fn version_parts(version: &str) -> Vec<u64> {
+    version
+        .trim()
+        .trim_start_matches(|character: char| !character.is_ascii_digit())
+        .split(['.', '-', '+'])
+        .map_while(|part| part.parse::<u64>().ok())
+        .collect()
+}
 
-    let latest = parts(latest);
-    let current = parts(current);
+fn is_newer_version(latest: &str, current: &str) -> bool {
+    let latest = version_parts(latest);
+    let current = version_parts(current);
     !latest.is_empty() && !current.is_empty() && latest > current
+}
+
+/// Newest stable release published at least [`MIN_RELEASE_AGE`] before `now`.
+/// `registry` is the output of `npm view <package> time versions --json`.
+/// `time` still lists unpublished releases, so only entries also in
+/// `versions` count.
+fn settled_release(registry: &Value, now: chrono::DateTime<chrono::Utc>) -> Option<String> {
+    let published: Vec<&str> = registry["versions"]
+        .as_array()?
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    registry["time"]
+        .as_object()?
+        .iter()
+        .filter(|(version, _)| {
+            published.contains(&version.as_str())
+                && version.chars().all(|c| c.is_ascii_digit() || c == '.')
+        })
+        .filter_map(|(version, time)| {
+            let time = chrono::DateTime::parse_from_rfc3339(time.as_str()?).ok()?;
+            (now - time.with_timezone(&chrono::Utc) >= MIN_RELEASE_AGE)
+                .then(|| (version_parts(version), version))
+        })
+        .max_by(|a, b| a.0.cmp(&b.0))
+        .map(|(_, version)| version.clone())
+}
+
+fn run_npm(npm_path: &str, args: &[&str], cwd: Option<&Path>) -> Result<String, String> {
+    let output = host_cli_command(npm_path, cwd)
+        .args(args)
+        .output()
+        .map_err(|e| format!("Failed to run npm {} (is npm on PATH?): {e}", args[0]))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if output.status.success() {
+        return Ok(stdout);
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    Err(format!(
+        "npm {} failed: {}",
+        args[0],
+        if stderr.is_empty() { stdout } else { stderr }
+    ))
+}
+
+fn fetch_settled_release(npm_path: &str) -> Result<String, String> {
+    let raw = run_npm(
+        npm_path,
+        &["view", NPM_PACKAGE, "time", "versions", "--json"],
+        None,
+    )?;
+    let registry: Value = serde_json::from_str(&raw)
+        .map_err(|e| format!("Failed to read agent-browser releases: {e}"))?;
+    settled_release(&registry, chrono::Utc::now()).ok_or_else(|| {
+        format!(
+            "No agent-browser release is older than {} days",
+            MIN_RELEASE_AGE.num_days()
+        )
+    })
+}
+
+/// Checks the output of `npm audit signatures --json --include-attestations`.
+/// npm lists a package as verified only after it checks the signed SLSA
+/// provenance. Anyone can publish with provenance from their own repo, so the
+/// workflow repository must also be [`SOURCE_REPOSITORY`].
+fn check_provenance(audit_json: &str, version: &str) -> Result<(), String> {
+    use base64::Engine as _;
+
+    let audit: Value = serde_json::from_str(audit_json)
+        .map_err(|e| format!("Failed to read npm audit signatures output: {e}"))?;
+    let find = |key: &str| {
+        audit[key].as_array().into_iter().flatten().find(|entry| {
+            entry["name"] == NPM_PACKAGE && entry["version"].as_str() == Some(version)
+        })
+    };
+    if find("invalid").is_some() {
+        return Err(format!(
+            "agent-browser {version} has an invalid npm signature"
+        ));
+    }
+    let Some(verified) = find("verified") else {
+        return Err(format!(
+            "agent-browser {version} has no verified provenance attestation"
+        ));
+    };
+    let repository = verified["attestationBundles"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|bundle| bundle["predicateType"] == "https://slsa.dev/provenance/v1")
+        .find_map(|bundle| {
+            let payload = bundle["bundle"]["dsseEnvelope"]["payload"].as_str()?;
+            let payload = base64::engine::general_purpose::STANDARD
+                .decode(payload)
+                .ok()?;
+            let statement: Value = serde_json::from_slice(&payload).ok()?;
+            statement["predicate"]["buildDefinition"]["externalParameters"]["workflow"]
+                ["repository"]
+                .as_str()
+                .map(str::to_string)
+        });
+    match repository.as_deref() {
+        Some(SOURCE_REPOSITORY) => Ok(()),
+        Some(other) => Err(format!(
+            "agent-browser {version} was built from {other}, not {SOURCE_REPOSITORY}"
+        )),
+        None => Err(format!(
+            "agent-browser {version} has no SLSA provenance with a source repository"
+        )),
+    }
+}
+
+fn installed_package_version(cli_dir: &Path) -> Option<String> {
+    let manifest = cli_dir
+        .join("node_modules")
+        .join(NPM_PACKAGE)
+        .join("package.json");
+    let manifest: Value = serde_json::from_str(&std::fs::read_to_string(manifest).ok()?).ok()?;
+    manifest["version"].as_str().map(str::to_string)
+}
+
+/// Installs an exact version into a staging folder and moves it over
+/// `cli_dir` only after the checks pass, so CLIs never start an unverified
+/// binary. npm runs with scripts off until the provenance check passes; then
+/// `npm rebuild` runs the postinstall script.
+fn install_package(npm_path: &str, cli_dir: &Path, version: &str) -> Result<(), String> {
+    let staging = cli_dir.with_extension("staging");
+    let _ = std::fs::remove_dir_all(&staging);
+    let result =
+        stage_package(npm_path, &staging, version).and_then(|()| replace_dir(&staging, cli_dir));
+    let _ = std::fs::remove_dir_all(&staging);
+    result
+}
+
+fn stage_package(npm_path: &str, staging: &Path, version: &str) -> Result<(), String> {
+    std::fs::create_dir_all(staging)
+        .map_err(|e| format!("Failed to create {}: {e}", staging.display()))?;
+    let prefix = staging.to_string_lossy();
+    let spec = format!("{NPM_PACKAGE}@{version}");
+    run_npm(
+        npm_path,
+        &[
+            "install",
+            "--ignore-scripts",
+            "--save-exact",
+            "--prefix",
+            &prefix,
+            &spec,
+        ],
+        None,
+    )?;
+    // npm exits non-zero for an invalid signature but still prints the JSON.
+    let output = host_cli_command(npm_path, Some(staging))
+        .args(["audit", "signatures", "--json", "--include-attestations"])
+        .output()
+        .map_err(|e| format!("Failed to run npm audit signatures: {e}"))?;
+    check_provenance(&String::from_utf8_lossy(&output.stdout), version)?;
+    run_npm(
+        npm_path,
+        &["rebuild", NPM_PACKAGE, "--prefix", &prefix],
+        None,
+    )?;
+    if !managed_bin_path(staging).is_file() {
+        return Err(format!(
+            "npm did not create {}",
+            managed_bin_path(staging).display()
+        ));
+    }
+    Ok(())
+}
+
+/// Moves `from` to `to`. A running browser keeps its files, so `to` is first
+/// renamed aside and restored if the second rename fails.
+fn replace_dir(from: &Path, to: &Path) -> Result<(), String> {
+    let old = to.with_extension("old");
+    let _ = std::fs::remove_dir_all(&old);
+    let had_old = to.exists();
+    if had_old {
+        std::fs::rename(to, &old)
+            .map_err(|e| format!("Failed to move {} aside (is it in use?): {e}", to.display()))?;
+    }
+    if let Err(error) = std::fs::rename(from, to) {
+        if had_old {
+            let _ = std::fs::rename(&old, to);
+        }
+        return Err(format!(
+            "Failed to move the new install into place: {error}"
+        ));
+    }
+    if had_old {
+        if let Err(error) = std::fs::remove_dir_all(&old) {
+            log::warn!("Failed to remove {}: {error}", old.display());
+        }
+    }
+    Ok(())
+}
+
+/// `chrome-<version>` folder names older than the newest
+/// [`KEPT_CHROME_BUILDS`]. Other names are never returned.
+fn stale_chrome_dirs(names: &[String]) -> Vec<String> {
+    let mut builds: Vec<(Vec<u64>, &String)> = names
+        .iter()
+        .filter_map(|name| {
+            let parts = version_parts(name.strip_prefix("chrome-")?);
+            (!parts.is_empty()).then_some((parts, name))
+        })
+        .collect();
+    builds.sort_by(|a, b| b.0.cmp(&a.0));
+    builds
+        .into_iter()
+        .skip(KEPT_CHROME_BUILDS)
+        .map(|(_, name)| name.clone())
+        .collect()
+}
+
+/// Delete old Chrome builds from agent-browser's cache (`~/.agent-browser/browsers`).
+/// Each `agent-browser install` adds a ~400 MB folder and never removes old ones.
+fn prune_old_chrome_builds(browsers_dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(browsers_dir) else {
+        return;
+    };
+    let names: Vec<String> = entries
+        .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .collect();
+    for name in stale_chrome_dirs(&names) {
+        let path = browsers_dir.join(&name);
+        match std::fs::remove_dir_all(&path) {
+            Ok(()) => log::info!("Removed old agent-browser Chrome {}", path.display()),
+            Err(error) => log::warn!("Failed to remove {}: {error}", path.display()),
+        }
+    }
 }
 
 /// Install agent-browser via npm into Jean app data, then download Chromium
@@ -512,36 +737,17 @@ pub async fn install_agent_browser(app: AppHandle) -> Result<AgentBrowserStatus,
 }
 
 pub(crate) fn install_agent_browser_sync(app: &AppHandle) -> Result<AgentBrowserStatus, String> {
+    let _install = INSTALL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let cli_dir = managed_cli_dir(app)?;
-    std::fs::create_dir_all(&cli_dir).map_err(|e| {
-        format!(
-            "Failed to create agent-browser install dir {}: {e}",
-            cli_dir.display()
-        )
-    })?;
-
     let npm_path = crate::prerequisites::require_npm("agent-browser")?;
-
-    let npm_output = host_cli_command(&npm_path, None)
-        .args(["install", "--prefix"])
-        .arg(&cli_dir)
-        .arg(NPM_INSTALL_SPEC)
-        .output()
-        .map_err(|e| {
-            format!("Failed to run npm install for agent-browser (is npm on PATH?): {e}")
-        })?;
-
-    if !npm_output.status.success() {
-        let stderr = String::from_utf8_lossy(&npm_output.stderr)
-            .trim()
-            .to_string();
-        let stdout = String::from_utf8_lossy(&npm_output.stdout)
-            .trim()
-            .to_string();
-        return Err(format!(
-            "npm install agent-browser failed: {}",
-            if stderr.is_empty() { stdout } else { stderr }
-        ));
+    let target = fetch_settled_release(&npm_path)?;
+    // A broken install is repaired; a newer installed version is never downgraded.
+    let needs_install = !managed_bin_path(&cli_dir).is_file()
+        || installed_package_version(&cli_dir)
+            .is_none_or(|installed| is_newer_version(&target, &installed));
+    if needs_install {
+        install_package(&npm_path, &cli_dir, &target)
+            .map_err(|error| format!("agent-browser {target} was not installed: {error}"))?;
     }
 
     let binary = managed_bin_path(&cli_dir);
@@ -585,6 +791,10 @@ pub(crate) fn install_agent_browser_sync(app: &AppHandle) -> Result<AgentBrowser
                     .unwrap_or_else(|| "unknown error".to_string())
             ));
         }
+    }
+
+    if let Some(home) = dirs::home_dir() {
+        prune_old_chrome_builds(&home.join(".agent-browser").join("browsers"));
     }
 
     // Build status without re-entering async.
@@ -1373,7 +1583,121 @@ mod tests {
     }
 
     #[test]
-    fn managed_install_explicitly_requests_latest_release() {
-        assert_eq!(NPM_INSTALL_SPEC, "agent-browser@latest");
+    fn settled_release_picks_newest_published_stable_release_at_least_three_days_old() {
+        let registry = json!({
+            "versions": ["0.9.0", "0.10.0", "0.10.1-beta.1", "0.11.0"],
+            "time": {
+                "created": "2026-01-01T00:00:00.000Z",
+                "modified": "2026-11-03T00:00:00.000Z",
+                "0.9.0": "2026-10-01T00:00:00.000Z",
+                "0.10.0": "2026-10-20T00:00:00.000Z",
+                "0.10.1-beta.1": "2026-10-01T00:00:00.000Z",
+                "0.10.5": "2026-10-25T00:00:00.000Z",
+                "0.11.0": "2026-11-01T00:00:00.000Z",
+            },
+        });
+        let now = chrono::DateTime::parse_from_rfc3339("2026-11-03T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+
+        // 0.10.5 was unpublished, 0.11.0 is too new.
+        assert_eq!(settled_release(&registry, now).as_deref(), Some("0.10.0"));
+        let early = now - chrono::TimeDelta::days(30);
+        assert_eq!(settled_release(&registry, early).as_deref(), Some("0.9.0"));
+        let too_early = now - chrono::TimeDelta::days(40);
+        assert_eq!(settled_release(&registry, too_early), None);
+    }
+
+    fn audit_json(list: &str, repository: &str) -> String {
+        use base64::Engine as _;
+        let statement = json!({
+            "predicate": { "buildDefinition": { "externalParameters": {
+                "workflow": { "repository": repository, "path": ".github/workflows/release.yml" }
+            } } }
+        });
+        let payload = base64::engine::general_purpose::STANDARD.encode(statement.to_string());
+        let entry = json!({
+            "name": "agent-browser",
+            "version": "0.41.0",
+            "attestationBundles": [
+                { "predicateType": "https://github.com/npm/attestation/tree/main/specs/publish/v0.1",
+                  "bundle": { "dsseEnvelope": { "payload": "" } } },
+                { "predicateType": "https://slsa.dev/provenance/v1",
+                  "bundle": { "dsseEnvelope": { "payload": payload } } },
+            ],
+        });
+        let mut audit = json!({ "invalid": [], "missing": [], "verified": [] });
+        audit[list] = json!([entry]);
+        audit.to_string()
+    }
+
+    #[test]
+    fn check_provenance_requires_slsa_provenance_from_the_source_repository() {
+        let verified = audit_json("verified", SOURCE_REPOSITORY);
+        assert_eq!(check_provenance(&verified, "0.41.0"), Ok(()));
+        assert_eq!(
+            check_provenance(&verified, "0.41.1"),
+            Err("agent-browser 0.41.1 has no verified provenance attestation".to_string())
+        );
+        assert_eq!(
+            check_provenance(&audit_json("verified", "https://github.com/evil/fork"), "0.41.0"),
+            Err("agent-browser 0.41.0 was built from https://github.com/evil/fork, not https://github.com/vercel-labs/agent-browser".to_string())
+        );
+        assert_eq!(
+            check_provenance(&audit_json("invalid", SOURCE_REPOSITORY), "0.41.0"),
+            Err("agent-browser 0.41.0 has an invalid npm signature".to_string())
+        );
+        assert!(check_provenance("npm ERR!", "0.41.0").is_err());
+    }
+
+    #[test]
+    fn replace_dir_swaps_in_the_new_install_and_removes_the_old_one() {
+        let dir = TempDir::new().unwrap();
+        let live = dir.path().join("agent-browser-cli");
+        let staging = dir.path().join("agent-browser-cli.staging");
+        fs::create_dir_all(&live).unwrap();
+        fs::write(live.join("version"), "old").unwrap();
+        fs::create_dir_all(&staging).unwrap();
+        fs::write(staging.join("version"), "new").unwrap();
+
+        replace_dir(&staging, &live).unwrap();
+
+        assert_eq!(fs::read_to_string(live.join("version")).unwrap(), "new");
+        assert!(!staging.exists());
+        assert!(!dir.path().join("agent-browser-cli.old").exists());
+    }
+
+    #[test]
+    fn prune_old_chrome_builds_keeps_two_newest_and_other_folders() {
+        let dir = TempDir::new().unwrap();
+        for name in [
+            "chrome-153.0.8010.36",
+            "chrome-156.0.8078.9",
+            "chrome-156.0.8078.80",
+            "chrome-156.0.8078.73",
+            "chrome-latest",
+            "firefox-1538",
+        ] {
+            fs::create_dir(dir.path().join(name)).unwrap();
+        }
+        fs::write(dir.path().join("chrome-1.0.0"), "file, not a build").unwrap();
+
+        prune_old_chrome_builds(dir.path());
+
+        let mut left: Vec<String> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
+        left.sort();
+        assert_eq!(
+            left,
+            [
+                "chrome-1.0.0",
+                "chrome-156.0.8078.73",
+                "chrome-156.0.8078.80",
+                "chrome-latest",
+                "firefox-1538",
+            ]
+        );
     }
 }

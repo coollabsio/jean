@@ -15,28 +15,59 @@ interface AgentBrowserUpdateStatus {
 
 const UPDATE_TOAST_ID = 'agent-browser-update'
 const UPDATE_PROGRESS_TOAST_ID = 'agent-browser-update-progress'
+const FIRST_CHECK_DELAY_MS = 15_000
+const CHECK_INTERVAL_MS = 30 * 60_000
 
+/**
+ * The backend offers only releases that are 3+ days old, and installs one
+ * only after npm verifies its provenance, so background updates are safe.
+ */
 export function useAgentBrowserUpdateCheck() {
-  const checkedRef = useRef(false)
+  const updatingRef = useRef(false)
+  // A version that failed to auto-install falls back to the confirm toast,
+  // so a broken release does not retry and show an error every 30 minutes.
+  const failedVersionRef = useRef<string | null>(null)
   const { data: preferences } = usePreferences()
   const enabled = preferences?.agent_browser_enabled ?? false
+  const autoUpdate = preferences?.auto_update_ai_backends ?? true
 
   useEffect(() => {
     if (!enabled) return
-    const timer = window.setTimeout(async () => {
-      if (checkedRef.current) return
-      checkedRef.current = true
+    const name = `Agent Browser (${updateTargetLabel()})`
 
-      const name = `Agent Browser (${updateTargetLabel()})`
+    const update = async (version: string, toastId?: string | number) => {
+      updatingRef.current = true
+      try {
+        const updated = await invoke('install_agent_browser')
+        await invoke('install_agent_browser_mcp')
+        queryClient.setQueryData(['agentBrowserStatus'], updated)
+        invalidateAllMcpServers()
+        toast.success(`${name} updated to ${version}`, { id: toastId })
+      } catch (error) {
+        failedVersionRef.current = version
+        toast.error(`${name} update failed: ${error}`, { id: toastId })
+      } finally {
+        updatingRef.current = false
+      }
+    }
+
+    const check = async () => {
+      if (updatingRef.current) return
       try {
         const status = await invoke<AgentBrowserUpdateStatus>(
           'check_agent_browser_update'
         )
-        if (!status.updateAvailable || !status.latestVersion) return
+        const version = status.latestVersion
+        if (!status.updateAvailable || !version) return
+
+        if (autoUpdate && failedVersionRef.current !== version) {
+          await update(version)
+          return
+        }
 
         toast.info(`${name} update available`, {
           id: UPDATE_TOAST_ID,
-          description: `${status.currentVersion ?? 'Installed version'} → ${status.latestVersion}`,
+          description: `${status.currentVersion ?? 'Installed version'} → ${version}`,
           duration: Infinity,
           action: {
             label: 'Update',
@@ -49,19 +80,7 @@ export function useAgentBrowserUpdateCheck() {
                 id: UPDATE_PROGRESS_TOAST_ID,
                 duration: Infinity,
               })
-              void (async () => {
-                try {
-                  const updated = await invoke('install_agent_browser')
-                  await invoke('install_agent_browser_mcp')
-                  queryClient.setQueryData(['agentBrowserStatus'], updated)
-                  invalidateAllMcpServers()
-                  toast.success(`${name} updated`, { id: toastId })
-                } catch (error) {
-                  toast.error(`${name} update failed: ${error}`, {
-                    id: toastId,
-                  })
-                }
-              })()
+              void update(version, toastId)
             },
           },
           cancel: {
@@ -72,8 +91,18 @@ export function useAgentBrowserUpdateCheck() {
       } catch (error) {
         console.warn('Failed to check Agent Browser updates', error)
       }
-    }, 15_000)
+    }
 
-    return () => window.clearTimeout(timer)
-  }, [enabled])
+    // "Later" only closes the toast, so it shows again at the next check.
+    let interval: number | undefined
+    const timer = window.setTimeout(() => {
+      void check()
+      interval = window.setInterval(() => void check(), CHECK_INTERVAL_MS)
+    }, FIRST_CHECK_DELAY_MS)
+
+    return () => {
+      window.clearTimeout(timer)
+      window.clearInterval(interval)
+    }
+  }, [enabled, autoUpdate])
 }

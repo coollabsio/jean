@@ -3993,7 +3993,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
 
             <InlineField
               label="Auto-update AI backends"
-              description="Install CLI updates in the background"
+              description="Install CLI and Agent Browser updates in the background"
             >
               <Switch
                 checked={preferences?.auto_update_ai_backends ?? true}
