@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden'
 import { ChevronLeft, ChevronRight } from '@/components/icons/reicon'
 import {
-  Dialog,
   DialogContent,
   DialogDescription,
   DialogTitle,
@@ -10,6 +9,7 @@ import {
 import { cn } from '@/lib/utils'
 import { useImageSrc } from './use-image-src'
 import { ZoomableImage } from './zoomable-image'
+import { usePreviewStore } from '@/store/preview-store'
 
 /** Thumbnails shown inline; the last one shows "+N" for the rest. */
 const MAX_TILES = 3
@@ -59,6 +59,74 @@ function Screenshot({
   )
 }
 
+/** Preview dialog content; arrow keys step through the screenshots. */
+function ScreenshotGalleryContent({
+  paths,
+  serverId,
+  initialIndex,
+}: {
+  paths: string[]
+  serverId?: string
+  initialIndex: number
+}) {
+  const [openIndex, setOpenIndex] = useState(initialIndex)
+  const step = (delta: number) =>
+    setOpenIndex(index => (index + delta + paths.length) % paths.length)
+
+  return (
+    <DialogContent
+      className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-auto sm:max-h-[90vh] sm:!top-[5vh] sm:!translate-y-0 sm:!rounded-lg sm:p-4 bg-background/95"
+      onKeyDown={event => {
+        if (event.key === 'ArrowLeft') step(-1)
+        if (event.key === 'ArrowRight') step(1)
+      }}
+    >
+      <VisuallyHidden>
+        <DialogTitle>Screenshots</DialogTitle>
+        <DialogDescription>Screenshot gallery</DialogDescription>
+      </VisuallyHidden>
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-4 sm:p-0">
+        <ZoomableImage
+          key={paths[openIndex]}
+          className="min-h-0 w-full flex-1 sm:flex-none"
+        >
+          <Screenshot
+            path={paths[openIndex] ?? ''}
+            serverId={serverId}
+            className="max-h-[calc(90vh-6rem)] min-h-40 max-w-full rounded-md object-contain"
+          />
+        </ZoomableImage>
+        <div className="flex items-center gap-3 text-sm text-muted-foreground">
+          {paths.length > 1 && (
+            <button
+              type="button"
+              onClick={() => step(-1)}
+              aria-label="Previous screenshot"
+              className="rounded-md p-1.5 hover:bg-muted hover:text-foreground"
+            >
+              <ChevronLeft className="size-4" />
+            </button>
+          )}
+          <span className="max-w-[60vw] truncate">
+            {paths.length > 1 && `${openIndex + 1} / ${paths.length} · `}
+            {fileName(paths[openIndex] ?? '')}
+          </span>
+          {paths.length > 1 && (
+            <button
+              type="button"
+              onClick={() => step(1)}
+              aria-label="Next screenshot"
+              className="rounded-md p-1.5 hover:bg-muted hover:text-foreground"
+            >
+              <ChevronRight className="size-4" />
+            </button>
+          )}
+        </div>
+      </div>
+    </DialogContent>
+  )
+}
+
 export function ScreenshotGallery({
   paths,
   serverId,
@@ -66,111 +134,56 @@ export function ScreenshotGallery({
   paths: string[]
   serverId?: string
 }) {
-  const [openIndex, setOpenIndex] = useState<number | null>(null)
   const tiles = paths.slice(0, MAX_TILES)
   const hidden = paths.length - tiles.length
-  const step = (delta: number) =>
-    setOpenIndex(index =>
-      index === null ? null : (index + delta + paths.length) % paths.length
-    )
 
   return (
-    <>
-      <div
-        className={cn(
-          'my-4 grid gap-2',
-          tiles.length === 1 && 'max-w-md grid-cols-1',
-          tiles.length === 2 && 'grid-cols-2',
-          tiles.length >= 3 && 'grid-cols-3'
-        )}
-      >
-        {tiles.map((path, index) => {
-          const moreCount = index === tiles.length - 1 ? hidden : 0
-          return (
-            <button
-              // react-doctor-disable-next-line react-doctor/no-array-index-as-key -- tiles are a fixed slice of the message; paths may repeat
-              key={`${index}-${path}`}
-              type="button"
-              onClick={() => setOpenIndex(index)}
-              aria-label={
-                moreCount > 0
-                  ? `Open screenshots (${moreCount} more)`
-                  : `Open ${fileName(path)}`
-              }
-              className="group relative aspect-[16/10] cursor-pointer overflow-hidden rounded-xl border border-border/60 bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <Screenshot
-                path={path}
-                serverId={serverId}
-                className="size-full object-cover object-top transition-transform group-hover:scale-[1.02]"
-              />
-              {moreCount > 0 && (
-                <span className="absolute inset-0 flex items-center justify-center bg-black/55 text-2xl font-semibold text-white sm:text-3xl">
-                  +{moreCount}
-                </span>
-              )}
-            </button>
-          )
-        })}
-      </div>
-
-      <Dialog
-        open={openIndex !== null}
-        onOpenChange={open => !open && setOpenIndex(null)}
-      >
-        <DialogContent
-          className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-auto sm:max-h-[90vh] sm:!top-[5vh] sm:!translate-y-0 sm:!rounded-lg sm:p-4 bg-background/95"
-          onKeyDown={event => {
-            if (event.key === 'ArrowLeft') step(-1)
-            if (event.key === 'ArrowRight') step(1)
-          }}
-        >
-          <VisuallyHidden>
-            <DialogTitle>Screenshots</DialogTitle>
-            <DialogDescription>Screenshot gallery</DialogDescription>
-          </VisuallyHidden>
-          {openIndex !== null && (
-            <div className="flex h-full flex-col items-center justify-center gap-3 p-4 sm:p-0">
-              <ZoomableImage
-                key={paths[openIndex]}
-                className="min-h-0 w-full flex-1 sm:flex-none"
-              >
-                <Screenshot
-                  path={paths[openIndex] ?? ''}
-                  serverId={serverId}
-                  className="max-h-[calc(90vh-6rem)] min-h-40 max-w-full rounded-md object-contain"
-                />
-              </ZoomableImage>
-              <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                {paths.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => step(-1)}
-                    aria-label="Previous screenshot"
-                    className="rounded-md p-1.5 hover:bg-muted hover:text-foreground"
-                  >
-                    <ChevronLeft className="size-4" />
-                  </button>
-                )}
-                <span className="max-w-[60vw] truncate">
-                  {paths.length > 1 && `${openIndex + 1} / ${paths.length} · `}
-                  {fileName(paths[openIndex] ?? '')}
-                </span>
-                {paths.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => step(1)}
-                    aria-label="Next screenshot"
-                    className="rounded-md p-1.5 hover:bg-muted hover:text-foreground"
-                  >
-                    <ChevronRight className="size-4" />
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-    </>
+    <div
+      className={cn(
+        'my-4 grid gap-2',
+        tiles.length === 1 && 'max-w-md grid-cols-1',
+        tiles.length === 2 && 'grid-cols-2',
+        tiles.length >= 3 && 'grid-cols-3'
+      )}
+    >
+      {tiles.map((path, index) => {
+        const moreCount = index === tiles.length - 1 ? hidden : 0
+        return (
+          <button
+            // react-doctor-disable-next-line react-doctor/no-array-index-as-key -- tiles are a fixed slice of the message; paths may repeat
+            key={`${index}-${path}`}
+            type="button"
+            onClick={() =>
+              usePreviewStore
+                .getState()
+                .openPreview(
+                  <ScreenshotGalleryContent
+                    paths={paths}
+                    serverId={serverId}
+                    initialIndex={index}
+                  />
+                )
+            }
+            aria-label={
+              moreCount > 0
+                ? `Open screenshots (${moreCount} more)`
+                : `Open ${fileName(path)}`
+            }
+            className="group relative aspect-[16/10] cursor-pointer overflow-hidden rounded-xl border border-border/60 bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Screenshot
+              path={path}
+              serverId={serverId}
+              className="size-full object-cover object-top transition-transform group-hover:scale-[1.02]"
+            />
+            {moreCount > 0 && (
+              <span className="absolute inset-0 flex items-center justify-center bg-black/55 text-2xl font-semibold text-white sm:text-3xl">
+                +{moreCount}
+              </span>
+            )}
+          </button>
+        )
+      })}
+    </div>
   )
 }

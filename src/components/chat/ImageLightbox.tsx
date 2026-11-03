@@ -1,7 +1,5 @@
-import { useState, useCallback } from 'react'
 import { convertServerFileSrc } from '@/lib/transport'
 import {
-  Dialog,
   DialogContent,
   DialogDescription,
   DialogTitle,
@@ -9,6 +7,7 @@ import {
 import { MessageThreadContextMenu } from './message-thread-context-menu'
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden'
 import { ZoomableImage } from '@/components/ui/zoomable-image'
+import { usePreviewStore } from '@/store/preview-store'
 
 interface ImageLightboxProps {
   /** File path to the image */
@@ -25,6 +24,29 @@ interface ImageLightboxProps {
   children?: React.ReactNode
 }
 
+function ImageLightboxContent({ src, alt }: { src: string; alt: string }) {
+  return (
+    <DialogContent
+      className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-auto sm:max-h-[85vh] sm:!top-[7.5vh] sm:!translate-y-0 sm:!rounded-lg sm:p-4 bg-background/95"
+      showCloseButton={true}
+    >
+      <VisuallyHidden>
+        <DialogTitle>Image Preview</DialogTitle>
+        <DialogDescription>Preview of image: {alt}</DialogDescription>
+      </VisuallyHidden>
+      <ZoomableImage className="h-full sm:h-auto">
+        <MessageThreadContextMenu>
+          <img
+            src={src}
+            alt={alt}
+            className="max-w-full max-h-[calc(85vh-4rem)] object-contain rounded-md"
+          />
+        </MessageThreadContextMenu>
+      </ZoomableImage>
+    </DialogContent>
+  )
+}
+
 /**
  * Displays an image thumbnail that opens in a full-size lightbox modal when clicked
  */
@@ -36,52 +58,27 @@ export function ImageLightbox({
   serverId,
   children,
 }: ImageLightboxProps) {
-  const [isOpen, setIsOpen] = useState(false)
-
-  const handleOpen = useCallback(() => {
-    setIsOpen(true)
-  }, [])
-
   const assetSrc = convertServerFileSrc(serverId, src)
 
   return (
-    <>
-      <button
-        type="button"
-        onClick={handleOpen}
-        className={`cursor-pointer focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded-md ${className ?? ''}`}
-      >
-        {children ?? (
-          <img
-            src={assetSrc}
-            alt={alt}
-            className={thumbnailClassName}
-            loading="lazy"
-            decoding="async"
-          />
-        )}
-      </button>
-
-      <Dialog open={isOpen} onOpenChange={setIsOpen}>
-        <DialogContent
-          className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-auto sm:max-h-[85vh] sm:!top-[7.5vh] sm:!translate-y-0 sm:!rounded-lg sm:p-4 bg-background/95"
-          showCloseButton={true}
-        >
-          <VisuallyHidden>
-            <DialogTitle>Image Preview</DialogTitle>
-            <DialogDescription>Preview of image: {alt}</DialogDescription>
-          </VisuallyHidden>
-          <ZoomableImage className="h-full sm:h-auto">
-            <MessageThreadContextMenu>
-              <img
-                src={assetSrc}
-                alt={alt}
-                className="max-w-full max-h-[calc(85vh-4rem)] object-contain rounded-md"
-              />
-            </MessageThreadContextMenu>
-          </ZoomableImage>
-        </DialogContent>
-      </Dialog>
-    </>
+    <button
+      type="button"
+      onClick={() =>
+        usePreviewStore
+          .getState()
+          .openPreview(<ImageLightboxContent src={assetSrc} alt={alt} />)
+      }
+      className={`cursor-pointer focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded-md ${className ?? ''}`}
+    >
+      {children ?? (
+        <img
+          src={assetSrc}
+          alt={alt}
+          className={thumbnailClassName}
+          loading="lazy"
+          decoding="async"
+        />
+      )}
+    </button>
   )
 }

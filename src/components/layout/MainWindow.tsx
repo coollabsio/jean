@@ -174,6 +174,7 @@ const CloseWorktreeDialog = lazy(() =>
   }))
 )
 import { Toaster } from '@/components/ui/sonner'
+import { PreviewDialogHost } from '@/components/ui/preview-dialog-host'
 import { MobileLeftSidebar } from './MobileLeftSidebar'
 import { useShowAgents } from '@/components/agents/agents-feature'
 import { AgentsTitleSync, resolveWindowTitle } from './window-title'
@@ -744,6 +745,8 @@ export function MainWindow() {
 
       {/* Global UI Components (hidden until triggered) */}
       <CommandPalette />
+      {/* Global attachment/image preview (opened from chat messages) */}
+      <PreviewDialogHost />
       {/* Global file viewer/editor (tool clicks + file browser) */}
       <Suspense fallback={null}>
         <FileContentModal

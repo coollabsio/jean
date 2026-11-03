@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@/test/test-utils'
 import { Markdown, headingBefore } from './markdown'
+import { PreviewDialogHost } from './preview-dialog-host'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 
@@ -546,7 +547,12 @@ describe('Markdown', () => {
     // Streaming keeps the raw block until the message completes
     expect(screen.getByRole('button', { name: 'Copy code' })).toBeTruthy()
 
-    rerender(<Markdown sessionId="remote-1:session-1">{content}</Markdown>)
+    rerender(
+      <>
+        <Markdown sessionId="remote-1:session-1">{content}</Markdown>
+        <PreviewDialogHost />
+      </>
+    )
     expect(screen.getByRole('button', { name: 'Open a.png' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Open b.png' })).toBeTruthy()
     const more = screen.getByRole('button', {
