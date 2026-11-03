@@ -9,6 +9,24 @@ bundled model list for Claude and Codex; other backends merge CDN entries ahead
 of models discovered from their CLI. Fast variants inherit their base model's
 reasoning capability.
 
+## Inherited Codex defaults
+
+Before saving a new Codex chat session, the shared backend checks the inherited
+model against the current CLI account's `model/list` catalog. It keeps an
+available preference (including its Fast variant), or selects the catalog's
+visible default, then its first visible model. Pagination is followed before
+rejecting a preferred model. The resolved model is saved in the session, so
+MCP, native desktop, Web Access, and mobile use the same selection. Empty
+sessions without a saved model use the same check on their first send, including
+sessions reused by MCP.
+
+This check does not rewrite global preferences, explicit session or turn
+choices, terminal sessions, or custom provider models. If catalog discovery
+fails or returns no visible models, session creation keeps the preference.
+The CLI remains responsible for validating explicit model selections.
+
+Protocol: https://developers.openai.com/codex/app-server (`model/list`).
+
 ## Applying a model to all Magic Prompts
 
 Settings → Magic Prompts has an **All prompts** row: a searchable model

@@ -530,6 +530,33 @@ pub(crate) fn default_model_for_backend(
     }
 }
 
+/// Validate inherited defaults for the CLI account, including empty sessions
+/// reused by MCP that have no persisted model yet.
+async fn resolve_default_model_for_backend(
+    app: &AppHandle,
+    backend: &Backend,
+    preferences: Option<&crate::AppPreferences>,
+) -> Option<String> {
+    let preferred = preferences.and_then(|prefs| default_model_for_backend(backend, prefs));
+    if *backend != Backend::Codex {
+        return preferred;
+    }
+    let app = app.clone();
+    let fallback = preferred.clone();
+    let custom_provider = preferences.and_then(|prefs| prefs.default_codex_provider.clone());
+    match tauri::async_runtime::spawn_blocking(move || {
+        super::codex::resolve_inherited_model(&app, preferred, custom_provider.as_deref())
+    })
+    .await
+    {
+        Ok(model) => model,
+        Err(error) => {
+            log::warn!("Could not resolve inherited Codex model: {error}");
+            fallback
+        }
+    }
+}
+
 /// Trim and drop empty optional strings (MCP/UI may send `""` or whitespace).
 fn normalize_optional_string(value: Option<String>) -> Option<String> {
     value
@@ -1315,6 +1342,12 @@ pub async fn create_session(
         }
     };
 
+    let inherited_model = if primary_surface.as_deref() == Some("terminal") {
+        None
+    } else {
+        resolve_default_model_for_backend(&app, &backend_enum, preferences.as_ref()).await
+    };
+
     let session = with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
         // Generate name if not provided
         let session_number = sessions.next_session_number();
@@ -1345,9 +1378,7 @@ pub async fn create_session(
             persist_salvaged_resume_id(&mut session, &backend_enum, native_session_id);
         }
         if primary_surface.as_deref() != Some("terminal") {
-            session.selected_model = preferences
-                .as_ref()
-                .and_then(|prefs| default_model_for_backend(&backend_enum, prefs));
+            session.selected_model = inherited_model;
         }
         let session_id = session.id.clone();
 
@@ -3134,8 +3165,22 @@ async fn send_chat_message_inner(
     // Covers sessions created before selected_model was persisted, or when
     // create_session could not load preferences.
     if model.is_none() {
-        if let Some(prefs) = prefs.as_ref() {
-            model = default_model_for_backend(&effective_backend, prefs);
+        model = if effective_backend == Backend::Codex && custom_profile_name.is_some() {
+            prefs
+                .as_ref()
+                .and_then(|prefs| default_model_for_backend(&effective_backend, prefs))
+        } else {
+            resolve_default_model_for_backend(&app, &effective_backend, prefs.as_ref()).await
+        };
+        if effective_backend == Backend::Codex {
+            if let Some(resolved) = model.as_ref() {
+                with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
+                    if let Some(session) = sessions.find_session_mut(&session_id) {
+                        session.selected_model = Some(resolved.clone());
+                    }
+                    Ok(())
+                })?;
+            }
         }
     }
     if effective_backend == Backend::Devin
@@ -12265,6 +12310,26 @@ mod tests {
 
         drop(new);
         assert!(!has_active_send("race-session"));
+    }
+
+    #[tokio::test]
+    async fn inherited_defaults_preserve_custom_provider_and_other_backends() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = AppHandle::new(temp.path().to_path_buf(), temp.path().to_path_buf()).unwrap();
+        let prefs = crate::AppPreferences {
+            selected_codex_model: "provider-only-model".into(),
+            default_codex_provider: Some("work".into()),
+            selected_model: "claude-sonnet-4-6[1m]".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            resolve_default_model_for_backend(&app, &Backend::Codex, Some(&prefs)).await,
+            Some("provider-only-model".into())
+        );
+        assert_eq!(
+            resolve_default_model_for_backend(&app, &Backend::Claude, Some(&prefs)).await,
+            Some("claude-sonnet-4-6[1m]".into())
+        );
     }
 
     #[test]

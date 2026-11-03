@@ -705,6 +705,85 @@ pub(crate) fn split_fast_model(model: &str) -> (&str, bool) {
     }
 }
 
+/// Resolve only an inherited default. Explicit session/turn selections are not changed.
+fn resolve_inherited_model_from_catalog(
+    preferred: Option<&str>,
+    mut request: impl FnMut(&str, serde_json::Value) -> Result<serde_json::Value, String>,
+) -> Result<Option<String>, String> {
+    let preferred_base = preferred.map(|model| split_fast_model(model).0);
+    let mut cursor: Option<String> = None;
+    let mut first = None;
+    let mut default = None;
+    let mut seen_cursors = std::collections::HashSet::new();
+    loop {
+        let response = request(
+            "model/list",
+            serde_json::json!({"includeHidden": false, "cursor": cursor}),
+        )?;
+        let models = response["data"]
+            .as_array()
+            .ok_or("Codex model/list returned no model data")?;
+        for entry in models {
+            if entry["hidden"].as_bool() == Some(true) {
+                continue;
+            }
+            let Some(model) = entry["model"].as_str().filter(|model| !model.is_empty()) else {
+                continue;
+            };
+            if preferred_base == Some(model) {
+                return Ok(preferred.map(str::to_string));
+            }
+            first.get_or_insert_with(|| model.to_string());
+            if entry["isDefault"].as_bool() == Some(true) {
+                default.get_or_insert_with(|| model.to_string());
+            }
+        }
+        match response["nextCursor"].as_str() {
+            Some(next) if seen_cursors.insert(next.to_string()) => {
+                cursor = Some(next.to_string());
+            }
+            Some(_) => return Err("Codex model/list repeated a pagination cursor".to_string()),
+            None => break,
+        }
+    }
+    Ok(default.or(first).or_else(|| preferred.map(str::to_string)))
+}
+
+/// The catalog belongs to the CLI's current account. Custom provider model IDs
+/// must not be checked against that account's built-in catalog.
+pub(crate) fn resolve_inherited_model(
+    app: &tauri::AppHandle,
+    preferred: Option<String>,
+    custom_provider: Option<&str>,
+) -> Option<String> {
+    if custom_provider.is_some_and(|provider| !provider.trim().is_empty()) {
+        return preferred;
+    }
+    if let Err(error) = super::codex_server::ensure_running(app) {
+        log::warn!("Could not check inherited Codex model: {error}");
+        return preferred;
+    }
+    let result = resolve_inherited_model_from_catalog(
+        preferred.as_deref(),
+        super::codex_server::send_request,
+    );
+    super::codex_server::decrement_usage_count();
+    match result {
+        Ok(model) => {
+            if model != preferred {
+                log::info!(
+                    "Resolved inherited Codex model {preferred:?} to account model {model:?}"
+                );
+            }
+            model
+        }
+        Err(error) => {
+            log::warn!("Could not check inherited Codex model: {error}");
+            preferred
+        }
+    }
+}
+
 /// Insert custom model_provider config for a Jean-managed Codex provider profile.
 /// Does not mutate the user's base ~/.codex/config.toml — per-thread/one-shot only.
 pub fn apply_codex_provider_to_config(
@@ -5592,6 +5671,95 @@ fn build_one_shot_codex_args(
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inherited_model_uses_available_account_default() {
+        let model =
+            resolve_inherited_model_from_catalog(Some("gpt-6.1-sol-fast"), |method, params| {
+                assert_eq!(method, "model/list");
+                assert_eq!(params["includeHidden"], false);
+                Ok(serde_json::json!({"data": [
+                    {"model": "gpt-5.6-terra", "isDefault": false},
+                    {"model": "gpt-6-luna", "isDefault": true}
+                ]}))
+            })
+            .unwrap();
+        assert_eq!(model.as_deref(), Some("gpt-6-luna"));
+    }
+
+    #[test]
+    fn inherited_model_keeps_supported_fast_selection_across_pages() {
+        let mut calls = 0;
+        let model = resolve_inherited_model_from_catalog(Some("gpt-6-luna-fast"), |_, params| {
+            calls += 1;
+            if calls == 1 {
+                assert_eq!(params["cursor"], serde_json::Value::Null);
+                Ok(serde_json::json!({"data": [{"model": "gpt-5.6-terra", "isDefault": true}], "nextCursor": "page-2"}))
+            } else {
+                assert_eq!(params["cursor"], "page-2");
+                Ok(serde_json::json!({"data": [{"model": "gpt-6-luna", "isDefault": false}]}))
+            }
+        }).unwrap();
+        assert_eq!(calls, 2);
+        assert_eq!(model.as_deref(), Some("gpt-6-luna-fast"));
+    }
+
+    #[test]
+    fn inherited_model_without_default_uses_first_visible_model() {
+        let model = resolve_inherited_model_from_catalog(None, |_, _| {
+            Ok(serde_json::json!({"data": [
+                {"model": "internal-review", "hidden": true, "isDefault": true},
+                {"model": "gpt-6-luna", "isDefault": false}
+            ]}))
+        })
+        .unwrap();
+        assert_eq!(model.as_deref(), Some("gpt-6-luna"));
+    }
+
+    #[test]
+    fn inherited_model_keeps_preference_when_catalog_is_empty() {
+        assert_eq!(
+            resolve_inherited_model_from_catalog(Some("custom-model"), |_, _| {
+                Ok(serde_json::json!({"data": []}))
+            })
+            .unwrap()
+            .as_deref(),
+            Some("custom-model")
+        );
+    }
+
+    #[test]
+    fn inherited_model_preserves_custom_provider_without_starting_server() {
+        let temp = tempfile::tempdir().unwrap();
+        let app =
+            tauri::AppHandle::new(temp.path().to_path_buf(), temp.path().to_path_buf()).unwrap();
+        assert_eq!(
+            resolve_inherited_model(&app, Some("provider-only-model".into()), Some("work")),
+            Some("provider-only-model".into())
+        );
+    }
+
+    #[test]
+    fn inherited_model_rejects_malformed_catalog_and_repeated_cursor() {
+        assert!(resolve_inherited_model_from_catalog(None, |_, _| {
+            Ok(serde_json::json!({"unexpected": []}))
+        })
+        .is_err());
+        assert!(resolve_inherited_model_from_catalog(None, |_, _| {
+            Ok(serde_json::json!({"data": [], "nextCursor": "same-page"}))
+        })
+        .is_err());
+    }
+
+    #[test]
+    fn inherited_model_reports_catalog_errors() {
+        assert!(
+            resolve_inherited_model_from_catalog(Some("gpt-6-luna"), |_, _| {
+                Err("offline".to_string())
+            })
+            .is_err()
+        );
+    }
 
     #[test]
     fn permission_policies_apply_to_threads_and_every_turn() {
