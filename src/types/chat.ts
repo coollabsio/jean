@@ -444,6 +444,15 @@ export interface Session {
   loaded_run_start_index?: number
   /** Pending ScheduleWakeup request (one per session, last-wins) */
   scheduled_wakeup?: ScheduledWakeup
+  /** Session that started this one through Jean MCP and receives its updates */
+  delegated_by?: SessionDelegator
+}
+
+/** Origin of a delegated session. Ids are scoped like `Session.id`. */
+export interface SessionDelegator {
+  origin_session_id: string
+  origin_worktree_id: string
+  origin_name?: string | null
 }
 
 /**

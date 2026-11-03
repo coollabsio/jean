@@ -427,8 +427,20 @@ function decorateSession(serverId: ServerId, value: unknown): unknown {
     ...(session.parent_session_id
       ? { parent_session_id: scopedId(serverId, session.parent_session_id) }
       : {}),
+    ...(session.delegated_by && typeof session.delegated_by === 'object'
+      ? { delegated_by: decorateDelegator(serverId, session.delegated_by) }
+      : {}),
     serverId,
     resourceId: session.id,
+  }
+}
+
+function decorateDelegator(serverId: ServerId, value: object): unknown {
+  const delegator = value as Record<string, unknown>
+  return {
+    ...delegator,
+    origin_session_id: scopedId(serverId, delegator.origin_session_id),
+    origin_worktree_id: scopedId(serverId, delegator.origin_worktree_id),
   }
 }
 

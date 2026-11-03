@@ -77,6 +77,20 @@ describe('QueuedPromptsPanel', () => {
     expect(screen.getByText('Third prompt')).toBeInTheDocument()
   })
 
+  it('labels a queued session update by its sender', () => {
+    renderPanel({
+      messages: [
+        createMessage(
+          'msg-1',
+          '[Jean session update]\nsession: s2\nworktree: w2\nname: Fix login\nstatus: done\n---\nDone.'
+        ),
+      ],
+    })
+
+    expect(screen.getByText('Update from Fix login')).toBeInTheDocument()
+    expect(screen.queryByText(/Jean session update/)).not.toBeInTheDocument()
+  })
+
   it('renders nothing when the queue is empty', () => {
     renderPanel({ messages: [] })
 

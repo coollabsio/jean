@@ -168,6 +168,7 @@ import { SendCancelButton } from './toolbar/SendCancelButton'
 import { ReviewResultsPanel } from './ReviewResultsPanel'
 import { ReviewMethodModal } from './ReviewMethodModal'
 import { QueuedPromptsPanel } from './QueuedPromptsPanel'
+import { DelegatedByRow } from './SessionDelegation'
 import { useQueuedPromptActions } from './hooks/useQueuedPromptActions'
 import { FloatingButtons } from './FloatingButtons'
 import { GoalBadge } from './GoalBadge'
@@ -2826,6 +2827,11 @@ const ChatWindowContent = memo(function ChatWindowContent({
                               </div>
                             ) : (
                               <>
+                                {session?.delegated_by && (
+                                  <DelegatedByRow
+                                    delegator={session.delegated_by}
+                                  />
+                                )}
                                 {messages.length === 0 &&
                                   !isSending &&
                                   activeSessionId && (

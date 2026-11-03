@@ -9,6 +9,8 @@ import {
   USER_PILL_BUBBLE_CLASS,
 } from './ReplyBubble'
 import { ChatContinuedNotice } from './ChatContinuedNotice'
+import { SessionUpdateCard } from './SessionDelegation'
+import { parseSessionUpdate } from './session-update'
 import {
   parseInlineNumberedQuestion,
   withoutInlineQuestion,
@@ -1138,6 +1140,11 @@ export const MessageItem = memo(function MessageItem({
     if (isAgentUpdateMessage(message.content)) return null
     if (isChatContinuedMessage(message.content))
       return <ChatContinuedNotice content={message.content} />
+    const sessionUpdate = parseSessionUpdate(message.content)
+    if (sessionUpdate)
+      return (
+        <SessionUpdateCard update={sessionUpdate} ownerSessionId={sessionId} />
+      )
     // A message from an agent: one line that opens the conversation
     const agentSent = parseAgentSentMessage(message.content)
     if (agentSent)

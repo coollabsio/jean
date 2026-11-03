@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils'
 import { useChatStore } from '@/store/chat-store'
 import type { QueuedMessage } from '@/types/chat'
 import { COMPOSER_SURFACE_CLASS } from './composer-surface'
+import { parseSessionUpdate } from './session-update'
 
 interface QueuedPromptsPanelProps {
   sessionId: string
@@ -34,6 +35,12 @@ function attachmentCount(msg: QueuedMessage): number {
     msg.pendingSkills.length +
     msg.pendingTextFiles.length
   )
+}
+
+/** Jean's session updates show who sent them instead of the raw header. */
+function queuedLabel(message: string): string {
+  const update = parseSessionUpdate(message)
+  return update ? `Update from ${update.name || 'a session'}` : message
 }
 
 /**
@@ -198,7 +205,7 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
                   >
                     {isEditing
                       ? 'Editing in the input below. Submit it to save.'
-                      : msg.message}
+                      : queuedLabel(msg.message)}
                   </span>
                   {!isEditing && attachments > 0 && (
                     <span className="flex shrink-0 items-center gap-0.5 rounded bg-muted/50 px-1 py-0.5 text-2xs text-muted-foreground">

@@ -414,6 +414,28 @@ describe('server command routing', () => {
     })
   })
 
+  it('scopes the delegating session of a loaded session', () => {
+    expect(
+      decorateServerResult('r1', 'get_session', {
+        id: 's1',
+        delegated_by: {
+          origin_session_id: 's0',
+          origin_worktree_id: 'w0',
+          origin_name: 'Planner',
+        },
+      })
+    ).toEqual({
+      id: 'r1:s1',
+      delegated_by: {
+        origin_session_id: 'r1:s0',
+        origin_worktree_id: 'r1:w0',
+        origin_name: 'Planner',
+      },
+      serverId: 'r1',
+      resourceId: 's1',
+    })
+  })
+
   it('scopes every created worktree like its lifecycle events', () => {
     const event = decorateServerEvent(
       'r1',

@@ -15,9 +15,7 @@ import {
   type AgentDelegation,
   type AgentSummary,
 } from '@/services/agents'
-import { useChatStore } from '@/store/chat-store'
-import { useProjectsStore } from '@/store/projects-store'
-import { useUIStore } from '@/store/ui-store'
+import { openSessionInWorktree } from '@/components/chat/open-session'
 import { AgentQuestionCard } from './AgentQuestionCard'
 import { useAgentsEnabledServers } from './agents-feature'
 import {
@@ -245,18 +243,7 @@ function DelegationRow({ delegation }: { delegation: AgentDelegation }) {
   )
 
   const open = useCallback(() => {
-    if (!worktree) return
-    const { selectProject, selectWorktree } = useProjectsStore.getState()
-    selectProject(worktree.project_id)
-    selectWorktree(worktree.id)
-    const chat = useChatStore.getState()
-    chat.registerWorktreePath(worktree.id, worktree.path)
-    chat.clearActiveWorktree()
-    chat.setActiveSession(worktree.id, delegation.sessionId)
-    const ui = useUIStore.getState()
-    ui.markWorktreeForAutoOpenSession(worktree.id, delegation.sessionId)
-    // Leave the Agents page so the project canvas can open the session
-    ui.setRailSection('workspace')
+    if (worktree) openSessionInWorktree(worktree, delegation.sessionId)
   }, [worktree, delegation.sessionId])
 
   return (

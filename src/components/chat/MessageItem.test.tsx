@@ -108,6 +108,42 @@ describe('MessageItem', () => {
     expect(screen.queryByText('Prompt sent')).not.toBeInTheDocument()
   })
 
+  it('renders a session update as a card instead of a user bubble', async () => {
+    render(
+      <MessageItem
+        {...baseProps}
+        message={{
+          id: 'user-update',
+          session_id: 'session-1',
+          role: 'user',
+          content: [
+            '[Jean session update]',
+            'session: child-1',
+            'worktree: wt-child',
+            'name: Fix login',
+            'status: question',
+            '---',
+            'Which provider should I use?',
+          ].join('\n'),
+          timestamp: 1,
+          tool_calls: [],
+        }}
+      />
+    )
+
+    const card = screen.getByTestId('session-update-card')
+    expect(card).toHaveTextContent('Fix login')
+    expect(card).toHaveTextContent('Asking a question')
+    expect(screen.queryByText(/Jean session update/)).not.toBeInTheDocument()
+    expect(
+      screen.queryByText('Which provider should I use?')
+    ).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByText('Fix login'))
+    expect(screen.getByText('Which provider should I use?')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Open session' })).toBeDisabled()
+  })
+
   it('hides prompt metadata and message actions in zen mode', () => {
     useUIStore.setState({ zenMode: true })
     render(
