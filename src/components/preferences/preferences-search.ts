@@ -1017,17 +1017,6 @@ const sectionEntries: PreferenceSearchEntry[] = [
     fallbackAnchorId: 'pref-general-section-advanced',
   },
   {
-    id: 'experimental-agents',
-    pane: 'general',
-    paneTitle: 'General',
-    type: 'section',
-    title: 'Agents',
-    sectionTitle: 'Experimental',
-    keywords: ['agents', 'jean', 'coordinator', 'boss', 'experimental'],
-    anchorId: 'pref-general-agents',
-    fallbackAnchorId: 'pref-general-section-experimental',
-  },
-  {
     id: 'terminal-settings',
     pane: 'terminal',
     paneTitle: 'Terminal',

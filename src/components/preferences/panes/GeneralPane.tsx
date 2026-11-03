@@ -4051,28 +4051,32 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             )}
           </SettingsSection>
 
-          <SettingsSection
-            title="Experimental"
-            anchorId="pref-general-section-experimental"
-            collapsible
-            defaultOpen={false}
-          >
-            <InlineField
-              id="pref-general-agents"
-              label="Agents"
-              description="Show the Agents tab with Jean, the coordinator agent"
+          {/* Agents are closed to new users. Users who already turned them on
+              keep the switch until they turn it off. */}
+          {preferences?.agents_enabled && (
+            <SettingsSection
+              title="Experimental"
+              anchorId="pref-general-section-experimental"
+              collapsible
+              defaultOpen={false}
             >
-              <Switch
-                checked={preferences?.agents_enabled ?? false}
-                onCheckedChange={checked => {
-                  patchPreferences.mutate({ agents_enabled: checked })
-                  // Leave the Agents page when the feature is turned off
-                  if (!checked)
-                    useUIStore.getState().setRailSection('workspace')
-                }}
-              />
-            </InlineField>
-          </SettingsSection>
+              <InlineField
+                id="pref-general-agents"
+                label="Agents"
+                description="Show the Agents tab with Jean, the coordinator agent. Agents are no longer available to turn on: if you turn this off, you cannot turn it on again."
+              >
+                <Switch
+                  checked={preferences?.agents_enabled ?? false}
+                  onCheckedChange={checked => {
+                    patchPreferences.mutate({ agents_enabled: checked })
+                    // Leave the Agents page when the feature is turned off
+                    if (!checked)
+                      useUIStore.getState().setRailSection('workspace')
+                  }}
+                />
+              </InlineField>
+            </SettingsSection>
+          )}
 
           <div
             id="pref-general-section-version"

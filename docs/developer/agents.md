@@ -2,8 +2,10 @@
 
 Agents are persistent AI workers (Jean, the coordinator, plus agents the user
 creates) that manage projects through the Jean MCP tools. They run on the
-backend, so they keep working with no client open. The feature is experimental:
-**Settings → Experimental → Agents** (`agents_enabled`, default off).
+backend, so they keep working with no client open. The feature is experimental and closed
+to new users: **Settings → General → Experimental → Agents** (`agents_enabled`,
+default off) shows only when `agents_enabled` is already true. Users who turn
+it off cannot turn it on again from the UI.
 
 Code: `jean-core/src/agents/` (backend), `src/components/agents/` and
 `src/services/agents.ts` (UI).
