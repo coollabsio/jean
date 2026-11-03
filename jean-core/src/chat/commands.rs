@@ -16,8 +16,8 @@ use super::registry::{
 };
 use super::run_log;
 use super::storage::{
-    cleanup_combined_context_files, delete_session_data, get_data_dir, get_index_path,
-    get_session_dir, load_index, load_metadata, load_sessions, save_metadata,
+    cleanup_combined_context_files, client_session, delete_session_data, get_data_dir,
+    get_index_path, get_session_dir, load_index, load_metadata, load_sessions, save_metadata,
     with_existing_metadata_mut, with_index_mut, with_metadata_mut, with_sessions_mut,
 };
 use super::types::{
@@ -1063,7 +1063,7 @@ pub async fn list_unread_sessions(app: AppHandle) -> Result<AllSessionsResponse,
             let sessions: Vec<Session> = unread_session_ids_for_worktree(&app, &worktree.id)?
                 .iter()
                 .filter_map(|session_id| match load_metadata(&app, session_id) {
-                    Ok(Some(metadata)) => Some(metadata.to_session()),
+                    Ok(Some(metadata)) => Some(client_session(&app, &metadata)),
                     Ok(None) => None,
                     Err(error) => {
                         log::warn!("Failed to load unread session {session_id}: {error}");
@@ -1509,6 +1509,14 @@ async fn drain_backend_queue(
             None,
         )
         .await;
+        // The wrapper reports runs it started; this loop started this one.
+        // Report before dequeuing the next prompt, which would otherwise make
+        // the session live again before the report looks at it.
+        super::delegation::report_run_end(
+            &app,
+            &session_id,
+            result.as_ref().err().map(|e| e.message.as_str()),
+        );
 
         let user_turn = match result {
             Err(e) if e.busy => {
@@ -2866,6 +2874,9 @@ pub async fn send_chat_message(
     // session as busy and stops, so queued prompts waited until the session
     // was opened again.
     let (app, worktree_id, worktree_path, session_id) = drain_target;
+    // Report before the drain: a queued prompt would otherwise start the next
+    // run first and the report would see the session as live.
+    super::delegation::report_run_end(&app, &session_id, result.as_ref().err().map(String::as_str));
     trigger_backend_queue_drain(app, worktree_id, worktree_path, session_id);
     result
 }
@@ -8896,6 +8907,10 @@ pub async fn resume_session(
             // resume_codex_after_crash blocks on sync mpsc — blocking a tokio
             // worker would starve the async runtime.
             std::thread::spawn(move || {
+                let _report = super::delegation::ReportRunEnd::new(
+                    app_clone.clone(),
+                    session_id_clone.clone(),
+                );
                 let emit_done = |app: &tauri::AppHandle, sid: &str, wid: &str| {
                     let _ = app.emit_all(
                         "chat:done",
@@ -8983,6 +8998,10 @@ pub async fn resume_session(
             let run_id_clone = run_id.clone();
 
             tauri::async_runtime::spawn(async move {
+                let _report = super::delegation::ReportRunEnd::new(
+                    app_clone.clone(),
+                    session_id_clone.clone(),
+                );
                 let emit_done = |app: &tauri::AppHandle, sid: &str, wid: &str| {
                     let _ = app.emit_all(
                         "chat:done",
@@ -9068,6 +9087,10 @@ pub async fn resume_session(
             let run_id_clone = run_id.clone();
             let execution_mode = run.execution_mode.clone();
             tauri::async_runtime::spawn(async move {
+                let _report = super::delegation::ReportRunEnd::new(
+                    app_clone.clone(),
+                    session_id_clone.clone(),
+                );
                 let response = super::antigravity::tail_antigravity_output(
                     &app_clone,
                     &session_id_clone,
@@ -9157,6 +9180,10 @@ pub async fn resume_session(
             let execution_mode = run.execution_mode.clone();
 
             tauri::async_runtime::spawn(async move {
+                let _report = super::delegation::ReportRunEnd::new(
+                    app_clone.clone(),
+                    session_id_clone.clone(),
+                );
                 let emit_done = |app: &tauri::AppHandle, sid: &str, wid: &str| {
                     let _ = app.emit_all(
                         "chat:done",
@@ -9255,6 +9282,10 @@ pub async fn resume_session(
             let execution_mode = run.execution_mode.clone();
 
             tauri::async_runtime::spawn(async move {
+                let _report = super::delegation::ReportRunEnd::new(
+                    app_clone.clone(),
+                    session_id_clone.clone(),
+                );
                 let emit_done = |app: &tauri::AppHandle, sid: &str, wid: &str| {
                     let _ = app.emit_all(
                         "chat:done",
@@ -9357,6 +9388,10 @@ pub async fn resume_session(
             let run_id_clone = run_id.clone();
 
             tauri::async_runtime::spawn(async move {
+                let _report = super::delegation::ReportRunEnd::new(
+                    app_clone.clone(),
+                    session_id_clone.clone(),
+                );
                 let (grok_session_id, usage, cancelled, final_content) =
                     match super::grok::tail_grok_output(
                         &app_clone,
@@ -9477,6 +9512,8 @@ pub async fn resume_session(
         // tail_claude_output is a blocking poll loop (std::thread::sleep), so run
         // it on its own OS thread instead of starving an async runtime worker.
         std::thread::spawn(move || {
+            let _report =
+                super::delegation::ReportRunEnd::new(app_clone.clone(), session_id_clone.clone());
             log::trace!("Starting tail task for run: {run_id_clone}, session: {session_id_clone}");
 
             // Helper: emit chat:done so frontend clears sending state
@@ -10128,7 +10165,19 @@ pub async fn enqueue_message(
     session_id: String,
     message: serde_json::Value,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let queue = with_existing_metadata_mut(&app, &session_id, |metadata| {
+    push_queued_message(&app, worktree_id, worktree_path, session_id, message)
+}
+
+/// Append to a session's queue and start its drain. Sync so run-end paths
+/// without an executor (resume tails, drop guards) can call it.
+pub(crate) fn push_queued_message(
+    app: &AppHandle,
+    worktree_id: String,
+    worktree_path: String,
+    session_id: String,
+    message: serde_json::Value,
+) -> Result<Vec<serde_json::Value>, String> {
+    let queue = with_existing_metadata_mut(app, &session_id, |metadata| {
         metadata.queued_messages.push(message);
         metadata.queued_messages.clone()
     })?;

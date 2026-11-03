@@ -864,6 +864,19 @@ pub fn cleanup_orphaned_combined_contexts(app: &AppHandle) -> Result<u32, String
 // High-Level Session API (Backward Compatibility)
 // ============================================================================
 
+/// The `Session` a client sees: metadata plus the name of the session that
+/// delegated to it (one extra metadata read, only for delegated sessions).
+pub fn client_session(app: &AppHandle, metadata: &SessionMetadata) -> Session {
+    let mut session = metadata.to_session();
+    if let Some(link) = session.delegated_by.as_mut() {
+        link.origin_name = load_metadata(app, &link.origin_session_id)
+            .ok()
+            .flatten()
+            .map(|origin| origin.name);
+    }
+    session
+}
+
 /// Load all sessions for a worktree as WorktreeSessions (backward compatible API).
 /// This is the main function used by commands.rs for session management.
 pub fn load_sessions(
@@ -877,7 +890,7 @@ pub fn load_sessions(
     let mut sessions = Vec::new();
     for entry in &index.sessions {
         let session = if let Ok(Some(metadata)) = load_metadata(app, &entry.id) {
-            metadata.to_session()
+            client_session(app, &metadata)
         } else {
             // No metadata found - create minimal session from index entry
             // Use resolved backend from preferences instead of hardcoded Claude
@@ -963,6 +976,7 @@ pub fn load_sessions(
                 total_runs: 0,
                 loaded_run_start_index: 0,
                 scheduled_wakeup: None,
+                delegated_by: None,
             };
             // Persist an explicit policy: a missing field reloads as legacy Plan.
             session.set_execution_policy(Some(execution_mode));
@@ -1096,6 +1110,7 @@ where
                 total_runs: 0,
                 loaded_run_start_index: 0,
                 scheduled_wakeup: None,
+                delegated_by: None,
             };
             // Persist an explicit policy: a missing field reloads as legacy Plan.
             session.set_execution_policy(Some(execution_mode));

@@ -1036,6 +1036,32 @@ pub struct Session {
     /// Fires the stored prompt into this session after fire_at_unix.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scheduled_wakeup: Option<ScheduledWakeup>,
+
+    /// The chat session that last sent work here through Jean MCP.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegated_by: Option<SessionDelegatedBy>,
+}
+
+/// Link from a session to the chat session that sent it work through Jean
+/// MCP `send_chat_message`. While `armed`, the end of this session's next run
+/// is reported back to the origin as a queued message.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionDelegation {
+    pub origin_session_id: String,
+    pub origin_worktree_id: String,
+    /// Distance from the session that started the chain: 1 for a direct send.
+    pub hop: u8,
+    pub armed: bool,
+    pub created_at: u64,
+}
+
+/// `Session` view of [`SessionDelegation`] for "Started by" in the UI.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionDelegatedBy {
+    pub origin_session_id: String,
+    pub origin_worktree_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_name: Option<String>,
 }
 
 /// A ScheduleWakeup request originated from the Claude CLI tool.
@@ -1249,6 +1275,7 @@ impl Session {
             total_runs: 0,
             loaded_run_start_index: 0,
             scheduled_wakeup: None,
+            delegated_by: None,
         }
     }
 
@@ -1502,7 +1529,7 @@ impl SessionMetadata {
         })
     }
 
-    fn has_pending_plan_waiting(&self) -> bool {
+    pub(crate) fn has_pending_plan_waiting(&self) -> bool {
         let Some(message_id) = self.pending_plan_message_id.as_ref() else {
             return false;
         };
@@ -1637,6 +1664,11 @@ impl SessionMetadata {
             total_runs: self.runs.len(),
             loaded_run_start_index: self.runs.len(),
             scheduled_wakeup: self.scheduled_wakeup.clone(),
+            delegated_by: self.delegated_by.as_ref().map(|link| SessionDelegatedBy {
+                origin_session_id: link.origin_session_id.clone(),
+                origin_worktree_id: link.origin_worktree_id.clone(),
+                origin_name: None,
+            }),
         }
     }
 
@@ -2259,6 +2291,11 @@ pub struct SessionMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scheduled_wakeup: Option<ScheduledWakeup>,
 
+    /// The chat session that last sent work here through Jean MCP, and
+    /// whether the end of the next run is still owed to it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegated_by: Option<SessionDelegation>,
+
     /// Monotonic counter of run-state transitions. Bumped by the storage
     /// layer whenever [`SessionMetadata::run_state_signature`] changes between
     /// the on-disk copy and the copy being written, so every transition path
@@ -2458,6 +2495,7 @@ impl SessionMetadata {
             review_activity_at: None,
             runs: vec![],
             scheduled_wakeup: None,
+            delegated_by: None,
             status_version: 0,
             version: 1,
         }

@@ -11,6 +11,7 @@ pub(crate) mod commandcode;
 mod commands;
 pub(crate) mod context_instructions;
 pub(crate) mod cursor;
+pub mod delegation;
 pub mod detached;
 pub(crate) mod devin;
 mod devin_permissions;

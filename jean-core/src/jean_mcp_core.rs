@@ -320,7 +320,7 @@ fn tool_registry_session() -> Value {
     json!([
         {"name":"list_sessions","description":"List chat sessions in a worktree without loading full message history. Use before creating a session to avoid duplicates.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"}},"required":["worktreeId"],"additionalProperties":false}},
         {"name":"create_session","description":"Get a chat session for a prompt in an existing worktree. Reuses an empty chat session when one is available; otherwise creates a new session. Returns the session id needed for send_chat_message.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"name":{"type":"string"},"backend":{"type":"string","enum":["claude","codex","cursor","opencode","pi","commandcode","grok","kimi","antigravity","muse"]}},"required":["worktreeId"],"additionalProperties":false}},
-        {"name":"send_chat_message","description":"Send a message to an existing session. Deleted sessions are rejected. Fire-and-forget: returns immediately as the session begins processing; poll get_session_status with the returned sessionId for completion or failure. Omitted settings inherit the session selections, then the user's defaults. Supplied settings override one turn only.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"message":{"type":"string"},"model":{"type":"string"},"backend":{"type":"string","enum":["claude","codex","cursor","opencode","pi","commandcode","grok","kimi","antigravity","muse"]},"customProfileName":{"type":"string","description":"Optional one-turn provider/profile override."},"effortLevel":{"type":"string","enum":["off","adaptive","minimal","low","medium","high","xhigh","max","ultracode"]},"thinkingLevel":{"type":"string","enum":["off","adaptive","think","megathink","ultrathink"]},"executionMode":{"type":"string","enum":EXECUTION_MODES,"description":"Permission modes: supervised = Supervised, build = Auto-accept edits, auto = Auto, yolo = Full access. plan is the legacy planning mode. Use get_session_capabilities to check backend support. Pass only when the user explicitly asks for a mode. Omit it to use the session's selected mode or the user's default execution mode. Do not choose plan just because the message asks for a plan first."}},"required":["sessionId","message"],"additionalProperties":false}},
+        {"name":"send_chat_message","description":"Send a message to an existing session. Deleted sessions are rejected, and so is a session that is still working for another session (wait for its result or use a different session). Returns as soon as the session begins processing. When the run ends, its result comes back to you automatically as a message; if the session was already running, the result of that run comes back instead. End your turn after sending; do not poll. Omitted settings inherit the session selections, then the user's defaults. Supplied settings override one turn only.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"message":{"type":"string"},"model":{"type":"string"},"backend":{"type":"string","enum":["claude","codex","cursor","opencode","pi","commandcode","grok","kimi","antigravity","muse"]},"customProfileName":{"type":"string","description":"Optional one-turn provider/profile override."},"effortLevel":{"type":"string","enum":["off","adaptive","minimal","low","medium","high","xhigh","max","ultracode"]},"thinkingLevel":{"type":"string","enum":["off","adaptive","think","megathink","ultrathink"]},"executionMode":{"type":"string","enum":EXECUTION_MODES,"description":"Permission modes: supervised = Supervised, build = Auto-accept edits, auto = Auto, yolo = Full access. plan is the legacy planning mode. Use get_session_capabilities to check backend support. Pass only when the user explicitly asks for a mode. Omit it to use the session's selected mode or the user's default execution mode. Do not choose plan just because the message asks for a plan first."}},"required":["sessionId","message"],"additionalProperties":false}},
         {"name":"delete_session","description":"Delete a chat session. It disappears from the session list immediately; its history stays on disk for 30 days, then it is purged. Cannot be undone from Jean.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"}},"required":["sessionId"],"additionalProperties":false}},
         {"name":"move_session","description":"Move a Jean session to another active worktree while preserving its session id, complete message/run history, attachments, settings, and backend resume context. An idle session moves immediately. A running session is scheduled to move automatically after its current turn finishes; do not cancel the run or retry the move.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"targetWorktreeId":{"type":"string"}},"required":["sessionId","targetWorktreeId"],"additionalProperties":false}},
         {"name":"get_session_status","description":"Get whether a Jean session is idle/running/resumable/cancelled/error plus latest run metadata. Use after send_chat_message to poll fire-and-forget work.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"}},"required":["sessionId"],"additionalProperties":false}},
@@ -1052,6 +1052,11 @@ async fn run_tool(
             )?;
             // Agent callers: the agent gets an update when this session's run ends.
             crate::agents::mcp::record_delegation(app, source, &session_id, &worktree_id);
+            // Chat callers: the end of this run comes back as a queued message.
+            if let Some(origin) = chat_delegation_origin(app, source, &session_id) {
+                crate::chat::delegation::arm(app, &origin, &session_id)
+                    .map_err(ToolError::invalid_params)?;
+            }
             // Agent callers: mark the sender so the chat shows one "Message from" line
             let message = match crate::agents::agent_for_session(app, source) {
                 Some(agent) if source != session_id => {
@@ -3084,6 +3089,25 @@ fn ensure_mcp_worktree_can_link_pr(app: &AppHandle, worktree_id: &str) -> Result
     Ok(())
 }
 
+/// The chat session behind an MCP call, when there is one: manual MCP
+/// clients (`manual-dev`, `manual-prod`) have no session, agents report
+/// through their own delegation table, and a session sending to itself owes
+/// itself nothing.
+fn chat_delegation_origin(
+    app: &AppHandle,
+    source: &str,
+    target_session_id: &str,
+) -> Option<crate::chat::types::SessionMetadata> {
+    if source == target_session_id {
+        return None;
+    }
+    let origin = crate::chat::storage::load_metadata(app, source).ok()??;
+    if crate::agents::is_agent_worktree_id(&origin.worktree_id) {
+        return None;
+    }
+    Some(origin)
+}
+
 /// Reject MCP send_chat_message when the session was deleted or its worktree is inactive.
 fn ensure_mcp_session_can_run(
     app: &AppHandle,
@@ -3385,6 +3409,298 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"F
         assert_eq!(messages[0]["content"], message);
         assert_eq!(messages[1]["role"], "assistant");
         assert_eq!(messages[1]["content"], "Fixture reply");
+    }
+
+    /// A session in the `current-base` worktree with metadata on disk.
+    fn saved_session(app: &AppHandle, id: &str) -> crate::chat::types::SessionMetadata {
+        let metadata = crate::chat::types::SessionMetadata::new(
+            id.to_string(),
+            "current-base".to_string(),
+            "Session".to_string(),
+            0,
+        );
+        crate::chat::storage::save_metadata(app, &metadata).unwrap();
+        metadata
+    }
+
+    #[test]
+    fn chat_delegation_origin_is_only_a_real_chat_session() {
+        let (_temp, app) = session_lookup_app();
+        saved_session(&app, "origin");
+        let mut agent = saved_session(&app, "agent-chat");
+        agent.worktree_id = "__agent_release__".to_string();
+        crate::chat::storage::save_metadata(&app, &agent).unwrap();
+
+        assert_eq!(
+            chat_delegation_origin(&app, "origin", "target").map(|m| m.id),
+            Some("origin".to_string())
+        );
+        assert!(chat_delegation_origin(&app, "manual-dev", "target").is_none());
+        assert!(chat_delegation_origin(&app, "manual-prod", "target").is_none());
+        assert!(chat_delegation_origin(&app, "test", "target").is_none());
+        assert!(chat_delegation_origin(&app, "agent-chat", "target").is_none());
+        assert!(chat_delegation_origin(&app, "origin", "origin").is_none());
+    }
+
+    #[tokio::test]
+    async fn send_chat_message_rejects_a_fourth_hop_before_dispatch() {
+        let (_temp, app) = session_lookup_app();
+        let mut deep = saved_session(&app, "deep");
+        deep.delegated_by = Some(crate::chat::types::SessionDelegation {
+            origin_session_id: "above".to_string(),
+            origin_worktree_id: "current-base".to_string(),
+            hop: 3,
+            armed: true,
+            created_at: 1,
+        });
+        crate::chat::storage::save_metadata(&app, &deep).unwrap();
+        saved_session(&app, "target");
+
+        let error = run_tool(
+            &app,
+            "send_chat_message",
+            json!({ "sessionId": "target", "message": "go deeper" }),
+            "deep",
+        )
+        .await
+        .unwrap_err();
+        assert!(error.message.contains("3 hops"), "{}", error.message);
+        assert_eq!(
+            crate::chat::storage::load_metadata(&app, "target")
+                .unwrap()
+                .unwrap()
+                .delegated_by,
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn send_chat_message_refuses_a_target_armed_for_another_session() {
+        let (_temp, app) = session_lookup_app();
+        let first = saved_session(&app, "first");
+        saved_session(&app, "second");
+        saved_session(&app, "target");
+        crate::chat::delegation::arm(&app, &first, "target").unwrap();
+
+        let error = run_tool(
+            &app,
+            "send_chat_message",
+            json!({ "sessionId": "target", "message": "also do this" }),
+            "second",
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            error.message,
+            "Session target is already working for another session; wait for its result or use \
+             a different session."
+        );
+        let link = crate::chat::storage::load_metadata(&app, "target")
+            .unwrap()
+            .unwrap()
+            .delegated_by
+            .unwrap();
+        assert_eq!(link.origin_session_id, "first");
+        assert!(link.armed);
+    }
+
+    /// A run the queue drain started on an armed child reports once; the next
+    /// queued run, with the link disarmed, reports nothing.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn drain_started_run_on_an_armed_child_reports_once() {
+        if !crate::test_support::in_isolated_process(
+            "jean_mcp_core::tests::drain_started_run_on_an_armed_child_reports_once",
+        ) {
+            return;
+        }
+        let (temp, app) = session_send_app();
+        let path = temp.path().to_string_lossy().to_string();
+        let create = |name: &str| {
+            crate::chat::create_session(
+                app.clone(),
+                "current-base".to_string(),
+                path.clone(),
+                Some(name.to_string()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+        };
+        let origin_id = create("Origin").await.unwrap().id;
+        let child_id = create("Child").await.unwrap().id;
+        // The origin waits for input, so its drain holds and the update stays
+        // visible in its queue.
+        let origin = crate::chat::storage::with_existing_metadata_mut(&app, &origin_id, |m| {
+            m.waiting_for_input = true;
+            m.waiting_for_input_type = Some("question".to_string());
+            m.clone()
+        })
+        .unwrap();
+        crate::chat::delegation::arm(&app, &origin, &child_id).unwrap();
+
+        for text in ["first", "second"] {
+            crate::chat::enqueue_message(
+                app.clone(),
+                "current-base".to_string(),
+                path.clone(),
+                child_id.clone(),
+                json!({
+                    "id": text,
+                    "message": text,
+                    "pendingImages": [],
+                    "pendingFiles": [],
+                    "pendingSkills": [],
+                    "pendingTextFiles": [],
+                }),
+            )
+            .await
+            .unwrap();
+        }
+
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let metadata = crate::chat::storage::load_metadata(&app, &child_id)
+                    .unwrap()
+                    .unwrap();
+                let both_done = metadata.runs.len() == 2
+                    && metadata
+                        .runs
+                        .iter()
+                        .all(|run| run.status == crate::chat::types::RunStatus::Completed);
+                if both_done && !crate::chat::registry::is_session_actively_managed(&child_id) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("both queued prompts ran in the child");
+
+        let queued = crate::chat::storage::load_metadata(&app, &origin_id)
+            .unwrap()
+            .unwrap()
+            .queued_messages;
+        assert_eq!(queued.len(), 1, "{queued:?}");
+        let update = queued[0]["message"].as_str().unwrap();
+        assert!(
+            update.starts_with(&format!("[Jean session update]\nsession: {child_id}\n")),
+            "{update}"
+        );
+        assert!(
+            update.contains("\nstatus: done\n---\nFixture reply\n"),
+            "{update}"
+        );
+        assert!(
+            !crate::chat::storage::load_metadata(&app, &child_id)
+                .unwrap()
+                .unwrap()
+                .delegated_by
+                .unwrap()
+                .armed
+        );
+    }
+
+    /// Origin sends to a child through the tool; the child's fixture run ends;
+    /// the update is queued into the origin and sent as the origin's next run.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn mcp_send_from_a_chat_session_reports_the_run_end_back() {
+        if !crate::test_support::in_isolated_process(
+            "jean_mcp_core::tests::mcp_send_from_a_chat_session_reports_the_run_end_back",
+        ) {
+            return;
+        }
+        let (_temp, app) = session_send_app();
+        let origin = run_tool(
+            &app,
+            "create_session",
+            json!({ "worktreeId": "current-base" }),
+            "test",
+        )
+        .await
+        .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        // A run makes the origin non-empty, so the next create_session is a new session.
+        run_tool(
+            &app,
+            "send_chat_message",
+            json!({ "sessionId": origin, "message": "plan the work" }),
+            "test",
+        )
+        .await
+        .unwrap();
+        assert_mcp_send_completed(&app, &origin, "plan the work", "build").await;
+        let child = run_tool(
+            &app,
+            "create_session",
+            json!({ "worktreeId": "current-base" }),
+            "test",
+        )
+        .await
+        .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_ne!(child, origin);
+
+        let sent = run_tool(
+            &app,
+            "send_chat_message",
+            json!({ "sessionId": child, "message": "fix the bug" }),
+            &origin,
+        )
+        .await
+        .unwrap();
+        assert_eq!(sent["status"], "started");
+        let link = crate::chat::storage::load_metadata(&app, &child)
+            .unwrap()
+            .unwrap()
+            .delegated_by
+            .unwrap();
+        assert_eq!(link.origin_session_id, origin);
+        assert_eq!(link.hop, 1);
+
+        let update = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let metadata = crate::chat::storage::load_metadata(&app, &origin)
+                    .unwrap()
+                    .unwrap();
+                if let Some(run) = metadata.runs.get(1) {
+                    if run.status == crate::chat::types::RunStatus::Completed {
+                        break run.user_message.clone();
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("origin received and ran the update");
+        assert_eq!(
+            update,
+            format!(
+                "[Jean session update]\nsession: {child}\nworktree: current-base\nname: Session 2\nstatus: done\n---\nFixture reply\n\nUse read_session_messages for the full transcript."
+            )
+        );
+        let child_metadata = crate::chat::storage::load_metadata(&app, &child)
+            .unwrap()
+            .unwrap();
+        assert!(!child_metadata.delegated_by.unwrap().armed);
+        assert_eq!(
+            child_metadata.runs.len(),
+            1,
+            "the update ran in the origin only"
+        );
+        assert!(crate::chat::storage::load_metadata(&app, &origin)
+            .unwrap()
+            .unwrap()
+            .queued_messages
+            .is_empty());
     }
 
     #[cfg(unix)]

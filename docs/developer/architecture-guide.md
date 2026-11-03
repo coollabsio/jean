@@ -100,6 +100,35 @@ refetches. Internally `send_chat_message_inner` returns `SendError { message,
 user_turn }` so the backend queue drain requeues exactly the prompts the
 composer would restore.
 
+**Chat-to-chat delegation (Jean MCP).** A chat session that calls the Jean MCP
+`send_chat_message` tool gets the end of that run back as a message queued
+into its own session (`jean-core/src/chat/delegation.rs`). The MCP send arms a
+`delegated_by` link on the child (`SessionDelegation`: origin ids, `hop`,
+`armed`) before dispatching. `hop` is the caller's own hop plus one while the
+caller's link is armed (it is working for someone); a caller whose link was
+reported or never armed is a root and the child gets hop 1. A chain deeper
+than `MAX_HOPS` (3) is rejected, so at most three armed links stack at once.
+Ping-pong across turns (A sends to B, B's update makes A send again) is not
+bounded by the hop count; each round needs the model to call the tool again,
+nothing re-sends on its own. A target whose link is armed for a different
+origin refuses the send with a tool error; the same origin may re-arm it.
+`report_run_end` runs from the `send_chat_message` wrapper after every exit,
+from the queue drain after each run it starts, from a drop guard in each
+resume tail, and once at startup for runs that ended while Jean was closed.
+Each path reports before the session's next queued prompt starts, so the
+report sees the run as finished. It disarms under the metadata lock first, so
+a repeat call sends nothing; `waiting_plan` and `question` outcomes keep the
+link armed so the run after the user's answer reports too. Runs the user
+types into the child, and runs started by the update message itself, are not
+armed and never report. If the child was busy and the MCP message was
+rejected or steered, the link stays armed and the run already going reports
+when it ends. Manual MCP clients (`manual-dev`, `manual-prod`) and agents
+(`__agent_*__` worktrees, which use `agents::mcp::record_delegation`) never
+arm a link. The update text starts with `[Jean session update]` followed by
+`session`, `worktree`, `name` and `status` header lines, `---`, then the error
+(when failed), the last assistant reply (1500 chars) and a
+`read_session_messages` hint; the frontend parses the header.
+
 **Versioned run state.** The backend is the single source of run state. Each
 `SessionMetadata` carries `status_version: u64`, bumped in one place:
 `storage.rs` `save_metadata_internal` compares the on-disk copy's

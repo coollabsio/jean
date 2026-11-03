@@ -5394,6 +5394,9 @@ pub fn initialize_runtime(context: &RuntimeContext) -> Result<(), String> {
         Ok(recovered) => chat::resume_recovered_runs(context.clone(), recovered),
         Err(error) => log::warn!("Failed to recover incomplete runs: {error}"),
     }
+    // Delegated runs that ended while Jean was closed still owe their origin
+    // an update. Live runs were just resumed above and report when they end.
+    chat::delegation::report_armed_links_on_startup(context);
     let task_manager = background_tasks::BackgroundTaskManager::new(context.clone());
     task_manager.start();
     context.manage(task_manager);
