@@ -31,6 +31,7 @@ import {
 } from '@/components/icons/reicon'
 import type {
   ReviewFinding,
+  ReviewJobStatus,
   ReviewResponse,
   StoredReviewResults,
 } from '@/types/projects'
@@ -268,20 +269,47 @@ function ReviewReportSections({ review }: { review: ReviewResponse }) {
   )
 }
 
-/** Empty state when no review results */
-function EmptyState({ isReviewing = false }: { isReviewing?: boolean }) {
+/** Empty state when no review results: running, failed, cancelled, or none */
+function EmptyState({
+  isReviewing = false,
+  status,
+  error,
+}: {
+  isReviewing?: boolean
+  status?: ReviewJobStatus
+  error?: string
+}) {
+  const failed = !isReviewing && status === 'failed'
+  const cancelled = !isReviewing && status === 'cancelled'
+  const title = isReviewing
+    ? 'Review running...'
+    : failed
+      ? 'Review failed'
+      : cancelled
+        ? 'Review cancelled'
+        : 'No review results'
+  const description = isReviewing
+    ? 'Results will appear here when the review finishes.'
+    : failed
+      ? error?.trim() || 'The reviewer returned no result.'
+      : undefined
+
   return (
     <Empty className="h-full p-6 md:p-6">
       <EmptyHeader>
         <EmptyMedia variant="icon">
-          {isReviewing ? <Loader2 className="animate-spin" /> : <FileCode />}
+          {isReviewing ? (
+            <Loader2 className="animate-spin" />
+          ) : failed ? (
+            <AlertTriangle className="text-destructive" />
+          ) : (
+            <FileCode />
+          )}
         </EmptyMedia>
-        <EmptyTitle className="text-sm">
-          {isReviewing ? 'Review running...' : 'No review results'}
-        </EmptyTitle>
-        {isReviewing && (
-          <EmptyDescription className="text-xs">
-            Results will appear here when the review finishes.
+        <EmptyTitle className="text-sm">{title}</EmptyTitle>
+        {description && (
+          <EmptyDescription className="text-xs break-words select-text">
+            {description}
           </EmptyDescription>
         )}
       </EmptyHeader>
@@ -616,6 +644,8 @@ export function ReviewResultsPanel({
             isReviewing={
               isReviewing || selectedReviewEntry?.status === 'running'
             }
+            status={selectedReviewEntry?.status}
+            error={selectedReviewEntry?.error}
           />
         </div>
       </div>

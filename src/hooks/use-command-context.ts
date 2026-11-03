@@ -15,10 +15,7 @@ import {
 } from '@/lib/session-debug'
 import type { CommandContext } from '@/lib/commands/types'
 import type { AppPreferences, ClaudeModel } from '@/types/preferences'
-import {
-  resolveMagicPromptBackend,
-  resolveMagicPromptProvider,
-} from '@/types/preferences'
+import { resolveMagicPromptProvider } from '@/types/preferences'
 import type {
   ThinkingLevel,
   ExecutionMode,
@@ -26,17 +23,13 @@ import type {
   Backend,
   Session,
 } from '@/types/chat'
-import type { Project, StartReviewJobResponse } from '@/types/projects'
+import type { Project } from '@/types/projects'
 import { useQueryClient } from '@tanstack/react-query'
 import { useInstalledBackends } from '@/hooks/useInstalledBackends'
 import { chatQueryKeys } from '@/services/chat'
 import { projectsQueryKeys } from '@/services/projects'
 import { triggerImmediateGitPoll, performGitPull } from '@/services/git-status'
-import {
-  resolveCodeReviewConfigs,
-  startCodeReviewsSequentially,
-} from '@/lib/code-review-configs'
-import { generateId } from '@/lib/uuid'
+import { startJeanReviewSession } from '@/lib/jean-review'
 
 /**
  * Command context hook - provides essential actions for commands
@@ -619,66 +612,29 @@ export function useCommandContext(
       return
     }
 
-    const toastId = toast.loading('Starting AI code review...')
+    const worktree = queryClient.getQueryData<{
+      project_id: string
+      base_branch?: string
+      base_remote?: string
+    }>([...projectsQueryKeys.all, 'worktree', activeWorktreeId])
+    const project = queryClient
+      .getQueryData<Project[]>(projectsQueryKeys.list())
+      ?.find(p => p.id === worktree?.project_id)
+    const baseBranch =
+      worktree?.base_branch || project?.default_branch || 'main'
+    const baseRemote = worktree?.base_remote || 'origin'
     try {
-      const configs = resolveCodeReviewConfigs({
-        configured: preferences?.magic_code_review_configs,
-        fallbackBackend:
-          resolveMagicPromptBackend(
-            preferences?.magic_prompt_backends,
-            'code_review_backend',
-            preferences?.default_backend
-          ) ?? 'claude',
-        fallbackModel:
-          preferences?.magic_prompt_models?.code_review_model ?? 'sonnet',
-      })
-      let reviewSessionId: string | undefined
-      await startCodeReviewsSequentially(configs, async config => {
-        const { job } = await invoke<StartReviewJobResponse>(
-          'start_review_job',
-          {
-            worktreeId: activeWorktreeId,
-            worktreePath: activeWorktreePath,
-            source: 'ai',
-            backend: config.backend,
-            customPrompt: preferences?.magic_prompts?.code_review,
-            model: config.model,
-            customProfileName: resolveMagicPromptProvider(
-              preferences?.magic_prompt_providers,
-              'code_review_provider',
-              preferences?.default_provider
-            ),
-            reasoningEffort:
-              config.reasoning_effort ??
-              preferences?.magic_prompt_efforts?.code_review_effort ??
-              null,
-            reviewRunId: generateId(),
-            reviewType: null,
-            sessionId: reviewSessionId,
-          }
-        )
-        reviewSessionId ??= job.sessionId
-      })
-      queryClient.invalidateQueries({
-        queryKey: chatQueryKeys.sessions(activeWorktreeId),
-      })
-      toast.success(`Started ${configs.length} code review session(s)`, {
-        id: toastId,
+      await startJeanReviewSession({
+        worktreeId: activeWorktreeId,
+        worktreePath: activeWorktreePath,
+        baseRef: `${baseRemote}/${baseBranch}`,
+        preferences,
+        queryClient,
       })
     } catch (error) {
-      toast.error(`Failed to review: ${error}`, { id: toastId })
+      toast.error(`Failed to start review: ${error}`)
     }
-  }, [
-    preferences?.magic_prompts?.code_review,
-    preferences?.magic_prompt_models?.code_review_model,
-    preferences?.magic_code_review_configs,
-    preferences?.magic_prompt_backends,
-    preferences?.default_backend,
-    preferences?.magic_prompt_providers,
-    preferences?.default_provider,
-    preferences?.magic_prompt_efforts?.code_review_effort,
-    queryClient,
-  ])
+  }, [preferences, queryClient])
 
   // Terminal - Open terminal panel
   const openTerminalPanel = useCallback(() => {

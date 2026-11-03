@@ -1,4 +1,5 @@
 import { useCallback, useState, type RefObject } from 'react'
+import { startJeanReviewSession } from '@/lib/jean-review'
 import { invoke, listen } from '@/lib/transport'
 import { openExternal } from '@/lib/platform'
 import { dismissibleToast } from '@/lib/dismissible-toast'
@@ -56,13 +57,8 @@ import {
   resolveMagicPromptProvider,
   type CliBackend,
   type AppPreferences,
-  type MagicCodeReviewConfig,
 } from '@/types/preferences'
 import type { InvestigateOverride } from './useMagicCommands'
-import {
-  resolveCodeReviewConfigs,
-  startCodeReviewsSequentially,
-} from '@/lib/code-review-configs'
 
 interface SessionMutation<T> {
   mutate: (args: T) => void
@@ -772,11 +768,7 @@ export function useGitOperations({
   // If existingSessionId is provided, stores results on that session (in-place review from ChatWindow)
   // Creates a new session and stores review results in it
   const runReview = useCallback(
-    async (
-      source: 'ai' | 'coderabbit-cli' | 'coderabbit-pr',
-      reviewConfig?: MagicCodeReviewConfig,
-      reviewSessionId?: string
-    ) => {
+    async (source: 'coderabbit-cli' | 'coderabbit-pr') => {
       if (!activeWorktreeId || !activeWorktreePath) return
 
       const { setWorktreeLoading, clearWorktreeLoading } =
@@ -841,8 +833,7 @@ export function useGitOperations({
       }
 
       const reviewRunId = generateId()
-      const reviewLabel =
-        source === 'coderabbit-cli' ? 'CodeRabbit CLI review' : 'Review'
+      const reviewLabel = 'CodeRabbit CLI review'
       const toastId = toast.loading(
         `Starting ${reviewLabel} for ${reviewTarget}...`
       )
@@ -879,29 +870,8 @@ export function useGitOperations({
             worktreeId: activeWorktreeId,
             worktreePath: activeWorktreePath,
             source,
-            backend:
-              reviewConfig?.backend ??
-              resolveMagicPromptBackend(
-                preferences?.magic_prompt_backends,
-                'code_review_backend',
-                preferences?.default_backend
-              ),
-            customPrompt: preferences?.magic_prompts?.code_review,
-            model:
-              reviewConfig?.model ??
-              preferences?.magic_prompt_models?.code_review_model,
-            customProfileName: resolveMagicPromptProvider(
-              preferences?.magic_prompt_providers,
-              'code_review_provider',
-              preferences?.default_provider
-            ),
-            reasoningEffort:
-              reviewConfig?.reasoning_effort ??
-              preferences?.magic_prompt_efforts?.code_review_effort ??
-              null,
             reviewRunId,
-            reviewType: source === 'coderabbit-cli' ? 'all' : null,
-            sessionId: reviewSessionId,
+            reviewType: 'all',
           }
         )
 
@@ -1025,40 +995,34 @@ export function useGitOperations({
         clearWorktreeLoading(activeWorktreeId)
       }
     },
-    [
-      activeWorktreeId,
-      activeWorktreePath,
-      worktree,
-      project?.name,
-      queryClient,
-      preferences?.magic_prompts?.code_review,
-      preferences?.magic_prompt_models?.code_review_model,
-      preferences?.magic_prompt_backends,
-      preferences?.default_backend,
-      preferences?.magic_prompt_providers,
-      preferences?.default_provider,
-      preferences?.magic_prompt_efforts?.code_review_effort,
-    ]
+    [activeWorktreeId, activeWorktreePath, worktree, project?.name, queryClient]
   )
 
   const handleReview = useCallback(async () => {
-    const configs = resolveCodeReviewConfigs({
-      configured: preferences?.magic_code_review_configs,
-      fallbackBackend:
-        resolveMagicPromptBackend(
-          preferences?.magic_prompt_backends,
-          'code_review_backend',
-          preferences?.default_backend
-        ) ?? 'claude',
-      fallbackModel:
-        preferences?.magic_prompt_models?.code_review_model ?? 'sonnet',
-    })
-    let reviewSessionId: string | undefined
-    await startCodeReviewsSequentially(configs, async config => {
-      reviewSessionId =
-        (await runReview('ai', config, reviewSessionId)) ?? reviewSessionId
-    })
-  }, [preferences, runReview])
+    if (!activeWorktreeId || !activeWorktreePath) return
+    const baseBranch =
+      worktree?.base_branch || project?.default_branch || 'main'
+    const baseRemote = worktree?.base_remote || 'origin'
+    try {
+      await startJeanReviewSession({
+        worktreeId: activeWorktreeId,
+        worktreePath: activeWorktreePath,
+        baseRef: `${baseRemote}/${baseBranch}`,
+        preferences,
+        queryClient,
+      })
+    } catch (error) {
+      toast.error(`Failed to start review: ${error}`)
+    }
+  }, [
+    activeWorktreeId,
+    activeWorktreePath,
+    preferences,
+    project?.default_branch,
+    queryClient,
+    worktree?.base_branch,
+    worktree?.base_remote,
+  ])
 
   const handleCodeRabbitReview = useCallback(async () => {
     await runReview('coderabbit-cli')

@@ -337,17 +337,11 @@ const PROMPT_SECTIONS: PromptSection[] = [
         backendKey: 'code_review_backend',
         label: 'Code Review',
         description:
-          'Prompt for AI-powered code review of your changes. Each reviewer row has its own Mode for sessions created when sending that reviewer’s findings to chat.',
+          'Prompt for Jean review. It is sent as a chat message to a new "Review" session, which uses the first reviewer below.',
         variables: [
           {
-            name: '{branch_info}',
-            description: 'Source and target branch names',
-          },
-          { name: '{commits}', description: 'Commit history' },
-          { name: '{diff}', description: 'Code changes diff' },
-          {
-            name: '{uncommitted_section}',
-            description: 'Unstaged changes if any',
+            name: '{base_branch}',
+            description: 'Base branch to compare against (e.g. origin/main)',
           },
         ],
         defaultValue: DEFAULT_CODE_REVIEW_PROMPT,

@@ -7931,8 +7931,10 @@ fn extract_json_object_from_text(text: &str) -> Result<String, String> {
 
 fn build_claude_structured_output_args(model: &str, tools: &str, schema: &str) -> Vec<String> {
     let tools = if tools == "none" { "" } else { tools };
+    // A turn is one model round trip (parallel tool calls share it). Reviews
+    // need many rounds to inspect call sites and tests.
     let max_turns = if tools == REVIEW_CLAUDE_TOOLS {
-        "12"
+        REVIEW_CLAUDE_MAX_TURNS
     } else {
         "3"
     };
@@ -9998,10 +10000,11 @@ fn emit_commit_job_update(app: &AppHandle, job: &CommitJob) {
 const REVIEW_SCHEMA: &str = r#"{"type":"object","properties":{"summary":{"type":"string","description":"Brief 1-2 sentence summary of the overall changes, including notable good patterns if relevant"},"findings":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string","description":"Stable finding number: H1, H2, ... for critical (high); M1, M2, ... for warning (medium); L1, L2, ... for suggestion (low). Number each severity from 1 in report order."},"severity":{"type":"string","enum":["critical","warning","suggestion"],"description":"Severity level of the finding"},"category":{"type":"string","enum":["security","correctness","data_loss","race_condition","api_contract","serialization","migration","testing","performance","maintainability","repo_standard"],"description":"Primary issue category"},"confidence":{"type":"string","enum":["high","medium"],"description":"Confidence in the finding. Use medium only for high-impact issues with explicitly stated uncertainty."},"verified":{"type":"boolean","description":"True only if you confirmed the issue yourself with concrete evidence (traced the exact code path in the current source and compared it with the base branch). False for all other findings"},"blocking":{"type":"boolean","description":"Whether this should block approval until addressed"},"introduced_by_diff":{"type":"boolean","description":"Regression: true if the reviewed changes introduced or materially worsened the issue; false if the same bug already exists in the base branch (old bug)"},"base_behavior":{"type":"string","description":"For a regression: how the same behavior worked on the base branch. Empty string for an old bug"},"file":{"type":"string","description":"File path where the finding applies"},"line":{"type":"integer","description":"Line number if applicable, 0 if not specific"},"title":{"type":"string","description":"Short title for the finding (max 80 chars)"},"description":{"type":"string","description":"Detailed explanation of the issue and why it matters"},"failure_scenario":{"type":"string","description":"Concrete scenario or input where the issue manifests"},"suggestion":{"type":"string","description":"Minimal actionable code suggestion or fix"}},"required":["id","severity","category","confidence","verified","blocking","introduced_by_diff","base_behavior","file","line","title","description","failure_scenario","suggestion"],"additionalProperties":false},"description":"List of review findings"},"approval_status":{"type":"string","enum":["approved","changes_requested","needs_discussion"],"description":"Overall review verdict"},"release_notes":{"type":"array","items":{"type":"string"},"description":"Intended changes (not bugs) that need a release note. Empty array if none"},"looked_correct":{"type":"array","items":{"type":"string"},"description":"Reviewed areas that looked correct, so they are not reviewed again. Empty array if none"},"suggested_order":{"type":"array","items":{"type":"string"},"description":"Suggested order of work: one entry per step, starting with the finding id(s) and a short reason, e.g. 'H1: blocks release'. Empty array if no findings"}},"required":["summary","findings","approval_status","release_notes","looked_correct","suggested_order"],"additionalProperties":false}"#;
 
 const REVIEW_CLAUDE_TOOLS: &str = "Read,Grep,Glob";
-const AI_REVIEW_TIMEOUT: Duration = Duration::from_secs(300);
+const REVIEW_CLAUDE_MAX_TURNS: &str = "50";
+const AI_REVIEW_TIMEOUT: Duration = Duration::from_secs(600);
 
 fn review_timeout_error() -> String {
-    "AI review timed out after 5 minutes".to_string()
+    "AI review timed out after 10 minutes".to_string()
 }
 
 fn review_backend_allows_repository_investigation(backend: &crate::chat::types::Backend) -> bool {
@@ -16323,7 +16326,7 @@ Body
         let args =
             build_claude_structured_output_args("sonnet", REVIEW_CLAUDE_TOOLS, REVIEW_SCHEMA);
 
-        assert!(args.windows(2).any(|w| w == ["--max-turns", "12"]));
+        assert!(args.windows(2).any(|w| w == ["--max-turns", "50"]));
         assert!(!args.iter().any(|arg| arg == "--permission-mode"));
         assert!(args.windows(2).any(|w| w == ["--tools", "Read,Grep,Glob"]));
         assert_eq!(

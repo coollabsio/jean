@@ -214,6 +214,30 @@ describe('ReviewResultsPanel', () => {
     expect(screen.queryByText('No review results')).not.toBeInTheDocument()
   })
 
+  it('shows the error when the review failed', () => {
+    useChatStore.getState().setReviewResults('session-1', {
+      reviews: [
+        {
+          backend: 'claude',
+          model: 'claude-opus-5-5',
+          status: 'failed',
+          error:
+            'Claude CLI failed: reached max turns before producing structured output',
+        },
+      ],
+    })
+
+    render(<ReviewResultsPanel sessionId="session-1" />)
+
+    expect(screen.getByText('Review failed')).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        'Claude CLI failed: reached max turns before producing structured output'
+      )
+    ).toBeInTheDocument()
+    expect(screen.queryByText('No review results')).not.toBeInTheDocument()
+  })
+
   it('switches between grouped reviews using backend and model labels', async () => {
     useChatStore.getState().setReviewResults('session-1', {
       reviews: [

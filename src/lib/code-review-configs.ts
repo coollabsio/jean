@@ -48,39 +48,3 @@ export function resolveCodeReviewConfigs({
     return true
   })
 }
-
-/**
- * Start multi-backend code reviews one at a time.
- * Sequential is intentional: callers chain a shared reviewSessionId across
- * configs (see useGitOperations / MagicModal), so parallel starts would race.
- */
-export async function startCodeReviewsSequentially<T>(
-  configs: T[],
-  startReview: (config: T) => Promise<void>
-): Promise<void> {
-  const errors: unknown[] = []
-
-  // Sequential: each startReview may depend on prior session id / job setup
-  for (const config of configs) {
-    try {
-      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- reviews share a session id and must start in order
-      await startReview(config)
-    } catch (error) {
-      errors.push(error)
-    }
-  }
-
-  if (errors.length > 0) throw new AggregateError(errors)
-}
-
-export function getCodeReviewSessionName(
-  config: MagicCodeReviewConfig
-): string {
-  const backend =
-    config.backend === 'commandcode'
-      ? 'Command Code'
-      : config.backend === 'opencode'
-        ? 'OpenCode'
-        : config.backend.charAt(0).toUpperCase() + config.backend.slice(1)
-  return `Code Review · ${backend} · ${config.model}`
-}
