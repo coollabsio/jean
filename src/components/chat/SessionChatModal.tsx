@@ -816,7 +816,7 @@ export const SessionChatModal = memo(function SessionChatModal({
       })
   }, [isOpen, worktreeId, worktreePath])
 
-  // Keep Code Review first, then running sessions, then most recently updated.
+  // Keep Code Review first, then most recently updated, with running sessions last.
   const sortedCards = useMemo(() => {
     return sortSessionCardsForTabs(cards)
   }, [cards])

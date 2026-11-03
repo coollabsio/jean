@@ -51,8 +51,8 @@ describe('session tab ordering', () => {
 
     expect(sorted.map(item => item.session.id)).toEqual([
       'review-session',
-      'running',
       'waiting',
+      'running',
     ])
   })
 
@@ -72,7 +72,7 @@ describe('session tab ordering', () => {
     ])
   })
 
-  it('puts running sessions before sessions updated more recently', () => {
+  it('puts running sessions after all other sessions', () => {
     const review = card('review-session', 'review', 99, 1)
     review.session.name = 'Code Review · Claude'
 
@@ -86,10 +86,10 @@ describe('session tab ordering', () => {
 
     expect(sorted.map(item => item.session.id)).toEqual([
       'review-session',
-      'old-running',
-      'older-planning',
       'new-review',
       'new-idle',
+      'old-running',
+      'older-planning',
     ])
   })
 })

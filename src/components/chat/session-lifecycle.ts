@@ -12,7 +12,7 @@ function isRunning(card: SessionCardData): boolean {
   return RUNNING_STATUSES.includes(card.status)
 }
 
-/** Code Review first, then running sessions, then most recently updated. */
+/** Code Review first, then most recently updated, with running sessions last. */
 export function sortSessionCardsForTabs(
   cards: SessionCardData[]
 ): SessionCardData[] {
@@ -23,7 +23,7 @@ export function sortSessionCardsForTabs(
 
     const aIsRunning = isRunning(a)
     const bIsRunning = isRunning(b)
-    if (aIsRunning !== bIsRunning) return aIsRunning ? -1 : 1
+    if (aIsRunning !== bIsRunning) return aIsRunning ? 1 : -1
 
     if (a.session.updated_at !== b.session.updated_at) {
       return b.session.updated_at - a.session.updated_at
