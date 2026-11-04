@@ -748,25 +748,56 @@ describe('CompactMessageList request_secret', () => {
     expect(sent).not.toContain('tskey-auth-123')
   })
 
-  it('keeps secrets until forgotten by default', async () => {
+  it('keeps secrets until deleted by default', async () => {
     mockSecretCommands(null)
     renderCompact(secretMessages, { onSendAnswer: vi.fn() })
     fireEvent.change(screen.getByLabelText('Tailscale auth key'), {
       target: { value: 'tskey-auth-123' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Save securely' }))
-    await screen.findByRole('button', { name: 'Forget' })
+    await screen.findByRole('button', { name: 'Delete' })
     expect(invoke).toHaveBeenCalledWith(
       'save_secret_request',
       expect.objectContaining({ retention: 'forever' })
     )
   })
 
-  it('forgets a saved secret of an answered request', async () => {
+  it('saves every line of a multi-line secret', async () => {
+    mockSecretCommands(null)
+    const envMessages = [
+      message('user-1', 'user', 100, 'add env'),
+      message('assistant-1', 'assistant', 104, '', {
+        tool_calls: [
+          {
+            id: 'tool-1',
+            name: 'mcp__jean__request_secret',
+            input: {
+              label: 'App .env',
+              reason: 'Your .env.local',
+              example: 'DATABASE_URL=postgresql://...\nRESEND_API_KEY=re_...',
+            },
+          },
+        ],
+        content_blocks: [{ type: 'tool_use', tool_call_id: 'tool-1' }],
+      }),
+    ]
+    renderCompact(envMessages, { onSendAnswer: vi.fn() })
+    const field = screen.getByLabelText('App .env')
+    expect(field.tagName).toBe('TEXTAREA')
+    fireEvent.change(field, { target: { value: 'A=1\nB=2' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save securely' }))
+    await screen.findByRole('button', { name: 'Delete' })
+    expect(invoke).toHaveBeenCalledWith(
+      'save_secret_request',
+      expect.objectContaining({ secret: 'A=1\nB=2' })
+    )
+  })
+
+  it('deletes a saved secret of an answered request', async () => {
     mockSecretCommands({ path: '/data/secrets/abc', retention: 'forever' })
     renderCompact([...secretMessages, message('user-2', 'user', 110, 'ok')])
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Forget' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }))
 
     expect(
       await screen.findByText('Tailscale auth key · not saved')

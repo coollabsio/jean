@@ -27,8 +27,21 @@ describe('secretRequest', () => {
         label: 'Tailscale key',
         reason: 'Create it',
         placeholder: 'tskey-',
+        multiline: false,
+        example: undefined,
       })
     }
+  })
+
+  it('uses a text area when asked or when the example has several lines', () => {
+    const read = (input: object) =>
+      secretRequest(
+        tool('mcp__jean__request_secret', { label: '.env', ...input })
+      )?.multiline
+    expect(read({})).toBe(false)
+    expect(read({ multiline: true })).toBe(true)
+    expect(read({ example: 'A=1\nB=2' })).toBe(true)
+    expect(read({ example: 'tskey-auth-...' })).toBe(false)
   })
 
   it('ignores failed calls, other tools, and calls without a label', () => {
@@ -55,7 +68,7 @@ describe('secret messages', () => {
     })
     expect(saved).toContain('"Key"')
     expect(saved).toContain(`TOKEN="$(cat '/data/secrets/abc')"`)
-    expect(saved).toContain('kept until the user forgets it')
+    expect(saved).toContain('kept until the user deletes it')
     expect(secretDeclinedMessage('Key')).toBe('I declined to give "Key".')
   })
 })

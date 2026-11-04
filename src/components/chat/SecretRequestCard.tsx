@@ -1,10 +1,17 @@
-import { useId, useRef, useState, type FormEvent } from 'react'
+import {
+  useId,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FormEvent,
+} from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { CheckIcon, Lock, Minus, ShieldCheck } from '@/components/icons/reicon'
 import { toast } from 'sonner'
 import { invoke } from '@/lib/transport'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import {
   secretDeclinedMessage,
@@ -16,7 +23,7 @@ import {
 } from './secret-request'
 
 const RETENTION_OPTIONS: { value: SecretRetention; label: string }[] = [
-  { value: 'forever', label: 'Until I forget it' },
+  { value: 'forever', label: 'Until I delete it' },
   { value: 'day', label: '24 hours' },
 ]
 
@@ -27,7 +34,7 @@ const TOGGLE_ITEM_CLASS =
  * Card for a Jean MCP `request_secret` call. The value goes only to
  * `save_secret_request`, which writes an owner-only file; the chat gets the
  * file path as the next user message. The value stays in local state only.
- * The file belongs to this tool call, so the card can show it and forget it.
+ * The file belongs to this tool call, so the card can show it and delete it.
  */
 export function SecretRequestCard({
   sessionId,
@@ -68,9 +75,9 @@ export function SecretRequestCard({
       await invoke('forget_secret_request', { sessionId, toolCallId })
       await queryClient.cancelQueries({ queryKey })
       queryClient.setQueryData(queryKey, null)
-      toast.success(`Forgot "${request.label}"`)
+      toast.success(`Deleted "${request.label}"`)
     } catch (error) {
-      toast.error(`Could not forget the secret: ${String(error)}`)
+      toast.error(`Could not delete the secret: ${String(error)}`)
     }
   }
 
@@ -88,7 +95,7 @@ export function SecretRequestCard({
           className="h-6 px-2 text-xs"
           onClick={() => void forget()}
         >
-          Forget
+          Delete
         </Button>
       </div>
     )
@@ -141,6 +148,23 @@ export function SecretRequestCard({
     onSend(secretDeclinedMessage(request.label))
   }
 
+  const fieldProps = {
+    autoComplete: 'off',
+    autoCorrect: 'off',
+    autoCapitalize: 'off',
+    spellCheck: false,
+    'data-1p-ignore': true,
+    'data-lpignore': 'true',
+    'data-bwignore': true,
+    placeholder:
+      request.placeholder ??
+      (request.multiline ? 'Paste the contents' : 'Paste the secret'),
+    value: secret,
+    disabled: blocked,
+    onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+      setSecret(event.currentTarget.value),
+  }
+
   return (
     <form
       className="my-2 flex min-w-0 flex-col gap-3 rounded-xl border border-border/60 bg-card p-4"
@@ -157,24 +181,36 @@ export function SecretRequestCard({
           </p>
         )}
       </div>
-      <div className="flex min-w-0 items-center gap-2">
-        <Input
-          id={inputId}
-          // A password field makes browsers offer to save a login
-          type="text"
-          className="min-w-0 flex-1 [-webkit-text-security:disc]"
-          autoComplete="off"
-          autoCorrect="off"
-          autoCapitalize="off"
-          spellCheck={false}
-          data-1p-ignore
-          data-lpignore="true"
-          data-bwignore
-          placeholder={request.placeholder ?? 'Paste the secret'}
-          value={secret}
-          disabled={blocked}
-          onChange={event => setSecret(event.currentTarget.value)}
-        />
+      {request.example && (
+        <div className="flex min-w-0 flex-col gap-1">
+          <span className="text-xs text-muted-foreground">Example</span>
+          <pre className="overflow-x-auto rounded-md bg-muted px-3 py-2 font-mono text-xs text-muted-foreground">
+            {request.example}
+          </pre>
+        </div>
+      )}
+      <div
+        className={
+          request.multiline
+            ? 'flex min-w-0 flex-col items-end gap-2'
+            : 'flex min-w-0 items-center gap-2'
+        }
+      >
+        {request.multiline ? (
+          <Textarea
+            id={inputId}
+            className="max-h-64 min-h-28 w-full font-mono text-xs [-webkit-text-security:disc]"
+            {...fieldProps}
+          />
+        ) : (
+          <Input
+            id={inputId}
+            // A password field makes browsers offer to save a login
+            type="text"
+            className="min-w-0 flex-1 [-webkit-text-security:disc]"
+            {...fieldProps}
+          />
+        )}
         <Button type="submit" disabled={blocked || !secret.trim()}>
           Save securely
         </Button>
@@ -207,7 +243,7 @@ export function SecretRequestCard({
         <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
           <ShieldCheck className="size-3.5 shrink-0" aria-hidden />
           Kept out of chat, in a private file this agent&apos;s commands can
-          read. You can forget it at any time.
+          read. Delete it anytime, just ask in any chat.
         </p>
         <Button
           type="button"

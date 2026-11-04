@@ -6,6 +6,10 @@ export interface SecretRequest {
   label: string
   reason: string
   placeholder?: string
+  /** Text area instead of a one-line input, for example a whole .env file */
+  multiline: boolean
+  /** Expected format with fake values */
+  example?: string
 }
 
 function str(value: unknown): string | undefined {
@@ -29,10 +33,13 @@ export function secretRequest(tool: ToolCall): SecretRequest | null {
   const input = (tool.input ?? {}) as Record<string, unknown>
   const label = str(input.label)
   if (!label) return null
+  const example = str(input.example)
   return {
     label,
     reason: str(input.reason) ?? '',
     placeholder: str(input.placeholder),
+    multiline: input.multiline === true || !!example?.includes('\n'),
+    example,
   }
 }
 
@@ -63,7 +70,7 @@ export interface SecretEntry {
 export function secretRetentionText(retention: SecretRetention): string {
   return retention === 'day'
     ? 'deleted after 24 hours'
-    : 'kept until the user forgets it'
+    : 'kept until the user deletes it'
 }
 
 /** User message after a save. It holds the file path, never the value. */
