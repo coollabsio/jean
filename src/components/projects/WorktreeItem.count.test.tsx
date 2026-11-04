@@ -28,6 +28,7 @@ vi.mock('@/services/chat', () => ({
   useSessions: () => ({ data: { sessions: mocks.sessions } }),
   useRenameSession: () => ({ mutate: vi.fn() }),
   useCloseSession: () => ({ mutate: vi.fn() }),
+  useCloseSessions: () => vi.fn(),
 }))
 vi.mock('@/services/projects', () => ({
   useRenameWorktree: () => ({ mutate: vi.fn() }),

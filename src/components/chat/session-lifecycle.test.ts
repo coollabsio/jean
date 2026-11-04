@@ -3,9 +3,12 @@ import type { Session } from '@/types/chat'
 import type { SessionCardData } from './session-card-utils'
 import {
   decideSessionClose,
+  finishedSubSessionIds,
   isActiveSessionGone,
   isSessionEmpty,
+  leadIdsOf,
   mergeSessionIntoWorktreeSessions,
+  nestUnderLeads,
   openSessions,
   resolveActiveAfterCloseSuccess,
   resolveActiveSessionId,
@@ -244,6 +247,7 @@ describe('decideSessionClose', () => {
       inputDrafts?: Record<string, string>
       onLastSession?: 'close-session' | 'confirm-worktree'
       isServer?: boolean
+      finishedSubSessionCount?: number
     } = {}
   ) =>
     decideSessionClose({
@@ -252,7 +256,14 @@ describe('decideSessionClose', () => {
       inputDrafts: options.inputDrafts ?? {},
       onLastSession: options.onLastSession ?? 'close-session',
       isServer: options.isServer,
+      finishedSubSessionCount: options.finishedSubSessionCount,
     })
+
+  it('confirms an empty lead so the dialog can offer its finished sub-sessions', () => {
+    expect(decide(empty, [empty, other], { finishedSubSessionCount: 2 })).toBe(
+      'confirm-session'
+    )
+  })
 
   it('closes an empty session at once when other sessions exist', () => {
     expect(decide(empty, [empty, other])).toBe('close-session')
@@ -406,5 +417,182 @@ describe('mergeSessionIntoWorktreeSessions', () => {
 
     expect(merged.sessions.map(item => item.id)).toEqual(['other', 'open'])
     expect(merged.active_session_id).toBe('other')
+  })
+})
+
+interface Link {
+  id: string
+  delegated_by?: { origin_session_id: string }
+  archived_at?: number
+  busy?: boolean
+}
+
+function link(id: string, leadId?: string, extra: Partial<Link> = {}): Link {
+  return {
+    id,
+    ...(leadId ? { delegated_by: { origin_session_id: leadId } } : {}),
+    ...extra,
+  }
+}
+
+const self = (item: Link) => item
+
+function rows(
+  items: Link[],
+  options: Parameters<typeof nestUnderLeads<Link>>[2] = {}
+) {
+  return nestUnderLeads(items, self, options).map(
+    ({ item, depth, hidden, collapsed }) =>
+      `${item.id}:${depth}${hidden ? ':hidden' : ''}${collapsed ? ':collapsed' : ''}`
+  )
+}
+
+describe('nestUnderLeads', () => {
+  it('puts sub-sessions right after their lead, in incoming order', () => {
+    expect(
+      rows([
+        link('child-b', 'lead'),
+        link('other'),
+        link('lead'),
+        link('child-a', 'lead'),
+      ])
+    ).toEqual(['other:0', 'lead:0', 'child-b:1', 'child-a:1'])
+  })
+
+  it('follows the lead chain and caps indentation at two levels', () => {
+    expect(
+      rows([
+        link('d3', 'd2'),
+        link('d2', 'd1'),
+        link('d1', 'root'),
+        link('root'),
+      ])
+    ).toEqual(['root:0', 'd1:1', 'd2:2', 'd3:2'])
+  })
+
+  it('keeps a sub-session at top level when its lead is not listed', () => {
+    expect(rows([link('orphan', 'elsewhere'), link('plain')])).toEqual([
+      'orphan:0',
+      'plain:0',
+    ])
+  })
+
+  it('hides every sub-session below a collapsed lead', () => {
+    expect(
+      rows([link('lead'), link('child', 'lead'), link('grandchild', 'child')], {
+        collapsedLeadIds: new Set(['lead']),
+      })
+    ).toEqual(['lead:0:collapsed', 'child:1:hidden', 'grandchild:2:hidden'])
+  })
+
+  it('never collapses a lead whose sub-session is busy at any depth', () => {
+    const nested = nestUnderLeads(
+      [
+        link('lead'),
+        link('child', 'lead'),
+        link('grandchild', 'child', { busy: true }),
+      ],
+      self,
+      { collapsedLeadIds: new Set(['lead']), isBusy: item => !!item.busy }
+    )
+    expect(
+      nested.map(({ item, hidden, collapsible }) => [
+        item.id,
+        hidden,
+        collapsible,
+      ])
+    ).toEqual([
+      ['lead', false, false],
+      ['child', false, false],
+      ['grandchild', false, false],
+    ])
+  })
+
+  it('ignores the collapsed flag of a session without sub-sessions', () => {
+    expect(
+      rows([link('alone')], { collapsedLeadIds: new Set(['alone']) })
+    ).toEqual(['alone:0'])
+  })
+
+  it('shows each item once when the lead chain is a cycle', () => {
+    expect(
+      rows([
+        link('a', 'b'),
+        link('b', 'a'),
+        link('self', 'self'),
+        link('plain'),
+      ])
+    ).toEqual(['self:0', 'plain:0', 'a:0', 'b:1'])
+  })
+
+  it('counts direct sub-sessions only', () => {
+    const nested = nestUnderLeads(
+      [link('lead'), link('a', 'lead'), link('b', 'lead'), link('c', 'a')],
+      self
+    )
+    expect(nested.map(entry => [entry.item.id, entry.childCount])).toEqual([
+      ['lead', 2],
+      ['a', 1],
+      ['c', 0],
+      ['b', 0],
+    ])
+  })
+})
+
+describe('session tab keyboard order', () => {
+  it('skips sub-sessions hidden in a collapsed lead', () => {
+    const child = card('child', 'completed', 2, 1)
+    child.session.delegated_by = {
+      origin_session_id: 'lead',
+      origin_worktree_id: 'wt',
+    }
+    const tabs = [
+      card('lead', 'completed', 0, 3),
+      card('normal', 'completed', 1, 2),
+      child,
+    ]
+    const visible = (collapsed: string[]) =>
+      nestUnderLeads(sortSessionCardsForTabs(tabs), c => c.session, {
+        collapsedLeadIds: new Set(collapsed),
+      })
+        .filter(entry => !entry.hidden)
+        .map(entry => entry.item.session.id)
+
+    expect(visible([])).toEqual(['lead', 'child', 'normal'])
+    expect(visible(['lead'])).toEqual(['lead', 'normal'])
+  })
+})
+
+describe('leadIdsOf', () => {
+  it('lists listed leads nearest first and stops at a cycle', () => {
+    const items = [link('root'), link('mid', 'root'), link('leaf', 'mid')]
+    expect(leadIdsOf('leaf', items, self)).toEqual(['mid', 'root'])
+    expect(leadIdsOf('root', items, self)).toEqual([])
+    expect(leadIdsOf('a', [link('a', 'b'), link('b', 'a')], self)).toEqual([
+      'b',
+    ])
+  })
+})
+
+describe('finishedSubSessionIds', () => {
+  it('offers finished sub-sessions only, never busy or closed ones', () => {
+    const items = [
+      link('lead'),
+      link('done', 'lead'),
+      link('done-grandchild', 'done'),
+      link('running', 'lead', { busy: true }),
+      link('under-running', 'running'),
+      link('closed', 'lead', { archived_at: 1 }),
+      link('unrelated'),
+    ]
+    expect(
+      finishedSubSessionIds('lead', items, self, item => !item.busy)
+    ).toEqual(['done', 'done-grandchild'])
+  })
+
+  it('returns nothing for a session without sub-sessions', () => {
+    expect(
+      finishedSubSessionIds('alone', [link('alone')], self, () => true)
+    ).toEqual([])
   })
 })

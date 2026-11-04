@@ -25,14 +25,20 @@ import { visibleWorktreeIds } from './sidebar-context-menu'
 import { middleClickClose } from '@/lib/middle-click'
 import {
   decideSessionClose,
+  finishedSubSessionIds,
+  isSessionBusy,
+  leadIdsOf,
+  nestStatusGroups,
   openSessions,
   resolveActiveSessionId,
 } from '@/components/chat/session-lifecycle'
+import { useSubSessionStore } from '@/store/sub-session-store'
 import { useRenameWorktree, useWorktrees } from '@/services/projects'
 import {
   prefetchSession,
   prefetchWorktreeDefaultSession,
   useCloseSession,
+  useCloseSessions,
   useRenameSession,
   useSessions,
 } from '@/services/chat'
@@ -69,8 +75,8 @@ interface WorktreeSessionListProps {
   isSelected: boolean
   isNarrowSidebar: boolean
   onSessionSelect: (sessionId: string) => void
-  onSessionMiddleClose: (session: Session) => void
-  onSessionRemove: (session: Session) => void
+  /** Close a session, offering its finished sub-sessions too. */
+  onSessionRemove: (session: Session, finishedSubSessionIds: string[]) => void
 }
 
 /**
@@ -86,7 +92,6 @@ const WorktreeSessionList = memo(function WorktreeSessionList({
   isSelected,
   isNarrowSidebar,
   onSessionSelect,
-  onSessionMiddleClose,
   onSessionRemove,
 }: WorktreeSessionListProps) {
   // Active session for this worktree (reactive subscription)
@@ -99,12 +104,49 @@ const WorktreeSessionList = memo(function WorktreeSessionList({
   // session's card instead of rescanning every session's messages.
   const sessionCardDataCache = useMemo(() => createSessionCardDataCache(), [])
 
-  const sessionGroups = useMemo(
-    () =>
-      groupCardsByStatus(
-        sessions.map(s => sessionCardDataCache(s, storeState))
-      ),
+  const cards = useMemo(
+    () => sessions.map(s => sessionCardDataCache(s, storeState)),
     [sessions, sessionCardDataCache, storeState]
+  )
+  const collapsedLeadSessionIds = useSubSessionStore(
+    state => state.collapsedLeadSessionIds
+  )
+  // Sub-sessions sit under their lead, inside the lead's status group.
+  const sessionGroups = useMemo(
+    () => nestStatusGroups(groupCardsByStatus(cards), collapsedLeadSessionIds),
+    [cards, collapsedLeadSessionIds]
+  )
+  const removeSession = useCallback(
+    (session: Session) =>
+      onSessionRemove(
+        session,
+        finishedSubSessionIds(
+          session.id,
+          cards,
+          card => card.session,
+          card => !isSessionBusy(card.status)
+        )
+      ),
+    [cards, onSessionRemove]
+  )
+  // Collapsing the lead of the open session selects the lead, so the open
+  // session never hides.
+  const toggleLead = useCallback(
+    (leadId: string) => {
+      const { collapsedLeadSessionIds, toggleLeadCollapsed } =
+        useSubSessionStore.getState()
+      const { activeSessionIds, setActiveSession } = useChatStore.getState()
+      const activeId = activeSessionIds[worktreeId]
+      if (
+        !collapsedLeadSessionIds.has(leadId) &&
+        activeId &&
+        leadIdsOf(activeId, cards, card => card.session).includes(leadId)
+      ) {
+        setActiveSession(worktreeId, leadId)
+      }
+      toggleLeadCollapsed(leadId)
+    },
+    [cards, worktreeId]
   )
 
   const renameSession = useRenameSession()
@@ -191,25 +233,29 @@ const WorktreeSessionList = memo(function WorktreeSessionList({
                 />
                 <span>{group.title}</span>
                 <span className="text-muted-foreground/60">
-                  {group.cards.length}
+                  {group.rows.filter(row => !row.hidden).length}
                 </span>
               </div>
             </StatusGroupContextMenu>
-            {group.cards.map(card => {
+            {group.rows.map(row => {
+              if (row.hidden) return null
+              const card = row.item
               const config = statusConfig[card.status]
               const isGeneratingName =
                 namingSessionIds[card.session.id] ?? false
               const rowClassName = cn(
-                'flex w-full items-center gap-1.5 pl-5 py-1 cursor-pointer text-sm truncate text-left',
+                'flex w-full items-center gap-1.5 py-1 cursor-pointer text-sm truncate text-left',
+                row.depth > 0 ? 'pl-3' : 'pl-5',
+                row.collapsible && 'pr-6',
                 activeSessionId === card.session.id && isSelected
                   ? 'text-foreground bg-primary/10 font-medium'
                   : activeSessionId === card.session.id
                     ? 'text-foreground/80 hover:text-foreground hover:bg-accent/50'
                     : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
               )
-              if (renamingSessionId === card.session.id) {
-                return (
-                  <div key={card.session.id} className={rowClassName}>
+              const rowNode =
+                renamingSessionId === card.session.id ? (
+                  <div className={rowClassName}>
                     <StatusIndicator
                       status={config.indicatorStatus}
                       shape={config.indicatorShape}
@@ -237,53 +283,86 @@ const WorktreeSessionList = memo(function WorktreeSessionList({
                       className="min-w-0 flex-1 bg-transparent text-base outline-none ring-1 ring-ring rounded px-1 md:text-xs"
                     />
                   </div>
-                )
-              }
-              return (
-                <SidebarSessionContextMenu
-                  key={card.session.id}
-                  session={card.session}
-                  worktreeId={worktreeId}
-                  worktreePath={worktreePath}
-                  onRename={handleStartRename}
-                  onLabel={setLabelSessionId}
-                  onDelete={onSessionRemove}
-                >
-                  <button
-                    type="button"
-                    className={rowClassName}
-                    onClick={e => {
-                      e.stopPropagation()
-                      onSessionSelect(card.session.id)
-                    }}
-                    onPointerEnter={() => sessionHover.start(card.session.id)}
-                    onPointerLeave={sessionHover.cancel}
-                    {...middleClickClose(() =>
-                      onSessionMiddleClose(card.session)
-                    )}
+                ) : (
+                  <SidebarSessionContextMenu
+                    session={card.session}
+                    worktreeId={worktreeId}
+                    worktreePath={worktreePath}
+                    onRename={handleStartRename}
+                    onLabel={setLabelSessionId}
+                    onDelete={removeSession}
                   >
-                    <StatusIndicator
-                      status={config.indicatorStatus}
-                      shape={config.indicatorShape}
-                      label={config.label}
-                      className="h-1.5 w-1.5 shrink-0"
-                    />
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="flex min-w-0 items-center gap-1.5 truncate text-xs">
-                          <span className="truncate">
-                            {isGeneratingName
-                              ? 'Generating…'
-                              : card.session.name || 'Untitled'}
+                    <button
+                      type="button"
+                      className={rowClassName}
+                      onClick={e => {
+                        e.stopPropagation()
+                        onSessionSelect(card.session.id)
+                      }}
+                      onPointerEnter={() => sessionHover.start(card.session.id)}
+                      onPointerLeave={sessionHover.cancel}
+                      {...middleClickClose(() => removeSession(card.session))}
+                    >
+                      <StatusIndicator
+                        status={config.indicatorStatus}
+                        shape={config.indicatorShape}
+                        label={config.label}
+                        className="h-1.5 w-1.5 shrink-0"
+                      />
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="flex min-w-0 items-center gap-1.5 truncate text-xs">
+                            <span className="truncate">
+                              {isGeneratingName
+                                ? 'Generating…'
+                                : card.session.name || 'Untitled'}
+                            </span>
                           </span>
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent className="max-w-72">
-                        {`${config.label}: ${card.session.name || 'Untitled'}`}
-                      </TooltipContent>
-                    </Tooltip>
-                  </button>
-                </SidebarSessionContextMenu>
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-72">
+                          {`${config.label}: ${card.session.name || 'Untitled'}`}
+                        </TooltipContent>
+                      </Tooltip>
+                    </button>
+                  </SidebarSessionContextMenu>
+                )
+              return (
+                <div
+                  key={card.session.id}
+                  className={cn(
+                    row.depth === 1 && 'ml-6 border-l border-border/20',
+                    row.depth > 1 && 'ml-10 border-l border-border/20',
+                    row.collapsible && 'group/session relative'
+                  )}
+                >
+                  {rowNode}
+                  {row.collapsible && renamingSessionId !== card.session.id && (
+                    <button
+                      type="button"
+                      aria-label={
+                        row.collapsed
+                          ? 'Show sub-sessions'
+                          : 'Hide sub-sessions'
+                      }
+                      aria-expanded={!row.collapsed}
+                      className={cn(
+                        'absolute right-1 top-1/2 flex size-4 -translate-y-1/2 items-center justify-center rounded text-muted-foreground transition-opacity hover:!opacity-100 hover:bg-accent-foreground/10',
+                        row.collapsed
+                          ? 'opacity-50'
+                          : 'opacity-50 sm:opacity-0 sm:group-hover/session:opacity-50'
+                      )}
+                      onClick={e => {
+                        e.stopPropagation()
+                        toggleLead(card.session.id)
+                      }}
+                    >
+                      <DisclosureChevron
+                        open={!row.collapsed}
+                        className="size-3"
+                      />
+                    </button>
+                  )}
+                </div>
               )
             })}
           </div>
@@ -373,6 +452,7 @@ export const WorktreeItem = memo(function WorktreeItem({
   const { handleClose } = menuActions
 
   const { mutate: closeSession } = useCloseSession()
+  const closeSessions = useCloseSessions()
   const handleDeleteSession = useCallback(
     (sessionId: string) =>
       closeSession({
@@ -389,6 +469,7 @@ export const WorktreeItem = memo(function WorktreeItem({
   const [closeConfirm, setCloseConfirm] = useState<{
     mode: CloseConfirmMode
     sessionId?: string
+    finishedSubSessionIds?: string[]
   } | null>(null)
 
   // Check if any session has streaming AskUserQuestion waiting (blinks).
@@ -675,16 +756,21 @@ export const WorktreeItem = memo(function WorktreeItem({
   // Middle-click or "Delete Session" on a conversation row, mirroring the
   // session tab: non-empty sessions confirm first, empty ones close at once.
   const handleSessionRemove = useCallback(
-    (session: Session) => {
+    (session: Session, finishedSubSessionIds: string[]) => {
       const decision = decideSessionClose({
         target: session,
         sessions: sessionList ?? [session],
         inputDrafts: useChatStore.getState().inputDrafts,
         onLastSession: 'close-session',
+        finishedSubSessionCount: finishedSubSessionIds.length,
       })
       if (decision === 'close-session') handleDeleteSession(session.id)
       else if (decision === 'confirm-session') {
-        setCloseConfirm({ mode: 'session', sessionId: session.id })
+        setCloseConfirm({
+          mode: 'session',
+          sessionId: session.id,
+          finishedSubSessionIds,
+        })
       }
     },
     [handleDeleteSession, sessionList]
@@ -932,7 +1018,6 @@ export const WorktreeItem = memo(function WorktreeItem({
           isSelected={isSelected}
           isNarrowSidebar={isNarrowSidebar}
           onSessionSelect={handleSessionSelect}
-          onSessionMiddleClose={handleSessionRemove}
           onSessionRemove={handleSessionRemove}
         />
       )}
@@ -942,12 +1027,24 @@ export const WorktreeItem = memo(function WorktreeItem({
         onOpenChange={open => {
           if (!open) setCloseConfirm(null)
         }}
-        onConfirm={() => {
+        onConfirm={({ closeSubSessions }) => {
           const intent = closeConfirm
           setCloseConfirm(null)
           if (!intent) return
+          const subSessionIds = closeSubSessions
+            ? (intent.finishedSubSessionIds ?? [])
+            : []
           if (intent.mode === 'session' && intent.sessionId) {
-            handleDeleteSession(intent.sessionId)
+            if (subSessionIds.length > 0) {
+              void closeSessions(
+                worktree.id,
+                worktree.path,
+                intent.sessionId,
+                subSessionIds
+              )
+            } else {
+              handleDeleteSession(intent.sessionId)
+            }
           } else {
             handleClose()
           }
@@ -955,6 +1052,7 @@ export const WorktreeItem = memo(function WorktreeItem({
         branchName={worktree.branch}
         mode={closeConfirm?.mode ?? 'worktree'}
         worktree={worktree}
+        finishedSubSessionCount={closeConfirm?.finishedSubSessionIds?.length}
       />
     </div>
   )

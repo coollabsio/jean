@@ -8,6 +8,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { Checkbox } from '@/components/ui/checkbox'
 import { useState } from 'react'
 import {
   UncommittedChangesStep,
@@ -20,11 +21,13 @@ export type CloseConfirmMode = 'worktree' | 'session'
 interface CloseWorktreeDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onConfirm: () => void
+  onConfirm: (options: { closeSubSessions: boolean }) => void
   branchName?: string
   mode?: CloseConfirmMode
   /** Worktree to delete. When it has uncommitted changes, a second step asks again. */
   worktree?: Worktree
+  /** Finished sub-sessions of the session to delete, offered to delete too. */
+  finishedSubSessionCount?: number
 }
 
 export function CloseWorktreeDialog({
@@ -34,6 +37,7 @@ export function CloseWorktreeDialog({
   branchName,
   mode = 'worktree',
   worktree,
+  finishedSubSessionCount = 0,
 }: CloseWorktreeDialogProps) {
   if (!open) return null
 
@@ -45,6 +49,7 @@ export function CloseWorktreeDialog({
       branchName={branchName}
       mode={mode}
       worktree={worktree}
+      finishedSubSessionCount={finishedSubSessionCount}
     />
   )
 }
@@ -56,12 +61,15 @@ function CloseWorktreeDialogContent({
   branchName,
   mode = 'worktree',
   worktree,
+  finishedSubSessionCount = 0,
 }: CloseWorktreeDialogProps) {
   const uncommitted = useWorktreeUncommittedChanges(
     mode === 'worktree' ? worktree : undefined
   )
   const [showUncommittedStep, setShowUncommittedStep] = useState(false)
   const isSession = mode === 'session'
+  const offersSubSessions = isSession && finishedSubSessionCount > 0
+  const [closeSubSessions, setCloseSubSessions] = useState(true)
   const title = isSession ? 'Delete session?' : 'Delete worktree?'
   const description = isSession
     ? 'This will delete this session. Deleted sessions are removed from disk after 30 days.'
@@ -76,7 +84,7 @@ function CloseWorktreeDialogContent({
           <UncommittedChangesStep
             branchName={branchName ?? worktree?.branch}
             changes={uncommitted}
-            onConfirm={onConfirm}
+            onConfirm={() => onConfirm({ closeSubSessions: false })}
           />
         </AlertDialogContent>
       </AlertDialog>
@@ -89,7 +97,7 @@ function CloseWorktreeDialogContent({
       setShowUncommittedStep(true)
       return
     }
-    onConfirm()
+    onConfirm({ closeSubSessions: offersSubSessions && closeSubSessions })
     onOpenChange(false)
   }
 
@@ -108,6 +116,15 @@ function CloseWorktreeDialogContent({
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
+        {offersSubSessions && (
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Checkbox
+              checked={closeSubSessions}
+              onCheckedChange={checked => setCloseSubSessions(checked === true)}
+            />
+            {`Also close ${finishedSubSessionCount} finished sub-session${finishedSubSessionCount === 1 ? '' : 's'}`}
+          </label>
+        )}
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction

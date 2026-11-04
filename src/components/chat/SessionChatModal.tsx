@@ -46,6 +46,7 @@ import {
   useRenameSession,
   reconnectNativeCliSession,
   useCloseSession,
+  useCloseSessions,
 } from '@/services/chat'
 import { usePreferences } from '@/services/preferences'
 import { useQueryClient } from '@tanstack/react-query'
@@ -86,7 +87,11 @@ import {
 } from './session-card-utils'
 import {
   decideSessionClose,
+  finishedSubSessionIds,
   isActiveSessionGone,
+  isSessionBusy,
+  leadIdsOf,
+  nestUnderLeads,
   openSessions,
   resolveActiveSessionId,
   selectNeighborAfterClose,
@@ -94,6 +99,8 @@ import {
   sortSessionCardsForTabs,
   type SessionCloseDecision,
 } from './session-lifecycle'
+import { useSubSessionStore } from '@/store/sub-session-store'
+import { DisclosureChevron } from '@/components/projects/DisclosureChevron'
 import { useCanvasStoreState } from './hooks/useCanvasStoreState'
 import {
   ContextMenu,
@@ -597,10 +604,21 @@ export const SessionChatModal = memo(function SessionChatModal({
   }, [])
 
   const { mutate: closeSession } = useCloseSession()
+  const closeSessions = useCloseSessions()
   const handleDeleteSession = useCallback(
     (sessionId: string) =>
       closeSession({ worktreeId, worktreePath, sessionId }),
     [closeSession, worktreeId, worktreePath]
+  )
+  const finishedSubSessionsOf = useCallback(
+    (sessionId: string) =>
+      finishedSubSessionIds(
+        sessionId,
+        cards,
+        card => card.session,
+        card => !isSessionBusy(card.status)
+      ),
+    [cards]
   )
 
   // Select the visually adjacent session after closing a tab.
@@ -612,22 +630,33 @@ export const SessionChatModal = memo(function SessionChatModal({
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)
   const [closeConfirmMode, setCloseConfirmMode] =
     useState<CloseConfirmMode>('session')
-  const pendingCloseAction = useRef<(() => void) | null>(null)
+  const [closeSubSessionCount, setCloseSubSessionCount] = useState(0)
+  const pendingCloseAction = useRef<
+    ((options: { closeSubSessions: boolean }) => void) | null
+  >(null)
 
-  const executeCloseAction = useCallback(() => {
-    pendingCloseAction.current?.()
-    pendingCloseAction.current = null
-    setCloseConfirmOpen(false)
-  }, [])
+  const executeCloseAction = useCallback(
+    (options: { closeSubSessions: boolean }) => {
+      pendingCloseAction.current?.(options)
+      pendingCloseAction.current = null
+      setCloseConfirmOpen(false)
+    },
+    []
+  )
 
   // Run a close decision. The neighbor is picked when the close runs, after
   // any confirmation, from the tab order at that moment. When the last
   // session closes, the mutation selects the backend-created empty session.
   const applyCloseDecision = useCallback(
-    (decision: SessionCloseDecision, sessionId: string | null) => {
+    (
+      decision: SessionCloseDecision,
+      sessionId: string | null,
+      subSessionIds: string[] = []
+    ) => {
       if (decision === 'noop') return
       if (decision === 'confirm-worktree') {
         setCloseConfirmMode('worktree')
+        setCloseSubSessionCount(0)
         pendingCloseAction.current = () => {
           onRequestCloseWorktree()
           onClose()
@@ -636,40 +665,59 @@ export const SessionChatModal = memo(function SessionChatModal({
         return
       }
       if (!sessionId) return
-      const closeTab = () => {
+      const closeTab = ({ closeSubSessions = false } = {}) => {
+        const closing = closeSubSessions ? subSessionIds : []
         const { activeSessionIds, setActiveSession } = useChatStore.getState()
+        const activeId = activeSessionIds[worktreeId]
+        // A sub-session closing with its lead moves the selection like the lead.
         const nextId = selectNeighborAfterClose(
-          openSessions(sortedSessionsRef.current).map(s => s.id),
+          openSessions(sortedSessionsRef.current)
+            .map(s => s.id)
+            .filter(id => !closing.includes(id)),
           sessionId,
-          activeSessionIds[worktreeId]
+          activeId && closing.includes(activeId) ? sessionId : activeId
         )
         if (nextId) setActiveSession(worktreeId, nextId)
-        handleDeleteSession(sessionId)
+        if (closing.length > 0) {
+          void closeSessions(worktreeId, worktreePath, sessionId, closing)
+        } else {
+          handleDeleteSession(sessionId)
+        }
       }
       if (decision === 'confirm-session') {
         setCloseConfirmMode('session')
+        setCloseSubSessionCount(subSessionIds.length)
         pendingCloseAction.current = closeTab
         setCloseConfirmOpen(true)
       } else {
         closeTab()
       }
     },
-    [handleDeleteSession, onClose, onRequestCloseWorktree, worktreeId]
+    [
+      closeSessions,
+      handleDeleteSession,
+      onClose,
+      onRequestCloseWorktree,
+      worktreeId,
+      worktreePath,
+    ]
   )
 
   // Delete a session tab, asking for confirmation first when it has content.
   const removeSessionTab = useCallback(
     (session: Session) => {
+      const subSessionIds = finishedSubSessionsOf(session.id)
       const decision = decideSessionClose({
         target: session,
         sessions: tabSessions,
         inputDrafts: useChatStore.getState().inputDrafts,
         onLastSession: 'close-session',
         isServer,
+        finishedSubSessionCount: subSessionIds.length,
       })
-      applyCloseDecision(decision, session.id)
+      applyCloseDecision(decision, session.id, subSessionIds)
     },
-    [tabSessions, isServer, applyCloseDecision]
+    [tabSessions, isServer, applyCloseDecision, finishedSubSessionsOf]
   )
 
   const handleTabAuxClick = useCallback(
@@ -691,14 +739,18 @@ export const SessionChatModal = memo(function SessionChatModal({
             id: currentSessionId,
           })
         : null
+      const subSessionIds = currentSessionId
+        ? finishedSubSessionsOf(currentSessionId)
+        : []
       const decision = decideSessionClose({
         target,
         sessions: tabSessions,
         inputDrafts: useChatStore.getState().inputDrafts,
         onLastSession: 'close-session',
         isServer,
+        finishedSubSessionCount: subSessionIds.length,
       })
-      applyCloseDecision(decision, currentSessionId)
+      applyCloseDecision(decision, currentSessionId, subSessionIds)
     }
     window.addEventListener('close-session-or-worktree', handler, {
       capture: true,
@@ -707,7 +759,14 @@ export const SessionChatModal = memo(function SessionChatModal({
       window.removeEventListener('close-session-or-worktree', handler, {
         capture: true,
       })
-  }, [isOpen, tabSessions, currentSessionId, applyCloseDecision, isServer])
+  }, [
+    isOpen,
+    tabSessions,
+    currentSessionId,
+    applyCloseDecision,
+    isServer,
+    finishedSubSessionsOf,
+  ])
 
   // Listen for toggle-session-label event (CMD+S)
   useEffect(() => {
@@ -816,10 +875,50 @@ export const SessionChatModal = memo(function SessionChatModal({
       })
   }, [isOpen, worktreeId, worktreePath])
 
-  // Keep Code Review first, then most recently updated, with running sessions last.
-  const sortedCards = useMemo(() => {
-    return sortSessionCardsForTabs(cards)
-  }, [cards])
+  // Keep Code Review first, then most recently updated, with running sessions
+  // last. Sub-sessions follow their lead; collapsed ones are not tabs at all,
+  // so shortcuts and close neighbors skip them.
+  const collapsedLeadSessionIds = useSubSessionStore(
+    state => state.collapsedLeadSessionIds
+  )
+  const visibleTabs = useMemo(
+    () =>
+      nestUnderLeads(sortSessionCardsForTabs(cards), card => card.session, {
+        collapsedLeadIds: collapsedLeadSessionIds,
+        isBusy: card => isSessionBusy(card.status),
+      }).filter(tab => !tab.hidden),
+    [cards, collapsedLeadSessionIds]
+  )
+  const sortedCards = useMemo(
+    () => visibleTabs.map(tab => tab.item),
+    [visibleTabs]
+  )
+
+  // Opening a hidden sub-session (sidebar, Recent, notification) shows it.
+  useEffect(() => {
+    if (!currentSessionId) return
+    if (sortedCards.some(card => card.session.id === currentSessionId)) return
+    useSubSessionStore
+      .getState()
+      .expandLeads(leadIdsOf(currentSessionId, cards, card => card.session))
+  }, [cards, currentSessionId, sortedCards])
+
+  const handleToggleLead = useCallback(
+    (leadId: string) => {
+      const { collapsedLeadSessionIds, toggleLeadCollapsed } =
+        useSubSessionStore.getState()
+      const hidesActive =
+        !collapsedLeadSessionIds.has(leadId) &&
+        !!currentSessionId &&
+        leadIdsOf(currentSessionId, cards, card => card.session).includes(
+          leadId
+        )
+      if (hidesActive)
+        useChatStore.getState().setActiveSession(worktreeId, leadId)
+      toggleLeadCollapsed(leadId)
+    },
+    [cards, currentSessionId, worktreeId]
+  )
 
   const sortedSessions = useMemo(
     () => sortedCards.map(c => c.session),
@@ -1339,7 +1438,8 @@ export const SessionChatModal = memo(function SessionChatModal({
                   aria-label="Sessions"
                   className="flex min-w-max items-center gap-0 py-0 px-0"
                 >
-                  {sortedCards.map((card, idx) => {
+                  {visibleTabs.map((tab, idx) => {
+                    const card = tab.item
                     const session = card.session
                     const isActive = session.id === currentSessionId
                     const status = card.status
@@ -1377,6 +1477,15 @@ export const SessionChatModal = memo(function SessionChatModal({
                                 'bg-warning/10 text-warning border-warning hover:bg-warning/20 hover:text-warning'
                             )}
                           >
+                            {tab.depth > 0 && (
+                              <span
+                                aria-hidden="true"
+                                className={cn(
+                                  'h-3 shrink-0 border-l border-border',
+                                  tab.depth > 1 && 'ml-1.5'
+                                )}
+                              />
+                            )}
                             <StatusIndicator
                               status={config.indicatorStatus}
                               shape={config.indicatorShape}
@@ -1413,6 +1522,34 @@ export const SessionChatModal = memo(function SessionChatModal({
                                 </TooltipContent>
                               </Tooltip>
                             )}
+                            {tab.collapsible &&
+                              renamingSessionId !== session.id && (
+                                <button
+                                  type="button"
+                                  aria-label={
+                                    tab.collapsed
+                                      ? 'Show sub-sessions'
+                                      : 'Hide sub-sessions'
+                                  }
+                                  aria-expanded={!tab.collapsed}
+                                  className={cn(
+                                    'flex size-4 shrink-0 items-center justify-center rounded transition-opacity hover:!opacity-100 hover:bg-accent-foreground/10',
+                                    tab.collapsed
+                                      ? 'opacity-60'
+                                      : 'opacity-60 sm:opacity-0 sm:group-hover/tab:opacity-50'
+                                  )}
+                                  onClick={e => {
+                                    e.stopPropagation()
+                                    handleToggleLead(session.id)
+                                  }}
+                                  onDoubleClick={e => e.stopPropagation()}
+                                >
+                                  <DisclosureChevron
+                                    open={!tab.collapsed}
+                                    className="size-3"
+                                  />
+                                </button>
+                              )}
                             {renamingSessionId !== session.id && (
                               <DismissButton
                                 tooltip={'Remove session'}
@@ -1536,6 +1673,9 @@ export const SessionChatModal = memo(function SessionChatModal({
         branchName={worktree?.branch}
         mode={closeConfirmMode}
         worktree={worktree ?? undefined}
+        finishedSubSessionCount={
+          closeConfirmMode === 'session' ? closeSubSessionCount : 0
+        }
       />
     </>
   )

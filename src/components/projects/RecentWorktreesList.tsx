@@ -31,11 +31,14 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { WorkingWaveform } from '@/components/ui/status-indicator'
+import { cn } from '@/lib/utils'
 import { isNativeApp } from '@/lib/environment'
 import { formatShortcutDisplay } from '@/types/keybindings'
 import {
   decideSessionClose,
+  finishedSubSessionIds,
   mergeSessionIntoWorktreeSessions,
+  nestUnderLeads,
 } from '@/components/chat/session-lifecycle'
 import { useChatStore } from '@/store/chat-store'
 import { useProjectsStore } from '@/store/projects-store'
@@ -44,6 +47,7 @@ import {
   chatQueryKeys,
   prefetchSession,
   useCloseSession,
+  useCloseSessions,
 } from '@/services/chat'
 import { useHoverIntent } from '@/hooks/useHoverIntent'
 import {
@@ -135,6 +139,55 @@ export function sortRecentRows(
   return [...rows].sort((a, b) => rank(a) - rank(b))
 }
 
+/**
+ * Split sorted rows into the list, the Working shelf (unpinned running), and
+ * the Snoozed shelf (unpinned, inactive for a day). Inside each part a
+ * sub-session follows its lead when both are there; `depthById` holds the
+ * indent of each nested row.
+ */
+export function groupRecentRows(
+  rows: RecentWorktreeItem[],
+  pinned: ReadonlySet<string>,
+  isRunning: (row: RecentWorktreeItem) => boolean,
+  now = Date.now()
+) {
+  const groups = {
+    listRows: [] as RecentWorktreeItem[],
+    workingRows: [] as RecentWorktreeItem[],
+    snoozedRows: [] as RecentWorktreeItem[],
+  }
+  for (const row of sortRecentRows(rows, pinned, isRunning)) {
+    const isPinned = pinned.has(row.session.id)
+    if (!isPinned && isRunning(row)) groups.workingRows.push(row)
+    else if (!isPinned && isSnoozedSession(row.lastActivityAt, now))
+      groups.snoozedRows.push(row)
+    else groups.listRows.push(row)
+  }
+  const depthById = new Map<string, number>()
+  const nest = (part: RecentWorktreeItem[]) =>
+    nestUnderLeads(part, row => row.session).map(({ item, depth }) => {
+      if (depth > 0) depthById.set(item.session.id, depth)
+      return item
+    })
+  const listRows = nest(groups.listRows)
+  // The pinned separator goes above the first unpinned top-level row. A
+  // sub-session of a pinned lead stays above it, under its lead.
+  const firstUnpinned = listRows.find(
+    row => !pinned.has(row.session.id) && !depthById.has(row.session.id)
+  )
+  const hasPinned = listRows.some(
+    row => pinned.has(row.session.id) && !depthById.has(row.session.id)
+  )
+  return {
+    listRows,
+    workingRows: nest(groups.workingRows),
+    snoozedRows: nest(groups.snoozedRows),
+    depthById,
+    firstUnpinnedSessionId:
+      hasPinned && firstUnpinned ? firstUnpinned.session.id : null,
+  }
+}
+
 export function RecentWorktreesList({
   projects,
   searchQuery = '',
@@ -204,35 +257,34 @@ export function RecentWorktreesList({
   const pinned = useMemo(() => new Set(pinnedSessionIds), [pinnedSessionIds])
   // Unpinned running sessions move to a collapsible Working shelf, and
   // unpinned snoozed sessions to a collapsible Snoozed shelf below it.
-  // Pinned sessions stay in the pinned group.
-  const { listRows, workingRows, snoozedRows } = useMemo(() => {
-    const visibleRows = rows.filter(row =>
-      matchesSidebarSearch(
-        searchQuery,
-        row.session.name,
-        row.projectName,
-        row.worktree.name
-      )
-    )
-    const isRunning = (row: RecentWorktreeItem) =>
-      getRecentSessionStatus(row.session, {
-        sending: sendingSessionIds[row.session.id] ?? false,
-        waiting: waitingForInputSessionIds[row.session.id] ?? false,
-      }).tone === 'working'
-    const groups = {
-      listRows: [] as RecentWorktreeItem[],
-      workingRows: [] as RecentWorktreeItem[],
-      snoozedRows: [] as RecentWorktreeItem[],
-    }
-    for (const row of sortRecentRows(visibleRows, pinned, isRunning)) {
-      const isPinned = pinned.has(row.session.id)
-      if (!isPinned && isRunning(row)) groups.workingRows.push(row)
-      else if (!isPinned && isSnoozedSession(row.lastActivityAt))
-        groups.snoozedRows.push(row)
-      else groups.listRows.push(row)
-    }
-    return groups
-  }, [pinned, rows, searchQuery, sendingSessionIds, waitingForInputSessionIds])
+  // Pinned sessions stay in the pinned group. Inside each part, a
+  // sub-session follows its lead when both are there.
+  const {
+    listRows,
+    workingRows,
+    snoozedRows,
+    depthById,
+    firstUnpinnedSessionId,
+  } = useMemo(
+    () =>
+      groupRecentRows(
+        rows.filter(row =>
+          matchesSidebarSearch(
+            searchQuery,
+            row.session.name,
+            row.projectName,
+            row.worktree.name
+          )
+        ),
+        pinned,
+        row =>
+          getRecentSessionStatus(row.session, {
+            sending: sendingSessionIds[row.session.id] ?? false,
+            waiting: waitingForInputSessionIds[row.session.id] ?? false,
+          }).tone === 'working'
+      ),
+    [pinned, rows, searchQuery, sendingSessionIds, waitingForInputSessionIds]
+  )
   // The shelf hides when no session runs. Collapse it then, so it always
   // comes back closed and the first click opens it.
   if (workingExpanded && workingRows.length === 0) setWorkingExpanded(false)
@@ -305,11 +357,13 @@ export function RecentWorktreesList({
 
   // Mobile swipe close follows the CMD+W session row rules
   const { mutate: closeSession } = useCloseSession()
+  const closeSessions = useCloseSessions()
   const deleteWorktree = useDeleteWorktree()
   const closeBaseSessionClean = useCloseBaseSessionClean()
   const [closeTarget, setCloseTarget] = useState<{
     row: RecentWorktreeItem
     mode: 'session' | 'worktree'
+    finishedSubSessionIds: string[]
   } | null>(null)
   const refreshRecent = useCallback(
     () =>
@@ -317,7 +371,20 @@ export function RecentWorktreesList({
     [queryClient]
   )
   const closeRow = useCallback(
-    (row: RecentWorktreeItem, mode: 'session' | 'worktree') => {
+    (
+      row: RecentWorktreeItem,
+      mode: 'session' | 'worktree',
+      subSessionIds: string[] = []
+    ) => {
+      if (mode === 'session' && subSessionIds.length > 0) {
+        void closeSessions(
+          row.worktree.id,
+          row.worktree.path,
+          row.session.id,
+          subSessionIds
+        ).then(refreshRecent)
+        return
+      }
       if (mode === 'session') {
         closeSession(
           {
@@ -337,7 +404,13 @@ export function RecentWorktreesList({
         { onSuccess: refreshRecent }
       )
     },
-    [closeSession, closeBaseSessionClean, deleteWorktree, refreshRecent]
+    [
+      closeSession,
+      closeSessions,
+      closeBaseSessionClean,
+      deleteWorktree,
+      refreshRecent,
+    ]
   )
   const requestCloseRow = useCallback(
     async (row: RecentWorktreeItem) => {
@@ -346,11 +419,29 @@ export function RecentWorktreesList({
         worktreePath: row.worktree.path,
         includeMessageCounts: false,
       })
+      const chat = useChatStore.getState()
+      const subSessionIds = finishedSubSessionIds(
+        row.session.id,
+        sessions,
+        session => session,
+        session => {
+          const tone = getRecentSessionStatus(session, {
+            sending: chat.sendingSessionIds[session.id] ?? false,
+            waiting: chat.waitingForInputSessionIds[session.id] ?? false,
+          }).tone
+          return (
+            tone !== 'working' &&
+            tone !== 'waiting' &&
+            !session.scheduled_wakeup
+          )
+        }
+      )
       const decision = decideSessionClose({
         target: row.session,
         sessions,
-        inputDrafts: useChatStore.getState().inputDrafts,
+        inputDrafts: chat.inputDrafts,
         onLastSession: 'confirm-worktree',
+        finishedSubSessionCount: subSessionIds.length,
       })
       if (decision === 'noop') return
       if (decision === 'close-session') closeRow(row, 'session')
@@ -358,6 +449,7 @@ export function RecentWorktreesList({
         setCloseTarget({
           row,
           mode: decision === 'confirm-session' ? 'session' : 'worktree',
+          finishedSubSessionIds: subSessionIds,
         })
     },
     [closeRow]
@@ -458,11 +550,8 @@ export function RecentWorktreesList({
   const snoozedCount = snoozedRows.length + hiddenCount
   // Older snoozed pages load only while the Snoozed shelf is open.
   const showLoadMore = snoozedExpanded && hiddenCount > 0
-  const renderRow = (
-    row: RecentWorktreeItem,
-    index: number,
-    previous?: RecentWorktreeItem
-  ) => {
+  const renderRow = (row: RecentWorktreeItem, index: number) => {
+    const depth = depthById.get(row.session.id) ?? 0
     const isCurrent = row.session.id === selectedSessionId
     const activity = formatRecentActivity(row.lastActivityAt)
     const activityLabel =
@@ -482,10 +571,18 @@ export function RecentWorktreesList({
     const isPinned = pinned.has(row.session.id)
     const project = projectsById.get(row.projectId)
     const isServer = !!project?.server
-    const showPinnedSeparator =
-      !isPinned && !!previous && pinned.has(previous.session.id)
+    const showPinnedSeparator = row.session.id === firstUnpinnedSessionId
     return (
-      <li key={row.session.id} className="group">
+      <li
+        key={row.session.id}
+        className={cn(
+          'group',
+          // The negative margin carries the indent line through the list gap.
+          depth > 0 && '-mt-2 border-l border-border/20 pt-2 pl-1',
+          depth === 1 && 'ml-4',
+          depth > 1 && 'ml-8'
+        )}
+      >
         {showPinnedSeparator && (
           <div
             role="separator"
@@ -643,9 +740,7 @@ export function RecentWorktreesList({
           aria-label="Recent sessions"
           className={`${listClassName} pt-2 pb-2`}
         >
-          {listRows.map((row, index) =>
-            renderRow(row, index, listRows[index - 1])
-          )}
+          {listRows.map((row, index) => renderRow(row, index))}
         </ul>
         {/* Shelves and paging actions sit at the bottom of a short list and
             scroll with a long one. */}
@@ -700,11 +795,18 @@ export function RecentWorktreesList({
         onOpenChange={open => {
           if (!open) setCloseTarget(null)
         }}
-        onConfirm={() => {
-          if (closeTarget) closeRow(closeTarget.row, closeTarget.mode)
+        onConfirm={({ closeSubSessions }) => {
+          if (closeTarget) {
+            closeRow(
+              closeTarget.row,
+              closeTarget.mode,
+              closeSubSessions ? closeTarget.finishedSubSessionIds : []
+            )
+          }
           setCloseTarget(null)
         }}
         mode={closeTarget?.mode}
+        finishedSubSessionCount={closeTarget?.finishedSubSessionIds.length}
         branchName={closeTarget?.row.worktree.branch}
         worktree={
           closeTarget?.mode === 'worktree'

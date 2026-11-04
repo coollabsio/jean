@@ -19,7 +19,7 @@ describe('RecentWorktreesList structure', () => {
     )
     expect(source).toContain('aria-label="Snoozed sessions"')
     expect(source).toContain('aria-expanded={snoozedExpanded}')
-    expect(source).toContain('isSnoozedSession(row.lastActivityAt)')
+    expect(source).toContain('isSnoozedSession(row.lastActivityAt, now)')
   })
 
   it('moves unpinned working sessions to a collapsible Working shelf', () => {
@@ -128,7 +128,7 @@ describe('RecentWorktreesList structure', () => {
     expect(source).toContain("weight={isPinned ? 'Filled' : 'Outline'}")
     expect(source).toContain('void setRecentSessionPinned(')
     expect(source).toContain('pinned.has(row.session.id)')
-    expect(source).toContain('sortRecentRows(visibleRows, pinned, isRunning)')
+    expect(source).toContain('sortRecentRows(rows, pinned, isRunning)')
     expect(source).toContain('opacity-100')
     expect(source).toContain('md:opacity-0')
     expect(source).toContain('md:group-hover:opacity-100')

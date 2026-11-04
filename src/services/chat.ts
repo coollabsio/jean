@@ -1253,6 +1253,53 @@ export function useCloseSession() {
 }
 
 /**
+ * Close sessions of one worktree one after another, stopping at the first
+ * failure (`useCloseSession` reports it). Used to close a lead session with
+ * its finished sub-sessions.
+ */
+/**
+ * Close a lead session, then the sub-sessions the user chose with it. The
+ * sub-sessions were picked when the dialog opened; one that started working
+ * since then is kept, so a running or waiting session is never closed.
+ */
+export function useCloseSessions() {
+  const { mutateAsync } = useCloseSession()
+  return useCallback(
+    async (
+      worktreeId: string,
+      worktreePath: string,
+      leadSessionId: string,
+      subSessionIds: string[]
+    ) => {
+      try {
+        await mutateAsync({
+          worktreeId,
+          worktreePath,
+          sessionId: leadSessionId,
+        })
+      } catch {
+        return
+      }
+      for (const sessionId of subSessionIds) {
+        const chat = useChatStore.getState()
+        if (
+          chat.sendingSessionIds[sessionId] ||
+          chat.waitingForInputSessionIds[sessionId]
+        ) {
+          continue
+        }
+        try {
+          await mutateAsync({ worktreeId, worktreePath, sessionId })
+        } catch {
+          return
+        }
+      }
+    },
+    [mutateAsync]
+  )
+}
+
+/**
  * Hook to handle the CMD+W keybinding for closing session or worktree.
  *
  * Listens for 'close-session-or-worktree' custom event and either:

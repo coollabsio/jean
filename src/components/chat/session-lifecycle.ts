@@ -1,5 +1,10 @@
 import type { Session, WorktreeSessions } from '@/types/chat'
-import type { SessionCardData, SessionStatus } from './session-card-utils'
+import {
+  isActionableWaitingStatus,
+  type SessionCardData,
+  type SessionStatus,
+  type StatusGroup,
+} from './session-card-utils'
 
 const RUNNING_STATUSES: readonly SessionStatus[] = [
   'planning',
@@ -10,6 +15,205 @@ const RUNNING_STATUSES: readonly SessionStatus[] = [
 
 function isRunning(card: SessionCardData): boolean {
   return RUNNING_STATUSES.includes(card.status)
+}
+
+/** Running, scheduled, or waiting for the user: a sub-session still at work. */
+export function isSessionBusy(status: SessionStatus): boolean {
+  return (
+    RUNNING_STATUSES.includes(status) ||
+    status === 'scheduled' ||
+    isActionableWaitingStatus(status)
+  )
+}
+
+/** The fields that link a sub-session to the session that started it. */
+interface SessionLink {
+  id: string
+  delegated_by?: { origin_session_id: string } | null
+}
+
+/** Sub-sessions indent at most this many levels. */
+export const MAX_SUB_SESSION_DEPTH = 2
+
+export interface NestedItem<T> {
+  item: T
+  /** Indent level, 0 for top level, capped at `MAX_SUB_SESSION_DEPTH`. */
+  depth: number
+  /** Direct sub-sessions in the list. */
+  childCount: number
+  /** Inside a collapsed lead. */
+  hidden: boolean
+  /** Has sub-sessions and none of them is busy, so they may be hidden. */
+  collapsible: boolean
+  /** Its sub-sessions are hidden. */
+  collapsed: boolean
+}
+
+const NO_IDS: ReadonlySet<string> = new Set()
+
+/**
+ * Put each sub-session right after its lead session, keeping the incoming
+ * order among siblings. A sub-session whose lead is not in the list stays at
+ * top level. A lead with a busy sub-session (at any depth) never collapses,
+ * so no running or waiting work is hidden. Every item appears exactly once,
+ * even with a broken or cyclic lead chain.
+ */
+export function nestUnderLeads<T>(
+  items: readonly T[],
+  sessionOf: (item: T) => SessionLink,
+  {
+    collapsedLeadIds = NO_IDS,
+    isBusy = () => false,
+  }: {
+    collapsedLeadIds?: ReadonlySet<string>
+    isBusy?: (item: T) => boolean
+  } = {}
+): NestedItem<T>[] {
+  const ids = new Set(items.map(item => sessionOf(item).id))
+  const leadIdOf = (item: T): string | null => {
+    const { id, delegated_by } = sessionOf(item)
+    const leadId = delegated_by?.origin_session_id
+    return leadId && leadId !== id && ids.has(leadId) ? leadId : null
+  }
+  const childrenOf = new Map<string, T[]>()
+  for (const item of items) {
+    const leadId = leadIdOf(item)
+    if (!leadId) continue
+    const siblings = childrenOf.get(leadId)
+    if (siblings) siblings.push(item)
+    else childrenOf.set(leadId, [item])
+  }
+
+  const busyBelow = new Map<string, boolean>()
+  const hasBusyDescendant = (id: string, path: Set<string>): boolean => {
+    const known = busyBelow.get(id)
+    if (known !== undefined) return known
+    path.add(id)
+    const busy = (childrenOf.get(id) ?? []).some(child => {
+      const childId = sessionOf(child).id
+      if (path.has(childId)) return false
+      return isBusy(child) || hasBusyDescendant(childId, path)
+    })
+    path.delete(id)
+    busyBelow.set(id, busy)
+    return busy
+  }
+
+  const result: NestedItem<T>[] = []
+  const visited = new Set<string>()
+  const emit = (item: T, depth: number, hidden: boolean) => {
+    const id = sessionOf(item).id
+    if (visited.has(id)) return
+    visited.add(id)
+    const children = childrenOf.get(id) ?? []
+    const collapsible = children.length > 0 && !hasBusyDescendant(id, new Set())
+    const collapsed = collapsible && collapsedLeadIds.has(id)
+    result.push({
+      item,
+      depth: Math.min(depth, MAX_SUB_SESSION_DEPTH),
+      childCount: children.length,
+      hidden,
+      collapsible,
+      collapsed,
+    })
+    for (const child of children) emit(child, depth + 1, hidden || collapsed)
+  }
+
+  for (const item of items) if (!leadIdOf(item)) emit(item, 0, false)
+  // Items left over sit in a lead cycle: show each cycle from its first item.
+  for (const item of items) emit(item, 0, false)
+  return result
+}
+
+export interface NestedStatusGroup extends Omit<StatusGroup, 'cards'> {
+  rows: NestedItem<SessionCardData>[]
+}
+
+/**
+ * Status groups with sub-sessions moved under their lead. A sub-session shows
+ * in its lead's group, whatever its own status; a group left without rows
+ * disappears.
+ */
+export function nestStatusGroups(
+  groups: readonly StatusGroup[],
+  collapsedLeadIds: ReadonlySet<string>
+): NestedStatusGroup[] {
+  const groupOf = new Map<string, StatusGroup>()
+  for (const group of groups) {
+    for (const card of group.cards) groupOf.set(card.session.id, group)
+  }
+  const nested = nestUnderLeads(
+    groups.flatMap(group => group.cards),
+    card => card.session,
+    { collapsedLeadIds, isBusy: card => isSessionBusy(card.status) }
+  )
+  const result: NestedStatusGroup[] = []
+  for (const row of nested) {
+    const group = row.depth === 0 ? groupOf.get(row.item.session.id) : null
+    const last = result.at(-1)
+    if (group && group.key !== last?.key) {
+      const { cards: _cards, ...header } = group
+      result.push({ ...header, rows: [row] })
+    } else {
+      last?.rows.push(row)
+    }
+  }
+  return result
+}
+
+/** The leads above `sessionId` in the list, nearest first. */
+export function leadIdsOf<T>(
+  sessionId: string,
+  items: readonly T[],
+  sessionOf: (item: T) => SessionLink
+): string[] {
+  const leadById = new Map(
+    items.map(item => {
+      const session = sessionOf(item)
+      return [session.id, session.delegated_by?.origin_session_id] as const
+    })
+  )
+  const chain: string[] = []
+  let leadId = leadById.get(sessionId)
+  while (
+    leadId &&
+    leadById.has(leadId) &&
+    leadId !== sessionId &&
+    !chain.includes(leadId)
+  ) {
+    chain.push(leadId)
+    leadId = leadById.get(leadId)
+  }
+  return chain
+}
+
+/**
+ * Sub-sessions that may close together with `leadId`: open, finished ones,
+ * found through finished sub-sessions only. A busy sub-session keeps its own
+ * sub-sessions.
+ */
+export function finishedSubSessionIds<T>(
+  leadId: string,
+  items: readonly T[],
+  sessionOf: (item: T) => SessionLink & { archived_at?: number | null },
+  isFinished: (item: T) => boolean
+): string[] {
+  const result: string[] = []
+  const seen = new Set([leadId])
+  const queue = [leadId]
+  while (queue.length > 0) {
+    const current = queue.shift()
+    for (const item of items) {
+      const session = sessionOf(item)
+      if (session.delegated_by?.origin_session_id !== current) continue
+      if (seen.has(session.id) || session.archived_at) continue
+      seen.add(session.id)
+      if (!isFinished(item)) continue
+      result.push(session.id)
+      queue.push(session.id)
+    }
+  }
+  return result
 }
 
 /** Code Review first, then most recently updated, with running sessions last. */
@@ -137,7 +341,8 @@ export type SessionCloseDecision =
  * closes. `onLastSession` is the surface policy for the last open session:
  * tabs close it (the backend then creates an empty one), Recent rows ask to
  * delete the worktree. Otherwise empty sessions close at once and the rest
- * confirm first.
+ * confirm first. A lead with finished sub-sessions always confirms, so the
+ * dialog can offer to close them too.
  */
 export function decideSessionClose({
   target,
@@ -145,6 +350,7 @@ export function decideSessionClose({
   inputDrafts,
   onLastSession,
   isServer = false,
+  finishedSubSessionCount = 0,
 }: {
   target: {
     id: string
@@ -155,6 +361,7 @@ export function decideSessionClose({
   inputDrafts: Record<string, string>
   onLastSession: 'close-session' | 'confirm-worktree'
   isServer?: boolean
+  finishedSubSessionCount?: number
 }): SessionCloseDecision {
   if (target?.archived_at) return 'noop'
   const open = openSessions(sessions)
@@ -164,7 +371,7 @@ export function decideSessionClose({
   if (isLast && onLastSession === 'confirm-worktree' && !isServer) {
     return 'confirm-worktree'
   }
-  return isSessionEmpty(target, inputDrafts)
+  return isSessionEmpty(target, inputDrafts) && finishedSubSessionCount === 0
     ? 'close-session'
     : 'confirm-session'
 }

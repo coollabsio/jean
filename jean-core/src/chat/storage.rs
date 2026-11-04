@@ -1020,7 +1020,7 @@ where
     let mut original_sessions = std::collections::HashMap::new();
     for entry in &index.sessions {
         let session = if let Some(metadata) = load_metadata_internal(app, &entry.id)? {
-            let session = metadata.to_session();
+            let session = client_session(app, &metadata);
             if let Ok(value) = serde_json::to_value(&session) {
                 original_sessions.insert(entry.id.clone(), value);
             }

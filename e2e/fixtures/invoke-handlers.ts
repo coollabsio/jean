@@ -183,12 +183,85 @@ export const defaultResponses: Record<string, unknown> = {
   send_chat_message: null,
   cancel_chat_message: false,
   list_pending_wakeups: [],
+  get_run_states: [],
 
   // Misc
   get_package_scripts: [],
   get_run_scripts: [],
   save_emergency_data: null,
   load_emergency_data: null,
+}
+
+/**
+ * Sub-session fixture for `fuzzy-tiger`, enabled by opening `/?fixture=delegation`
+ * (one running and one finished sub-session) or `/?fixture=delegation-finished`
+ * (both finished, so the lead can collapse). Off by default so specs that count
+ * sessions keep an empty worktree.
+ */
+function delegationSessions(childRunning: boolean) {
+  const now = Math.floor(Date.now() / 1000)
+  const lead = {
+    id: 'session-lead',
+    name: 'Plan the release',
+    order: 0,
+    created_at: now - 600,
+    updated_at: now - 60,
+    message_count: 4,
+    messages: [],
+    last_run_status: 'completed',
+  }
+  const delegatedBy = {
+    origin_session_id: lead.id,
+    origin_worktree_id: worktree1.id,
+    origin_name: lead.name,
+  }
+  return [
+    lead,
+    {
+      id: 'session-child-changelog',
+      name: 'Write changelog',
+      order: 1,
+      created_at: now - 300,
+      updated_at: now - 30,
+      message_count: 2,
+      messages: [],
+      last_run_status: childRunning ? 'running' : 'completed',
+      last_run_execution_mode: 'build',
+      delegated_by: delegatedBy,
+    },
+    {
+      id: 'session-child-ci',
+      name: 'Check CI',
+      order: 2,
+      created_at: now - 280,
+      updated_at: now - 120,
+      message_count: 2,
+      messages: [],
+      last_run_status: 'completed',
+      delegated_by: delegatedBy,
+    },
+    {
+      id: 'session-normal',
+      name: 'Fix flaky test',
+      order: 3,
+      created_at: now - 900,
+      updated_at: now - 90,
+      message_count: 3,
+      messages: [],
+      last_run_status: 'completed',
+    },
+  ]
+}
+
+export const sessionFixtures: Record<
+  string,
+  { worktreeId: string; sessions: Record<string, unknown>[] }
+> = {
+  delegation: { worktreeId: worktree1.id, sessions: delegationSessions(true) },
+  'delegation-finished': {
+    worktreeId: worktree1.id,
+    sessions: delegationSessions(false),
+  },
 }
 
 export { project, worktree1, worktree2 }

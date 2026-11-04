@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { fireEvent, render, screen } from '@/test/test-utils'
 import type { Worktree } from '@/types/projects'
 import { useProjectsStore } from '@/store/projects-store'
+import { useSubSessionStore } from '@/store/sub-session-store'
 import { WorktreeItem } from './WorktreeItem'
 
 const mocks = vi.hoisted(() => ({
@@ -11,8 +12,10 @@ const mocks = vi.hoisted(() => ({
     name: string
     messages: []
     message_count?: number
+    delegated_by?: { origin_session_id: string; origin_worktree_id: string }
   }[],
   remove: vi.fn(),
+  removeMany: vi.fn(),
   rename: vi.fn(),
 }))
 
@@ -34,6 +37,7 @@ vi.mock('@/services/chat', () => ({
   useSessions: () => ({ data: { sessions: mocks.sessions } }),
   useRenameSession: () => ({ mutate: mocks.rename }),
   useCloseSession: () => ({ mutate: mocks.remove }),
+  useCloseSessions: () => mocks.removeMany,
   useCreateSession: () => ({ mutate: vi.fn(), isPending: false }),
   canReconnectSession: () => false,
   reconnectNativeCliSession: vi.fn(),
@@ -61,6 +65,7 @@ vi.mock('@/components/chat/session-card-utils', () => ({
   statusConfig: {
     idle: { indicatorStatus: 'idle', indicatorShape: 'dot', label: 'Idle' },
   },
+  isActionableWaitingStatus: () => false,
   getResumeCommand: () => null,
   buildNativeClientSessionInput: () => null,
 }))
@@ -79,14 +84,20 @@ vi.mock('@/components/chat/CloseWorktreeDialog', () => ({
     open,
     mode,
     onConfirm,
+    finishedSubSessionCount,
   }: {
     open: boolean
     mode: string
-    onConfirm: () => void
+    onConfirm: (options: { closeSubSessions: boolean }) => void
+    finishedSubSessionCount?: number
   }) =>
     open ? (
-      <button type="button" onClick={onConfirm}>
+      <button
+        type="button"
+        onClick={() => onConfirm({ closeSubSessions: true })}
+      >
         confirm {mode}
+        {finishedSubSessionCount ? ` with ${finishedSubSessionCount}` : ''}
       </button>
     ) : null,
 }))
@@ -254,5 +265,91 @@ describe('WorktreeItem session context menu', () => {
     await user.click(screen.getByRole('menuitem', { name: 'Add Label' }))
 
     expect(screen.getByText('label modal s2')).toBeInTheDocument()
+  })
+
+  describe('sub-sessions', () => {
+    const delegatedBy = {
+      origin_session_id: 'lead',
+      origin_worktree_id: 'wt-1',
+    }
+    beforeEach(() => {
+      useSubSessionStore.setState({ collapsedLeadSessionIds: new Set() })
+      mocks.sessions = [
+        {
+          id: 'child',
+          name: 'Child chat',
+          messages: [],
+          message_count: 1,
+          delegated_by: delegatedBy,
+        },
+        { id: 'plain', name: 'Plain chat', messages: [] },
+        { id: 'lead', name: 'Lead chat', messages: [], message_count: 2 },
+      ]
+    })
+
+    const rowNames = () =>
+      screen
+        .getAllByRole('button', { name: /chat$/ })
+        .map(button => button.textContent)
+
+    it('lists a sub-session right under its lead', () => {
+      renderExpanded()
+
+      expect(rowNames()).toEqual(['Plain chat', 'Lead chat', 'Child chat'])
+    })
+
+    it('hides sub-sessions when the lead collapses', async () => {
+      const user = userEvent.setup()
+      renderExpanded()
+
+      await user.click(
+        screen.getByRole('button', { name: 'Hide sub-sessions' })
+      )
+
+      expect(rowNames()).toEqual(['Plain chat', 'Lead chat'])
+      expect(
+        screen.getByRole('button', { name: 'Show sub-sessions' })
+      ).toBeInTheDocument()
+    })
+
+    it('shows no collapse control on a session without sub-sessions', () => {
+      mocks.sessions = [{ id: 'plain', name: 'Plain chat', messages: [] }]
+      renderExpanded()
+
+      expect(
+        screen.queryByRole('button', { name: /sub-sessions/ })
+      ).not.toBeInTheDocument()
+    })
+
+    it('offers to close finished sub-sessions with their lead', async () => {
+      const user = userEvent.setup()
+      renderExpanded()
+
+      fireEvent.contextMenu(screen.getByText('Lead chat'))
+      await user.click(screen.getByRole('menuitem', { name: 'Delete Session' }))
+      await user.click(
+        screen.getByRole('button', { name: 'confirm session with 1' })
+      )
+
+      expect(mocks.removeMany).toHaveBeenCalledWith(
+        'wt-1',
+        '/tmp/feature',
+        'lead',
+        ['child']
+      )
+      expect(mocks.remove).not.toHaveBeenCalled()
+    })
+
+    it('closes only the sub-session itself, never its lead', async () => {
+      const user = userEvent.setup()
+      renderExpanded()
+
+      fireEvent.contextMenu(screen.getByText('Child chat'))
+      await user.click(screen.getByRole('menuitem', { name: 'Delete Session' }))
+      await user.click(screen.getByRole('button', { name: 'confirm session' }))
+
+      expect(mocks.remove).toHaveBeenCalledWith(closeArgs('child'))
+      expect(mocks.removeMany).not.toHaveBeenCalled()
+    })
   })
 })

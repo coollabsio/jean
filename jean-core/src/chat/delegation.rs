@@ -573,6 +573,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn session_lists_and_mutations_return_the_lead_link() {
+        let (temp, app) = app();
+        let path = temp.path().to_string_lossy().to_string();
+        let create = |name: &str| {
+            crate::chat::create_session(
+                app.clone(),
+                "wt".to_string(),
+                path.clone(),
+                Some(name.to_string()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+        };
+        let origin_id = create("Planner").await.unwrap().id;
+        let child_id = create("Worker").await.unwrap().id;
+        let origin = load_metadata(&app, &origin_id).unwrap().unwrap();
+        arm(&app, &origin, &child_id).unwrap();
+
+        let summary =
+            crate::chat::list_sessions_summary(app.clone(), "wt".to_string(), path.clone())
+                .await
+                .unwrap();
+        let sessions = summary["sessions"].as_array().unwrap();
+        let worker = sessions.iter().find(|s| s["id"] == child_id).unwrap();
+        assert_eq!(
+            worker["delegatedBy"],
+            json!({
+                "origin_session_id": origin_id,
+                "origin_worktree_id": "wt",
+                "origin_name": "Planner",
+            })
+        );
+        let planner = sessions.iter().find(|s| s["id"] == origin_id).unwrap();
+        assert!(planner["delegatedBy"].is_null());
+
+        let mutated = crate::chat::storage::with_sessions_mut(&app, &path, "wt", |sessions| {
+            Ok(sessions.find_session(&child_id).cloned())
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            mutated.delegated_by.unwrap().origin_name.as_deref(),
+            Some("Planner")
+        );
+    }
+
+    #[tokio::test]
     async fn armed_run_end_enqueues_one_update_and_disarms() {
         let (_temp, app) = app();
         let root = origin(&app, "root");

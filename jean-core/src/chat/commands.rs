@@ -867,6 +867,7 @@ pub async fn list_sessions_summary(
                 "lastRunStartedAt": session.last_run_started_at,
                 "waitingForInput": session.waiting_for_input,
                 "waitingForInputType": session.waiting_for_input_type,
+                "delegatedBy": session.delegated_by,
             })
         })
         .collect();
