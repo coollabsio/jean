@@ -23,18 +23,13 @@ import {
 } from '@/components/ui/tooltip'
 import { WorktreeList } from './WorktreeList'
 import { ProjectContextMenu } from './ProjectContextMenu'
-import { matchesProjectSearch, matchesWorktreeSearch } from './project-search'
 import { CollapsedCountBadge } from './CollapsedCountBadge'
 
 interface ProjectTreeItemProps {
   project: Project
-  searchQuery?: string
 }
 
-export function ProjectTreeItem({
-  project,
-  searchQuery = '',
-}: ProjectTreeItemProps) {
+export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
   const isMobile = useIsMobile()
   const isOffline = project.offline === true
   const isProjectExpanded = useProjectsStore(state =>
@@ -46,16 +41,10 @@ export function ProjectTreeItem({
     state => state.toggleProjectExpanded
   )
   const shouldLoadWorktrees =
-    !isOffline &&
-    (Boolean(searchQuery) ||
-      isProjectExpanded ||
-      selectedProjectId === project.id)
-  const { data: loadedWorktrees, isLoading: worktreesLoading } = useWorktrees(
-    project.id,
-    {
-      enabled: shouldLoadWorktrees,
-    }
-  )
+    !isOffline && (isProjectExpanded || selectedProjectId === project.id)
+  const { data: loadedWorktrees } = useWorktrees(project.id, {
+    enabled: shouldLoadWorktrees,
+  })
   const worktrees = useMemo(
     () =>
       (loadedWorktrees ?? []).filter(
@@ -68,23 +57,17 @@ export function ProjectTreeItem({
     ? worktrees.length
     : (project.worktree_count ?? 0)
   const hasWorktrees = !isOffline && worktreeCount > 0
-  const projectMatchesSearch = matchesProjectSearch(project, searchQuery)
-  const hasMatchingWorktree = worktrees.some(worktree =>
-    matchesWorktreeSearch(worktree, searchQuery)
-  )
-  const isExpanded = hasWorktrees && (Boolean(searchQuery) || isProjectExpanded)
+  const isExpanded = hasWorktrees && isProjectExpanded
 
   // Fetch git status for all worktrees when project is expanded
-  useFetchWorktreesStatus(project.id, isExpanded && !searchQuery)
+  useFetchWorktreesStatus(project.id, isExpanded)
 
   // Check if base session exists
   const hasBaseSession = worktrees.some(w => isBaseSession(w))
 
   // Get base branch status from any worktree (all have it)
   const firstWorktree = worktrees[0]
-  const { data: gitStatus } = useGitStatus(
-    searchQuery ? null : (firstWorktree?.id ?? null)
-  )
+  const { data: gitStatus } = useGitStatus(firstWorktree?.id ?? null)
 
   // Only show on project line when no base session
   const baseBranchBehindCount = !hasBaseSession
@@ -221,15 +204,6 @@ export function ProjectTreeItem({
     ]
   )
 
-  if (
-    searchQuery &&
-    !projectMatchesSearch &&
-    !worktreesLoading &&
-    !hasMatchingWorktree
-  ) {
-    return null
-  }
-
   return (
     <div>
       {/* Project Row — only the row is the context-menu trigger, so worktree
@@ -355,9 +329,6 @@ export function ProjectTreeItem({
           projectPath={project.path}
           worktrees={worktrees}
           defaultBranch={project.default_branch}
-          searchQuery={projectMatchesSearch ? '' : searchQuery}
-          searchActive={Boolean(searchQuery)}
-          loadSessionCounts={!searchQuery}
         />
       )}
     </div>

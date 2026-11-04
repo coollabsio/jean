@@ -1,6 +1,6 @@
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { Server } from '@/components/icons/reicon'
+import { MessageSquare, Server, Settings } from '@/components/icons/reicon'
 import { useUIStore } from '@/store/ui-store'
 import { useCommandContext } from '@/hooks/use-command-context'
 import { usePreferences } from '@/services/preferences'
@@ -10,6 +10,12 @@ import {
   useAppDataDir,
 } from '@/services/projects'
 import { useChatStore } from '@/store/chat-store'
+import { useAllSessions, useSessionMessageSearch } from '@/services/chat'
+import { openSessionInWorktree } from '@/components/chat/open-session'
+import { formatRecentActivity } from '@/components/projects/recent-activity'
+import { getBackendIcon } from '@/components/ui/backend-label'
+import { searchPreferenceEntries } from '@/components/preferences/preferences-search'
+import type { Backend } from '@/types/chat'
 import {
   useAgentsEnabledServers,
   useShowAgents,
@@ -55,6 +61,25 @@ interface ProjectCommand {
   execute: () => void
 }
 
+interface SessionResult {
+  sessionId: string
+  name: string
+  projectId: string
+  projectName: string
+  worktreeId: string
+  worktreeName: string
+  worktreePath: string
+  updatedAt: number
+  backend?: Backend
+  /** Matched message text; only for "In messages" rows */
+  snippet?: string
+}
+
+const SESSION_LIMIT = 20
+const MESSAGE_LIMIT = 10
+const SETTINGS_LIMIT = 6
+const MESSAGE_SEARCH_DEBOUNCE_MS = 150
+
 export function CommandPalette() {
   const native = isNativeApp()
   useRemoteConnections()
@@ -63,6 +88,23 @@ export function CommandPalette() {
   const commandContext = useCommandContext(preferences)
   const [search, setSearch] = useState('')
   const queryClient = useQueryClient()
+  const searchLower = search.toLowerCase().trim()
+
+  // Sessions, settings and message bodies are searched only while typing, so
+  // CMD+K → Enter still switches to the previous project.
+  const { data: allSessions } = useAllSessions(commandPaletteOpen)
+  const [messageQuery, setMessageQuery] = useState('')
+  useEffect(() => {
+    const timer = setTimeout(
+      () => setMessageQuery(search),
+      MESSAGE_SEARCH_DEBOUNCE_MS
+    )
+    return () => clearTimeout(timer)
+  }, [search])
+  const { data: messageSearch } = useSessionMessageSearch(
+    messageQuery,
+    commandPaletteOpen
+  )
 
   // Fetch projects for dynamic commands
   const { data: projects = [] } = useProjects()
@@ -157,7 +199,6 @@ export function CommandPalette() {
     const staticCommands = getAllCommands(commandContext, search)
 
     // Filter project commands by search
-    const searchLower = search.toLowerCase().trim()
     const filteredProjectCommands = searchLower
       ? projectCommands.filter(
           cmd =>
@@ -211,6 +252,7 @@ export function CommandPalette() {
   }, [
     commandContext,
     search,
+    searchLower,
     projectCommands,
     agents,
     agentServers.length,
@@ -218,6 +260,77 @@ export function CommandPalette() {
     selectedAgentId,
     agentsLeftAt,
   ])
+
+  const sessionResults = useMemo((): SessionResult[] => {
+    if (!searchLower || !allSessions) return []
+    return allSessions.entries
+      .flatMap(entry =>
+        entry.sessions
+          .filter(session => !session.archived_at)
+          .map(session => ({
+            sessionId: session.id,
+            name: session.name,
+            projectId: entry.project_id,
+            projectName: entry.project_name,
+            worktreeId: entry.worktree_id,
+            worktreeName: entry.worktree_name,
+            worktreePath: entry.worktree_path,
+            updatedAt: session.updated_at,
+            backend: session.backend,
+          }))
+      )
+      .filter(row =>
+        [row.name, row.projectName, row.worktreeName].some(text =>
+          text.toLowerCase().includes(searchLower)
+        )
+      )
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, SESSION_LIMIT)
+  }, [allSessions, searchLower])
+
+  const messageResults = useMemo((): SessionResult[] => {
+    if (!searchLower || !messageSearch) return []
+    const listed = new Set(sessionResults.map(row => row.sessionId))
+    return messageSearch.hits
+      .filter(hit => !listed.has(hit.session_id))
+      .slice(0, MESSAGE_LIMIT)
+      .map(hit => ({
+        sessionId: hit.session_id,
+        name: hit.session_name,
+        projectId: hit.project_id,
+        projectName: hit.project_name,
+        worktreeId: hit.worktree_id,
+        worktreeName: hit.worktree_name,
+        worktreePath: hit.worktree_path,
+        updatedAt: hit.updated_at,
+        snippet: hit.snippet,
+      }))
+  }, [messageSearch, searchLower, sessionResults])
+
+  const settingsResults = useMemo(
+    () => searchPreferenceEntries(search, SETTINGS_LIMIT),
+    [search]
+  )
+
+  const closePalette = useCallback(() => {
+    setCommandPaletteOpen(false)
+    setSearch('')
+  }, [setCommandPaletteOpen])
+
+  const handleSessionSelect = useCallback(
+    (row: SessionResult) => {
+      closePalette()
+      openSessionInWorktree(
+        {
+          id: row.worktreeId,
+          path: row.worktreePath,
+          project_id: row.projectId,
+        },
+        row.sessionId
+      )
+    },
+    [closePalette]
+  )
 
   const handleAgentSelect = useCallback(
     (agentId: string) => {
@@ -312,6 +425,41 @@ export function CommandPalette() {
     </CommandGroup>
   )
 
+  const renderSessionItem = (row: SessionResult, group: string) => {
+    const BackendIcon = row.backend ? getBackendIcon(row.backend) : null
+    return (
+      <CommandItem
+        key={`${group}-${row.sessionId}`}
+        value={`${group}-${row.sessionId} ${row.name} ${row.projectName} ${row.worktreeName}`}
+        keywords={row.snippet ? [row.snippet] : undefined}
+        onSelect={() => handleSessionSelect(row)}
+        className="items-start"
+      >
+        <span className="flex h-lh shrink-0 items-center leading-snug">
+          <MessageSquare className="size-4 text-muted-foreground" />
+        </span>
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="truncate leading-snug">{row.name}</span>
+          <span className="flex min-w-0 items-center gap-1 text-xs leading-snug text-muted-foreground">
+            {row.snippet ? (
+              <span className="truncate">{row.snippet}</span>
+            ) : (
+              <>
+                <span className="truncate">
+                  {row.projectName} · {row.worktreeName}
+                </span>
+                {BackendIcon && <BackendIcon className="size-3! shrink-0" />}
+              </>
+            )}
+          </span>
+        </div>
+        <span className="self-center text-xs whitespace-nowrap text-muted-foreground tabular-nums">
+          {formatRecentActivity(row.updatedAt)}
+        </span>
+      </CommandItem>
+    )
+  }
+
   return (
     <CommandDialog
       open={commandPaletteOpen}
@@ -322,7 +470,7 @@ export function CommandPalette() {
       disablePointerSelection
     >
       <CommandInput
-        placeholder="Type a command or search..."
+        placeholder="Search sessions, messages, settings and commands…"
         value={search}
         onValueChange={setSearch}
       />
@@ -342,6 +490,11 @@ export function CommandPalette() {
           </CommandGroup>
         )}
         {!commandGroups.agentIsPrevious && agentsGroup}
+        {sessionResults.length > 0 && (
+          <CommandGroup heading="Sessions">
+            {sessionResults.map(row => renderSessionItem(row, 'session'))}
+          </CommandGroup>
+        )}
 
         {/* Static command groups */}
         {Object.entries(commandGroups.staticGroups).map(
@@ -378,6 +531,41 @@ export function CommandPalette() {
               ))}
             </CommandGroup>
           )
+        )}
+
+        {settingsResults.length > 0 && (
+          <CommandGroup heading="Settings">
+            {settingsResults.map(entry => (
+              <CommandItem
+                key={entry.id}
+                value={`setting-${entry.id} ${entry.title} ${entry.paneTitle} ${entry.sectionTitle ?? ''}`}
+                keywords={entry.keywords}
+                onSelect={() => {
+                  closePalette()
+                  useUIStore.getState().openPreferencesEntry(entry.id)
+                }}
+                className="items-start"
+              >
+                <span className="flex h-lh shrink-0 items-center leading-snug">
+                  <Settings className="size-4 text-muted-foreground" />
+                </span>
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className="truncate leading-snug">{entry.title}</span>
+                  <span className="truncate text-xs leading-snug text-muted-foreground">
+                    {['Settings', entry.paneTitle, entry.sectionTitle]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </span>
+                </div>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
+
+        {messageResults.length > 0 && (
+          <CommandGroup heading="In messages">
+            {messageResults.map(row => renderSessionItem(row, 'message'))}
+          </CommandGroup>
         )}
       </CommandList>
     </CommandDialog>

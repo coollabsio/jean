@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from 'react'
 import {
   keepPreviousData,
@@ -34,6 +35,11 @@ import { WorkingWaveform } from '@/components/ui/status-indicator'
 import { cn } from '@/lib/utils'
 import { isNativeApp } from '@/lib/environment'
 import { formatShortcutDisplay } from '@/types/keybindings'
+import {
+  SNOOZE_AFTER_SECONDS,
+  formatRecentActivity,
+  isSnoozedSession,
+} from './recent-activity'
 import {
   decideSessionClose,
   finishedSubSessionIds,
@@ -71,37 +77,14 @@ import {
 import { isUnreadSession } from '@/components/unread/unread-utils'
 import { ProjectAvatar } from './ProjectAvatar'
 import { getRecentSessionStatus } from './recent-session-status'
-import { matchesSidebarSearch } from './SidebarSearchField'
 
 const INITIAL_RECENT_LIMIT = 10
 const RECENT_PAGE_SIZE = 25
-const SNOOZE_AFTER_SECONDS = 24 * 60 * 60
 
 interface RecentWorktreesListProps {
   projects: Project[]
-  /** Filters the loaded rows by session, project or worktree name. */
-  searchQuery?: string
-}
-
-export function formatRecentActivity(
-  timestamp: number,
-  now = Date.now()
-): string {
-  const seconds = Math.max(0, Math.floor((now - timestamp * 1000) / 1000))
-  if (seconds < 60) return 'now'
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h`
-  const days = Math.floor(hours / 24)
-  return days < 30 ? `${days}d` : `${Math.floor(days / 30)}mo`
-}
-
-export function isSnoozedSession(
-  lastActivityAt: number,
-  now = Date.now()
-): boolean {
-  return lastActivityAt <= Math.floor(now / 1000) - SNOOZE_AFTER_SECONDS
+  /** Scrolls with the list, above the rows. */
+  header?: ReactNode
 }
 
 export function getAdjacentRecentRow(
@@ -190,7 +173,7 @@ export function groupRecentRows(
 
 export function RecentWorktreesList({
   projects,
-  searchQuery = '',
+  header,
 }: RecentWorktreesListProps) {
   const isMobile = useIsMobile()
   const queryClient = useQueryClient()
@@ -268,14 +251,7 @@ export function RecentWorktreesList({
   } = useMemo(
     () =>
       groupRecentRows(
-        rows.filter(row =>
-          matchesSidebarSearch(
-            searchQuery,
-            row.session.name,
-            row.projectName,
-            row.worktree.name
-          )
-        ),
+        rows,
         pinned,
         row =>
           getRecentSessionStatus(row.session, {
@@ -283,7 +259,7 @@ export function RecentWorktreesList({
             waiting: waitingForInputSessionIds[row.session.id] ?? false,
           }).tone === 'working'
       ),
-    [pinned, rows, searchQuery, sendingSessionIds, waitingForInputSessionIds]
+    [pinned, rows, sendingSessionIds, waitingForInputSessionIds]
   )
   // The shelf hides when no session runs. Collapse it then, so it always
   // comes back closed and the first click opens it.
@@ -730,10 +706,11 @@ export function RecentWorktreesList({
       className="flex h-full min-h-0 flex-1 flex-col overflow-hidden"
       data-testid="recent-worktrees-list"
     >
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto [scrollbar-gutter:stable]">
+        {header}
         {displayedRows.length === 0 && snoozedCount === 0 && (
           <div className="px-3 py-6 text-center text-xs text-muted-foreground">
-            {searchQuery.trim() ? 'No matching sessions' : 'No recent sessions'}
+            No recent sessions
           </div>
         )}
         <ul

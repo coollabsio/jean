@@ -8,8 +8,6 @@ import type * as EnvironmentModule from '@/lib/environment'
 const mocks = vi.hoisted(() => ({
   createFolder: vi.fn(),
   isMobile: false,
-  copyToClipboard: vi.fn(),
-  readFromClipboard: vi.fn(),
 }))
 
 vi.mock('@/services/projects', () => ({
@@ -28,10 +26,6 @@ vi.mock('@/components/layout/SidebarWidthContext', () => ({
 vi.mock('@/lib/server-connections', () => ({
   useServerConnectionSnapshots: () => new Map(),
 }))
-vi.mock('@/lib/clipboard', () => ({
-  copyToClipboard: mocks.copyToClipboard,
-  readFromClipboard: mocks.readFromClipboard,
-}))
 vi.mock('@/lib/environment', async importOriginal => ({
   ...(await importOriginal<typeof EnvironmentModule>()),
   isNativeApp: () => false,
@@ -42,25 +36,14 @@ vi.mock('./RecentWorktreesList', () => ({ RecentWorktreesList: () => null }))
 describe('ProjectsSidebar folder creation', () => {
   beforeEach(() => {
     mocks.createFolder.mockReset()
-    mocks.copyToClipboard.mockReset()
-    mocks.copyToClipboard.mockResolvedValue(undefined)
-    mocks.readFromClipboard.mockReset()
-    mocks.readFromClipboard.mockResolvedValue('pasted')
     mocks.isMobile = false
-    useProjectsStore.setState({
-      addProjectDialogOpen: false,
-      sidebarSearchQuery: '',
-    })
+    useProjectsStore.setState({ addProjectDialogOpen: false })
   })
 
   it('offers New folder in the search-row plus menu', async () => {
     const user = userEvent.setup()
     render(<ProjectsSidebar />)
 
-    const search = screen.getByRole('searchbox', {
-      name: 'Search projects, worktrees and servers',
-    })
-    await user.type(search, 'old search')
     await user.click(
       screen.getByRole('button', { name: 'Add project, server or folder' })
     )
@@ -73,7 +56,6 @@ describe('ProjectsSidebar folder creation', () => {
     await user.click(screen.getByRole('menuitem', { name: 'New folder' }))
 
     expect(mocks.createFolder).toHaveBeenCalledWith({ name: 'New Folder' })
-    expect(search).toHaveValue('')
   })
 
   it('opens the server dialog from the plus menu', async () => {
@@ -89,8 +71,7 @@ describe('ProjectsSidebar folder creation', () => {
     expect(useProjectsStore.getState().serverDialog).toEqual({})
   })
 
-  it('suppresses the webview menu on chrome and edits the search field', async () => {
-    const user = userEvent.setup()
+  it('suppresses the webview menu on sidebar chrome', () => {
     render(<ProjectsSidebar />)
 
     const chrome = screen.getByRole('button', {
@@ -100,26 +81,6 @@ describe('ProjectsSidebar folder creation', () => {
       fireEvent.contextMenu(chrome, { bubbles: true, cancelable: true })
     ).toBe(false)
     expect(screen.queryByRole('menuitem')).not.toBeInTheDocument()
-
-    const search = screen.getByRole('searchbox', {
-      name: 'Search projects, worktrees and servers',
-    })
-    if (!(search instanceof HTMLInputElement)) {
-      throw new Error('Search field is not an input')
-    }
-    await user.type(search, 'alpha')
-    search.setSelectionRange(0, 5)
-    fireEvent.contextMenu(search)
-    await user.click(screen.getByRole('menuitem', { name: 'Copy' }))
-    expect(mocks.copyToClipboard).toHaveBeenCalledWith('alpha')
-
-    search.setSelectionRange(5, 5)
-    fireEvent.contextMenu(search)
-    expect(screen.getByRole('menuitem', { name: 'Cut' })).toHaveAttribute(
-      'data-disabled'
-    )
-    await user.click(screen.getByRole('menuitem', { name: 'Paste' }))
-    expect(search).toHaveValue('alphapasted')
   })
 
   it('offers New project in the empty project list', async () => {

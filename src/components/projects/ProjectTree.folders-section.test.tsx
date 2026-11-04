@@ -100,16 +100,6 @@ describe('ProjectTree Folders section', () => {
     expect(useProjectsStore.getState().expandedFolderIds.size).toBe(0)
   })
 
-  it('shows matching folders while searching', async () => {
-    const user = userEvent.setup()
-    const { rerender } = render(<ProjectTree projects={projects} />)
-    await user.click(screen.getByRole('button', { name: 'Hide folders' }))
-
-    rerender(<ProjectTree projects={projects} searchQuery="My folder" />)
-    expect(screen.getByText('My folder')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Hide folders' })).toBeDisabled()
-  })
-
   it('expands, collapses, and hides the Projects category from its header', async () => {
     const user = userEvent.setup()
     render(<ProjectTree projects={projects} />)

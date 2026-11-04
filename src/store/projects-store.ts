@@ -58,8 +58,6 @@ interface ProjectsUIState {
   projectCanvasActiveFilters: Record<string, string>
   sidebarServerFilter: string | null
   sidebarActiveTab: SidebarTab
-  // Search text shared by the Projects, Recent and Agents sidebar tabs
-  sidebarSearchQuery: string
   pinnedRecentSessionIds: string[]
 
   // Add project dialog state
@@ -128,7 +126,6 @@ interface ProjectsUIState {
   ) => void
   setServerDialog: (serverDialog: { project?: Project } | null) => void
   setSidebarActiveTab: (tab: SidebarTab) => void
-  setSidebarSearchQuery: (query: string) => void
   openProjectSettings: (projectId: string, pane?: string) => void
   closeProjectSettings: () => void
   openGitInitModal: (path: string) => void
@@ -171,7 +168,6 @@ export const useProjectsStore = create<ProjectsUIState>()(
       projectCanvasActiveFilters: {},
       sidebarServerFilter: null,
       sidebarActiveTab: 'projects',
-      sidebarSearchQuery: '',
       pinnedRecentSessionIds: [],
       addProjectDialogOpen: false,
       addProjectParentFolderId: null,
@@ -438,16 +434,6 @@ export const useProjectsStore = create<ProjectsUIState>()(
             state.sidebarActiveTab === tab ? state : { sidebarActiveTab: tab },
           undefined,
           'setSidebarActiveTab'
-        ),
-
-      setSidebarSearchQuery: query =>
-        set(
-          state =>
-            state.sidebarSearchQuery === query
-              ? state
-              : { sidebarSearchQuery: query },
-          undefined,
-          'setSidebarSearchQuery'
         ),
 
       setPinnedRecentSessionIds: sessionIds =>

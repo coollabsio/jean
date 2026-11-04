@@ -153,6 +153,8 @@ interface UIState {
   commandPaletteOpen: boolean
   preferencesOpen: boolean
   preferencesPane: PreferencePane | null
+  /** Settings search entry to scroll to when the dialog opens */
+  preferencesJumpEntryId: string | null
   commitModalOpen: boolean
   onboardingOpen: boolean
   onboardingDismissed: boolean
@@ -288,6 +290,7 @@ interface UIState {
   togglePreferences: () => void
   setPreferencesOpen: (open: boolean) => void
   openPreferencesPane: (pane: PreferencePane) => void
+  openPreferencesEntry: (entryId: string | null) => void
   setCommitModalOpen: (open: boolean) => void
   setOnboardingOpen: (open: boolean) => void
   setOnboardingManuallyTriggered: (triggered: boolean) => void
@@ -459,6 +462,7 @@ export const useUIStore = create<UIState>()(
       commandPaletteOpen: false,
       preferencesOpen: false,
       preferencesPane: null,
+      preferencesJumpEntryId: null,
       commitModalOpen: false,
       onboardingOpen: false,
       onboardingDismissed: false,
@@ -789,6 +793,25 @@ export const useUIStore = create<UIState>()(
           },
           undefined,
           'openPreferencesPane'
+        ),
+
+      openPreferencesEntry: entryId =>
+        set(
+          state =>
+            entryId === null
+              ? state.preferencesJumpEntryId === null
+                ? state
+                : { preferencesJumpEntryId: null }
+              : {
+                  preferencesOpen: true,
+                  preferencesPane: null,
+                  preferencesJumpEntryId: entryId,
+                  ...(mustCloseMobileSidebar(state)
+                    ? { leftSidebarVisible: false }
+                    : {}),
+                },
+          undefined,
+          'openPreferencesEntry'
         ),
 
       setCommitModalOpen: open =>

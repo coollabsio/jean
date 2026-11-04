@@ -72,6 +72,7 @@ import { IntegrationsPane } from './panes/IntegrationsPane'
 import { WebAccessPane } from './panes/WebAccessPane'
 import { OpinionatedPane } from './panes/OpinionatedPane'
 import {
+  getPreferenceSearchEntries,
   searchPreferenceEntries,
   type PreferenceSearchEntry,
 } from './preferences-search'
@@ -309,6 +310,19 @@ export function PreferencesDialog() {
     },
     [setPreferencesOpen]
   )
+
+  // The command palette opens settings at one search entry
+  const preferencesJumpEntryId = useUIStore(
+    state => state.preferencesJumpEntryId
+  )
+  useEffect(() => {
+    if (!preferencesOpen || !preferencesJumpEntryId) return
+    useUIStore.getState().openPreferencesEntry(null)
+    const entry = getPreferenceSearchEntries().find(
+      item => item.id === preferencesJumpEntryId
+    )
+    if (entry) handleSearchResultSelect(entry)
+  }, [preferencesOpen, preferencesJumpEntryId, handleSearchResultSelect])
 
   // Sync activePane from preferencesPane when dialog opens to a specific pane
   useEffect(() => {

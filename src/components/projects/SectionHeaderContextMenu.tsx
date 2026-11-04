@@ -12,8 +12,6 @@ interface SectionHeaderContextMenuProps {
   onCollapseAll: () => void
   onExpandCategory: () => void
   onCollapseCategory: () => void
-  /** Search forces the section open, so hide/show would not stick. */
-  categoryDisabled?: boolean
 }
 
 /** Right-click menu for a Folders or Projects section header. */
@@ -23,7 +21,6 @@ export function SectionHeaderContextMenu({
   onCollapseAll,
   onExpandCategory,
   onCollapseCategory,
-  categoryDisabled = false,
 }: SectionHeaderContextMenuProps) {
   return (
     <ContextMenu>
@@ -32,16 +29,10 @@ export function SectionHeaderContextMenu({
         <ContextMenuItem onSelect={onExpandAll}>Expand all</ContextMenuItem>
         <ContextMenuItem onSelect={onCollapseAll}>Collapse all</ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem
-          onSelect={onExpandCategory}
-          disabled={categoryDisabled}
-        >
+        <ContextMenuItem onSelect={onExpandCategory}>
           Expand category
         </ContextMenuItem>
-        <ContextMenuItem
-          onSelect={onCollapseCategory}
-          disabled={categoryDisabled}
-        >
+        <ContextMenuItem onSelect={onCollapseCategory}>
           Collapse category
         </ContextMenuItem>
       </ContextMenuContent>

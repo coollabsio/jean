@@ -14,12 +14,8 @@ import {
 } from '@/components/ui/tooltip'
 import { isNativeApp } from '@/lib/environment'
 import { cn } from '@/lib/utils'
-import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
-import {
-  matchesSidebarSearch,
-  SidebarSearchField,
-} from '@/components/projects/SidebarSearchField'
+import { SidebarSearchField } from '@/components/projects/SidebarSearchField'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { AgentIcon } from '@/components/icons/JeanAgentIcon'
 import type { AgentSummary } from '@/services/agents'
@@ -189,14 +185,9 @@ export function AgentsSidebar() {
   const servers = useMemo(() => agentServers(agents ?? []), [agents])
   // Native app with remote servers: filter and group agents by server
   const showServerFilter = isNativeApp() && servers.length > 1
-  const searchQuery = useProjectsStore(state => state.sidebarSearchQuery)
-  const visibleAgents = (
-    showServerFilter
-      ? filterAgentsByServer(agents ?? [], serverFilter)
-      : (agents ?? [])
-  ).filter(agent =>
-    matchesSidebarSearch(searchQuery, agent.name, agent.description)
-  )
+  const visibleAgents = showServerFilter
+    ? filterAgentsByServer(agents ?? [], serverFilter)
+    : (agents ?? [])
   const groups: [string, string, AgentSummary[]][] =
     showServerFilter && serverFilter === ALL_SERVERS
       ? servers.map(([id, name]) => [
@@ -236,7 +227,7 @@ export function AgentsSidebar() {
       <div className="@container/agents flex min-w-0 flex-1 flex-col">
         {/* The sidebar tab strip already names this view */}
         <div className="flex shrink-0 items-center gap-1 px-3 pb-2">
-          <SidebarSearchField label="Search agents" />
+          <SidebarSearchField />
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -303,11 +294,6 @@ export function AgentsSidebar() {
           className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pt-2 pb-3"
           aria-label="Agents"
         >
-          {agents && searchQuery.trim() && visibleAgents.length === 0 && (
-            <p className="px-3 py-6 text-center text-xs text-muted-foreground">
-              No matching agents
-            </p>
-          )}
           {agents &&
             groups
               .filter(([, , groupAgents]) => groupAgents.length > 0)

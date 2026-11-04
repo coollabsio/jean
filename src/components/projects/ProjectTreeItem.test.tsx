@@ -208,32 +208,6 @@ describe('ProjectTreeItem', () => {
     expect(screen.getByTestId('worktree-list')).toBeInTheDocument()
   })
 
-  it('loads and shows worktrees that match the sidebar search', () => {
-    useProjectsStore.setState({
-      selectedProjectId: null,
-      selectedWorktreeId: null,
-      expandedProjectIds: new Set(),
-    })
-
-    render(<ProjectTreeItem project={project} searchQuery="feature" />)
-
-    expect(mocks.worktreeQueryOptions.at(-1)).toEqual({ enabled: true })
-    expect(screen.getByTestId('project-row-project-1')).toBeInTheDocument()
-    expect(screen.getByTestId('worktree-list')).toBeInTheDocument()
-  })
-
-  it('hides projects that do not match the sidebar search', () => {
-    useProjectsStore.setState({
-      selectedProjectId: null,
-      selectedWorktreeId: null,
-      expandedProjectIds: new Set(),
-    })
-
-    render(<ProjectTreeItem project={project} searchQuery="missing" />)
-
-    expect(screen.queryByTestId('project-row-project-1')).toBeNull()
-  })
-
   it('opens project canvas when the project has no worktrees', async () => {
     mocks.worktrees = []
     const user = userEvent.setup()

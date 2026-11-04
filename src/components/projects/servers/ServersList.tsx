@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Pencil, Shield, Trash2 } from '@/components/icons/reicon'
 import {
@@ -41,15 +41,13 @@ function usesAdminUser(project: Project): boolean {
 interface ServersListProps {
   /** Server projects only, already sorted (see serverProjectsForView) */
   servers: Project[]
-  /** Shared search text of the Workspace view */
-  searchQuery: string
 }
 
 const iconButtonClass =
   'flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
 
 /** Servers section at the top of the Workspace view. */
-export function ServersList({ servers, searchQuery }: ServersListProps) {
+export function ServersList({ servers }: ServersListProps) {
   const queryClient = useQueryClient()
   const isMobile = useIsMobile()
   const selectedProjectId = useProjectsStore(state => state.selectedProjectId)
@@ -57,16 +55,6 @@ export function ServersList({ servers, searchQuery }: ServersListProps) {
   const [removing, setRemoving] = useState<Project | null>(null)
   const [settingUp, setSettingUp] = useState<Project | null>(null)
   const [collapsed, setCollapsed] = useState(false)
-
-  const filteredServers = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase()
-    if (!query) return servers
-    return servers.filter(
-      project =>
-        project.name.toLowerCase().includes(query) ||
-        serverSubtitle(project).toLowerCase().includes(query)
-    )
-  }, [servers, searchQuery])
 
   const handleOpen = useCallback(
     (project: Project) => {
@@ -85,12 +73,12 @@ export function ServersList({ servers, searchQuery }: ServersListProps) {
     [isMobile]
   )
 
-  const showServers = collapsed === false || Boolean(searchQuery)
+  const showServers = !collapsed
 
   return (
     <>
       {/* Nothing to show: the Add server action is in the Workspace "+" menu */}
-      {filteredServers.length > 0 && (
+      {servers.length > 0 && (
         <div className="py-1">
           <div className={SECTION_HEADER_CLASS}>
             <span className={SECTION_LABEL_CLASS}>Servers</span>
@@ -100,14 +88,13 @@ export function ServersList({ servers, searchQuery }: ServersListProps) {
               onClick={() => setCollapsed(value => !value)}
               aria-label={showServers ? 'Hide servers' : 'Show servers'}
               aria-expanded={showServers}
-              disabled={Boolean(searchQuery)}
             >
               <DisclosureChevron open={showServers} />
             </button>
           </div>
           {showServers && (
             <ul className="flex flex-col gap-px px-1.5 pb-1">
-              {filteredServers.map(project => {
+              {servers.map(project => {
                 return (
                   <li key={project.id} className="group relative">
                     <button

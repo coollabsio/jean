@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CommandPalette } from './CommandPalette'
+import type * as Environment from '@/lib/environment'
 
 Element.prototype.scrollIntoView = vi.fn()
 
@@ -19,6 +20,9 @@ const {
   setRailSection,
   setSelectedAgentId,
   agentState,
+  openSessionInWorktree,
+  openPreferencesEntry,
+  sessionState,
 } = vi.hoisted(() => ({
   fetchRemoteServerInfo: vi.fn(async () => ({
     ok: true,
@@ -40,6 +44,12 @@ const {
   },
   setRailSection: vi.fn(),
   setSelectedAgentId: vi.fn(),
+  openSessionInWorktree: vi.fn(),
+  openPreferencesEntry: vi.fn(),
+  sessionState: {
+    entries: [] as unknown[],
+    hits: [] as unknown[],
+  },
   agentState: {
     pageOpen: false,
     selectedAgentId: 'jean',
@@ -82,7 +92,13 @@ vi.mock('@/store/ui-store', () => ({
       }
       return selector ? selector(state) : state
     },
-    { getState: () => ({ setRailSection, setSelectedAgentId }) }
+    {
+      getState: () => ({
+        setRailSection,
+        setSelectedAgentId,
+        openPreferencesEntry,
+      }),
+    }
   ),
 }))
 
@@ -196,7 +212,44 @@ vi.mock('@/lib/remote-version', () => ({
   warnRemoteVersionMismatch,
 }))
 
-vi.mock('@/lib/environment', () => ({ isNativeApp }))
+vi.mock('@/lib/environment', async importOriginal => ({
+  ...(await importOriginal<typeof Environment>()),
+  isNativeApp,
+}))
+
+vi.mock('@/services/chat', () => ({
+  useAllSessions: () => ({ data: { entries: sessionState.entries } }),
+  useSessionMessageSearch: () => ({
+    data: { hits: sessionState.hits, truncated: false },
+  }),
+}))
+
+vi.mock('@/components/chat/open-session', () => ({ openSessionInWorktree }))
+
+const worktreeEntry = {
+  project_id: 'project-1',
+  project_name: 'Jean',
+  worktree_id: 'wt-1',
+  worktree_name: 'fix-login',
+  worktree_path: '/w/fix-login',
+  sessions: [
+    {
+      id: 'session-1',
+      name: 'Refactor palette',
+      updated_at: 100,
+      backend: 'claude',
+    },
+    {
+      id: 'session-archived',
+      name: 'Refactor old palette',
+      updated_at: 50,
+      archived_at: 60,
+    },
+  ],
+}
+
+const typeSearch = (text: string) =>
+  fireEvent.change(screen.getByRole('combobox'), { target: { value: text } })
 
 describe('CommandPalette projects', () => {
   beforeEach(() => {
@@ -253,12 +306,19 @@ describe('CommandPalette projects', () => {
     render(<CommandPalette />)
 
     const visibleProjectNames = () =>
-      screen.getAllByRole('option').map(row => row.textContent)
+      screen
+        .getAllByRole('option')
+        .filter(row =>
+          row.closest('[cmdk-group]')?.textContent?.startsWith('Projects')
+        )
+        .map(row => row.textContent)
 
     expect(visibleProjectNames()[0]).toContain('Active Tool')
 
     fireEvent.change(
-      screen.getByPlaceholderText('Type a command or search...'),
+      screen.getByPlaceholderText(
+        'Search sessions, messages, settings and commands…'
+      ),
       {
         target: { value: 'tool' },
       }
@@ -407,5 +467,90 @@ describe('CommandPalette agents', () => {
     render(<CommandPalette />)
 
     expect(screen.queryByText('Reviewer')).not.toBeInTheDocument()
+  })
+})
+
+describe('CommandPalette search', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    agentState.servers = []
+    agentState.agents = []
+    sessionState.entries = [worktreeEntry]
+    sessionState.hits = []
+  })
+
+  it('lists matching sessions only while typing, without archived ones', () => {
+    render(<CommandPalette />)
+    expect(screen.queryByText('Refactor palette')).not.toBeInTheDocument()
+
+    typeSearch('refactor')
+
+    const row = screen.getByText('Refactor palette').closest('[cmdk-item]')
+    expect(row?.closest('[cmdk-group]')).toHaveTextContent(/^Sessions/)
+    expect(row).toHaveTextContent('Jean · fix-login')
+    expect(screen.queryByText('Refactor old palette')).not.toBeInTheDocument()
+  })
+
+  it('opens the selected session in its worktree and closes the palette', () => {
+    render(<CommandPalette />)
+    typeSearch('fix-login')
+
+    fireEvent.click(screen.getByText('Refactor palette'))
+
+    expect(setCommandPaletteOpen).toHaveBeenCalledWith(false)
+    expect(openSessionInWorktree).toHaveBeenCalledWith(
+      { id: 'wt-1', path: '/w/fix-login', project_id: 'project-1' },
+      'session-1'
+    )
+  })
+
+  it('shows message hits with their snippet and drops sessions already listed', () => {
+    sessionState.hits = [
+      {
+        session_id: 'session-1',
+        session_name: 'Refactor palette',
+        project_id: 'project-1',
+        project_name: 'Jean',
+        worktree_id: 'wt-1',
+        worktree_name: 'fix-login',
+        worktree_path: '/w/fix-login',
+        snippet: 'the refactor plan',
+        match_count: 1,
+        updated_at: 100,
+      },
+      {
+        session_id: 'session-2',
+        session_name: 'Planning',
+        project_id: 'project-2',
+        project_name: 'Local Tool',
+        worktree_id: 'wt-2',
+        worktree_name: 'main',
+        worktree_path: '/w/main',
+        snippet: 'we should refactor the router',
+        match_count: 2,
+        updated_at: 90,
+      },
+    ]
+    render(<CommandPalette />)
+    typeSearch('refactor')
+
+    const group = screen.getByText('In messages').closest('[cmdk-group]')
+    expect(group).toHaveTextContent('Planning')
+    expect(group).toHaveTextContent('we should refactor the router')
+    expect(group).not.toHaveTextContent('Refactor palette')
+  })
+
+  it('opens settings at the selected entry', () => {
+    render(<CommandPalette />)
+    typeSearch('keybindings')
+
+    const group = screen
+      .getByText('Settings', { selector: '[cmdk-group-heading]' })
+      .closest('[cmdk-group]')
+    const first = group?.querySelector('[cmdk-item]') as HTMLElement
+    fireEvent.click(first)
+
+    expect(openPreferencesEntry).toHaveBeenCalledWith(expect.any(String))
+    expect(setCommandPaletteOpen).toHaveBeenCalledWith(false)
   })
 })

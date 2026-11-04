@@ -126,7 +126,6 @@ export function ProjectsSidebar() {
     state => state.setAddProjectDialogOpen
   )
   const createFolder = useCreateFolder()
-  const selectedProjectId = useProjectsStore(state => state.selectedProjectId)
   const sidebarWidth = useSidebarWidth()
   const [backendCheckReady, setBackendCheckReady] = useState(false)
   const serverFilter = useProjectsStore(
@@ -137,7 +136,6 @@ export function ProjectsSidebar() {
   )
   const [connectionsOpen, setConnectionsOpen] = useState(false)
   const activeTab = useProjectsStore(state => state.sidebarActiveTab)
-  const searchQuery = useProjectsStore(state => state.sidebarSearchQuery)
   const serverSnapshots = useServerConnectionSnapshots()
   const serverIds = useMemo(
     () => [...new Set(projects.map(projectServerId))],
@@ -179,20 +177,57 @@ export function ProjectsSidebar() {
   }, [setAddProjectDialogOpen])
 
   const handleNewFolder = useCallback(() => {
-    useProjectsStore.getState().setSidebarSearchQuery('')
     createFolder.mutate({ name: 'New Folder' })
   }, [createFolder])
-
-  // The open project canvas handles this (same as the new-session shortcut)
-  const handleNewSession = useCallback(() => {
-    window.dispatchEvent(
-      new CustomEvent('create-new-session', { detail: { intent: 'picker' } })
-    )
-  }, [])
 
   const handleNewServer = useCallback(() => {
     useProjectsStore.getState().setServerDialog({})
   }, [])
+
+  // Workspace and Recent share one search row and add menu
+  const searchRow = (
+    <div className="flex shrink-0 gap-1 px-3 pb-2">
+      <SidebarSearchField />
+      <DropdownMenu>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="flex size-8 shrink-0 items-center justify-center rounded-md border border-transparent bg-transparent text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                aria-label="Add project, server or folder"
+              >
+                <Plus className="size-3.5" />
+              </button>
+            </DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent>Add project, server or folder</TooltipContent>
+        </Tooltip>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem
+            onSelect={handleNewProject}
+            disabled={!backendCheckReady || setupIncomplete}
+            aria-label="Add project"
+          >
+            <Plus className="size-3.5" />
+            Add project
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={handleNewServer}>
+            <Server className="size-3.5" />
+            Add server
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onSelect={handleNewFolder}
+            disabled={createFolder.isPending}
+          >
+            <FolderPlus className="size-3.5" />
+            New folder
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  )
 
   return (
     <div
@@ -202,52 +237,8 @@ export function ProjectsSidebar() {
       {/* Content */}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {activeTab === 'projects' ? (
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
-            <div className="pb-2">
-              <div className="flex gap-1 px-3">
-                <SidebarSearchField label="Search projects, worktrees and servers" />
-                <DropdownMenu>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <DropdownMenuTrigger asChild>
-                        <button
-                          type="button"
-                          className="flex size-8 shrink-0 items-center justify-center rounded-md border border-transparent bg-transparent text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                          aria-label="Add project, server or folder"
-                        >
-                          <Plus className="size-3.5" />
-                        </button>
-                      </DropdownMenuTrigger>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      Add project, server or folder
-                    </TooltipContent>
-                  </Tooltip>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem
-                      onSelect={handleNewProject}
-                      disabled={!backendCheckReady || setupIncomplete}
-                      aria-label="Add project"
-                    >
-                      <Plus className="size-3.5" />
-                      Add project
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onSelect={handleNewServer}>
-                      <Server className="size-3.5" />
-                      Add server
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      onSelect={handleNewFolder}
-                      disabled={createFolder.isPending}
-                    >
-                      <FolderPlus className="size-3.5" />
-                      New folder
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            </div>
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]">
+            {searchRow}
             {showServerMenu && (
               <div className="px-1.5 py-2">
                 {/* 6px + 6px inset lines up with the section headers */}
@@ -352,10 +343,7 @@ export function ProjectsSidebar() {
               </div>
             ) : (
               <div className="flex flex-1 flex-col">
-                <ServersList
-                  servers={serverProjects}
-                  searchQuery={searchQuery}
-                />
+                <ServersList servers={serverProjects} />
                 {!projects.some(project => !isServerProject(project)) ? (
                   <SidebarEmptySpaceMenu
                     offerNewFolder={false}
@@ -374,7 +362,6 @@ export function ProjectsSidebar() {
                     groupByServer={
                       showServerFilter && serverFilter === ALL_SERVERS
                     }
-                    searchQuery={searchQuery}
                     onNewProject={handleNewProject}
                     onNewFolder={handleNewFolder}
                   />
@@ -384,26 +371,9 @@ export function ProjectsSidebar() {
           </div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col">
-            <div className="flex shrink-0 gap-1 px-3 pb-2">
-              <SidebarSearchField label="Search recent sessions" />
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    className="flex size-8 shrink-0 items-center justify-center rounded-md border border-transparent bg-transparent text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
-                    onClick={handleNewSession}
-                    disabled={!selectedProjectId}
-                    aria-label="New session"
-                  >
-                    <Plus className="size-3.5" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>New session</TooltipContent>
-              </Tooltip>
-            </div>
             <RecentWorktreesList
               projects={visibleProjects}
-              searchQuery={searchQuery}
+              header={searchRow}
             />
           </div>
         )}

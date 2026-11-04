@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatRecentActivity, isSnoozedSession } from './RecentWorktreesList'
+import { formatRecentActivity, isSnoozedSession } from './recent-activity'
 
 describe('formatRecentActivity', () => {
   const now = 1_800_000_000_000

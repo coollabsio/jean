@@ -26,11 +26,6 @@ describe('ProjectsSidebar server filter', () => {
     expect(source).toContain('className="px-1.5 py-2"')
     expect(source).toContain('<DropdownMenuTrigger')
     expect(source).toContain('aria-label="Filter projects by server"')
-    expect(
-      readFileSync('src/components/projects/SidebarSearchField.tsx', 'utf8')
-    ).toContain(
-      'border-transparent bg-transparent pl-7 pr-2 text-xs shadow-none focus-visible:border-transparent dark:bg-transparent'
-    )
     expect(source).not.toContain('<SelectTrigger')
   })
 
@@ -65,9 +60,7 @@ describe('ProjectsSidebar server filter', () => {
     const serverSelector = source.indexOf(
       'aria-label="Filter projects by server"'
     )
-    const search = source.indexOf(
-      'label="Search projects, worktrees and servers"'
-    )
+    const search = source.indexOf('<SidebarSearchField />')
     const addProject = source.indexOf('aria-label="Add project"')
     const projectTree = source.indexOf('<ProjectTree')
 
@@ -79,9 +72,9 @@ describe('ProjectsSidebar server filter', () => {
     expect(projectTree).toBeGreaterThan(source.indexOf('<ServersList'))
     expect(source).toContain('<Plus className="size-3.5" />')
     expect(source).not.toContain('Add worktree to selected project')
-    expect(source).toContain('className="flex gap-1 px-3"')
+    expect(source).toContain('className="flex shrink-0 gap-1 px-3 pb-2"')
     expect(source).toContain('border-transparent bg-transparent')
-    expect(source).toContain('searchQuery={searchQuery}')
+    expect(source).not.toContain('searchQuery')
     expect(source).not.toContain('aria-label="New"')
     expect(source).not.toContain('{/* Footer')
   })

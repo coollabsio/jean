@@ -32,7 +32,6 @@ import {
 import { reorderWithClosestEdge } from '@/lib/drag-and-drop/reorder'
 import { announceDrag } from '@/lib/drag-and-drop/live-region'
 import { DropIndicator } from '@/components/drag-and-drop/DropIndicator'
-import { matchesWorktreeSearch } from './project-search'
 import {
   applyWorktreeDropSnapshot,
   emptyWorktreeDropSnapshot,
@@ -163,9 +162,6 @@ interface WorktreeListProps {
   projectPath: string
   worktrees: Worktree[]
   defaultBranch: string
-  searchQuery?: string
-  searchActive?: boolean
-  loadSessionCounts?: boolean
 }
 
 export function WorktreeList({
@@ -173,9 +169,6 @@ export function WorktreeList({
   projectPath,
   worktrees,
   defaultBranch,
-  searchQuery = '',
-  searchActive = false,
-  loadSessionCounts = true,
 }: WorktreeListProps) {
   const reorderWorktrees = useReorderWorktrees()
   // draggable="true" makes mobile browsers lift the row on long-press, which
@@ -186,26 +179,16 @@ export function WorktreeList({
       state.projectCanvasSettings[projectId]?.worktreeSortMode ?? 'created'
   )
 
-  const visibleWorktrees = useMemo(
-    () =>
-      searchQuery
-        ? worktrees.filter(worktree =>
-            matchesWorktreeSearch(worktree, searchQuery)
-          )
-        : worktrees,
-    [searchQuery, worktrees]
-  )
-
   const pendingWorktrees = useMemo(
-    () => visibleWorktrees.filter(w => w.status === 'pending'),
-    [visibleWorktrees]
+    () => worktrees.filter(w => w.status === 'pending'),
+    [worktrees]
   )
   const readyWorktrees = useMemo(
     () =>
-      visibleWorktrees.filter(
+      worktrees.filter(
         w => !w.status || w.status === 'ready' || w.status === 'error'
       ),
-    [visibleWorktrees]
+    [worktrees]
   )
 
   const sessionQueries = useQueries({
@@ -221,7 +204,7 @@ export function WorktreeList({
           includeMessageCounts: true,
         })
       },
-      enabled: loadSessionCounts && !!wt.id && !!wt.path,
+      enabled: !!wt.id && !!wt.path,
       // Prefer bootstrap/init-seeded cache; avoid N-way WS refetch on open
       staleTime: 1000 * 60 * 5,
       gcTime: 1000 * 60 * 5,
@@ -547,7 +530,6 @@ export function WorktreeList({
             defaultBranch={defaultBranch}
             disabled={
               isTouchDevice ||
-              searchActive ||
               reorderWorktrees.isPending ||
               !canReorderWorktree(worktree)
             }
