@@ -38,7 +38,11 @@ import {
   getLastProjectDestination,
   rememberProjectDestination,
 } from '@/lib/project-destination'
-import { buildCloneUrl, type GitProvider } from '@/lib/git-provider'
+import {
+  buildCloneUrl,
+  stripProviderHost,
+  type GitProvider,
+} from '@/lib/git-provider'
 
 /** Extract a repository name from a git URL (strips .git suffix) */
 function extractRepoName(url: string): string {
@@ -208,7 +212,11 @@ export function CloneProjectModal() {
               </Label>
               <Select
                 value={provider}
-                onValueChange={value => setProvider(value as GitProvider)}
+                onValueChange={value => {
+                  const next = value as GitProvider
+                  setProvider(next)
+                  setUrl(current => stripProviderHost(next, current))
+                }}
                 disabled={cloneProject.isPending}
               >
                 <SelectTrigger id="clone-provider" className="w-full">
@@ -240,7 +248,9 @@ export function CloneProjectModal() {
                     : 'user/repository'
                 }
                 value={url}
-                onChange={e => setUrl(e.target.value)}
+                onChange={e =>
+                  setUrl(stripProviderHost(provider, e.target.value))
+                }
                 disabled={cloneProject.isPending}
                 autoFocus
                 onKeyDown={e => {

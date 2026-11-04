@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   branchWebUrl,
   buildCloneUrl,
+  stripProviderHost,
   hostedRepoWebUrl,
   issueWebUrl,
   pullRequestWebUrl,
@@ -20,9 +21,38 @@ describe('buildCloneUrl', () => {
     )
   })
 
+  it('accepts a pasted GitHub URL with a trailing slash', () => {
+    expect(
+      buildCloneUrl('github', 'https://github.com/coollabsio/openclaw/')
+    ).toBe('https://github.com/coollabsio/openclaw')
+  })
+
   it('keeps custom git URLs unchanged', () => {
     const url = 'ssh://git@example.com/team/project.git'
     expect(buildCloneUrl('custom', url)).toBe(url)
+  })
+})
+
+describe('stripProviderHost', () => {
+  it.each([
+    'https://github.com/coollabsio/openclaw/',
+    'http://www.github.com/coollabsio/openclaw/',
+    'github.com/coollabsio/openclaw/',
+    'git@github.com:coollabsio/openclaw/',
+    'ssh://git@github.com/coollabsio/openclaw/',
+  ])('removes the GitHub host from %s', value => {
+    expect(stripProviderHost('github', value)).toBe('coollabsio/openclaw/')
+  })
+
+  it('removes the GitLab host only for GitLab', () => {
+    const url = 'https://gitlab.com/group/sub/project'
+    expect(stripProviderHost('gitlab', url)).toBe('group/sub/project')
+    expect(stripProviderHost('github', url)).toBe(url)
+    expect(stripProviderHost('custom', url)).toBe(url)
+  })
+
+  it('keeps an owner/repo value unchanged', () => {
+    expect(stripProviderHost('github', 'coollabsio/')).toBe('coollabsio/')
   })
 })
 

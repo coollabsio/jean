@@ -5,10 +5,30 @@ const providerHosts: Record<Exclude<GitProvider, 'custom'>, string> = {
   gitlab: 'https://gitlab.com',
 }
 
+/**
+ * Removes a pasted provider host (`https://github.com/`, `git@github.com:`)
+ * so the input keeps only `owner/repo`. Custom input stays unchanged.
+ */
+export function stripProviderHost(
+  provider: GitProvider,
+  value: string
+): string {
+  if (provider === 'custom') return value
+  const host = new URL(providerHosts[provider]).hostname.replace(/\./g, '\\.')
+  const prefix = new RegExp(
+    `^\\s*(?:(?:https?|ssh|git)://)?(?:[^@/\\s]+@)?(?:www\\.)?${host}[/:]+`,
+    'i'
+  )
+  return value.replace(prefix, '')
+}
+
 export function buildCloneUrl(provider: GitProvider, value: string): string {
   const repository = value.trim()
   if (provider === 'custom') return repository
-  return `${providerHosts[provider]}/${repository.replace(/^\/+/, '')}`
+  const path = stripProviderHost(provider, repository)
+    .replace(/^\/+/, '')
+    .replace(/\/+$/, '')
+  return `${providerHosts[provider]}/${path}`
 }
 
 function trimTrailingSlash(url: string): string {
