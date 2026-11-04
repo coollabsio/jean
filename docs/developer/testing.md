@@ -76,7 +76,7 @@ The dev server starts automatically on port 1421. If you already have it running
 
 `tauri-mock.ts` can seed the `fuzzy-tiger` worktree with an opt-in fixture from `sessionFixtures` in `invoke-handlers.ts`. Open the page with a `fixture` query parameter:
 
-- `/?fixture=delegation`: a lead session with one running and one finished sub-session, plus one normal session. Also mocks `get_recent_worktrees` so Recent shows the rows.
+- `/?fixture=delegation`: a lead session with one running and one finished sub-session (the finished one carries a reported `delegated_by.outcome`, shown in the lead's sub-session panel), plus one normal session. Also mocks `get_recent_worktrees` so Recent shows the rows.
 - `/?fixture=delegation-finished`: the same, with both sub-sessions finished, so the lead can collapse.
 
 Without the parameter the worktree starts empty, so specs that count sessions are not affected. See `e2e/tests/sub-sessions.spec.ts`.

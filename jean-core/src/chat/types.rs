@@ -1053,15 +1053,61 @@ pub struct SessionDelegation {
     pub hop: u8,
     pub armed: bool,
     pub created_at: u64,
+    /// End of the last armed run. Stays until a lead update carried it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<DelegationOutcome>,
 }
 
-/// `Session` view of [`SessionDelegation`] for "Started by" in the UI.
+/// How a delegated run ended, as reported to the lead.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DelegationStatus {
+    Done,
+    Failed,
+    Cancelled,
+    WaitingPlan,
+    Question,
+}
+
+impl DelegationStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Done => "done",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+            Self::WaitingPlan => "waiting_plan",
+            Self::Question => "question",
+        }
+    }
+
+    /// The user still has to answer, so the run after their answer reports too.
+    pub fn needs_user(self) -> bool {
+        matches!(self, Self::WaitingPlan | Self::Question)
+    }
+}
+
+/// Recorded end of an armed run on the child's link.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DelegationOutcome {
+    pub status: DelegationStatus,
+    /// Error line and the child's last reply, truncated.
+    pub body: String,
+    pub ended_at: u64,
+    /// When a lead update carried this outcome; `None` while one is owed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reported_at: Option<u64>,
+}
+
+/// `Session` view of [`SessionDelegation`] for "Started by" and the lead's
+/// sub-session panel in the UI.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionDelegatedBy {
     pub origin_session_id: String,
     pub origin_worktree_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<DelegationOutcome>,
 }
 
 /// A ScheduleWakeup request originated from the Claude CLI tool.
@@ -1668,6 +1714,7 @@ impl SessionMetadata {
                 origin_session_id: link.origin_session_id.clone(),
                 origin_worktree_id: link.origin_worktree_id.clone(),
                 origin_name: None,
+                outcome: link.outcome.clone(),
             }),
         }
     }

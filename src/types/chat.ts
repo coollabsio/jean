@@ -453,6 +453,24 @@ export interface SessionDelegator {
   origin_session_id: string
   origin_worktree_id: string
   origin_name?: string | null
+  /** End of the last run the origin started, once that run ended */
+  outcome?: DelegationOutcome | null
+}
+
+export type DelegationStatus =
+  | 'done'
+  | 'failed'
+  | 'cancelled'
+  | 'waiting_plan'
+  | 'question'
+
+export interface DelegationOutcome {
+  status: DelegationStatus
+  /** Error line and the session's last reply, truncated */
+  body: string
+  ended_at: number
+  /** When the origin received this outcome; unset while one is owed */
+  reported_at?: number | null
 }
 
 /**

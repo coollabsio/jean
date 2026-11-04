@@ -4,19 +4,12 @@ import { render, screen } from '@/test/test-utils'
 import { useChatStore } from '@/store/chat-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
-import { DelegatedByRow, SessionUpdateCard } from './SessionDelegation'
-import type { SessionUpdate } from './session-update'
+import { DelegatedByRow, SessionUpdateLine } from './SessionDelegation'
 
 const worktrees: Record<
   string,
   { id: string; path: string; project_id: string }
 > = {
-  'wt-child': { id: 'wt-child', path: '/repo/child', project_id: 'proj-1' },
-  'remote-a:wt-child': {
-    id: 'remote-a:wt-child',
-    path: '/srv/child',
-    project_id: 'remote-a:proj-1',
-  },
   'remote-a:wt-origin': {
     id: 'remote-a:wt-origin',
     path: '/srv/origin',
@@ -30,15 +23,37 @@ vi.mock('@/services/projects', () => ({
   }),
 }))
 
-const update: SessionUpdate = {
-  sessionId: 'child-1',
-  worktreeId: 'wt-child',
-  name: 'Fix login',
-  status: 'failed',
-  body: 'Error: tests failed',
-}
+describe('SessionUpdateLine', () => {
+  it('names each sub-session with its outcome and nothing else', () => {
+    render(
+      <SessionUpdateLine
+        updates={[
+          {
+            sessionId: 'a',
+            worktreeId: 'w',
+            name: 'Write changelog',
+            status: 'done',
+            body: 'Added 1.2.0 notes.',
+          },
+          {
+            sessionId: 'b',
+            worktreeId: 'w',
+            name: 'Check CI',
+            status: 'failed',
+            body: 'Error: tests failed',
+          },
+        ]}
+      />
+    )
 
-describe('SessionUpdateCard', () => {
+    const line = screen.getByTestId('session-update-line')
+    expect(line).toHaveTextContent('Write changelog finished, Check CI failed')
+    expect(line).not.toHaveTextContent('Added 1.2.0 notes.')
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+  })
+})
+
+describe('DelegatedByRow', () => {
   beforeEach(() => {
     useProjectsStore.setState({
       selectedProjectId: null,
@@ -48,44 +63,6 @@ describe('SessionUpdateCard', () => {
     useUIStore.setState({ pendingAutoOpenSessionIds: {} })
   })
 
-  it('shows the child name and status', () => {
-    render(<SessionUpdateCard update={update} ownerSessionId="parent-1" />)
-
-    const card = screen.getByTestId('session-update-card')
-    expect(card).toHaveTextContent('Fix login')
-    expect(card).toHaveTextContent('Failed')
-  })
-
-  it('opens the child session on the local server', async () => {
-    render(<SessionUpdateCard update={update} ownerSessionId="parent-1" />)
-
-    await userEvent.click(screen.getByRole('button', { name: 'Open session' }))
-
-    expect(useProjectsStore.getState().selectedProjectId).toBe('proj-1')
-    expect(useProjectsStore.getState().selectedWorktreeId).toBe('wt-child')
-    expect(useChatStore.getState().activeSessionIds['wt-child']).toBe('child-1')
-    expect(useUIStore.getState().pendingAutoOpenSessionIds['wt-child']).toBe(
-      'child-1'
-    )
-  })
-
-  it('scopes the child to the server of the session that received it', async () => {
-    render(
-      <SessionUpdateCard update={update} ownerSessionId="remote-a:parent-1" />
-    )
-
-    await userEvent.click(screen.getByRole('button', { name: 'Open session' }))
-
-    expect(useProjectsStore.getState().selectedProjectId).toBe(
-      'remote-a:proj-1'
-    )
-    expect(useChatStore.getState().activeSessionIds['remote-a:wt-child']).toBe(
-      'remote-a:child-1'
-    )
-  })
-})
-
-describe('DelegatedByRow', () => {
   it('opens the session that started this one', async () => {
     render(
       <DelegatedByRow

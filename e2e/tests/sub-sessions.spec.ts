@@ -30,6 +30,32 @@ test.describe('Sub-sessions', () => {
     ).toHaveCount(0)
   })
 
+  test('the lead lists its sub-sessions beside the chat, or above the composer when narrow', async ({
+    mockPage,
+  }) => {
+    await mockPage.setViewportSize({ width: 1700, height: 900 })
+    await openFixture(mockPage, 'delegation')
+    await tabNames(mockPage).filter({ hasText: 'Plan the release' }).click()
+
+    const panel = mockPage.getByRole('complementary', { name: 'Sub-sessions' })
+    await expect(panel).toBeVisible()
+    await expect(panel.getByTestId('sub-session-card')).toHaveText([
+      /Write changelog/,
+      /Check CI.*CI is green on main\./,
+    ])
+    await expect(panel).not.toContainText('Fix flaky test')
+
+    await mockPage.setViewportSize({ width: 900, height: 700 })
+    await expect(panel).toBeHidden()
+    const strip = mockPage.getByTestId('sub-session-strip')
+    await expect(strip).toContainText('Sub-sessions')
+    await strip.getByRole('button', { name: /Sub-sessions/ }).click()
+    await expect(strip.getByTestId('sub-session-card')).toHaveText([
+      /Write changelog/,
+      /Check CI/,
+    ])
+  })
+
   test('collapsing a lead hides its finished sub-sessions from tabs and shortcuts', async ({
     mockPage,
   }) => {

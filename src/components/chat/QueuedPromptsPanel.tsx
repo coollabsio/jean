@@ -14,7 +14,7 @@ import { cn } from '@/lib/utils'
 import { useChatStore } from '@/store/chat-store'
 import type { QueuedMessage } from '@/types/chat'
 import { COMPOSER_SURFACE_CLASS } from './composer-surface'
-import { parseSessionUpdate } from './session-update'
+import { parseSessionUpdates } from './session-update'
 
 interface QueuedPromptsPanelProps {
   sessionId: string
@@ -39,8 +39,10 @@ function attachmentCount(msg: QueuedMessage): number {
 
 /** Jean's session updates show who sent them instead of the raw header. */
 function queuedLabel(message: string): string {
-  const update = parseSessionUpdate(message)
-  return update ? `Update from ${update.name || 'a session'}` : message
+  const updates = parseSessionUpdates(message)
+  if (!updates) return message
+  const names = updates.map(update => update.name || 'a session').join(', ')
+  return `Update from ${names}`
 }
 
 /**

@@ -1507,7 +1507,7 @@ async fn drain_backend_queue(
             request.chrome_enabled,
             request.custom_profile_name,
             request.backend,
-            None,
+            request.include_recap,
         )
         .await;
         // The wrapper reports runs it started; this loop started this one.
@@ -1582,7 +1582,7 @@ fn latest_run_user_turn(app: &AppHandle, session_id: &str) -> UserTurnOutcome {
         .unwrap_or(UserTurnOutcome::Persisted)
 }
 
-struct QueuedSendRequest {
+pub(crate) struct QueuedSendRequest {
     message: String,
     model: Option<String>,
     execution_mode: Option<String>,
@@ -1595,9 +1595,12 @@ struct QueuedSendRequest {
     chrome_enabled: Option<bool>,
     custom_profile_name: Option<String>,
     backend: Option<String>,
+    /// `includeRecap: false` on Jean's own queued messages (sub-session
+    /// updates) skips the recap table for that turn.
+    pub(crate) include_recap: Option<bool>,
 }
 
-async fn queued_message_to_send_request(
+pub(crate) async fn queued_message_to_send_request(
     app: &AppHandle,
     queued: &Value,
 ) -> Result<QueuedSendRequest, String> {
@@ -1687,6 +1690,7 @@ async fn queued_message_to_send_request(
         chrome_enabled,
         custom_profile_name,
         backend: json_string(queued, "backend"),
+        include_recap: queued.get("includeRecap").and_then(Value::as_bool),
     })
 }
 

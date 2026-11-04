@@ -3452,6 +3452,7 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"F
             hop: 3,
             armed: true,
             created_at: 1,
+            outcome: None,
         });
         crate::chat::storage::save_metadata(&app, &deep).unwrap();
         saved_session(&app, "target");
@@ -3684,7 +3685,7 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"F
         assert_eq!(
             update,
             format!(
-                "[Jean session update]\nsession: {child}\nworktree: current-base\nname: Session 2\nstatus: done\n---\nFixture reply\n\nUse read_session_messages for the full transcript."
+                "[Jean session update]\nsession: {child}\nworktree: current-base\nname: Session 2\nstatus: done\n---\nFixture reply\n\nUse read_session_messages for a full transcript. Reply briefly; the user sees sub-session status in the side panel."
             )
         );
         let child_metadata = crate::chat::storage::load_metadata(&app, &child)

@@ -292,9 +292,11 @@ export async function activateWorktree(
   }
   await expect(projectsHeader).toBeVisible({ timeout: 3000 })
 
-  // Click the worktree row in the sidebar (the canvas lists it too)
+  // Click the worktree name in the sidebar row (the canvas lists it too).
+  // The row's centre is its expand toggle, which only lists the sessions.
   await page
     .getByRole('button', { name: `${worktreeName} Expand sessions` })
+    .getByText(worktreeName, { exact: true })
     .click()
   await page.waitForTimeout(1000)
 

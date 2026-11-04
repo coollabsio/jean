@@ -116,18 +116,35 @@ origin refuses the send with a tool error; the same origin may re-arm it.
 from the queue drain after each run it starts, from a drop guard in each
 resume tail, and once at startup for runs that ended while Jean was closed.
 Each path reports before the session's next queued prompt starts, so the
-report sees the run as finished. It disarms under the metadata lock first, so
-a repeat call sends nothing; `waiting_plan` and `question` outcomes keep the
-link armed so the run after the user's answer reports too. Runs the user
-types into the child, and runs started by the update message itself, are not
-armed and never report. If the child was busy and the MCP message was
-rejected or steered, the link stays armed and the run already going reports
-when it ends. Manual MCP clients (`manual-dev`, `manual-prod`) and agents
-(`__agent_*__` worktrees, which use `agents::mcp::record_delegation`) never
-arm a link. The update text starts with `[Jean session update]` followed by
-`session`, `worktree`, `name` and `status` header lines, `---`, then the error
-(when failed), the last assistant reply (1500 chars) and a
-`read_session_messages` hint; the frontend parses the header.
+report sees the run as finished. It disarms under the metadata lock first and
+records a `DelegationOutcome` (status, error plus last reply of 1500 chars,
+`ended_at`, `reported_at`) on the link, so a repeat call records nothing;
+`waiting_plan` and `question` outcomes keep the link armed so the run after
+the user's answer reports too. Runs the user types into the child, and runs
+started by the update message itself, are not armed and never report. If the
+child was busy and the MCP message was rejected or steered, the link stays
+armed and the run already going reports when it ends. Manual MCP clients
+(`manual-dev`, `manual-prod`) and agents (`__agent_*__` worktrees, which use
+`agents::mcp::record_delegation`) never arm a link.
+
+Outcomes reach the lead in batches (`flush_lead`, serialized by one mutex):
+after a child records its outcome, the lead gets one queued message carrying
+every child outcome with no `reported_at` yet, but only when no sibling is
+still working (armed and not waiting for the user) or when this child needs
+the user. Outcomes are marked reported before the push, so a crash in between
+drops that update instead of resending it on every restart; the startup sweep
+also flushes leads whose children hold unreported outcomes. A different lead
+arming a child first flushes the previous lead's pending outcome. The queued
+message carries `includeRecap: false`, which the drain passes to
+`send_chat_message_inner`, so the update turn writes no recap table. The text
+is one block per child (`[Jean session update]`, `session`, `worktree`,
+`name` and `status` header lines, `---`, then the error and last reply)
+joined by blank lines, then a footer telling the model to reply briefly. The
+frontend (`session-update.ts`) parses every block; the chat shows the update
+as one muted line, and the lead's sub-sessions (same worktree, read from the
+session list with live store status) live in `SubSessionPanel.tsx`: a column
+docked right of the messages when the chat is at least `@4xl` wide, otherwise
+a strip above the composer.
 
 **Versioned run state.** The backend is the single source of run state. Each
 `SessionMetadata` carries `status_version: u64`, bumped in one place:

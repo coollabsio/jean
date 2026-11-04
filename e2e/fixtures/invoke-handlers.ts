@@ -238,7 +238,15 @@ function delegationSessions(childRunning: boolean) {
       message_count: 2,
       messages: [],
       last_run_status: 'completed',
-      delegated_by: delegatedBy,
+      delegated_by: {
+        ...delegatedBy,
+        outcome: {
+          status: 'done',
+          body: 'CI is green on main.',
+          ended_at: now - 120,
+          reported_at: now - 100,
+        },
+      },
     },
     {
       id: 'session-normal',

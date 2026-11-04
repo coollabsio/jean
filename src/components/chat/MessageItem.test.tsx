@@ -108,7 +108,7 @@ describe('MessageItem', () => {
     expect(screen.queryByText('Prompt sent')).not.toBeInTheDocument()
   })
 
-  it('renders a session update as a card instead of a user bubble', async () => {
+  it('renders a session update as one muted line instead of a user bubble', () => {
     render(
       <MessageItem
         {...baseProps}
@@ -124,6 +124,16 @@ describe('MessageItem', () => {
             'status: question',
             '---',
             'Which provider should I use?',
+            '',
+            '[Jean session update]',
+            'session: child-2',
+            'worktree: wt-child',
+            'name: Check CI',
+            'status: done',
+            '---',
+            'CI is green.',
+            '',
+            'Use read_session_messages for a full transcript. Reply briefly; the user sees sub-session status in the side panel.',
           ].join('\n'),
           timestamp: 1,
           tool_calls: [],
@@ -131,17 +141,14 @@ describe('MessageItem', () => {
       />
     )
 
-    const card = screen.getByTestId('session-update-card')
-    expect(card).toHaveTextContent('Fix login')
-    expect(card).toHaveTextContent('Asking a question')
+    expect(screen.getByTestId('session-update-line')).toHaveTextContent(
+      'Fix login asking a question, Check CI finished'
+    )
     expect(screen.queryByText(/Jean session update/)).not.toBeInTheDocument()
     expect(
-      screen.queryByText('Which provider should I use?')
+      screen.queryByText(/Which provider should I use/)
     ).not.toBeInTheDocument()
-
-    await userEvent.click(screen.getByText('Fix login'))
-    expect(screen.getByText('Which provider should I use?')).toBeVisible()
-    expect(screen.getByRole('button', { name: 'Open session' })).toBeDisabled()
+    expect(screen.queryByText(/Reply briefly/)).not.toBeInTheDocument()
   })
 
   it('hides prompt metadata and message actions in zen mode', () => {

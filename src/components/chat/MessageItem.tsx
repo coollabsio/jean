@@ -9,8 +9,8 @@ import {
   USER_PILL_BUBBLE_CLASS,
 } from './ReplyBubble'
 import { ChatContinuedNotice } from './ChatContinuedNotice'
-import { SessionUpdateCard } from './SessionDelegation'
-import { parseSessionUpdate } from './session-update'
+import { SessionUpdateLine } from './SessionDelegation'
+import { parseSessionUpdates } from './session-update'
 import {
   parseInlineNumberedQuestion,
   withoutInlineQuestion,
@@ -1140,11 +1140,9 @@ export const MessageItem = memo(function MessageItem({
     if (isAgentUpdateMessage(message.content)) return null
     if (isChatContinuedMessage(message.content))
       return <ChatContinuedNotice content={message.content} />
-    const sessionUpdate = parseSessionUpdate(message.content)
-    if (sessionUpdate)
-      return (
-        <SessionUpdateCard update={sessionUpdate} ownerSessionId={sessionId} />
-      )
+    // Sub-session results live in the side panel; the stream keeps one line
+    const sessionUpdates = parseSessionUpdates(message.content)
+    if (sessionUpdates) return <SessionUpdateLine updates={sessionUpdates} />
     // A message from an agent: one line that opens the conversation
     const agentSent = parseAgentSentMessage(message.content)
     if (agentSent)
