@@ -6575,10 +6575,27 @@ pub struct DetectPrResponse {
     pub title: String,
 }
 
-fn parse_open_pr_list(output: &[u8]) -> Result<Option<DetectPrResponse>, String> {
+/// Pick the first open PR from `gh pr list --json number,url,title,isCrossRepository,headRepositoryOwner`.
+///
+/// `gh pr list --head <branch>` matches by branch name only, so fork PRs with the
+/// same head name (e.g. a fork's `next`) also match. Accept a fork PR only when
+/// its head owner is the owner of one of the local remotes.
+fn parse_open_pr_list(
+    output: &[u8],
+    remote_owners: &[String],
+) -> Result<Option<DetectPrResponse>, String> {
     let prs: Vec<serde_json::Value> = serde_json::from_slice(output)
         .map_err(|e| format!("Failed to parse open PR response: {e}"))?;
-    let Some(pr) = prs.first() else {
+    let Some(pr) = prs.iter().find(|pr| {
+        if !pr["isCrossRepository"].as_bool().unwrap_or(false) {
+            return true;
+        }
+        let head_owner = pr["headRepositoryOwner"]["login"].as_str().unwrap_or("");
+        !head_owner.is_empty()
+            && remote_owners
+                .iter()
+                .any(|owner| owner.eq_ignore_ascii_case(head_owner))
+    }) else {
         return Ok(None);
     };
 
@@ -6593,6 +6610,13 @@ fn parse_open_pr_list(output: &[u8]) -> Result<Option<DetectPrResponse>, String>
         pr_url,
         title: pr["title"].as_str().unwrap_or("").to_string(),
     }))
+}
+
+/// Owner segment of a forge web URL such as `https://github.com/owner/repo`.
+fn remote_owner_from_web_url(url: &str) -> Option<String> {
+    let after_scheme = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let owner = after_scheme.split('/').nth(1)?;
+    (!owner.is_empty()).then(|| owner.to_string())
 }
 
 fn find_open_pr_for_branch(
@@ -6624,9 +6648,9 @@ fn find_open_pr_for_branch(
             "--head",
             &current_branch,
             "--json",
-            "number,url,title",
+            "number,url,title,isCrossRepository,headRepositoryOwner",
             "--limit",
-            "1",
+            "30",
         ])
         .output()
         .map_err(|e| format!("Failed to check open PRs for branch {current_branch}: {e}"))?;
@@ -6641,7 +6665,12 @@ fn find_open_pr_for_branch(
         ));
     }
 
-    parse_open_pr_list(&output.stdout)
+    let remote_owners: Vec<String> = git::get_github_remotes(worktree_path)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|remote| remote_owner_from_web_url(&remote.url))
+        .collect();
+    parse_open_pr_list(&output.stdout, &remote_owners)
 }
 
 /// Response from manually linking a PR to a worktree.
@@ -15021,7 +15050,8 @@ mod tests {
     #[test]
     fn parse_open_pr_list_returns_first_matching_pr() {
         let response = parse_open_pr_list(
-            br#"[{"number":42,"url":"https://github.com/acme/app/pull/42","title":"Ship it"}]"#,
+            br#"[{"number":42,"url":"https://github.com/acme/app/pull/42","title":"Ship it","isCrossRepository":false,"headRepositoryOwner":{"login":"acme"}}]"#,
+            &[],
         )
         .expect("parse response")
         .expect("open PR");
@@ -15029,6 +15059,42 @@ mod tests {
         assert_eq!(response.pr_number, 42);
         assert_eq!(response.pr_url, "https://github.com/acme/app/pull/42");
         assert_eq!(response.title, "Ship it");
+    }
+
+    #[test]
+    fn parse_open_pr_list_skips_fork_prs_from_unknown_owners() {
+        let output = br#"[
+            {"number":11808,"url":"https://github.com/acme/app/pull/11808","title":"Fork next","isCrossRepository":true,"headRepositoryOwner":{"login":"stranger"}},
+            {"number":7,"url":"https://github.com/acme/app/pull/7","title":"Own next","isCrossRepository":false,"headRepositoryOwner":{"login":"acme"}}
+        ]"#;
+
+        let response = parse_open_pr_list(output, &["acme".to_string()])
+            .expect("parse response")
+            .expect("own PR");
+        assert_eq!(response.pr_number, 7);
+
+        let only_fork = br#"[{"number":11808,"url":"https://github.com/acme/app/pull/11808","title":"Fork next","isCrossRepository":true,"headRepositoryOwner":{"login":"stranger"}}]"#;
+        assert!(parse_open_pr_list(only_fork, &["acme".to_string()])
+            .expect("parse response")
+            .is_none());
+    }
+
+    #[test]
+    fn parse_open_pr_list_accepts_fork_pr_from_local_remote_owner() {
+        let output = br#"[{"number":5,"url":"https://github.com/acme/app/pull/5","title":"From my fork","isCrossRepository":true,"headRepositoryOwner":{"login":"Me"}}]"#;
+        let response = parse_open_pr_list(output, &["acme".to_string(), "me".to_string()])
+            .expect("parse response")
+            .expect("fork PR from own remote");
+        assert_eq!(response.pr_number, 5);
+    }
+
+    #[test]
+    fn remote_owner_from_web_url_reads_owner_segment() {
+        assert_eq!(
+            remote_owner_from_web_url("https://github.com/coollabsio/coolify").as_deref(),
+            Some("coollabsio")
+        );
+        assert_eq!(remote_owner_from_web_url("https://github.com"), None);
     }
 
     #[test]
