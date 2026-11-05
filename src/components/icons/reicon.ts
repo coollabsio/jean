@@ -12,6 +12,13 @@ export const Circle = createIcon('Circle', {
 })
 export { Circle as CircleIcon }
 
+// Reicon's Loader is a ring of spokes; spun with animate-spin it looks like a
+// rotating sun. A faint track with a quarter arc reads as a real spinner.
+export const Loader = createIcon('Loader', {
+  O: `<circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.5" opacity="0.25"/><path d="M12 3a9 9 0 0 1 9 9" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>`,
+})
+export { Loader as Loader2, Loader as Loader2Icon, Loader as LoaderCircle }
+
 export {
   Activity,
   AlertCircle,
@@ -79,7 +86,6 @@ export {
   Link2,
   List,
   ListCheck,
-  Loader,
   Lock,
   Login,
   Logout,
@@ -207,9 +213,6 @@ export { Layout as LayoutDashboard } from 'reicon-react'
 export { List3 as LayoutList } from 'reicon-react'
 export { ListCheck as ListChecks } from 'reicon-react'
 export { ListCheck as ListTodo } from 'reicon-react'
-export { Loader as Loader2 } from 'reicon-react'
-export { Loader as Loader2Icon } from 'reicon-react'
-export { Loader as LoaderCircle } from 'reicon-react'
 export { Login as LogIn } from 'reicon-react'
 export { Logout as LogOut } from 'reicon-react'
 export { MessagePlus as MessageSquarePlus } from 'reicon-react'
