@@ -13,6 +13,7 @@ import {
   hasPreloadedData,
   listen,
   onEstablishedWsDisconnect,
+  waitUntilBackendReachable,
   usesWebSocketBackend,
   signInToWebAccess,
   type InitialData,
@@ -158,6 +159,7 @@ function App() {
   // Track preloading state for web view
   const [isPreloading, setIsPreloading] = useState(webBackend)
   const [platformVersion, setPlatformVersion] = useState(0)
+  const [webReconnecting, setWebReconnecting] = useState(false)
   const queryClient = useQueryClient()
   const hasStartedTransportRef = useRef(false)
 
@@ -873,9 +875,16 @@ function App() {
         dismissTransientUi()
         return
       }
-      logger.info('WebSocket disconnected, reloading web app')
-      captureWebReloadState()
-      window.location.reload()
+      // Reloading while the network switches (Wi-Fi to cellular) lands on
+      // the browser's offline page with no way back. Reload only once the
+      // server answers again.
+      logger.info('WebSocket disconnected, waiting for server before reload')
+      setWebReconnecting(true)
+      void waitUntilBackendReachable().then(() => {
+        logger.info('WebSocket disconnected, reloading web app')
+        captureWebReloadState()
+        window.location.reload()
+      })
     })
   }, [captureWebReloadState, webBackend])
 
@@ -1599,8 +1608,13 @@ function App() {
     <ErrorBoundary>
       <ThemeProvider>
         <MainWindow />
-        {webBackend && wsCheckingConnection && (
-          <JeanLoadingScreen message="Checking connection to Jean..." onTop />
+        {webBackend && webReconnecting ? (
+          <JeanLoadingScreen message="Reconnecting to Jean..." onTop />
+        ) : (
+          webBackend &&
+          wsCheckingConnection && (
+            <JeanLoadingScreen message="Checking connection to Jean..." onTop />
+          )
         )}
         {webBackend && <WsAuthErrorOverlay />}
         <NetworkOfflineScreen />

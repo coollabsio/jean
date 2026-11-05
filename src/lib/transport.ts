@@ -94,6 +94,65 @@ function fetchBackend(url: string): Promise<Response> {
   )
 }
 
+const REACHABLE_PROBE_TIMEOUT = 5_000
+const REACHABLE_RETRY_MAX = 5_000
+let reachablePromise: Promise<void> | null = null
+
+/** Resolve once the backend answers HTTP. A page reload while the network
+ *  is switching (Wi-Fi to cellular) shows the browser's offline error page,
+ *  and no Jean code runs there to recover. Wait for the server first. */
+export function waitUntilBackendReachable(): Promise<void> {
+  reachablePromise ??= probeUntilReachable().finally(() => {
+    reachablePromise = null
+  })
+  return reachablePromise
+}
+
+async function probeUntilReachable(): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    if (navigator.onLine !== false) {
+      const controller = new AbortController()
+      const timeout = setTimeout(
+        () => controller.abort(),
+        REACHABLE_PROBE_TIMEOUT
+      )
+      try {
+        const res = await fetch(backendUrl('healthz'), {
+          cache: 'no-store',
+          signal: controller.signal,
+        })
+        if (res.ok) return
+      } catch {
+        // Network still switching; retry below.
+      } finally {
+        clearTimeout(timeout)
+      }
+    }
+    await waitForRetryOrWake(Math.min(500 * 2 ** attempt, REACHABLE_RETRY_MAX))
+  }
+}
+
+/** Sleep, but retry at once when the network or page comes back. */
+function waitForRetryOrWake(ms: number): Promise<void> {
+  return new Promise(resolve => {
+    const connection = getNetworkInformation()
+    const done = () => {
+      clearTimeout(timer)
+      window.removeEventListener('online', done)
+      document.removeEventListener('visibilitychange', onVisible)
+      connection?.removeEventListener('change', done)
+      resolve()
+    }
+    const onVisible = () => {
+      if (!document.hidden) done()
+    }
+    const timer = setTimeout(done, ms)
+    window.addEventListener('online', done)
+    document.addEventListener('visibilitychange', onVisible)
+    connection?.addEventListener('change', done)
+  })
+}
+
 // ---------------------------------------------------------------------------
 // File source URL conversion (drop-in for Tauri's convertFileSrc)
 // ---------------------------------------------------------------------------

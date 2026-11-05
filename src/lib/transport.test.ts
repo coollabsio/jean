@@ -1079,6 +1079,45 @@ describe('transport bootstrap', () => {
     expect(onDisconnect).toHaveBeenCalledOnce()
   })
 
+  it('waits for the server to answer before resolving reachability', async () => {
+    vi.useFakeTimers()
+    const transport = await loadTransportModule()
+    vi.mocked(fetch)
+      .mockRejectedValueOnce(new TypeError('network changed'))
+      .mockResolvedValueOnce({ ok: false } as Response)
+      .mockResolvedValue({ ok: true } as Response)
+    const resolved = vi.fn()
+
+    void transport.waitUntilBackendReachable().then(resolved)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(resolved).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(500)
+    expect(resolved).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(resolved).toHaveBeenCalledOnce()
+    expect(String(vi.mocked(fetch).mock.calls[0]?.[0])).toContain('/healthz')
+  })
+
+  it('probes again at once when the network comes back', async () => {
+    vi.useFakeTimers()
+    const transport = await loadTransportModule()
+    vi.mocked(fetch)
+      .mockRejectedValueOnce(new TypeError('network changed'))
+      .mockRejectedValueOnce(new TypeError('network changed'))
+      .mockResolvedValue({ ok: true } as Response)
+    const resolved = vi.fn()
+
+    void transport.waitUntilBackendReachable().then(resolved)
+    await vi.advanceTimersByTimeAsync(500)
+    expect(resolved).not.toHaveBeenCalled()
+
+    window.dispatchEvent(new Event('online'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(resolved).toHaveBeenCalledOnce()
+  })
+
   it('uploads attachments to the remote server over HTTP, not the WebSocket', async () => {
     const transport = await loadRemoteNativeTransportModule()
     const saved = { id: 'f1', filename: 'clip.mp4', path: '/p/clip', size: 3 }
