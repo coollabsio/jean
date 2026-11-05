@@ -51,40 +51,37 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 /// renders it as the visible summary instead of the full latest assistant text.
 pub const RECAP_INSTRUCTION: &str = "## End-of-turn recap
 
-When you finish a turn that involved tool calls, edits, or multi-step work, end your response with a final markdown section like this:
+End every turn that used tools, edited files, or did multi-step work with one final `## Recap` block. It is the deliverable: a reader who skips the rest of the message must get every fact that matters. Write it dense: facts only, no filler, no narration of your process, no restating the request.
+
+Format:
 
 ## Recap
 
-[If the user asked a question or requested a specific output, restate the actual answer/result here so the recap stands alone as the deliverable. Use a short paragraph, table, or list — whichever fits the answer best.]
-
-- 1-3 short bullets for context that doesn't fit above: caveats, follow-ups, unresolved questions, or files the user should review.
+[The answer or result in 1-3 short lines, or a table/list if that fits better. Include every finding, every fix or change made (what changed and where, `file:line` when useful), and every decision, caveat, or open item the user must know.]
 
 Tested against local dev env: Yes/No
 
-[`### Possible regressions` table — include ONLY when the rules below say to.]
+[`### Possible regressions` — only when the rules below say to.]
 
-[Optional `### How to test` subsection — include ONLY when the rules below say to.]
+[`### How to test` — only when the rules below say to.]
 
 Rules:
-- Heading must be the literal string `## Recap` on its own line.
-- Place it as the LAST block of the message, after any prose.
-- Keep the recap brief: short sentences, no filler, no background the user did not ask for. Every line must earn its place. Brevity applies to the wording, never to the number of findings: do not drop items to make the recap shorter.
-- The recap is the user-facing deliverable — it must be self-contained. Include the actual answer/result inline. Do NOT write things like \"I looked it up\" or \"see above\" — restate the answer.
-- Keep links in the recap. When the recap names an issue, PR, commit, security advisory, Linear issue, Sentry issue, URL, or other external resource that has a known link, write it as a Markdown link (for example `[GHSA-xxxx-xxxx-xxxx](https://github.com/owner/repo/security/advisories/GHSA-xxxx-xxxx-xxxx)` or `[#123](https://github.com/owner/repo/pull/123)`). If the same item is a link earlier in the message, it must also be a link in the recap. Do not invent URLs.
-- If the turn found issues, gaps, risks, ideas, or recommended fixes, list them in the recap as a Markdown table (for example: | # | Finding | Location | Impact | Recommended fix |), not as bullets or prose. The table must include EVERY item from the turn, with one row per item, across all groups and priorities (for example all numbered ideas plus all lettered bugs). Keep the same numbers or letters as earlier in the message. Do not keep only the top items, merge items into one row, or move items into a bullet such as \"smaller ideas\". The user must not need to open the full message to find an item. Shorten each cell instead.
-- Add a `### How to test` subsection ONLY when the turn produced code, config, or behavior changes the user can verify. Keep it simple: a numbered list of at most 5 short steps, each one plain action — the link or command, what to click, what to see (for example: `1. Open [http://localhost:1420/settings](http://localhost:1420/settings)` / `2. Click **Save**` / `3. Check that a \"Saved\" toast shows`). Use the exact URL or command when you know it. Make the steps a manual smoke test of the main behavior if it makes sense. No explanations, no edge-case lists. OMIT the subsection entirely on read-only turns — questions, explanations, research, planning, code review without edits, or any turn where there is nothing meaningful to test. Do NOT include placeholder content like \"N/A\", \"Nothing to test\", \"No tests needed\", or an empty bullet list. If in doubt, leave it out.
-- When the turn produced code, config, or behavior changes, include the line `Tested against local dev env: Yes` or `Tested against local dev env: No` (pick one, based on whether you actually verified the change in a running local dev environment). Omit this line on read-only turns.
-- Add a `### Possible regressions` subsection ONLY when the turn changed functional behavior: logic, data flow, state, persistence, APIs, commands, parsing, or code shared by other callers. OMIT it for visual-only UI changes (styling, layout, spacing, colors, icons, copy), docs, comments, prompt text, tests-only changes, and read-only turns. Use this table, riskiest row first: | # | What the user would see | Cause in this change | Proof it still works | Check it yourself |.
-  - `What the user would see`: a concrete failure as an action and its wrong result, for example `Delete server with \"remove SSH key\" → key stays on the server`. Never describe the code change here (\"Blade merge\", \"param removed\" are wrong).
-  - `Cause in this change`: the one change that could cause it, in a few words.
-  - `Proof it still works`: start with one label: `Old test:` (a test this turn did not add or edit, then its name), `New test:` (a test this turn added or edited — weak proof, because it was written with the change), `Ran in dev env:` (what you did), `Callers read:` (which ones), or `Not verified`.
-  - `Check it yourself`: one short manual step the user can do. Write `—` only when the proof is `Old test:` or `Ran in dev env:`.
-  - Look beyond the diff: callers, shared types, persistence, other backends, web access, and mobile. List only failures that have a real path from this change, not theoretical ones. If none, write the single line `No possible regressions found` and the reason, not an empty table.
-- In plan mode, when a plan is ready, you MUST still call the native plan tool (Claude ExitPlanMode, Codex `<proposed_plan>` / plan item, Cursor/OpenCode equivalent) to present it. The recap does NOT replace the plan tool — never end a plan-mode turn with only a `## Recap` block in place of the plan tool call.
-- Skip the recap entirely if the turn was a single one-line answer with no tool calls.
-- If the turn ends with a question for the user, put the question at the end of the recap, in this format: one line with the question, then the line `Reply with a number:`, then a numbered list (`1.`, `2.`, `3.`...) of 2 to 8 short options. Jean shows the options as buttons below the recap. Ask the question exactly once: do not write the question or its options anywhere before the `## Recap` heading, not even in an earlier message of the same turn, and not even when a skill tells you to ask it.
-- If you took screenshots or made images the user should see (for example browser screenshots of a UI change), show them in the recap in a fenced code block with the language `screenshots`, one absolute image file path or image URL per line, in the order to view them. Jean shows this block as an image gallery. Do not also list the same images as links or markdown images.
-- Do NOT repeat tool inputs, file diffs, or raw command output verbatim. Summarize.";
+- Heading is the literal `## Recap` on its own line, and it is the LAST block of the message.
+- Brief wording, complete content: cut words, never items: do not drop items to make the recap shorter. No \"see above\" or \"I looked it up\" — restate the result.
+- Findings, issues, risks, ideas, or fixes go in one Markdown table (for example: | # | Finding | Location | Impact | Fix / status |), not prose. The table must include EVERY item from the turn, one row per item, across all groups and priorities. Keep the numbers or letters used earlier. Do not merge rows or hide items in a bullet like \"smaller ideas\". Shorten cells instead.
+- Keep links: write every issue, PR, commit, advisory, Linear/Sentry issue, or URL with a known link as a Markdown link (for example `[#123](https://github.com/owner/repo/pull/123)`). Do not invent URLs.
+- `Tested against local dev env: Yes` or `Tested against local dev env: No`: include it only when the turn changed code, config, or behavior; Yes only if you verified it in a running local dev env.
+- `### How to test`: only when the turn made changes the user can verify. Max 5 numbered steps, each one plain action with the exact URL or command and the expected result — a manual smoke test of the main behavior if it makes sense. Omit it on read-only turns; never write placeholders like \"N/A\".
+- `### Possible regressions`: only when the turn changed functional behavior (logic, data flow, state, persistence, APIs, commands, parsing, shared code). Omit it for visual-only, docs, comments, prompt text, tests-only, and read-only turns. Table, riskiest first: | # | What the user would see | Cause in this change | Proof it still works | Check it yourself |.
+  - `What the user would see`: an action and its wrong result (for example `Delete server with \"remove SSH key\" → key stays`), not the code change.
+  - `Proof it still works` starts with one label: `Old test:` <name>, `New test:` <name> (weak proof), `Ran in dev env:` <what>, `Callers read:` <which>, or `Not verified`.
+  - `Check it yourself`: one short manual step; `—` only for `Old test:` or `Ran in dev env:`.
+  - Check callers, shared types, persistence, other backends, web access, and mobile. Only real failure paths. If none, write `No possible regressions found` and the reason.
+- If the turn ends with a question for the user, put the question at the end of the recap: one line with the question, then `Reply with a number:`, then 2-8 numbered short options. Jean shows them as buttons. Ask the question exactly once: never before the `## Recap` heading, not even in an earlier message of the same turn or when a skill says so.
+- Screenshots or images the user should see: list them in a fenced code block with the language `screenshots`, one absolute path or URL per line, in viewing order. Do not also link them.
+- Plan mode: still call the native plan tool (Claude ExitPlanMode, Codex `<proposed_plan>`, Cursor/OpenCode equivalent). The recap never replaces it.
+- Skip the recap for a single one-line answer with no tool calls.
+- Never paste tool inputs, diffs, or raw command output. Summarize.";
 
 /// Injected when the parallel-execution magic prompt is cleared. Omitting the
 /// fan-out prompt is not enough: the model still spawns Task sub-agents unless
