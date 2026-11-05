@@ -610,7 +610,28 @@ const PROMPT_CONFIGS = PROMPT_SECTIONS.flatMap(s => s.configs)
 const PROMPT_CONFIG_KEYS = new Set(PROMPT_CONFIGS.map(config => config.key))
 const MAGIC_PROMPT_HIGHLIGHT_DURATION_MS = 1800
 
-function getMagicPromptReasoningDefaults(
+const BULK_REASONING_EFFORT = 'medium'
+
+/** Medium when the model offers it, else the model default. */
+function getBulkReasoningEffort(
+  catalog: Parameters<typeof getMagicPromptModelReasoning>[0],
+  backend: CliBackend,
+  model: MagicPromptModel
+): string | null {
+  const reasoning = getMagicPromptModelReasoning(
+    catalog,
+    backend,
+    model,
+    null,
+    []
+  )
+  if (!reasoning) return null
+  return reasoning.levels.some(level => level.value === BULK_REASONING_EFFORT)
+    ? BULK_REASONING_EFFORT
+    : reasoning.default
+}
+
+function getBulkReasoningEfforts(
   catalog: Parameters<typeof getMagicPromptModelReasoning>[0],
   backend: CliBackend,
   models: MagicPromptModels
@@ -618,14 +639,11 @@ function getMagicPromptReasoningDefaults(
   const efforts = { ...DEFAULT_MAGIC_PROMPT_EFFORTS }
   for (const config of PROMPT_CONFIGS) {
     if (!config.modelKey || !config.effortKey) continue
-    efforts[config.effortKey] =
-      getMagicPromptModelReasoning(
-        catalog,
-        backend,
-        models[config.modelKey],
-        null,
-        []
-      )?.default ?? null
+    efforts[config.effortKey] = getBulkReasoningEffort(
+      catalog,
+      backend,
+      models[config.modelKey]
+    )
   }
   return efforts
 }
@@ -638,9 +656,7 @@ function makeCodeReviewConfig(
   return {
     backend,
     model,
-    reasoning_effort:
-      getMagicPromptModelReasoning(catalog, backend, model, null, [])
-        ?.default ?? null,
+    reasoning_effort: getBulkReasoningEffort(catalog, backend, model),
     fix_mode: DEFAULT_MAGIC_PROMPT_MODES.code_review_fix_mode,
   }
 }
@@ -1529,7 +1545,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
       magic_prompt_providers: DEFAULT_MAGIC_PROMPT_PROVIDERS,
       magic_prompt_backends: backends,
       magic_prompt_modes: modes,
-      magic_prompt_efforts: getMagicPromptReasoningDefaults(
+      magic_prompt_efforts: getBulkReasoningEfforts(
         modelCatalog,
         backend,
         models

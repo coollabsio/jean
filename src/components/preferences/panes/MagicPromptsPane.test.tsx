@@ -722,42 +722,47 @@ describe('MagicPromptsPane', () => {
   })
 
   it.each([
-    'opencode',
-    'cursor',
-    'pi',
-    'commandcode',
-    'grok',
-    'kimi',
-    'antigravity',
-  ])('applies an available %s model to all prompts', async backend => {
-    installedBackendsMock = [backend]
-    const user = userEvent.setup()
-    render(<MagicPromptsPane />)
-    await user.click(
-      screen.getByRole('combobox', { name: 'Model for all prompts' })
-    )
-    const [option] = screen.getAllByRole('option')
-    if (!option) throw new Error('Expected an available model')
-    await user.click(option)
-    await user.click(
-      screen.getByRole('button', { name: 'Apply to all prompts' })
-    )
-    const patch = mutateMock.mock.calls[0]?.[0]
-    expect(new Set(Object.values(patch.magic_prompt_backends))).toEqual(
-      new Set([backend])
-    )
-    const models = Object.values(patch.magic_prompt_models)
-    expect(new Set(models).size).toBe(1)
-    expect(models[0]).toEqual(
-      expect.stringMatching(new RegExp('^' + backend + '/'))
-    )
-    expect(patch.magic_code_review_configs[0]).toEqual(
-      expect.objectContaining({
-        backend,
-        model: models[0],
-      })
-    )
-  })
+    ['opencode', 'medium'],
+    ['cursor', null],
+    ['pi', 'medium'],
+    ['commandcode', null],
+    ['grok', 'medium'],
+    ['kimi', 'medium'],
+    ['antigravity', 'medium'],
+  ])(
+    'applies an available %s model to all prompts',
+    async (backend, effort) => {
+      installedBackendsMock = [backend]
+      const user = userEvent.setup()
+      render(<MagicPromptsPane />)
+      await user.click(
+        screen.getByRole('combobox', { name: 'Model for all prompts' })
+      )
+      const [option] = screen.getAllByRole('option')
+      if (!option) throw new Error('Expected an available model')
+      await user.click(option)
+      await user.click(
+        screen.getByRole('button', { name: 'Apply to all prompts' })
+      )
+      const patch = mutateMock.mock.calls[0]?.[0]
+      expect(new Set(Object.values(patch.magic_prompt_backends))).toEqual(
+        new Set([backend])
+      )
+      const models = Object.values(patch.magic_prompt_models)
+      expect(new Set(models).size).toBe(1)
+      expect(models[0]).toEqual(
+        expect.stringMatching(new RegExp('^' + backend + '/'))
+      )
+      expect(patch.magic_prompt_efforts.investigate_issue_effort).toBe(effort)
+      expect(patch.magic_code_review_configs[0]).toEqual(
+        expect.objectContaining({
+          backend,
+          model: models[0],
+          reasoning_effort: effort,
+        })
+      )
+    }
+  )
 
   it('shows an empty state when no backend is installed', async () => {
     installedBackendsMock = []
