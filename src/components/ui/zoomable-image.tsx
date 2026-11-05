@@ -4,6 +4,8 @@ import { cn } from '@/lib/utils'
 const MAX_SCALE = 5
 const DOUBLE_TAP_SCALE = 2.5
 const DOUBLE_TAP_MS = 300
+/** Horizontal drag distance (px) at scale 1 that changes the slide. */
+const SWIPE_THRESHOLD = 60
 
 interface Point {
   x: number
@@ -29,15 +31,20 @@ function midpoint(a: Point, b: Point): Point {
 /**
  * Pinch-zoom, drag-pan, and double-tap/double-click zoom for its children.
  * The page viewport disables browser zoom, so images need their own.
+ * With `onSwipe`, a horizontal drag at scale 1 moves the content with the
+ * finger and calls `onSwipe(1)` (next) or `onSwipe(-1)` (previous) on release.
  */
 export function ZoomableImage({
   children,
   className,
+  onSwipe,
 }: {
   children: ReactNode
   className?: string
+  onSwipe?: (direction: 1 | -1) => void
 }) {
   const [view, setView] = useState<View>(IDENTITY)
+  const [dragging, setDragging] = useState(false)
   const viewRef = useRef(view)
   const pointers = useRef(new Map<number, Point>())
   const gesture = useRef<{
@@ -85,6 +92,7 @@ export function ZoomableImage({
     if (pointers.current.size === 1) {
       tap.current.downAt = event.timeStamp
       tap.current.moved = false
+      setDragging(true)
     } else {
       tap.current.moved = true
     }
@@ -119,6 +127,8 @@ export function ZoomableImage({
     if (Math.hypot(dx, dy) > 8) tap.current.moved = true
     if (start.scale > 1) {
       apply({ ...start, x: start.x + dx, y: start.y + dy })
+    } else if (onSwipe) {
+      apply({ scale: 1, x: dx, y: 0 })
     }
   }
 
@@ -126,6 +136,7 @@ export function ZoomableImage({
     if (!pointers.current.delete(event.pointerId)) return
     const { scale, x, y } = viewRef.current
     if (pointers.current.size === 0) {
+      setDragging(false)
       const isTap =
         !tap.current.moved &&
         event.timeStamp - tap.current.downAt < DOUBLE_TAP_MS
@@ -143,7 +154,11 @@ export function ZoomableImage({
         }
       } else {
         tap.current.lastTapAt = isTap ? event.timeStamp : -Infinity
-        if (scale <= 1 && (x !== 0 || y !== 0)) apply(IDENTITY)
+        if (scale <= 1 && onSwipe && Math.abs(x) >= SWIPE_THRESHOLD) {
+          onSwipe(x < 0 ? 1 : -1)
+        } else if (scale <= 1 && (x !== 0 || y !== 0)) {
+          apply(IDENTITY)
+        }
       }
     }
     beginGesture()
@@ -164,7 +179,10 @@ export function ZoomableImage({
       onDragStart={event => event.preventDefault()}
     >
       <div
-        className="flex max-h-full max-w-full items-center justify-center"
+        className={cn(
+          'flex max-h-full max-w-full items-center justify-center',
+          !dragging && 'transition-transform duration-200 ease-out'
+        )}
         style={{
           transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`,
         }}

@@ -69,9 +69,15 @@ function ScreenshotGalleryContent({
   serverId?: string
   initialIndex: number
 }) {
-  const [openIndex, setOpenIndex] = useState(initialIndex)
-  const step = (delta: number) =>
-    setOpenIndex(index => (index + delta + paths.length) % paths.length)
+  const [{ openIndex, direction }, setSlide] = useState({
+    openIndex: initialIndex,
+    direction: 0,
+  })
+  const step = (delta: 1 | -1) =>
+    setSlide(({ openIndex: index }) => ({
+      openIndex: (index + delta + paths.length) % paths.length,
+      direction: delta,
+    }))
 
   return (
     <DialogContent
@@ -85,10 +91,16 @@ function ScreenshotGalleryContent({
         <DialogTitle>Screenshots</DialogTitle>
         <DialogDescription>Screenshot gallery</DialogDescription>
       </VisuallyHidden>
-      <div className="flex h-full flex-col items-center justify-center gap-3 p-4 sm:p-0">
+      <div className="flex h-full flex-col items-center justify-center gap-3 overflow-hidden p-4 sm:p-0">
         <ZoomableImage
-          key={paths[openIndex]}
-          className="min-h-0 w-full flex-1 sm:flex-none"
+          key={`${openIndex}-${paths[openIndex]}`}
+          onSwipe={paths.length > 1 ? step : undefined}
+          className={cn(
+            'min-h-0 w-full flex-1 sm:flex-none',
+            direction !== 0 && 'animate-in fade-in-0 duration-200 ease-out',
+            direction === 1 && 'slide-in-from-right',
+            direction === -1 && 'slide-in-from-left'
+          )}
         >
           <Screenshot
             path={paths[openIndex] ?? ''}

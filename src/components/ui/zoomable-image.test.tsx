@@ -1,11 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { ZoomableImage } from './zoomable-image'
 
 // Container is 200x200 at the origin, so its center is (100, 100).
-function setup() {
+function setup(onSwipe?: (direction: 1 | -1) => void) {
   render(
-    <ZoomableImage>
+    <ZoomableImage onSwipe={onSwipe}>
       <img src="shot.png" alt="shot" />
     </ZoomableImage>
   )
@@ -83,6 +83,33 @@ describe('ZoomableImage', () => {
     pointer('pointerUp', container, 1, 150, 100, 1050)
     pointer('pointerDown', container, 1, 150, 100, 1150)
     pointer('pointerUp', container, 1, 150, 100, 1200)
+    expect(transform()).toBe('translate(0px, 0px) scale(1)')
+  })
+
+  it('follows a horizontal drag and swipes to the next or previous slide', () => {
+    const onSwipe = vi.fn()
+    const { container, transform } = setup(onSwipe)
+
+    pointer('pointerDown', container, 1, 150, 100)
+    pointer('pointerMove', container, 1, 60, 120)
+    expect(transform()).toBe('translate(-90px, 0px) scale(1)')
+    pointer('pointerUp', container, 1, 60, 120)
+    expect(onSwipe).toHaveBeenLastCalledWith(1)
+
+    pointer('pointerDown', container, 1, 50, 100, 1000)
+    pointer('pointerMove', container, 1, 150, 100, 1100)
+    pointer('pointerUp', container, 1, 150, 100, 1100)
+    expect(onSwipe).toHaveBeenLastCalledWith(-1)
+  })
+
+  it('snaps back on a short drag without swiping', () => {
+    const onSwipe = vi.fn()
+    const { container, transform } = setup(onSwipe)
+
+    pointer('pointerDown', container, 1, 100, 100)
+    pointer('pointerMove', container, 1, 70, 100)
+    pointer('pointerUp', container, 1, 70, 100)
+    expect(onSwipe).not.toHaveBeenCalled()
     expect(transform()).toBe('translate(0px, 0px) scale(1)')
   })
 })
