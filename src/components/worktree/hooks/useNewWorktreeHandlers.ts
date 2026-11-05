@@ -25,7 +25,7 @@ import type { SentryIssue, SentryIssueContext } from '@/types/sentry'
 import type { useNewWorktreeData } from './useNewWorktreeData'
 import type { TabId } from '../new-worktree-tabs'
 import type { SecuritySelection } from '../SecurityAlertsTab'
-import { reportBulkInvestigateResults } from '../bulkInvestigateUtils'
+import { runBulkInvestigation } from '../bulkInvestigateUtils'
 import {
   contextLinkMatchLabel,
   openContextLinkMatch,
@@ -517,66 +517,51 @@ export function useNewWorktreeHandlers(
       if (issues.length < 1) return
 
       setIsBulkInvestigating(true)
-      const toastId = toast.loading(
-        `Starting investigation of ${issues.length} issues…`
-      )
-
-      const results = await Promise.allSettled(
-        issues.map(async issue => {
-          const issueDetail = await invoke<
-            GitHubIssue & {
-              comments: {
-                body: string
-                author: { login: string }
-                created_at: string
-              }[]
-            }
-          >('get_github_issue', {
-            projectPath,
-            issueNumber: issue.number,
-            ...githubRepoArgs(issue.repo),
-          })
-
-          const issueContext: IssueContext = {
-            number: issueDetail.number,
-            title: issueDetail.title,
-            body: issueDetail.body,
-            comments: (issueDetail.comments ?? []).flatMap(c =>
-              c && c.created_at && c.author
-                ? [
-                    {
-                      body: c.body ?? '',
-                      author: { login: c.author.login ?? '' },
-                      createdAt: c.created_at,
-                    },
-                  ]
-                : []
-            ),
-            ...githubRepoArgs(issue.repo),
+      await runBulkInvestigation(issues, 'issue', 'issues', async issue => {
+        const issueDetail = await invoke<
+          GitHubIssue & {
+            comments: {
+              body: string
+              author: { login: string }
+              created_at: string
+            }[]
           }
-
-          useUIStore.getState().incrementPendingBackgroundCreations()
-          const worktree = await createWorktree.mutateAsync({
-            projectId: selectedProjectId,
-            issueContext,
-            background: true,
-          })
-          useUIStore
-            .getState()
-            .markWorktreeForAutoInvestigate(worktree.id, investigationOverride)
-          return issue.number
+        >('get_github_issue', {
+          projectPath,
+          issueNumber: issue.number,
+          ...githubRepoArgs(issue.repo),
         })
-      )
 
+        const issueContext: IssueContext = {
+          number: issueDetail.number,
+          title: issueDetail.title,
+          body: issueDetail.body,
+          comments: (issueDetail.comments ?? []).flatMap(c =>
+            c && c.created_at && c.author
+              ? [
+                  {
+                    body: c.body ?? '',
+                    author: { login: c.author.login ?? '' },
+                    createdAt: c.created_at,
+                  },
+                ]
+              : []
+          ),
+          ...githubRepoArgs(issue.repo),
+        }
+
+        useUIStore.getState().incrementPendingBackgroundCreations()
+        const worktree = await createWorktree.mutateAsync({
+          projectId: selectedProjectId,
+          issueContext,
+          background: true,
+        })
+        useUIStore
+          .getState()
+          .markWorktreeForAutoInvestigate(worktree.id, investigationOverride)
+        return worktree
+      })
       setIsBulkInvestigating(false)
-      const succeeded = results.filter(r => r.status === 'fulfilled').length
-      reportBulkInvestigateResults(
-        toastId,
-        succeeded,
-        results.length - succeeded,
-        'issue',
-        'issues'
-      )
     },
     [
       selectedProjectId,
@@ -606,39 +591,21 @@ export function useNewWorktreeHandlers(
       if (prs.length < 1) return
 
       setIsBulkInvestigating(true)
-      const toastId = toast.loading(
-        `Starting investigation of ${prs.length} PRs…`
-      )
+      await runBulkInvestigation(prs, 'PR', 'PRs', async pr => {
+        const prContext = await fetchPullRequestContext(projectPath, pr)
 
-      const results = await Promise.allSettled(
-        prs.map(async pr => {
-          const prContext = await fetchPullRequestContext(projectPath, pr)
-
-          useUIStore.getState().incrementPendingBackgroundCreations()
-          const worktree = await createWorktree.mutateAsync({
-            projectId: selectedProjectId,
-            prContext,
-            background: true,
-          })
-          useUIStore
-            .getState()
-            .markWorktreeForAutoInvestigatePR(
-              worktree.id,
-              investigationOverride
-            )
-          return pr.number
+        useUIStore.getState().incrementPendingBackgroundCreations()
+        const worktree = await createWorktree.mutateAsync({
+          projectId: selectedProjectId,
+          prContext,
+          background: true,
         })
-      )
-
+        useUIStore
+          .getState()
+          .markWorktreeForAutoInvestigatePR(worktree.id, investigationOverride)
+        return worktree
+      })
       setIsBulkInvestigating(false)
-      const succeeded = results.filter(r => r.status === 'fulfilled').length
-      reportBulkInvestigateResults(
-        toastId,
-        succeeded,
-        results.length - succeeded,
-        'PR',
-        'PRs'
-      )
     },
     [
       selectedProjectId,
@@ -665,87 +632,72 @@ export function useNewWorktreeHandlers(
       if (items.length < 1) return
 
       setIsBulkInvestigating(true)
-      const toastId = toast.loading(
-        `Starting investigation of ${items.length} security items…`
-      )
-
-      const results = await Promise.allSettled(
-        items.map(async item => {
-          if (item.kind === 'alert') {
-            const alertDetail = await invoke<DependabotAlert>(
-              'get_dependabot_alert',
-              {
-                projectPath,
-                alertNumber: item.alert.number,
-              }
-            )
-            const securityContext: SecurityAlertContext = {
-              number: alertDetail.number,
-              packageName: alertDetail.packageName,
-              packageEcosystem: alertDetail.packageEcosystem,
-              severity: alertDetail.severity,
-              summary: alertDetail.summary,
-              description: alertDetail.description,
-              ghsaId: alertDetail.ghsaId,
-              cveId: alertDetail.cveId,
-              manifestPath: alertDetail.manifestPath,
-              htmlUrl: alertDetail.htmlUrl,
-            }
-            useUIStore.getState().incrementPendingBackgroundCreations()
-            const worktree = await createWorktree.mutateAsync({
-              projectId: selectedProjectId,
-              securityContext,
-              background: true,
-            })
-            useUIStore
-              .getState()
-              .markWorktreeForAutoInvestigateSecurityAlert(worktree.id)
-            return `alert:${item.alert.number}`
-          }
-
-          const advisoryDetail = await invoke<RepositoryAdvisory>(
-            'get_repository_advisory',
+      await runBulkInvestigation(items, 'item', 'items', async item => {
+        if (item.kind === 'alert') {
+          const alertDetail = await invoke<DependabotAlert>(
+            'get_dependabot_alert',
             {
               projectPath,
-              ghsaId: item.advisory.ghsaId,
+              alertNumber: item.alert.number,
             }
           )
-          const advisoryContext: AdvisoryContext = {
-            ghsaId: advisoryDetail.ghsaId,
-            severity: advisoryDetail.severity,
-            summary: advisoryDetail.summary,
-            description: advisoryDetail.description,
-            cveId: advisoryDetail.cveId,
-            vulnerabilities: advisoryDetail.vulnerabilities.map(v => ({
-              packageName: v.packageName,
-              packageEcosystem: v.packageEcosystem,
-              vulnerableVersionRange: v.vulnerableVersionRange,
-              patchedVersions: v.patchedVersions,
-            })),
-            htmlUrl: advisoryDetail.htmlUrl,
+          const securityContext: SecurityAlertContext = {
+            number: alertDetail.number,
+            packageName: alertDetail.packageName,
+            packageEcosystem: alertDetail.packageEcosystem,
+            severity: alertDetail.severity,
+            summary: alertDetail.summary,
+            description: alertDetail.description,
+            ghsaId: alertDetail.ghsaId,
+            cveId: alertDetail.cveId,
+            manifestPath: alertDetail.manifestPath,
+            htmlUrl: alertDetail.htmlUrl,
           }
           useUIStore.getState().incrementPendingBackgroundCreations()
           const worktree = await createWorktree.mutateAsync({
             projectId: selectedProjectId,
-            advisoryContext,
+            securityContext,
             background: true,
           })
           useUIStore
             .getState()
-            .markWorktreeForAutoInvestigateAdvisory(worktree.id)
-          return `advisory:${item.advisory.ghsaId}`
-        })
-      )
+            .markWorktreeForAutoInvestigateSecurityAlert(worktree.id)
+          return worktree
+        }
 
+        const advisoryDetail = await invoke<RepositoryAdvisory>(
+          'get_repository_advisory',
+          {
+            projectPath,
+            ghsaId: item.advisory.ghsaId,
+          }
+        )
+        const advisoryContext: AdvisoryContext = {
+          ghsaId: advisoryDetail.ghsaId,
+          severity: advisoryDetail.severity,
+          summary: advisoryDetail.summary,
+          description: advisoryDetail.description,
+          cveId: advisoryDetail.cveId,
+          vulnerabilities: advisoryDetail.vulnerabilities.map(v => ({
+            packageName: v.packageName,
+            packageEcosystem: v.packageEcosystem,
+            vulnerableVersionRange: v.vulnerableVersionRange,
+            patchedVersions: v.patchedVersions,
+          })),
+          htmlUrl: advisoryDetail.htmlUrl,
+        }
+        useUIStore.getState().incrementPendingBackgroundCreations()
+        const worktree = await createWorktree.mutateAsync({
+          projectId: selectedProjectId,
+          advisoryContext,
+          background: true,
+        })
+        useUIStore
+          .getState()
+          .markWorktreeForAutoInvestigateAdvisory(worktree.id)
+        return worktree
+      })
       setIsBulkInvestigating(false)
-      const succeeded = results.filter(r => r.status === 'fulfilled').length
-      reportBulkInvestigateResults(
-        toastId,
-        succeeded,
-        results.length - succeeded,
-        'item',
-        'items'
-      )
     },
     [selectedProjectId, selectedProject, createWorktree, skipLinkedItems]
   )
@@ -763,45 +715,30 @@ export function useNewWorktreeHandlers(
       if (issues.length < 1) return
 
       setIsBulkInvestigating(true)
-      const toastId = toast.loading(
-        `Starting investigation of ${issues.length} Linear issues…`
-      )
-
-      const results = await Promise.allSettled(
-        issues.map(async issue => {
-          const detail = await invoke<LinearIssueDetail>('get_linear_issue', {
-            projectId: selectedProjectId,
-            issueId: issue.id,
-          })
-          const linearContext = {
-            id: detail.id,
-            identifier: detail.identifier,
-            title: detail.title,
-            description: detail.description,
-            comments: detail.comments ?? [],
-          }
-          useUIStore.getState().incrementPendingBackgroundCreations()
-          const worktree = await createWorktree.mutateAsync({
-            projectId: selectedProjectId,
-            linearContext,
-            background: true,
-          })
-          useUIStore
-            .getState()
-            .markWorktreeForAutoInvestigateLinearIssue(worktree.id)
-          return issue.id
+      await runBulkInvestigation(issues, 'issue', 'issues', async issue => {
+        const detail = await invoke<LinearIssueDetail>('get_linear_issue', {
+          projectId: selectedProjectId,
+          issueId: issue.id,
         })
-      )
-
+        const linearContext = {
+          id: detail.id,
+          identifier: detail.identifier,
+          title: detail.title,
+          description: detail.description,
+          comments: detail.comments ?? [],
+        }
+        useUIStore.getState().incrementPendingBackgroundCreations()
+        const worktree = await createWorktree.mutateAsync({
+          projectId: selectedProjectId,
+          linearContext,
+          background: true,
+        })
+        useUIStore
+          .getState()
+          .markWorktreeForAutoInvestigateLinearIssue(worktree.id)
+        return worktree
+      })
       setIsBulkInvestigating(false)
-      const succeeded = results.filter(r => r.status === 'fulfilled').length
-      reportBulkInvestigateResults(
-        toastId,
-        succeeded,
-        results.length - succeeded,
-        'issue',
-        'issues'
-      )
     },
     [selectedProjectId, createWorktree, skipLinkedItems]
   )
@@ -815,38 +752,23 @@ export function useNewWorktreeHandlers(
       if (issues.length < 1) return
 
       setIsBulkInvestigating(true)
-      const toastId = toast.loading(
-        `Starting investigation of ${issues.length} Sentry issues…`
-      )
-
-      const results = await Promise.allSettled(
-        issues.map(async issue => {
-          const sentryContext = await invoke<SentryIssueContext>(
-            'get_sentry_issue',
-            { projectId: selectedProjectId, issueId: issue.id }
-          )
-          useUIStore.getState().incrementPendingBackgroundCreations()
-          const worktree = await createWorktree.mutateAsync({
-            projectId: selectedProjectId,
-            sentryContext,
-            background: true,
-          })
-          useUIStore
-            .getState()
-            .markWorktreeForAutoInvestigateSentryIssue(worktree.id)
-          return issue.id
+      await runBulkInvestigation(issues, 'issue', 'issues', async issue => {
+        const sentryContext = await invoke<SentryIssueContext>(
+          'get_sentry_issue',
+          { projectId: selectedProjectId, issueId: issue.id }
+        )
+        useUIStore.getState().incrementPendingBackgroundCreations()
+        const worktree = await createWorktree.mutateAsync({
+          projectId: selectedProjectId,
+          sentryContext,
+          background: true,
         })
-      )
-
+        useUIStore
+          .getState()
+          .markWorktreeForAutoInvestigateSentryIssue(worktree.id)
+        return worktree
+      })
       setIsBulkInvestigating(false)
-      const succeeded = results.filter(r => r.status === 'fulfilled').length
-      reportBulkInvestigateResults(
-        toastId,
-        succeeded,
-        results.length - succeeded,
-        'issue',
-        'issues'
-      )
     },
     [selectedProjectId, createWorktree]
   )

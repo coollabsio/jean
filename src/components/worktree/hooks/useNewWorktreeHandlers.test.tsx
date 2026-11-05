@@ -1,13 +1,16 @@
 import { act, renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { invoke } from '@/lib/transport'
+import { invoke, listen } from '@/lib/transport'
 import { useUIStore } from '@/store/ui-store'
 import type { GitHubIssue } from '@/types/github'
 import { useNewWorktreeHandlers } from './useNewWorktreeHandlers'
 import { openContextLinkMatch } from '@/hooks/useContextLinkUsage'
 import { toast } from 'sonner'
 
-vi.mock('@/lib/transport', () => ({ invoke: vi.fn() }))
+vi.mock('@/lib/transport', () => ({
+  invoke: vi.fn(),
+  listen: vi.fn(async () => () => undefined),
+}))
 vi.mock('@/hooks/useContextLinkUsage', () => ({
   openContextLinkMatch: vi.fn(),
   contextLinkMatchLabel: (match: { worktreeName: string }) =>
@@ -87,7 +90,13 @@ describe('useNewWorktreeHandlers duplicate guard', () => {
     )
     const { result, createWorktree } = setup(getMatches)
     vi.mocked(invoke).mockResolvedValue({ number: 2, title: 't' } as never)
-    createWorktree.mutateAsync.mockResolvedValue({ id: 'wt-new' })
+    createWorktree.mutateAsync.mockImplementation(async () => {
+      const worktree = { id: 'wt-new' }
+      for (const [event, handler] of vi.mocked(listen).mock.calls) {
+        if (event === 'worktree:created') handler({ payload: { worktree } })
+      }
+      return worktree
+    })
 
     await act(async () => {
       await result.current.handleBulkInvestigateIssues([
