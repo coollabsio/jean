@@ -185,7 +185,6 @@ import {
   useDeleteWorktree,
   useCloseBaseSessionClean,
 } from '@/services/projects'
-import { TerminalStatusIndicator } from '@/hooks/useWorktreeTerminalStatus'
 import { usePreferences } from '@/services/preferences'
 import { DEFAULT_KEYBINDINGS, formatShortcutDisplay } from '@/types/keybindings'
 import type { CheckStatus, PrDisplayStatus } from '@/types/pr-status'
@@ -777,12 +776,6 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
           <span className="ml-auto shrink-0 pl-2 text-xs tabular-nums text-muted-foreground">
             {lastActivity}
           </span>
-          {isVisible && (
-            <TerminalStatusIndicator
-              worktreeId={worktree.id}
-              iconSize="h-3 w-3"
-            />
-          )}
         </div>
         {labelsExpanded && compactLabels.length > 0 && (
           <button
@@ -903,12 +896,6 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
               runningCount > 0 && (
                 <WorkingWaveform label={`${runningCount} running`} />
               )
-            )}
-            {isVisible && (
-              <TerminalStatusIndicator
-                worktreeId={worktree.id}
-                iconSize="h-3 w-3"
-              />
             )}
             <span className="flex min-w-0 flex-1 flex-col gap-1 font-medium sm:flex-row sm:items-center sm:gap-1.5">
               <span className="flex min-w-0 items-center gap-1.5">
