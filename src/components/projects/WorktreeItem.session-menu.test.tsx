@@ -27,9 +27,6 @@ vi.mock('@/hooks/useRemotePicker', () => ({
 vi.mock('@/components/layout/SidebarWidthContext', () => ({
   useSidebarWidth: () => 320,
 }))
-vi.mock('@/hooks/useWorktreeTerminalStatus', () => ({
-  TerminalStatusIndicator: () => null,
-}))
 vi.mock('@/services/git-status', () => ({
   useGitStatus: () => ({ data: null }),
 }))

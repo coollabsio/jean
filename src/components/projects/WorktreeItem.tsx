@@ -11,7 +11,6 @@ import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { pushNeedsRemotePicker, useRemotePicker } from '@/hooks/useRemotePicker'
-import { TerminalStatusIndicator } from '@/hooks/useWorktreeTerminalStatus'
 import { WorktreeContextMenu } from './WorktreeContextMenu'
 import { useWorktreeMenuActions } from './useWorktreeMenuActions'
 import {
@@ -940,9 +939,6 @@ export const WorktreeItem = memo(function WorktreeItem({
               </button>
             </span>
           )}
-
-          {/* Worktree-level terminal activity */}
-          <TerminalStatusIndicator worktreeId={worktree.id} />
 
           {/* Sync / Pull / Push badges */}
           {showStatusBadges && (behindCount > 0 || pushCount > 0) && (

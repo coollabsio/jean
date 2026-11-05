@@ -18,9 +18,6 @@ vi.mock('@/components/layout/SidebarWidthContext', () => ({
   // Session count badges only render at status-badge widths (>= 320px).
   useSidebarWidth: () => 320,
 }))
-vi.mock('@/hooks/useWorktreeTerminalStatus', () => ({
-  TerminalStatusIndicator: () => null,
-}))
 vi.mock('@/services/git-status', () => ({
   useGitStatus: () => ({ data: null }),
 }))
