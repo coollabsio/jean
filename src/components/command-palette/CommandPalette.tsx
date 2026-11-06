@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { MessageSquare, Server, Settings } from '@/components/icons/reicon'
 import { useUIStore } from '@/store/ui-store'
@@ -100,6 +100,17 @@ export function CommandPalette() {
       MESSAGE_SEARCH_DEBOUNCE_MS
     )
     return () => clearTimeout(timer)
+  }, [search])
+  // cmdk selects the new first row on every search change, but it scrolls to
+  // the row that was selected before (its aria-selected is not updated yet).
+  // New groups above push that old row down, so the list jumps away from the
+  // results. Scroll back to the top, where the new selected row is.
+  const listRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      listRef.current?.scrollTo({ top: 0 })
+    })
+    return () => cancelAnimationFrame(frame)
   }, [search])
   const { data: messageSearch } = useSessionMessageSearch(
     messageQuery,
@@ -474,7 +485,7 @@ export function CommandPalette() {
         value={search}
         onValueChange={setSearch}
       />
-      <CommandList className="max-h-[70dvh] sm:max-h-[300px]">
+      <CommandList ref={listRef} className="max-h-[70dvh] sm:max-h-[300px]">
         <CommandEmpty>No results found.</CommandEmpty>
 
         {/* Previous place first for quick CMD+K → Enter switching */}
