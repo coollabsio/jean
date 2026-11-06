@@ -229,12 +229,36 @@ function tableToTsv(data: string[][]): string {
   return data.map(row => row.join('\t')).join('\n')
 }
 
-function MarkdownImage({ src, alt }: { src?: string; alt?: string }) {
+function MarkdownImage({
+  src,
+  alt,
+  width,
+  height,
+}: {
+  src?: string
+  alt?: string
+  width?: string | number
+  height?: string | number
+}) {
   const { sessionId } = useContext(MarkdownTableContext)
   const serverId = sessionId
     ? parseServerResourceKey(sessionId)?.serverId
     : undefined
   const imageSrc = useImageSrc(src, serverId)
+
+  // Raw HTML images with an explicit size are inline icons (for example the
+  // CodeRabbit severity and <summary> icons). Keep them on the text line.
+  if (width || height) {
+    return (
+      <img
+        src={imageSrc}
+        alt={alt || ''}
+        width={width}
+        height={height}
+        className="inline-block align-text-bottom max-w-full"
+      />
+    )
+  }
 
   return (
     <img
