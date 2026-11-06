@@ -78,6 +78,11 @@ export function secretSavedMessage(label: string, saved: SavedSecret): string {
   return `I saved "${label}" to a private file: ${saved.path}\nRead it only inside a shell command, for example TOKEN="$(cat '${saved.path}')". Do not print the value. The file is ${secretRetentionText(saved.retention)}.`
 }
 
+/** The agent needs this message, the user does not: the chat hides it. */
+export function isSecretSavedMessage(content: string): boolean {
+  return /^I saved ".*" to a private file: /.test(content)
+}
+
 export function secretDeclinedMessage(label: string): string {
   return `I declined to give "${label}".`
 }

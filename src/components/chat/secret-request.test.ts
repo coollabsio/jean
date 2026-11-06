@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ToolCall } from '@/types/chat'
 import {
+  isSecretSavedMessage,
   secretDeclinedMessage,
   secretRequest,
   secretSavedMessage,
@@ -70,5 +71,17 @@ describe('secret messages', () => {
     expect(saved).toContain(`TOKEN="$(cat '/data/secrets/abc')"`)
     expect(saved).toContain('kept until the user deletes it')
     expect(secretDeclinedMessage('Key')).toBe('I declined to give "Key".')
+  })
+})
+
+describe('isSecretSavedMessage', () => {
+  it('matches only the saved-secret message', () => {
+    expect(
+      isSecretSavedMessage(
+        secretSavedMessage('API token', { path: '/s/1', retention: 'day' })
+      )
+    ).toBe(true)
+    expect(isSecretSavedMessage(secretDeclinedMessage('API token'))).toBe(false)
+    expect(isSecretSavedMessage('Please save the token')).toBe(false)
   })
 })

@@ -44,6 +44,7 @@ import { SecretListCard } from './SecretListCard'
 import {
   isSecretListTool,
   isSecretRequestTool,
+  isSecretSavedMessage,
   secretRequest,
 } from './secret-request'
 import { SteeredPromptGroup } from './SteeredPromptGroup'
@@ -918,6 +919,7 @@ export const CompactMessageList = memo(
         messages.forEach((message, globalIndex) => {
           if (message.role === 'user') {
             flush()
+            if (isSecretSavedMessage(message.content)) return
             items.push({ kind: 'message', message, globalIndex })
             return
           }
