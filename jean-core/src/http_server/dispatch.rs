@@ -1813,8 +1813,8 @@ pub async fn dispatch_command(
         // =====================================================================
         // Background Tasks (polling control)
         // =====================================================================
-        // Reached by native IPC; WebSocket clients are handled per connection
-        // in `websocket::dispatch_client_invoke`.
+        // Reached by native IPC; WebSocket clients report focus and active
+        // worktree per connection in `websocket::dispatch_client_invoke`.
         "set_app_focus_state" => {
             let focused: bool = from_field(&args, "focused")?;
             let state = app.state::<crate::background_tasks::BackgroundTaskManager>();
@@ -1822,22 +1822,7 @@ pub async fn dispatch_command(
             Ok(Value::Null)
         }
         "set_active_worktree_for_polling" => {
-            let worktree_id: Option<String> = field_opt(&args, "worktreeId", "worktree_id")?;
-            let worktree_path: Option<String> = field_opt(&args, "worktreePath", "worktree_path")?;
-            let base_branch: Option<String> = field_opt(&args, "baseBranch", "base_branch")?;
-            let pr_number: Option<u32> = field_opt(&args, "prNumber", "pr_number")?;
-            let pr_url: Option<String> = field_opt(&args, "prUrl", "pr_url")?;
-            let state = app.state::<crate::background_tasks::BackgroundTaskManager>();
-            crate::background_tasks::commands::set_active_worktree_for_polling(
-                app.clone(),
-                state,
-                worktree_id,
-                worktree_path,
-                base_branch,
-                pr_number,
-                pr_url,
-            )?;
-            Ok(Value::Null)
+            set_active_worktree_for_polling(app, crate::background_tasks::UiClient::Native, &args)
         }
         "trigger_immediate_git_poll" => {
             let state = app.state::<crate::background_tasks::BackgroundTaskManager>();
@@ -4620,6 +4605,31 @@ pub(crate) fn field<T: serde::de::DeserializeOwned>(
     snake: &str,
 ) -> Result<T, String> {
     from_field(args, camel).or_else(|_| from_field(args, snake))
+}
+
+/// Parse `set_active_worktree_for_polling` args and record the worktree
+/// `client` selected. Shared by the native arm and per-connection WebSocket
+/// handling.
+pub(super) fn set_active_worktree_for_polling(
+    app: &AppHandle,
+    client: crate::background_tasks::UiClient,
+    args: &Value,
+) -> Result<Value, String> {
+    let worktree_id: Option<String> = field_opt(args, "worktreeId", "worktree_id")?;
+    let worktree_path: Option<String> = field_opt(args, "worktreePath", "worktree_path")?;
+    let base_branch: Option<String> = field_opt(args, "baseBranch", "base_branch")?;
+    let pr_number: Option<u32> = field_opt(args, "prNumber", "pr_number")?;
+    let pr_url: Option<String> = field_opt(args, "prUrl", "pr_url")?;
+    crate::background_tasks::commands::set_active_worktree_for_polling(
+        app.clone(),
+        client,
+        worktree_id,
+        worktree_path,
+        base_branch,
+        pr_number,
+        pr_url,
+    )?;
+    Ok(Value::Null)
 }
 
 /// Try camelCase field first, then snake_case. For optional fields.

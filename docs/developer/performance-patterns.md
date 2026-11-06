@@ -147,10 +147,14 @@ in-flight flag, so it never delays active-worktree polling or overlaps its
 previous run. Both sweeps and `fetch_worktrees_status` share
 `for_each_bounded`, which caps concurrent workers to keep fd usage flat.
 
-Polling pauses only when every UI client has blurred. Focus is tracked per
-client: the native window and each WebSocket connection. A closed connection
-is dropped from the set. Before any client reports, polling runs, which covers a
-headless server with no UI attached yet.
+Polling pauses only when every UI client has blurred. Focus and the selected
+(active) worktree are tracked per client (`UiClient`): the native window and
+each WebSocket connection. Each focused client's active worktree gets fast
+polling (git every 10s, PR every 30s), once per worktree even when several
+clients select it. A blurred client's worktree falls back to the sweeps. A
+closed connection drops both its focus and its active worktree. Before any
+client reports focus, polling runs for every client's active worktree, which
+covers a headless server with no UI attached yet.
 
 The global sweep list should be limited to worktrees with no cached status yet,
 recent user activity, cached local/unpushed changes, or an open PR. Clean,

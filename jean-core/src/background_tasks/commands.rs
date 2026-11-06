@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use tauri::{AppHandle, State};
 
-use super::{BackgroundTaskManager, FocusClient};
+use super::{BackgroundTaskManager, UiClient};
 use crate::projects::git_status::ActiveWorktreeInfo;
 use crate::projects::storage::load_projects_data;
 use serde::Deserialize;
@@ -64,16 +64,17 @@ pub fn set_app_focus_state(
     state: State<'_, BackgroundTaskManager>,
     focused: bool,
 ) -> Result<(), String> {
-    state.set_client_focus(FocusClient::Native, focused);
+    state.set_client_focus(UiClient::Native, focused);
     Ok(())
 }
 
-/// Set the active worktree for git status polling
+/// Set the worktree `client` has selected, for fast git status polling.
 ///
-/// Pass null/None values to clear the active worktree and stop polling.
+/// Pass null/None values to clear that client's active worktree. Loads
+/// projects data from disk, so callers on an async loop should run it off-thread.
 pub fn set_active_worktree_for_polling(
     app: AppHandle,
-    state: State<'_, BackgroundTaskManager>,
+    client: UiClient,
     worktree_id: Option<String>,
     worktree_path: Option<String>,
     base_branch: Option<String>,
@@ -97,7 +98,8 @@ pub fn set_active_worktree_for_polling(
         _ => None,
     };
 
-    state.set_active_worktree(info);
+    app.state::<BackgroundTaskManager>()
+        .set_active_worktree(client, info);
     Ok(())
 }
 

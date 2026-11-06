@@ -7,9 +7,9 @@ use std::time::{Duration, Instant};
 use tauri::AppHandle;
 use tokio::sync::{broadcast, mpsc};
 
-use super::dispatch::{dispatch_command_off_runtime, from_field};
+use super::dispatch::{dispatch_command_off_runtime, from_field, set_active_worktree_for_polling};
 use super::{WsBroadcaster, WsEvent};
-use crate::background_tasks::{BackgroundTaskManager, FocusClient};
+use crate::background_tasks::{BackgroundTaskManager, UiClient};
 
 static NEXT_WS_CLIENT_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -91,13 +91,10 @@ fn spawn_ordered_dispatch_response(
     })
 }
 
-/// Focus is tracked per connection, so it is handled here where the
-/// connection id is known instead of in the generic dispatch arm.
-fn set_ws_client_focus(
-    app: &AppHandle,
-    client: FocusClient,
-    args: &Value,
-) -> Result<Value, String> {
+/// Focus and the active worktree are tracked per connection, so they are
+/// handled here where the connection id is known instead of in the generic
+/// dispatch arm.
+fn set_ws_client_focus(app: &AppHandle, client: UiClient, args: &Value) -> Result<Value, String> {
     let focused: bool = from_field(args, "focused")?;
     app.state::<BackgroundTaskManager>()
         .set_client_focus(client, focused);
@@ -108,7 +105,7 @@ fn set_ws_client_focus(
 /// dispatches independently so long-running work cannot block the WS loop.
 fn dispatch_client_invoke(
     app: &AppHandle,
-    focus_client: FocusClient,
+    ui_client: UiClient,
     id: String,
     command: String,
     args: Value,
@@ -116,10 +113,30 @@ fn dispatch_client_invoke(
     ordered_tail: &mut Option<tokio::task::JoinHandle<()>>,
 ) {
     if command == "set_app_focus_state" {
-        let resp = invoke_response(id, set_ws_client_focus(app, focus_client, &args));
+        let resp = invoke_response(id, set_ws_client_focus(app, ui_client, &args));
         if let Ok(json) = serde_json::to_string(&resp) {
             let _ = resp_tx.send(json);
         }
+    } else if command == "set_active_worktree_for_polling" {
+        // Per connection like focus, but it reads projects data from disk, so
+        // it runs on the blocking pool. Chained on the ordered tail so rapid
+        // selections apply in order and disconnect cleanup runs after them.
+        let app = app.clone();
+        let resp_tx = resp_tx.clone();
+        let previous = ordered_tail.take();
+        *ordered_tail = Some(tokio::spawn(async move {
+            if let Some(previous) = previous {
+                let _ = previous.await;
+            }
+            let result = tokio::task::spawn_blocking(move || {
+                set_active_worktree_for_polling(&app, ui_client, &args)
+            })
+            .await
+            .unwrap_or_else(|error| Err(format!("Command task failed: {error}")));
+            if let Ok(json) = serde_json::to_string(&invoke_response(id, result)) {
+                let _ = resp_tx.send(json);
+            }
+        }));
     } else if command_must_run_in_ws_order(&command) {
         *ordered_tail = Some(spawn_ordered_dispatch_response(
             app.clone(),
@@ -208,7 +225,7 @@ pub async fn handle_ws_connection(
     mut event_rx: broadcast::Receiver<WsEvent>,
 ) {
     let (mut ws_tx, mut ws_rx) = socket.split();
-    let focus_client = FocusClient::Ws(NEXT_WS_CLIENT_ID.fetch_add(1, Ordering::Relaxed));
+    let ui_client = UiClient::Ws(NEXT_WS_CLIENT_ID.fetch_add(1, Ordering::Relaxed));
 
     // Channel for command dispatch responses. Unbounded because command
     // responses are infrequent (user-initiated) and must never be dropped.
@@ -267,7 +284,7 @@ pub async fn handle_ws_connection(
                             Ok(WsClientMessage::Invoke { id, command, args }) => {
                                 dispatch_client_invoke(
                                     &app,
-                                    focus_client,
+                                    ui_client,
                                     id,
                                     command,
                                     args,
@@ -292,7 +309,7 @@ pub async fn handle_ws_connection(
                                     Ok(req) => {
                                         dispatch_client_invoke(
                                             &app,
-                                            focus_client,
+                                            ui_client,
                                             req.id,
                                             req.command,
                                             req.args,
@@ -356,8 +373,13 @@ pub async fn handle_ws_connection(
         }
     }
 
+    // Let a queued active-worktree update land before removing the client,
+    // or it would re-add the closed connection's worktree.
+    if let Some(tail) = ordered_dispatch_tail.take() {
+        let _ = tail.await;
+    }
     if let Some(manager) = app.try_state::<BackgroundTaskManager>() {
-        manager.remove_focus_client(focus_client);
+        manager.remove_client(ui_client);
     }
     log::trace!("WebSocket client disconnected");
 }
