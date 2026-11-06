@@ -3527,7 +3527,7 @@ pub async fn dispatch_command(
         "add_remote_mcp_server" => {
             let request = from_field(&args, "request")?;
             let result = Box::pin(crate::jean_mcp_config::add_remote_mcp_server(request)).await?;
-            emit_cache_invalidation(&app, &["mcp-servers"]);
+            emit_cache_invalidation(app, &["mcp-servers"]);
             to_value(result)
         }
         "remove_mcp_server" => {

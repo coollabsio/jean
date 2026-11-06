@@ -165,7 +165,7 @@ async fn run_command_with_timeout(
     .map_err(|error| error.to_string())?
 }
 
-fn auth_status_from_output(output: &Output) -> DevinAuthStatus {
+pub(crate) fn auth_status_from_output(output: &Output) -> DevinAuthStatus {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     // Keep JSON stdout separate from diagnostic stderr.
