@@ -975,7 +975,8 @@ fn resolve_http_server_bind_host(prefs: &AppPreferences) -> String {
 mod tests {
     use super::{
         default_global_system_prompt, default_global_system_prompt_with_legacy_ui_verification,
-        default_global_system_prompt_without_branch_rule, default_model,
+        default_global_system_prompt_without_branch_rule,
+        default_global_system_prompt_without_secrets, default_model,
         default_parallel_execution_prompt, effective_global_system_prompt,
         is_legacy_default_global_system_prompt,
         legacy_parallel_execution_prompt_before_subagent_strategy, normalize_browser_default_host,
@@ -1148,6 +1149,9 @@ mod tests {
         assert!(prompt.contains("test against its `url`, port, and startup command"));
         assert!(prompt.contains("start_run_environment"));
         assert!(!prompt.contains("use the returned/startup command"));
+        assert!(prompt.contains("## Jean Secrets"));
+        assert!(prompt.contains("`get_secret`"));
+        assert!(prompt.contains("`request_secret`"));
         assert!(prompt.contains("no other browser tool is available, use the Agent Browser"));
         assert!(prompt.contains("VERY IMPORTANT: Keep Code Simple"));
         assert!(prompt.contains("Always implement the simplest maintainable solution"));
@@ -1234,6 +1238,21 @@ mod tests {
             upgrade_legacy_parallel_execution_prompt(Some("leave this".to_string())).as_deref(),
             Some("leave this")
         );
+    }
+
+    #[test]
+    fn default_prompt_before_secrets_section_migrates() {
+        let previous = default_global_system_prompt_without_secrets();
+        assert!(!previous.contains("Jean Secrets"));
+        assert!(previous.contains("## Jean Run Environment"));
+        assert!(previous.contains("URL/port you used.\n\n## Important!"));
+        assert!(is_legacy_default_global_system_prompt(&previous));
+        assert_eq!(
+            effective_global_system_prompt(Some(&previous)),
+            default_global_system_prompt()
+        );
+        let custom = format!("{previous}\nExtra user rule.");
+        assert!(!is_legacy_default_global_system_prompt(&custom));
     }
 
     #[test]
@@ -2683,6 +2702,10 @@ fn default_global_system_prompt() -> String {
 - If nothing is running and verification needs a live server, start it with Jean MCP `start_run_environment`. Do not start a dev server by hand. If no Run command is configured, say so; do not invent a command or port.
 - In how-to-test notes, include the exact URL/port you used.
 
+## Jean Secrets
+- When the user wants to set or give you a secret (API key, token, password, auth key, .env values), always use Jean MCP. First call `get_secret` to reuse a saved secret. If none matches, call `request_secret`.
+- Do NOT ask the user to paste a secret in chat, and do NOT invent one. Read the value only from the file path that Jean gives, inside a shell command. Do not print or echo it.
+
 ## Important!
 
 - After each finished task, please write a few bullet points on how to test the changes."#
@@ -2707,9 +2730,26 @@ const UI_VERIFICATION_RULES_START: &str = "- Do NOT write tests that only check 
 const UI_VERIFICATION_RULES_END: &str =
     "use the Agent Browser. Check only the changed area, not the full app.\n";
 
-/// The current default global prompt with the legacy UI verification rules.
-fn default_global_system_prompt_with_legacy_ui_verification() -> String {
+const SECRETS_SECTION_START: &str = "## Jean Secrets\n";
+
+/// The default global prompt before the Jean Secrets section was added.
+fn default_global_system_prompt_without_secrets() -> String {
     let prompt = default_global_system_prompt();
+    let start = prompt
+        .find(SECRETS_SECTION_START)
+        .expect("default prompt has secrets section");
+    let end = start
+        + prompt[start..]
+            .find("\n\n")
+            .expect("secrets section ends with a blank line")
+        + 2;
+    format!("{}{}", &prompt[..start], &prompt[end..])
+}
+
+/// The default global prompt before the secrets section, with the legacy UI
+/// verification rules.
+fn default_global_system_prompt_with_legacy_ui_verification() -> String {
+    let prompt = default_global_system_prompt_without_secrets();
     let start = prompt
         .find(UI_VERIFICATION_RULES_START)
         .expect("default prompt has UI verification rules");
@@ -2730,7 +2770,9 @@ fn default_global_system_prompt_with_legacy_ui_verification() -> String {
 /// customized prompt, is kept.
 pub(crate) fn is_legacy_default_global_system_prompt(prompt: &str) -> bool {
     let normalized = prompt.replace("\r\n", "\n");
-    if normalized.trim() == default_global_system_prompt_with_legacy_ui_verification().trim() {
+    if normalized.trim() == default_global_system_prompt_without_secrets().trim()
+        || normalized.trim() == default_global_system_prompt_with_legacy_ui_verification().trim()
+    {
         return true;
     }
     let Some(start) = normalized.find(LEGACY_SUBAGENT_STRATEGY_SECTION) else {

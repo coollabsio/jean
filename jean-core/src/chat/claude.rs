@@ -111,6 +111,10 @@ Always use ASD-STE100 Simplified Technical English when you talk to me.\n\
 - If nothing is running and verification needs a live server, start it with Jean MCP `start_run_environment`. Do not start a dev server by hand. If no Run command is configured, say so; do not invent a command or port.\n\
 - In how-to-test notes, include the exact URL/port you used.\n\
 \n\
+## Jean Secrets\n\
+- When the user wants to set or give you a secret (API key, token, password, auth key, .env values), always use Jean MCP. First call `get_secret` to reuse a saved secret. If none matches, call `request_secret`.\n\
+- Do NOT ask the user to paste a secret in chat, and do NOT invent one. Read the value only from the file path that Jean gives, inside a shell command. Do not print or echo it.\n\
+\n\
 ## Important!\n\
 \n\
 - After each finished task, please write a few bullet points on how to test the changes.";
