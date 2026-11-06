@@ -6,8 +6,11 @@
 //! Polling is split into two categories:
 //! - **Local**: Git commands that run locally (fast, can run frequently)
 //! - **Remote**: API calls like PR status via `gh` (slower, rate-limited)
+//!
+//! Non-active worktrees are refreshed by periodic sweeps that cover every
+//! worktree each cycle with a small bounded worker pool.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -40,14 +43,20 @@ const MIN_LOCAL_POLL_DEBOUNCE: u64 = 10;
 pub const REMOTE_POLL_INTERVAL: u64 = 30;
 
 // ============================================================================
-// Sweep polling constants (round-robin PR checks for non-active worktrees)
+// Sweep polling constants (all non-active worktrees per cycle)
 // ============================================================================
 
-/// Git status sweep interval for non-active worktrees in seconds (1 minute)
-const GIT_SWEEP_POLL_INTERVAL: u64 = 60;
+/// Git status sweep interval for non-active worktrees in seconds (2 minutes)
+const GIT_SWEEP_POLL_INTERVAL: u64 = 120;
 
-/// Default sweep polling interval in seconds (5 minutes)
+/// Each git status runs ~8-10 git subprocesses; more workers risk fd exhaustion.
+const GIT_SWEEP_WORKERS: usize = 4;
+
+/// PR status sweep interval for non-active worktrees in seconds (5 minutes)
 pub const DEFAULT_SWEEP_POLL_INTERVAL: u64 = 300;
+
+/// Kept low so a sweep does not burst the GitHub quota.
+const PR_SWEEP_WORKERS: usize = 2;
 
 /// Default usage polling interval in seconds (5 minutes)
 /// This refreshes Claude/Codex usage caches on the backend.
@@ -75,6 +84,143 @@ fn poll_interval_elapsed(now: u64, last: Option<u64>, interval_secs: u64) -> boo
 }
 
 type WakeSignal = Arc<(Mutex<()>, Condvar)>;
+
+/// A UI that reports window focus: the native app or one WebSocket connection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FocusClient {
+    Native,
+    Ws(u64),
+}
+
+/// Which clients currently have focus. Polling runs while any client is
+/// focused, or before any client has reported (headless server with no UI yet).
+#[derive(Debug, Default)]
+enum FocusState {
+    #[default]
+    Unreported,
+    Reported(HashSet<FocusClient>),
+}
+
+impl FocusState {
+    fn is_focused(&self) -> bool {
+        match self {
+            FocusState::Unreported => true,
+            FocusState::Reported(focused) => !focused.is_empty(),
+        }
+    }
+
+    fn report(&mut self, client: FocusClient, focused: bool) {
+        if matches!(self, FocusState::Unreported) {
+            *self = FocusState::Reported(HashSet::new());
+        }
+        if let FocusState::Reported(clients) = self {
+            if focused {
+                clients.insert(client);
+            } else {
+                clients.remove(&client);
+            }
+        }
+    }
+
+    fn remove(&mut self, client: FocusClient) {
+        if let FocusState::Reported(clients) = self {
+            clients.remove(&client);
+        }
+    }
+}
+
+/// Run `f` over `items` on at most `workers` threads, returning when all finish.
+pub(crate) fn for_each_bounded<T: Send>(items: Vec<T>, workers: usize, f: impl Fn(T) + Sync) {
+    let worker_count = workers.max(1).min(items.len());
+    let queue = Mutex::new(items.into_iter());
+    thread::scope(|scope| {
+        for _ in 0..worker_count {
+            scope.spawn(|| loop {
+                let next = queue.lock().unwrap_or_else(|e| e.into_inner()).next();
+                let Some(item) = next else { break };
+                f(item);
+            });
+        }
+    });
+}
+
+/// Clears an in-flight flag on drop, so a panicking sweep cannot block later sweeps.
+struct InFlightGuard(Arc<AtomicBool>);
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
+/// Start `sweep` on its own thread unless the previous run is still in flight.
+fn spawn_sweep(in_flight: &Arc<AtomicBool>, sweep: impl FnOnce() + Send + 'static) -> bool {
+    if in_flight.swap(true, Ordering::AcqRel) {
+        return false;
+    }
+    let guard = InFlightGuard(Arc::clone(in_flight));
+    thread::spawn(move || {
+        let _guard = guard;
+        sweep();
+    });
+    true
+}
+
+fn sweep_git_status(app: &AppHandle, worktrees: Vec<ActiveWorktreeInfo>) {
+    for_each_bounded(worktrees, GIT_SWEEP_WORKERS, |worktree| {
+        log::trace!(
+            "Git sweep: polling git status for worktree {}",
+            worktree.worktree_id
+        );
+        match try_get_branch_status(&worktree) {
+            Ok(Some(status)) => {
+                if let Err(e) = emit_git_status(app, status) {
+                    log::error!("Git sweep: failed to emit git status: {e}");
+                }
+            }
+            Ok(None) => {
+                log::trace!(
+                    "Git sweep: skipping overlapping status poll for {}",
+                    worktree.worktree_id
+                );
+            }
+            Err(e) => {
+                log::warn!(
+                    "Git sweep: failed git status for {}: {e}",
+                    worktree.worktree_id
+                );
+            }
+        }
+    });
+}
+
+fn sweep_pr_status(app: &AppHandle, worktrees: Vec<ActiveWorktreeInfo>) {
+    for_each_bounded(worktrees, PR_SWEEP_WORKERS, |worktree| {
+        let (Some(pr_num), Some(pr_url)) = (worktree.pr_number, &worktree.pr_url) else {
+            return;
+        };
+        log::trace!(
+            "Sweep: polling PR #{pr_num} for worktree {}",
+            worktree.worktree_id
+        );
+        match get_pr_status(
+            app,
+            &worktree.worktree_path,
+            pr_num,
+            pr_url,
+            &worktree.worktree_id,
+        ) {
+            Ok(status) => {
+                if let Err(e) = emit_pr_status(app, status) {
+                    log::error!("Sweep: failed to emit PR status: {e}");
+                }
+            }
+            Err(e) => {
+                log::warn!("Sweep: failed PR status for #{pr_num}: {e}");
+            }
+        }
+    });
+}
 
 fn should_poll_local(now: u64, last: Option<u64>, is_immediate: bool, interval_secs: u64) -> bool {
     is_immediate || poll_interval_elapsed(now, last, interval_secs)
@@ -131,6 +277,8 @@ fn usage_polling_enabled() -> bool {
 /// - Remote polls run on a separate, longer interval (30s)
 pub struct BackgroundTaskManager {
     app: AppHandle,
+    focus: Mutex<FocusState>,
+    /// Cached `focus.is_focused()` for the polling loop; written only under the `focus` lock.
     is_focused: Arc<AtomicBool>,
     active_worktree: Arc<Mutex<Option<ActiveWorktreeInfo>>>,
     shutdown: Arc<AtomicBool>,
@@ -144,16 +292,14 @@ pub struct BackgroundTaskManager {
     last_remote_poll_times: Arc<Mutex<HashMap<String, u64>>>,
     /// All worktrees with open PRs (for sweep polling of non-active worktrees)
     pr_worktrees: Arc<Mutex<Vec<ActiveWorktreeInfo>>>,
-    /// Index for round-robin sweep
-    sweep_index: Arc<AtomicU64>,
     /// Timestamp of last sweep poll
     last_sweep_poll_time: Arc<AtomicU64>,
+    pr_sweep_in_flight: Arc<AtomicBool>,
     /// All worktrees for git status sweep polling (non-active worktrees)
     all_worktrees: Arc<Mutex<Vec<ActiveWorktreeInfo>>>,
-    /// Index for round-robin git sweep
-    git_sweep_index: Arc<AtomicU64>,
     /// Timestamp of last git sweep poll
     last_git_sweep_time: Arc<AtomicU64>,
+    git_sweep_in_flight: Arc<AtomicBool>,
     /// Timestamp of last usage cache refresh poll
     last_usage_poll_time: Arc<AtomicU64>,
     /// Guard to avoid overlapping usage refresh jobs
@@ -171,7 +317,8 @@ impl BackgroundTaskManager {
     pub fn new(app: AppHandle) -> Self {
         Self {
             app,
-            is_focused: Arc::new(AtomicBool::new(true)), // Assume focused on startup
+            focus: Mutex::new(FocusState::Unreported),
+            is_focused: Arc::new(AtomicBool::new(FocusState::Unreported.is_focused())),
             active_worktree: Arc::new(Mutex::new(None)),
             shutdown: Arc::new(AtomicBool::new(false)),
             immediate_poll: Arc::new(AtomicBool::new(false)),
@@ -179,11 +326,11 @@ impl BackgroundTaskManager {
             last_local_poll_times: Arc::new(Mutex::new(HashMap::new())),
             last_remote_poll_times: Arc::new(Mutex::new(HashMap::new())),
             pr_worktrees: Arc::new(Mutex::new(Vec::new())),
-            sweep_index: Arc::new(AtomicU64::new(0)),
             last_sweep_poll_time: Arc::new(AtomicU64::new(0)),
+            pr_sweep_in_flight: Arc::new(AtomicBool::new(false)),
             all_worktrees: Arc::new(Mutex::new(Vec::new())),
-            git_sweep_index: Arc::new(AtomicU64::new(0)),
             last_git_sweep_time: Arc::new(AtomicU64::new(0)),
+            git_sweep_in_flight: Arc::new(AtomicBool::new(false)),
             // Initialize to "now" so startup does not trigger an immediate usage refresh.
             last_usage_poll_time: Arc::new(AtomicU64::new(now_unix_secs())),
             usage_poll_in_flight: Arc::new(AtomicBool::new(false)),
@@ -217,11 +364,11 @@ impl BackgroundTaskManager {
         let last_local_poll_times = Arc::clone(&self.last_local_poll_times);
         let last_remote_poll_times = Arc::clone(&self.last_remote_poll_times);
         let pr_worktrees = Arc::clone(&self.pr_worktrees);
-        let sweep_index = Arc::clone(&self.sweep_index);
         let last_sweep_poll_time = Arc::clone(&self.last_sweep_poll_time);
+        let pr_sweep_in_flight = Arc::clone(&self.pr_sweep_in_flight);
         let all_worktrees = Arc::clone(&self.all_worktrees);
-        let git_sweep_index = Arc::clone(&self.git_sweep_index);
         let last_git_sweep_time = Arc::clone(&self.last_git_sweep_time);
+        let git_sweep_in_flight = Arc::clone(&self.git_sweep_in_flight);
         let last_usage_poll_time = Arc::clone(&self.last_usage_poll_time);
         let usage_poll_in_flight = Arc::clone(&self.usage_poll_in_flight);
         let last_cleanup_poll_time = Arc::clone(&self.last_cleanup_poll_time);
@@ -319,7 +466,7 @@ impl BackgroundTaskManager {
                     }
                 }
 
-                // Only poll when app is focused
+                // Only poll while some UI client is focused (see FocusState)
                 if !is_focused.load(Ordering::Relaxed) {
                     wait_for_wake_signal(
                         &wake_signal,
@@ -454,114 +601,49 @@ impl BackgroundTaskManager {
                 }
 
                 // ================================================================
-                // Sweep polling (round-robin PR checks for non-active worktrees)
-                // Runs even when no worktree is selected on the canvas
+                // Sweeps: every non-active worktree per cycle, on their own
+                // threads so active-worktree polling is never blocked.
+                // Runs even when no worktree is selected on the canvas.
                 // ================================================================
                 {
-                    let now = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0);
+                    let now = now_unix_secs();
+                    let is_inactive = |w: &&ActiveWorktreeInfo| {
+                        active_worktree_id.as_ref() != Some(&w.worktree_id)
+                    };
+
                     let last_sweep = last_sweep_poll_time.load(Ordering::Relaxed);
-
                     if poll_interval_elapsed(now, Some(last_sweep), DEFAULT_SWEEP_POLL_INTERVAL) {
-                        let worktrees = pr_worktrees.lock().unwrap().clone();
-
-                        // Filter out the currently active worktree (already polled above)
-                        let candidates: Vec<_> = worktrees
+                        let candidates: Vec<_> = pr_worktrees
+                            .lock()
+                            .unwrap()
                             .iter()
-                            .filter(|w| active_worktree_id.as_ref() != Some(&w.worktree_id))
+                            .filter(is_inactive)
                             .filter(|w| w.pr_number.is_some() && w.pr_url.is_some())
+                            .cloned()
                             .collect();
-
-                        if !candidates.is_empty() {
-                            let idx = sweep_index.fetch_add(1, Ordering::Relaxed) as usize
-                                % candidates.len();
-                            let candidate = candidates[idx];
-
-                            if let (Some(pr_num), Some(pr_url)) =
-                                (&candidate.pr_number, &candidate.pr_url)
-                            {
-                                log::trace!(
-                                    "Sweep: polling PR #{} for worktree {}",
-                                    pr_num,
-                                    candidate.worktree_id
-                                );
-
-                                match get_pr_status(
-                                    &app,
-                                    &candidate.worktree_path,
-                                    *pr_num,
-                                    pr_url,
-                                    &candidate.worktree_id,
-                                ) {
-                                    Ok(status) => {
-                                        if let Err(e) = emit_pr_status(&app, status) {
-                                            log::error!("Sweep: failed to emit PR status: {e}");
-                                        }
-                                    }
-                                    Err(e) => {
-                                        log::warn!("Sweep: failed PR status for #{}: {e}", pr_num);
-                                    }
-                                }
-                            }
+                        let app = app.clone();
+                        if spawn_sweep(&pr_sweep_in_flight, move || {
+                            sweep_pr_status(&app, candidates)
+                        }) {
+                            last_sweep_poll_time.store(now, Ordering::Relaxed);
                         }
-
-                        last_sweep_poll_time.store(now, Ordering::Relaxed);
                     }
-                }
 
-                // ================================================================
-                // Git status sweep (round-robin git status for non-active worktrees)
-                // Runs even when no worktree is selected on the canvas
-                // ================================================================
-                {
-                    let now = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0);
                     let last_git_sweep = last_git_sweep_time.load(Ordering::Relaxed);
                     if poll_interval_elapsed(now, Some(last_git_sweep), GIT_SWEEP_POLL_INTERVAL) {
-                        let worktrees = all_worktrees.lock().unwrap().clone();
-
-                        // Filter out the currently active worktree (already polled above)
-                        let candidates: Vec<_> = worktrees
+                        let candidates: Vec<_> = all_worktrees
+                            .lock()
+                            .unwrap()
                             .iter()
-                            .filter(|w| active_worktree_id.as_ref() != Some(&w.worktree_id))
+                            .filter(is_inactive)
+                            .cloned()
                             .collect();
-
-                        if !candidates.is_empty() {
-                            let idx = git_sweep_index.fetch_add(1, Ordering::Relaxed) as usize
-                                % candidates.len();
-                            let candidate = candidates[idx];
-
-                            log::trace!(
-                                "Git sweep: polling git status for worktree {}",
-                                candidate.worktree_id
-                            );
-
-                            match try_get_branch_status(candidate) {
-                                Ok(Some(status)) => {
-                                    if let Err(e) = emit_git_status(&app, status) {
-                                        log::error!("Git sweep: failed to emit git status: {e}");
-                                    }
-                                }
-                                Ok(None) => {
-                                    log::trace!(
-                                        "Git sweep: skipping overlapping status poll for {}",
-                                        candidate.worktree_id
-                                    );
-                                }
-                                Err(e) => {
-                                    log::warn!(
-                                        "Git sweep: failed git status for {}: {e}",
-                                        candidate.worktree_id
-                                    );
-                                }
-                            }
+                        let app = app.clone();
+                        if spawn_sweep(&git_sweep_in_flight, move || {
+                            sweep_git_status(&app, candidates)
+                        }) {
+                            last_git_sweep_time.store(now, Ordering::Relaxed);
                         }
-
-                        last_git_sweep_time.store(now, Ordering::Relaxed);
                     }
                 }
 
@@ -588,13 +670,26 @@ impl BackgroundTaskManager {
         notify_wake_signal(&self.wake_signal);
     }
 
-    /// Set whether the application is focused
+    /// Record a client's window focus.
     ///
-    /// When the app loses focus, polling will be paused.
-    /// When the app regains focus, local polling will resume with a short debounce (10s).
-    /// Remote polling continues on its own interval.
-    pub fn set_focused(&self, focused: bool) {
-        let was_focused = self.is_focused.swap(focused, Ordering::Relaxed);
+    /// Polling pauses once every reporting client has blurred. When focus is
+    /// regained overall, local polling resumes with a short debounce (10s).
+    pub fn set_client_focus(&self, client: FocusClient, focused: bool) {
+        self.update_focus(|state| state.report(client, focused));
+    }
+
+    /// Forget a client that went away (for example a closed WebSocket).
+    pub fn remove_focus_client(&self, client: FocusClient) {
+        self.update_focus(|state| state.remove(client));
+    }
+
+    fn update_focus(&self, change: impl FnOnce(&mut FocusState)) {
+        let (was_focused, focused) = {
+            let mut state = self.focus.lock().unwrap_or_else(|e| e.into_inner());
+            change(&mut state);
+            let focused = state.is_focused();
+            (self.is_focused.swap(focused, Ordering::Relaxed), focused)
+        };
 
         if focused && !was_focused {
             // App gained focus - check if we should poll immediately
@@ -678,7 +773,7 @@ impl BackgroundTaskManager {
 
     /// Set all worktrees with open PRs for sweep polling.
     ///
-    /// The sweep polls these worktrees round-robin at a slower interval
+    /// Every 5 minutes the sweep refreshes all of them except the active one,
     /// to detect PR merges even when the worktree isn't actively selected.
     pub fn set_pr_worktrees(&self, worktrees: Vec<ActiveWorktreeInfo>) {
         log::trace!("Setting {} PR worktrees for sweep polling", worktrees.len());
@@ -691,8 +786,8 @@ impl BackgroundTaskManager {
 
     /// Set all worktrees for git status sweep polling.
     ///
-    /// The sweep polls these worktrees round-robin once per minute, to keep
-    /// uncommitted diff stats up to date even when not actively selected.
+    /// Every 2 minutes the sweep refreshes all of them except the active one,
+    /// to keep uncommitted diff stats up to date even when not actively selected.
     pub fn set_all_worktrees(&self, worktrees: Vec<ActiveWorktreeInfo>) {
         log::trace!(
             "Setting {} worktrees for git status sweep polling",
@@ -821,5 +916,92 @@ mod tests {
             take_immediate_poll_requests(&local, &remote),
             (false, false)
         );
+    }
+
+    fn manager() -> (tempfile::TempDir, BackgroundTaskManager) {
+        let temp = tempfile::tempdir().unwrap();
+        let app = crate::RuntimeContext::new(temp.path().join("data"), temp.path().into()).unwrap();
+        (temp, BackgroundTaskManager::new(app))
+    }
+
+    fn polling(manager: &BackgroundTaskManager) -> bool {
+        manager.is_focused.load(Ordering::Relaxed)
+    }
+
+    #[test]
+    fn polls_before_any_client_reports_focus() {
+        let (_temp, manager) = manager();
+        assert!(polling(&manager));
+    }
+
+    #[test]
+    fn one_focused_client_keeps_polling_while_another_blurs() {
+        let (_temp, manager) = manager();
+        manager.set_client_focus(FocusClient::Native, true);
+        manager.set_client_focus(FocusClient::Ws(1), false);
+        assert!(polling(&manager));
+
+        manager.set_client_focus(FocusClient::Native, false);
+        assert!(!polling(&manager));
+    }
+
+    #[test]
+    fn disconnecting_the_last_focused_client_pauses_polling() {
+        let (_temp, manager) = manager();
+        manager.set_client_focus(FocusClient::Native, false);
+        manager.set_client_focus(FocusClient::Ws(7), true);
+        assert!(polling(&manager));
+
+        manager.remove_focus_client(FocusClient::Ws(7));
+        assert!(!polling(&manager));
+    }
+
+    #[test]
+    fn regaining_focus_requests_an_immediate_poll() {
+        let (_temp, manager) = manager();
+        manager.set_client_focus(FocusClient::Ws(1), false);
+        manager.set_active_worktree(Some(ActiveWorktreeInfo {
+            worktree_id: "wt".to_string(),
+            worktree_path: "/tmp/wt".to_string(),
+            base_branch: "main".to_string(),
+            base_remote: None,
+            pr_number: Some(3),
+            pr_url: Some("https://github.com/o/r/pull/3".to_string()),
+            pr_push_remote: None,
+            pr_push_branch: None,
+        }));
+        manager.immediate_poll.store(false, Ordering::Relaxed);
+
+        manager.set_client_focus(FocusClient::Ws(2), true);
+        assert_eq!(
+            take_immediate_poll_requests(&manager.immediate_poll, &manager.immediate_remote_poll),
+            (true, true)
+        );
+
+        manager.set_client_focus(FocusClient::Native, true);
+        assert_eq!(
+            take_immediate_poll_requests(&manager.immediate_poll, &manager.immediate_remote_poll),
+            (false, false)
+        );
+    }
+
+    #[test]
+    fn for_each_bounded_processes_every_item_once_within_the_worker_cap() {
+        let seen = Mutex::new(Vec::new());
+        let running = AtomicU64::new(0);
+        let max_running = AtomicU64::new(0);
+
+        for_each_bounded((0..40).collect(), 3, |item: u32| {
+            let now = running.fetch_add(1, Ordering::SeqCst) + 1;
+            max_running.fetch_max(now, Ordering::SeqCst);
+            thread::sleep(Duration::from_millis(5));
+            seen.lock().unwrap().push(item);
+            running.fetch_sub(1, Ordering::SeqCst);
+        });
+
+        let mut seen = seen.into_inner().unwrap();
+        seen.sort_unstable();
+        assert_eq!(seen, (0..40).collect::<Vec<_>>());
+        assert_eq!(max_running.load(Ordering::SeqCst), 3);
     }
 }

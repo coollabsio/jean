@@ -614,15 +614,9 @@ export async function fetchWorktreesStatus(projectId: string): Promise<void> {
 // ============================================================================
 
 /**
- * Set all worktrees with open PRs for background sweep polling.
- *
- * The sweep polls these worktrees round-robin at a slow interval (5 min)
- * to detect PR merges even when the worktree isn't actively selected.
- */
-/**
  * Set all worktrees for background git status sweep polling.
  *
- * The sweep polls these worktrees round-robin at a slow interval (60s)
+ * Every 2 minutes the sweep refreshes all of them except the active one,
  * to keep uncommitted diff stats up to date even when not actively selected.
  */
 export async function setAllWorktreesForPolling(
@@ -636,6 +630,12 @@ export async function setAllWorktreesForPolling(
   await invoke('set_all_worktrees_for_polling', { worktrees })
 }
 
+/**
+ * Set all worktrees with open PRs for background sweep polling.
+ *
+ * Every 5 minutes the sweep refreshes all of them except the active one,
+ * to detect PR merges even when the worktree isn't actively selected.
+ */
 export async function setPrWorktreesForPolling(
   worktrees: {
     worktreeId: string

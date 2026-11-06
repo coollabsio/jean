@@ -2,12 +2,16 @@ use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tauri::AppHandle;
 use tokio::sync::{broadcast, mpsc};
 
-use super::dispatch::dispatch_command_off_runtime;
+use super::dispatch::{dispatch_command_off_runtime, from_field};
 use super::{WsBroadcaster, WsEvent};
+use crate::background_tasks::{BackgroundTaskManager, FocusClient};
+
+static NEXT_WS_CLIENT_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Commands that must preserve WebSocket receive order.
 ///
@@ -25,7 +29,11 @@ async fn dispatch_invoke_response(
     command: String,
     args: Value,
 ) -> InvokeResponse {
-    match dispatch_command_off_runtime(app, command, args).await {
+    invoke_response(id, dispatch_command_off_runtime(app, command, args).await)
+}
+
+fn invoke_response(id: String, result: Result<Value, String>) -> InvokeResponse {
+    match result {
         Ok(data) => InvokeResponse {
             msg_type: "response".to_string(),
             id,
@@ -83,17 +91,36 @@ fn spawn_ordered_dispatch_response(
     })
 }
 
+/// Focus is tracked per connection, so it is handled here where the
+/// connection id is known instead of in the generic dispatch arm.
+fn set_ws_client_focus(
+    app: &AppHandle,
+    client: FocusClient,
+    args: &Value,
+) -> Result<Value, String> {
+    let focused: bool = from_field(args, "focused")?;
+    app.state::<BackgroundTaskManager>()
+        .set_client_focus(client, focused);
+    Ok(Value::Null)
+}
+
 /// Route a client invoke: ordered commands chain serially; everything else
 /// dispatches independently so long-running work cannot block the WS loop.
 fn dispatch_client_invoke(
     app: &AppHandle,
+    focus_client: FocusClient,
     id: String,
     command: String,
     args: Value,
     resp_tx: &mpsc::UnboundedSender<String>,
     ordered_tail: &mut Option<tokio::task::JoinHandle<()>>,
 ) {
-    if command_must_run_in_ws_order(&command) {
+    if command == "set_app_focus_state" {
+        let resp = invoke_response(id, set_ws_client_focus(app, focus_client, &args));
+        if let Ok(json) = serde_json::to_string(&resp) {
+            let _ = resp_tx.send(json);
+        }
+    } else if command_must_run_in_ws_order(&command) {
         *ordered_tail = Some(spawn_ordered_dispatch_response(
             app.clone(),
             id,
@@ -181,6 +208,7 @@ pub async fn handle_ws_connection(
     mut event_rx: broadcast::Receiver<WsEvent>,
 ) {
     let (mut ws_tx, mut ws_rx) = socket.split();
+    let focus_client = FocusClient::Ws(NEXT_WS_CLIENT_ID.fetch_add(1, Ordering::Relaxed));
 
     // Channel for command dispatch responses. Unbounded because command
     // responses are infrequent (user-initiated) and must never be dropped.
@@ -239,6 +267,7 @@ pub async fn handle_ws_connection(
                             Ok(WsClientMessage::Invoke { id, command, args }) => {
                                 dispatch_client_invoke(
                                     &app,
+                                    focus_client,
                                     id,
                                     command,
                                     args,
@@ -263,6 +292,7 @@ pub async fn handle_ws_connection(
                                     Ok(req) => {
                                         dispatch_client_invoke(
                                             &app,
+                                            focus_client,
                                             req.id,
                                             req.command,
                                             req.args,
@@ -326,6 +356,9 @@ pub async fn handle_ws_connection(
         }
     }
 
+    if let Some(manager) = app.try_state::<BackgroundTaskManager>() {
+        manager.remove_focus_client(focus_client);
+    }
     log::trace!("WebSocket client disconnected");
 }
 

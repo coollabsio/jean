@@ -13374,17 +13374,8 @@ pub async fn fetch_worktrees_status(app: AppHandle, project_id: String) -> Resul
     // (EMFILE) and silently break both git status and coinciding claude CLI spawns.
     // Cap concurrency so fd usage stays flat regardless of worktree count.
     let project_default_branch = project.default_branch.clone();
-    let worker_count = worktrees.len().clamp(1, 8);
+    const WORKER_COUNT: usize = 8;
 
-    // Shared job queue: workers pull worktrees until the receiver is drained.
-    let (tx, rx) = mpsc::channel::<Worktree>();
-    for worktree in worktrees {
-        // Send cannot fail: receiver lives until all workers finish below.
-        let _ = tx.send(worktree);
-    }
-    drop(tx); // Close the channel so workers exit once the queue is empty.
-
-    let rx = std::sync::Arc::new(Mutex::new(rx));
     let (status_tx, status_rx) = mpsc::channel::<GitBranchStatus>();
 
     // Persist all results from this bootstrap pass in one projects.json write.
@@ -13485,25 +13476,9 @@ pub async fn fetch_worktrees_status(app: AppHandle, project_id: String) -> Resul
         }
     });
 
-    for _ in 0..worker_count {
-        let app_clone = app.clone();
-        let project_default_branch = project_default_branch.clone();
-        let rx = std::sync::Arc::clone(&rx);
-        let status_tx = status_tx.clone();
-
-        thread::spawn(move || loop {
-            // Pull the next worktree job (lock only while dequeuing).
-            let worktree = {
-                let guard = match rx.lock() {
-                    Ok(g) => g,
-                    Err(_) => break,
-                };
-                match guard.recv() {
-                    Ok(w) => w,
-                    Err(_) => break, // Channel drained — worker done.
-                }
-            };
-
+    // `status_tx` drops when the workers finish, which lets the coordinator flush.
+    thread::spawn(move || {
+        crate::background_tasks::for_each_bounded(worktrees, WORKER_COUNT, |worktree| {
             let base_branch = resolve_worktree_status_base(&worktree, &project_default_branch);
 
             let info = ActiveWorktreeInfo {
@@ -13532,7 +13507,7 @@ pub async fn fetch_worktrees_status(app: AppHandle, project_id: String) -> Resul
                         status: &status,
                         cache_persisted: true,
                     };
-                    if let Err(e) = app_clone.emit_all("git:status-update", &event) {
+                    if let Err(e) = app.emit_all("git:status-update", &event) {
                         log::warn!(
                             "Failed to emit git status for worktree {}: {e}",
                             worktree.id
@@ -13562,14 +13537,11 @@ pub async fn fetch_worktrees_status(app: AppHandle, project_id: String) -> Resul
                 }
             }
         });
-    }
-    drop(status_tx);
+    });
 
     // Don't wait for workers - fire and forget
     // Status updates will be emitted via events as they complete
-    log::trace!(
-        "[fetch_worktrees_status] Spawned {worker_count} status workers for project: {project_id}"
-    );
+    log::trace!("[fetch_worktrees_status] Spawned status workers for project: {project_id}");
     Ok(())
 }
 

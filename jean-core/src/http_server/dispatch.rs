@@ -1813,6 +1813,8 @@ pub async fn dispatch_command(
         // =====================================================================
         // Background Tasks (polling control)
         // =====================================================================
+        // Reached by native IPC; WebSocket clients are handled per connection
+        // in `websocket::dispatch_client_invoke`.
         "set_app_focus_state" => {
             let focused: bool = from_field(&args, "focused")?;
             let state = app.state::<crate::background_tasks::BackgroundTaskManager>();
