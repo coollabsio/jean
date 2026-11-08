@@ -157,7 +157,9 @@ mod tests {
     #[test]
     fn recap_requests_possible_regressions_table() {
         assert!(RECAP_INSTRUCTION.contains("### Possible regressions"));
-        assert!(RECAP_INSTRUCTION.contains("| # | What the user would see | Cause in this change |"));
+        assert!(
+            RECAP_INSTRUCTION.contains("| # | What the user would see | Cause in this change |")
+        );
         assert!(RECAP_INSTRUCTION.contains("`New test:`"));
         assert!(RECAP_INSTRUCTION.contains("Check it yourself"));
         assert!(RECAP_INSTRUCTION.contains("No possible regressions found"));
