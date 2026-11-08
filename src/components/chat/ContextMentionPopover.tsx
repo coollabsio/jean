@@ -87,7 +87,7 @@ const tabLabels: Record<ContextMentionTab, string> = {
   issue: 'Issues',
   pr: 'PRs',
   discussion: 'Discussions',
-  security: 'Security',
+  security: 'Dependabot',
   advisory: 'Advisories',
   linear: 'Linear',
 }
@@ -243,16 +243,17 @@ export function ContextMentionPopover({
     `${limitKeyPrefix(projectPath, projectId)}${includeClosed}\0${group}\0${query}`
   const limitFor = (group: ContextMentionType) =>
     loadedLimits.get(limitKey(group)) ?? DEFAULT_LIST_LIMIT
-  const { groups, isFetching, loadMoreDiscussions } = useContextMentionData({
-    open,
-    projectPath,
-    projectId,
-    query,
-    includeClosed,
-    issueLimit: limitFor('issue'),
-    prLimit: limitFor('pr'),
-    discussionLimit: limitFor('discussion'),
-  })
+  const { groups, sections, isFetching, loadMoreDiscussions } =
+    useContextMentionData({
+      open,
+      projectPath,
+      projectId,
+      query,
+      includeClosed,
+      issueLimit: limitFor('issue'),
+      prLimit: limitFor('pr'),
+      discussionLimit: limitFor('discussion'),
+    })
   const loadMore = (group: ContextMentionType) => {
     const limit = limitFor(group) + DEFAULT_LIST_LIMIT
     loadedLimits.set(limitKey(group), limit)
@@ -290,7 +291,7 @@ export function ContextMentionPopover({
 
   // Tabs narrow the list to one section. Search always covers every
   // section: typing switches back to "All".
-  const currentTab = groups.some(group => group.id === activeTab)
+  const currentTab = sections.some(group => group.id === activeTab)
     ? activeTab
     : 'all'
   const visibleGroups = useMemo(
@@ -582,15 +583,15 @@ export function ContextMentionPopover({
             </button>
           </div>
         </div>
-        {groups.length > 1 && (
+        {sections.length > 0 && (
           <div
             role="tablist"
             aria-label="Context link sections"
             className="scrollbar-hide flex gap-1 overflow-x-auto border-b border-border/30 px-2 py-1"
           >
-            {(['all', ...groups.map(group => group.id)] as const).map(tab => {
+            {(['all', ...sections.map(group => group.id)] as const).map(tab => {
               const tabGroup =
-                tab === 'all' ? null : groups.find(group => group.id === tab)
+                tab === 'all' ? null : sections.find(group => group.id === tab)
               const isActive = tab === currentTab
               return (
                 <button
