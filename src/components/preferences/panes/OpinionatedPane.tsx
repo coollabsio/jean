@@ -256,6 +256,36 @@ const PLUGINS: PluginDefinition[] = [
       },
     ],
   },
+  {
+    id: 'security-audit',
+    name: 'Security Audit',
+    description:
+      "Cloudflare's source-first security audit skill. It maps trust boundaries, hunts by coverage, checks each candidate with a fresh verifier, and writes structured findings.",
+    githubUrl: 'https://github.com/cloudflare/security-audit-skill',
+    scope: 'ai-backends',
+    backends: [
+      'Claude',
+      'Codex',
+      'OpenCode',
+      'Cursor',
+      'Pi',
+      'Command Code',
+      'Grok',
+    ],
+    usage: [
+      {
+        note: 'Installs the upstream cloudflare/security-audit-skill pack as-is into each backend path and the Jean-global mirror. A full audit needs Node.js for the findings validators. The skill runs target code only inside an OS sandbox. Without that sandbox it keeps the lead as needs_validation.',
+      },
+      {
+        label: 'Audit a codebase',
+        command: 'security audit this codebase',
+      },
+      {
+        label: 'Review one area',
+        command: 'find security vulnerabilities in ./src',
+      },
+    ],
+  },
 ]
 
 interface PluginStatus {

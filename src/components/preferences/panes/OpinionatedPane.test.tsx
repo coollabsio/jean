@@ -92,9 +92,15 @@ describe('OpinionatedPane', () => {
 
     await waitFor(() => {
       const names = within(section)
-        .getAllByText(/^(Caveman|Superpowers|pstack|tstack)$/)
+        .getAllByText(/^(Caveman|Superpowers|pstack|tstack|Security Audit)$/)
         .map(el => el.textContent)
-      expect(names).toEqual(['Caveman', 'pstack', 'Superpowers', 'tstack'])
+      expect(names).toEqual([
+        'Caveman',
+        'pstack',
+        'Superpowers',
+        'tstack',
+        'Security Audit',
+      ])
     })
   })
 
@@ -148,6 +154,32 @@ describe('OpinionatedPane', () => {
     expect(
       within(tstackCard as HTMLElement).getByText('full send')
     ).toBeInTheDocument()
+  })
+
+  it('offers Security Audit for every Jean AI backend', async () => {
+    render(<OpinionatedPane />)
+
+    const label = await screen.findByText('Security Audit')
+    const card = label.closest('.rounded-md')?.parentElement
+    if (!card) throw new Error('Expected Security Audit card')
+
+    await userEvent.click(label)
+
+    expect(within(card as HTMLElement).getByText('Codex')).toBeInTheDocument()
+    expect(within(card as HTMLElement).getByText('Claude')).toBeInTheDocument()
+    expect(
+      within(card as HTMLElement).getByText('Command Code')
+    ).toBeInTheDocument()
+    expect(
+      within(card as HTMLElement).getByText('security audit this codebase')
+    ).toBeInTheDocument()
+
+    await userEvent.click(
+      within(card as HTMLElement).getByRole('button', { name: 'GitHub' })
+    )
+    expect(openExternal).toHaveBeenCalledWith(
+      'https://github.com/cloudflare/security-audit-skill'
+    )
   })
 
   it('shows opinionated skill installation status for each backend', async () => {
@@ -213,7 +245,13 @@ describe('OpinionatedPane', () => {
     expect(within(shell).queryByText('CLIProxyAPI')).not.toBeInTheDocument()
 
     const skills = screen.getByRole('region', { name: 'AI backend skills' })
-    for (const name of ['Caveman', 'Superpowers', 'pstack', 'tstack']) {
+    for (const name of [
+      'Caveman',
+      'Superpowers',
+      'pstack',
+      'tstack',
+      'Security Audit',
+    ]) {
       expect(within(skills).getByText(name)).toBeInTheDocument()
     }
     expect(within(skills).queryByText('RTK')).not.toBeInTheDocument()
