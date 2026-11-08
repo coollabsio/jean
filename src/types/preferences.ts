@@ -480,6 +480,7 @@ Investigate the loaded security {advisoryWord} ({advisoryRefs})
    - What type of vulnerability is it (injection, auth bypass, XSS, etc.)?
    - What are the preconditions for exploitation?
    - What is the severity and potential impact?
+   - Check that the advisory severity rating and CVSS score/vector match the real impact and exploitability you found; if they are too high or too low, give the correct severity, CVSS vector, and score with the reason, and update the advisory (for example \`gh api -X PATCH repos/{owner}/{repo}/security-advisories/{ghsa_id} -f cvss_vector_string=...\`, or \`-f severity=...\` when no CVSS vector is used)
 3. Locate the vulnerable code:
    - Search for the affected components, endpoints, or functions
    - Trace the vulnerable code path from entry point to impact
