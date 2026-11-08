@@ -772,6 +772,51 @@ export function useSession(
   })
 }
 
+/** Runs loaded on a cold session open. One run = user + assistant message. */
+const INITIAL_SESSION_RUN_LIMIT = 1
+
+interface LoadedMessages {
+  messages: ChatMessage[]
+  total_runs: number
+  loaded_run_start_index: number
+}
+
+/** Prepend every run before `beforeRunIndex` to the cached session. */
+async function loadOlderSessionHistory(
+  queryClient: QueryClient,
+  sessionId: string,
+  beforeRunIndex: number
+): Promise<void> {
+  const queryKey = chatQueryKeys.session(sessionId)
+  try {
+    const older = await invoke<LoadedMessages>('load_older_session_messages', {
+      sessionId,
+      beforeRunIndex,
+      limit: beforeRunIndex,
+    })
+    queryClient.setQueryData<Session | null>(queryKey, prev => {
+      // A full refetch already replaced the window; nothing to merge.
+      if (!prev || prev.loaded_run_start_index !== beforeRunIndex) return prev
+      const loadedIds = new Set(prev.messages.map(message => message.id))
+      return {
+        ...prev,
+        messages: [
+          ...older.messages.filter(message => !loadedIds.has(message.id)),
+          ...prev.messages,
+        ],
+        loaded_run_start_index: older.loaded_run_start_index,
+      }
+    })
+  } catch (error) {
+    logger.warn('[useSession] FAILED to load older history', {
+      error,
+      sessionId,
+    })
+    // Warm cache now, so the refetch loads the full history in one call.
+    void queryClient.invalidateQueries({ queryKey, exact: true })
+  }
+}
+
 async function fetchSession(
   queryClient: QueryClient,
   sessionId: string | null,
@@ -783,12 +828,24 @@ async function fetchSession(
   }
 
   try {
-    logger.debug('[useSession] fetching from disk', { sessionId })
+    // Cold load: fetch only the latest run (user + assistant message) so the
+    // chat renders fast, then fill in older history in the background.
+    // Warm refetches load everything at once so the transcript never shrinks.
+    const coldCache = queryClient.getQueryData<Session>(
+      chatQueryKeys.session(sessionId)
+    )
+    const isColdLoad = !coldCache || coldCache.messages.length === 0
+    logger.debug('[useSession] fetching from disk', { sessionId, isColdLoad })
     const session = await invoke<Session>('get_session', {
       worktreeId,
       worktreePath,
       sessionId,
+      ...(isColdLoad ? { limit: INITIAL_SESSION_RUN_LIMIT } : {}),
     })
+    const olderStart = session.loaded_run_start_index ?? 0
+    if (isColdLoad && olderStart > 0) {
+      void loadOlderSessionHistory(queryClient, sessionId, olderStart)
+    }
     logger.info('[useSession] loaded', {
       sessionId,
       messageCount: session.messages.length,
