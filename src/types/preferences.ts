@@ -1661,6 +1661,7 @@ export const fileEditModeOptions: { value: FileEditMode; label: string }[] = [
 ]
 
 export type ClaudeModel =
+  | 'claude-fable-5-2'
   | 'claude-fable-5-1'
   | 'claude-fable-5'
   | 'claude-opus-5-5'
@@ -1690,6 +1691,7 @@ export const modelOptions: { value: ClaudeModel; label: string }[] = [
   { value: 'claude-opus-5-5', label: 'Claude Opus 5.5' },
   { value: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5' },
   { value: 'claude-haiku-5-5', label: 'Claude Haiku 5.5' },
+  { value: 'claude-fable-5-2', label: 'Claude Fable 5.2' },
   { value: 'claude-fable-5-1', label: 'Claude Fable 5.1' },
   { value: 'claude-fable-5', label: 'Claude Fable 5' },
   { value: 'claude-opus-5', label: 'Claude Opus 5' },
