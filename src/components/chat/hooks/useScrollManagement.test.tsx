@@ -438,6 +438,37 @@ describe('useScrollManagement streaming auto-scroll', () => {
     expect(getByTestId('is-at-bottom')).toHaveTextContent('true')
   })
 
+  it('keeps following the tail when a run end shrinks and regrows the content', async () => {
+    const { getByTestId, viewport, setScrollHeight } = setupHook({
+      isSending: false,
+    })
+    viewport.scrollTop = 1600
+    fireEvent.scroll(viewport)
+
+    // Content shrank (browser clamped scrollTop down), then grew again before
+    // the scroll event fired. No user input happened.
+    viewport.scrollTop = 1400
+    setScrollHeight(2100)
+    fireEvent.scroll(viewport)
+    await triggerResize()
+
+    expect(viewport.scrollTop).toBe(2100)
+    expect(getByTestId('is-at-bottom')).toHaveTextContent('true')
+  })
+
+  it('stops following the tail when a scrollbar drag moves the viewport up', async () => {
+    const { viewport, setScrollHeight } = setupHook({ isSending: false })
+    viewport.scrollTop = 1600
+    fireEvent.scroll(viewport)
+
+    viewport.scrollTop = 1200
+    fireEvent.scroll(viewport)
+    setScrollHeight(2100)
+    await triggerResize()
+
+    expect(viewport.scrollTop).toBe(1200)
+  })
+
   it('pins the idle tail in the resize callback, before the next frame', () => {
     const { viewport, setScrollHeight } = setupHook({ isSending: false })
     viewport.scrollTop = 1600

@@ -141,6 +141,9 @@ export function useScrollManagement({
   // Cooldown: when user scrolls up, block handleScroll from re-setting isAtBottom for a short period
   const userScrollUpUntilRef = useRef(0)
   const lastScrollTopRef = useRef(0)
+  // scrollHeight at the last scroll event. A scrollTop drop that comes with a
+  // height change is layout (clamp on shrink, reflow), not the user.
+  const lastScrollHeightRef = useRef(0)
   const touchStartYRef = useRef<number | null>(null)
   // Last known good scroll snapshot for the displayed session. Updated on every
   // real scroll; used when leaving a session so Loading placeholders cannot
@@ -410,6 +413,7 @@ export function useScrollManagement({
         setIsAtBottom(true)
         scrollToTail(viewport)
         lastScrollTopRef.current = viewport.scrollTop
+        lastScrollHeightRef.current = viewport.scrollHeight
         if (sessionId) {
           lastKnownScrollRef.current = {
             sessionId,
@@ -437,6 +441,7 @@ export function useScrollManagement({
       const targetTop = Math.min(Math.max(0, saved.scrollTop), maxScroll)
       viewport.scrollTop = targetTop
       lastScrollTopRef.current = targetTop
+      lastScrollHeightRef.current = viewport.scrollHeight
       lastKnownScrollRef.current = {
         sessionId: sessionId ?? '',
         scrollTop: targetTop,
@@ -747,9 +752,17 @@ export function useScrollManagement({
 
       const target = e.target as HTMLDivElement
       const previousScrollTop = lastScrollTopRef.current
+      const contentHeightChanged =
+        target.scrollHeight !== lastScrollHeightRef.current
       lastScrollTopRef.current = target.scrollTop
+      lastScrollHeightRef.current = target.scrollHeight
 
+      // Wheel, touch, and keyboard report user scroll-up directly. This check
+      // only catches scrollbar drags, which do not resize the content. When a
+      // run ends, the content shrinks and grows again: the browser clamps
+      // scrollTop down, and that must not stop following the tail.
       if (
+        !contentHeightChanged &&
         hasScrollableOverflow(target) &&
         target.scrollTop < previousScrollTop - SCROLL_EPSILON_PX
       ) {
