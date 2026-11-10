@@ -19,21 +19,27 @@ rewrites `~/.codex/config.toml`.
 ## Setup
 
 1. Create an API key in the [QwenCloud console](https://home.qwencloud.com/api-keys).
-2. Export it as `DASHSCOPE_API_KEY` (Jean passes the environment variable name,
-   not the secret, to Codex and Pi):
+2. Export the key for your billing mode (Jean passes the environment variable
+   name, not the secret, to Codex and Pi):
 
    ```bash
+   # Pay-as-you-go (sk-ws- key)
    export DASHSCOPE_API_KEY="sk-ws-..."
+
+   # Token Plan (sk-sp- key) - separate variable, so both can coexist
+   export QWENCLOUD_TOKEN_PLAN_API_KEY="sk-sp-..."
    ```
 
    The variable must be visible to the **Jean process** (restart the app / server
-   after exporting it). This is the same environment variable used by model
-   autofetch.
+   after exporting it). These are the same variables used by model autofetch.
 
 3. Settings → Providers, click the `QwenCloud` / `qwencloud` template, choose
-   your region in the picker, and save. For the Claude CLI profile, replace
-   `<your-qwencloud-api-key>` in the JSON with your key (or point
-   `ANTHROPIC_AUTH_TOKEN` at a shell-expanded secret).
+   your region **and billing mode** in the picker, and save. Switching between
+   Pay-as-you-go and Token Plan rewrites the base URL and the API key env var
+   together. For the Claude CLI profile, replace `<your-qwencloud-api-key>` in
+   the JSON with your key (or point `ANTHROPIC_AUTH_TOKEN` at a shell-expanded
+   secret) — Claude profiles hold the token inline, so swap it manually when
+   changing modes.
 4. Pick the provider for a session, or set it as the default for that backend.
 
 Do not commit API keys. The Claude profile writes a settings file under
@@ -62,16 +68,37 @@ provider is active** (`jean-core/src/chat/codex.rs`), because the catalog
 belongs to the CLI's current account, not to QwenCloud. Explicit model choices
 are still passed through and validated by the CLI.
 
-## Regions
+## Two billing modes (not interchangeable)
 
-Pay-as-you-go endpoints are region-scoped, and **an API key only works with the
-base URL of the region it was created in**. Presets default to Singapore
-(`ap-southeast-1`), which is the region QwenCloud's docs use.
+QwenCloud has two completely separate billing modes. **Keys and endpoints must
+not be mixed** — a `sk-sp-` key fails against a regional endpoint and vice
+versa:
 
-You do not have to hand-edit URLs. A **QwenCloud region** picker appears in the
-provider form whenever the base URL (or the Claude settings JSON) points at a
-QwenCloud domain. Selecting a region rewrites the URL for all six regions plus
-Token Plan, and re-fetches the Pi model list for that region:
+|                     | Pay-as-you-go                     | Token Plan                               |
+| ------------------- | --------------------------------- | ---------------------------------------- |
+| Key prefix          | `sk-ws-` (older keys `sk-`)       | `sk-sp-`                                 |
+| Key env var in Jean | `DASHSCOPE_API_KEY`               | `QWENCLOUD_TOKEN_PLAN_API_KEY`           |
+| Base URL host       | `{region}.maas.qwencloudapi.com`  | `token-plan.maas.qwencloudapi.com`       |
+| Regions             | all six, key scoped to its region | Singapore only, no region ID             |
+| Billing             | per call                          | monthly Credits quota                    |
+| Model catalogue     | full region/workspace catalogue   | smaller plan-specific list, incl. `auto` |
+
+Both modes expose the same two protocol paths (`/compatible-mode/v1` and
+`/apps/anthropic`) and both expose `GET {base_url}/models` (401 without a key,
+404 on the Anthropic `/v1/models`). Token Plan covers only the models listed
+for the Individual or Team edition, and its terms restrict use to interactive
+programming/agent tools rather than custom backends.
+
+The provider picker groups endpoints by billing mode. Switching mode rewrites
+the base URL **and** the API key env var for Codex/Pi, and re-fetches the Pi
+model list. For the Claude CLI profile the key is inline in the settings JSON,
+so replace it when switching modes.
+
+## Pay-as-you-go regions
+
+Regional keys only work with the endpoint of the region where they were
+created. Presets default to Singapore (`ap-southeast-1`), the region used in
+QwenCloud's docs. The picker rewrites the URL automatically:
 
 | Region                  | Domain                                 |
 | ----------------------- | -------------------------------------- |
@@ -82,15 +109,10 @@ Token Plan, and re-fetches the Pi model list for that region:
 | Japan (Tokyo)           | `ap-northeast-1.maas.qwencloudapi.com` |
 | US (Virginia)           | `us-east-1.maas.qwencloudapi.com`      |
 
-`maas.qwencloudapi.com` without a region prefix is an alias for Singapore and
-is recognised as such. Model availability and prices differ by region.
-
-**Token Plan** is a separate Singapore-only product with its own `sk-sp-` API
-key and endpoint — it is listed in the picker, but replacing the base URL alone
-is not enough:
-
-- OpenAI compatible: `https://token-plan.maas.qwencloudapi.com/compatible-mode/v1`
-- Anthropic compatible: `https://token-plan.maas.qwencloudapi.com/apps/anthropic`
+`maas.qwencloudapi.com` without a region prefix is a Singapore alias and is
+recognised as such. Model availability and prices also differ by region and by
+workspace: a key in a sub-workspace only sees models granted to that workspace,
+which autofetch reflects automatically.
 
 ## Model lists and autofetch
 
@@ -104,22 +126,47 @@ from QwenCloud at runtime:
 | Codex                     | Local app-server `model/list` JSON-RPC. Skipped for custom providers (see above).                                                                                                   |
 | Pi custom provider        | `models[]` array written into `~/.pi/agent/models.json`, shown as `<provider>/<model>`.                                                                                             |
 
-QwenCloud's **OpenAI-compatible** endpoint does expose
-`GET {base_url}/models` (it returns 401 without a key, i.e. the route exists),
-while the Anthropic-compatible endpoint returns 404 for `/v1/models`. Jean uses
-the former:
+QwenCloud's **OpenAI-compatible** endpoint exposes `GET {base_url}/models` on
+both billing modes (401 without a key, i.e. the route exists — verified on the
+Singapore regional host and on `token-plan.maas.qwencloudapi.com`). The
+Anthropic-compatible endpoint returns 404 for `/v1/models`. Jean uses the
+former:
 
-- When the `qwencloud` Pi preset is selected, Jean **automatically fetches**
-  the region's model list and replaces the curated fallback list. Selecting a
-  different region re-fetches, because availability differs per region.
-- A **Fetch models from QwenCloud** button lets you refresh it manually.
-- The `fetch_qwencloud_models` command
-  (`jean-core/src/qwencloud.rs`) reads `DASHSCOPE_API_KEY` (or the configured
-  env var) from the **Jean process environment**. The key is never stored in
-  preferences and never sent over the Web Access WebSocket. The command
-  validates that the base URL is an `https://` QwenCloud host before attaching
-  the key, so a crafted URL cannot exfiltrate it.
-- If the key is missing, invalid, or the region has no access, autofetch fails
+### What the fetched list contains
+
+**All model IDs your key can access on that endpoint — not just Qwen-branded
+ones.** QwenCloud documents its third-party text models as "Same API format as
+Qwen models", so the list normally includes DeepSeek, Kimi, GLM and MiniMax ids
+alongside `qwen3.8-max` / `qwen3.7-plus` / `qwen3.8-flash`. The exact set is
+scoped by:
+
+- **Region** — models and prices differ per region.
+- **Workspace** — a sub-workspace key only sees models granted to it.
+- **Billing mode** — Token Plan returns its smaller plan catalogue, which
+  includes `auto`, `qwen3.8-max`, `qwen3.8-flash`, `glm-5.3`,
+  `deepseek-v4-pro`, etc. It does not include every pay-as-you-go model.
+- **Capability** — QwenCloud's marketplace also lists image, video, speech and
+  embedding models. If `/models` includes any of those, they will appear in the
+  list too, but they are not callable through the chat completions endpoint
+  (Token Plan even gives them dedicated endpoints). Remove them in the models
+  textarea, or narrow the list with the switch below.
+
+An **Only Qwen-branded models** switch filters the fetched list to ids starting
+with `qwen`, without another network call. It is off by default so third-party
+coding models stay available. The list is always editable before saving.
+
+### How the fetch works
+
+- Selecting the `qwencloud` Pi preset **autofetches** the model list. Changing
+  the region **or billing mode** re-fetches, because availability differs for
+  both. A **Fetch models from QwenCloud** button refreshes manually.
+- The `fetch_qwencloud_models` command (`jean-core/src/qwencloud.rs`) reads the
+  key env var for the selected mode (`DASHSCOPE_API_KEY` or
+  `QWENCLOUD_TOKEN_PLAN_API_KEY`) from the **Jean process environment**. The key
+  is never stored in preferences and never crosses the Web Access WebSocket.
+  The command validates that the base URL is an `https://` QwenCloud host before
+  attaching the key, so a crafted URL cannot exfiltrate it.
+- If the key is missing, invalid, or the endpoint has no access, autofetch fails
   silently and the curated list stays. The manual button shows the full error.
 
 The curated fallback list, used when autofetch is unavailable:
@@ -130,10 +177,9 @@ The curated fallback list, used when autofetch is unavailable:
 | `qwen3.7-plus`  | Balanced quality, speed, and cost; also the coder model |
 | `qwen3.8-flash` | Fast and cost-effective                                 |
 
-Fetched ids are passed through unchanged, so any QwenCloud model id can be
-used. Note that Claude and Codex keep their own native model pickers; making
-those fetch QwenCloud models would require changing Jean's backend-specific
-catalog logic and is not part of this integration.
+Fetched ids are passed through unchanged. Claude and Codex keep their own
+native model pickers; making those consume QwenCloud's `/models` would require
+backend-specific catalog changes and is not part of this integration.
 
 ## Wire formats and limitations
 
@@ -153,10 +199,17 @@ catalog logic and is not part of this integration.
 - Qwen model names also appear in Jean's Command Code model picker
   (`commandcode/Qwen/...`). Those go through Command Code's own provider, not
   QwenCloud credentials.
+- Token Plan's terms of use limit it to interactive use inside programming and
+  agent tools (not automation scripts or custom app backends). Jean is such a
+  tool, but check the plan terms before wiring a Token Plan key into
+  non-interactive workflows.
 
 ## References
 
 - [QwenCloud docs](https://docs.qwencloud.com/)
 - [Regions and endpoints](https://docs.qwencloud.com/developer-guides/getting-started/regions)
+- [API keys: Pay-as-you-go vs Token Plan](https://docs.qwencloud.com/developer-guides/administration/api-keys)
 - [Model selection](https://docs.qwencloud.com/developer-guides/getting-started/model-selection)
+- [Token Plan Individual quickstart](https://docs.qwencloud.com/token-plan/personal/token-plan-personal-quickstart)
+- [Token Plan supported models](https://docs.qwencloud.com/token-plan/personal/token-plan-personal-overview)
 - [Anthropic-compatible API](https://docs.qwencloud.com/api-reference/chat/anthropic)

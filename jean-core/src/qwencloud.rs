@@ -6,7 +6,11 @@
 //!
 //! The API key is read from the Jean process environment and never from the
 //! UI, so it is never stored in preferences or sent over the WebSocket
-//! transport used by Web Access.
+//! transport used by Web Access. Pay-as-you-go (`sk-ws-`) keys default to
+//! `DASHSCOPE_API_KEY`; Token Plan (`sk-sp-`) keys use
+//! `QWENCLOUD_TOKEN_PLAN_API_KEY` and the `token-plan` host. Both hosts are
+//! accepted by `validate_base_url` because keys and endpoints are not
+//! interchangeable between the two billing modes.
 
 use serde::Deserialize;
 use std::time::Duration;

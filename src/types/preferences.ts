@@ -1527,84 +1527,113 @@ export interface PiProviderProfile {
 }
 
 /**
- * QwenCloud endpoints. Pay-as-you-go API keys are region-scoped: a key created
- * in one region only works with that region's base URL. Singapore
- * (`ap-southeast-1`) is the default in QwenCloud's docs, so presets start
- * there and the provider form lets you switch to any region below.
- * See docs/developer/qwencloud.md.
+ * QwenCloud has two billing modes, and they are NOT interchangeable:
+ *
+ * - **Pay-as-you-go**: `sk-ws-` keys, scoped to the region they were created
+ *   in, using `{region}.maas.qwencloudapi.com`.
+ * - **Token Plan**: `sk-sp-` subscription keys, Singapore-only, using
+ *   `token-plan.maas.qwencloudapi.com`, with a smaller model catalogue.
+ *
+ * Each mode gets its own key environment variable so both can be configured
+ * in Jean at the same time. See docs/developer/qwencloud.md.
  */
-export interface QwenCloudRegion {
+export type QwenCloudBillingMode = 'pay-as-you-go' | 'token-plan'
+
+export interface QwenCloudEndpoint {
   id: string
   label: string
   domain: string
+  mode: QwenCloudBillingMode
 }
 
-const QWENCLOUD_DEFAULT_REGION: QwenCloudRegion = {
+export const QWENCLOUD_API_KEY_ENV: Record<QwenCloudBillingMode, string> = {
+  'pay-as-you-go': 'DASHSCOPE_API_KEY',
+  'token-plan': 'QWENCLOUD_TOKEN_PLAN_API_KEY',
+}
+
+export const QWENCLOUD_BILLING_MODE_LABELS: Record<
+  QwenCloudBillingMode,
+  string
+> = {
+  'pay-as-you-go': 'Pay-as-you-go (sk-ws-, regional keys)',
+  'token-plan': 'Token Plan (sk-sp-, Singapore only)',
+}
+
+const QWENCLOUD_DEFAULT_ENDPOINT: QwenCloudEndpoint = {
   id: 'ap-southeast-1',
   label: 'Singapore',
   domain: 'ap-southeast-1.maas.qwencloudapi.com',
+  mode: 'pay-as-you-go',
 }
 
-export const QWENCLOUD_REGIONS: QwenCloudRegion[] = [
-  QWENCLOUD_DEFAULT_REGION,
+export const QWENCLOUD_ENDPOINTS: QwenCloudEndpoint[] = [
+  QWENCLOUD_DEFAULT_ENDPOINT,
   {
     id: 'cn-beijing',
     label: 'China North 2 (Beijing)',
     domain: 'cn-beijing.maas.qwencloudapi.com',
+    mode: 'pay-as-you-go',
   },
   {
     id: 'eu-central-1',
     label: 'Germany (Frankfurt)',
     domain: 'eu-central-1.maas.qwencloudapi.com',
+    mode: 'pay-as-you-go',
   },
   {
     id: 'cn-hongkong',
     label: 'China (Hong Kong)',
     domain: 'cn-hongkong.maas.qwencloudapi.com',
+    mode: 'pay-as-you-go',
   },
   {
     id: 'ap-northeast-1',
     label: 'Japan (Tokyo)',
     domain: 'ap-northeast-1.maas.qwencloudapi.com',
+    mode: 'pay-as-you-go',
   },
   {
     id: 'us-east-1',
     label: 'US (Virginia)',
     domain: 'us-east-1.maas.qwencloudapi.com',
+    mode: 'pay-as-you-go',
   },
-  // Singapore-only, separate product with its own API key. Listed here so the
-  // region picker can switch to it without hand-editing the base URL.
   {
     id: 'token-plan',
-    label: 'Token Plan (Singapore, separate key)',
+    label: 'Singapore (Token Plan)',
     domain: 'token-plan.maas.qwencloudapi.com',
+    mode: 'token-plan',
   },
 ]
 
-export const QWENCLOUD_DEFAULT_REGION_ID = QWENCLOUD_DEFAULT_REGION.id
-export const QWENCLOUD_API_KEY_ENV = 'DASHSCOPE_API_KEY'
+export const QWENCLOUD_DEFAULT_REGION_ID = QWENCLOUD_DEFAULT_ENDPOINT.id
 
-export function qwenCloudRegionById(regionId: string): QwenCloudRegion {
+export function qwenCloudEndpointById(endpointId: string): QwenCloudEndpoint {
   return (
-    QWENCLOUD_REGIONS.find(region => region.id === regionId) ??
-    QWENCLOUD_DEFAULT_REGION
+    QWENCLOUD_ENDPOINTS.find(endpoint => endpoint.id === endpointId) ??
+    QWENCLOUD_DEFAULT_ENDPOINT
   )
 }
 
+/** Environment variable holding the API key for an endpoint's billing mode. */
+export function qwenCloudApiKeyEnv(endpointId: string): string {
+  return QWENCLOUD_API_KEY_ENV[qwenCloudEndpointById(endpointId).mode]
+}
+
 export function qwenCloudOpenAiBaseUrl(
-  regionId: string = QWENCLOUD_DEFAULT_REGION_ID
+  endpointId: string = QWENCLOUD_DEFAULT_REGION_ID
 ): string {
-  return `https://${qwenCloudRegionById(regionId).domain}/compatible-mode/v1`
+  return `https://${qwenCloudEndpointById(endpointId).domain}/compatible-mode/v1`
 }
 
 export function qwenCloudAnthropicBaseUrl(
-  regionId: string = QWENCLOUD_DEFAULT_REGION_ID
+  endpointId: string = QWENCLOUD_DEFAULT_REGION_ID
 ): string {
-  return `https://${qwenCloudRegionById(regionId).domain}/apps/anthropic`
+  return `https://${qwenCloudEndpointById(endpointId).domain}/apps/anthropic`
 }
 
 /**
- * Find the QwenCloud region used by a base URL or a Claude CLI settings JSON
+ * Find the QwenCloud endpoint used by a base URL or a Claude CLI settings JSON
  * blob. `maas.qwencloudapi.com` (no prefix) is the Singapore alias.
  */
 export function qwenCloudRegionFromValue(value: string): string | null {
@@ -1613,14 +1642,14 @@ export function qwenCloudRegionFromValue(value: string): string | null {
   const domain = match[0].toLowerCase()
   if (domain === 'maas.qwencloudapi.com') return QWENCLOUD_DEFAULT_REGION_ID
   return (
-    QWENCLOUD_REGIONS.find(region => region.domain === domain)?.id ??
+    QWENCLOUD_ENDPOINTS.find(endpoint => endpoint.domain === domain)?.id ??
     QWENCLOUD_DEFAULT_REGION_ID
   )
 }
 
-/** Rewrite every QwenCloud domain in a URL or settings JSON to `regionId`. */
-export function withQwenCloudRegion(value: string, regionId: string): string {
-  const domain = qwenCloudRegionById(regionId).domain
+/** Rewrite every QwenCloud domain in a URL or settings JSON to `endpointId`. */
+export function withQwenCloudRegion(value: string, endpointId: string): string {
+  const domain = qwenCloudEndpointById(endpointId).domain
   return value.replace(/([a-z0-9-]+\.)?maas\.qwencloudapi\.com/gi, domain)
 }
 
@@ -1643,7 +1672,7 @@ export const PREDEFINED_CODEX_PROVIDERS: CodexProviderProfile[] = [
     name: 'QwenCloud',
     provider_id: 'qwencloud',
     base_url: qwenCloudOpenAiBaseUrl(),
-    env_key: QWENCLOUD_API_KEY_ENV,
+    env_key: QWENCLOUD_API_KEY_ENV['pay-as-you-go'],
     // QwenCloud supports both OpenAI wire formats and recommends Responses for
     // new integrations, which is also what Codex app-server speaks.
     wire_api: 'responses',
@@ -1671,7 +1700,7 @@ export const PREDEFINED_PI_PROVIDERS: PiProviderProfile[] = [
     name: 'qwencloud',
     base_url: qwenCloudOpenAiBaseUrl(),
     api: 'openai-completions',
-    api_key_env: QWENCLOUD_API_KEY_ENV,
+    api_key_env: QWENCLOUD_API_KEY_ENV['pay-as-you-go'],
     models: [
       { id: 'qwen3.8-max', name: 'Qwen 3.8 Max' },
       { id: 'qwen3.7-plus', name: 'Qwen 3.7 Plus' },

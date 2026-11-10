@@ -3,11 +3,13 @@ import {
   PREDEFINED_CLI_PROFILES,
   PREDEFINED_CODEX_PROVIDERS,
   PREDEFINED_PI_PROVIDERS,
+  QWENCLOUD_API_KEY_ENV,
   QWENCLOUD_DEFAULT_REGION_ID,
-  QWENCLOUD_REGIONS,
+  QWENCLOUD_ENDPOINTS,
   qwenCloudAnthropicBaseUrl,
+  qwenCloudApiKeyEnv,
+  qwenCloudEndpointById,
   qwenCloudOpenAiBaseUrl,
-  qwenCloudRegionById,
   qwenCloudRegionFromValue,
   withQwenCloudRegion,
 } from './preferences'
@@ -73,9 +75,9 @@ describe('QwenCloud provider presets', () => {
   })
 })
 
-describe('QwenCloud regions', () => {
-  it('offers every pay-as-you-go region plus Token Plan', () => {
-    expect(QWENCLOUD_REGIONS.map(region => region.id)).toEqual([
+describe('QwenCloud regions and billing modes', () => {
+  it('offers six pay-as-you-go regions plus the Token Plan endpoint', () => {
+    expect(QWENCLOUD_ENDPOINTS.map(endpoint => endpoint.id)).toEqual([
       'ap-southeast-1',
       'cn-beijing',
       'eu-central-1',
@@ -85,21 +87,45 @@ describe('QwenCloud regions', () => {
       'token-plan',
     ])
     expect(QWENCLOUD_DEFAULT_REGION_ID).toBe('ap-southeast-1')
+    expect(
+      QWENCLOUD_ENDPOINTS.filter(e => e.mode === 'pay-as-you-go')
+    ).toHaveLength(6)
+    expect(
+      QWENCLOUD_ENDPOINTS.filter(e => e.mode === 'token-plan')
+    ).toHaveLength(1)
   })
 
-  it('builds both protocol URLs for every region', () => {
-    for (const region of QWENCLOUD_REGIONS) {
-      expect(qwenCloudOpenAiBaseUrl(region.id)).toBe(
-        `https://${region.domain}/compatible-mode/v1`
+  it('keeps a separate API key env var for each billing mode', () => {
+    expect(QWENCLOUD_API_KEY_ENV).toEqual({
+      'pay-as-you-go': 'DASHSCOPE_API_KEY',
+      'token-plan': 'QWENCLOUD_TOKEN_PLAN_API_KEY',
+    })
+    expect(qwenCloudApiKeyEnv('ap-southeast-1')).toBe('DASHSCOPE_API_KEY')
+    expect(qwenCloudApiKeyEnv('cn-beijing')).toBe('DASHSCOPE_API_KEY')
+    expect(qwenCloudApiKeyEnv('token-plan')).toBe(
+      'QWENCLOUD_TOKEN_PLAN_API_KEY'
+    )
+    expect(qwenCloudOpenAiBaseUrl('token-plan')).toBe(
+      'https://token-plan.maas.qwencloudapi.com/compatible-mode/v1'
+    )
+    expect(qwenCloudAnthropicBaseUrl('token-plan')).toBe(
+      'https://token-plan.maas.qwencloudapi.com/apps/anthropic'
+    )
+  })
+
+  it('builds both protocol URLs for every endpoint', () => {
+    for (const endpoint of QWENCLOUD_ENDPOINTS) {
+      expect(qwenCloudOpenAiBaseUrl(endpoint.id)).toBe(
+        `https://${endpoint.domain}/compatible-mode/v1`
       )
-      expect(qwenCloudAnthropicBaseUrl(region.id)).toBe(
-        `https://${region.domain}/apps/anthropic`
+      expect(qwenCloudAnthropicBaseUrl(endpoint.id)).toBe(
+        `https://${endpoint.domain}/apps/anthropic`
       )
     }
   })
 
-  it('falls back to Singapore for an unknown region', () => {
-    expect(qwenCloudRegionById('not-a-region').id).toBe('ap-southeast-1')
+  it('falls back to Singapore for an unknown endpoint', () => {
+    expect(qwenCloudEndpointById('not-a-region').id).toBe('ap-southeast-1')
     expect(qwenCloudOpenAiBaseUrl('not-a-region')).toBe(
       qwenCloudOpenAiBaseUrl('ap-southeast-1')
     )
@@ -116,6 +142,9 @@ describe('QwenCloud regions', () => {
         })
       )
     ).toBe('us-east-1')
+    expect(qwenCloudRegionFromValue(qwenCloudOpenAiBaseUrl('token-plan'))).toBe(
+      'token-plan'
+    )
     expect(
       qwenCloudRegionFromValue(
         'https://maas.qwencloudapi.com/compatible-mode/v1'
