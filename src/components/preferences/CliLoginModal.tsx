@@ -342,7 +342,7 @@ function CliLoginModalContent({
   return (
     <Dialog open={!minimized} onOpenChange={handleOpenChange}>
       <DialogContent
-        className="!w-screen !h-dvh !max-w-screen !rounded-none sm:!w-[calc(100vw-64px)] sm:!max-w-[calc(100vw-64px)] sm:!h-[calc(100vh-64px)] sm:!rounded-lg flex flex-col"
+        className="safe-top-fullscreen !w-screen !h-dvh !max-w-screen !rounded-none sm:!w-[calc(100vw-64px)] sm:!max-w-[calc(100vw-64px)] sm:!h-[calc(100vh-64px)] sm:!rounded-lg flex flex-col"
         showCloseButton={action === 'login'}
       >
         {action !== 'login' && (

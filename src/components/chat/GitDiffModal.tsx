@@ -1259,7 +1259,7 @@ export function GitDiffModal({
         <DialogContent
           ref={dialogContentRef}
           showCloseButton={false}
-          className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-[85vh] sm:!rounded-lg sm:p-4 bg-background/95 overflow-hidden flex flex-col"
+          className="safe-top-fullscreen !w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-[85vh] sm:!rounded-lg sm:p-4 bg-background/95 overflow-hidden flex flex-col"
           style={{ fontSize: 'var(--ui-font-size)' }}
           onOpenAutoFocus={e => {
             // Prevent Radix from focusing the first focusable element (a tooltip trigger button),

@@ -597,6 +597,16 @@
   padding-top: var(--mac-titlebar-action-top-inset, 4px);
 }
 
+/* Full-screen mobile dialogs: keep content (and the absolute close button)
+   below the iOS status bar. A transparent top border is painted by the
+   dialog background, so each dialog keeps its own padding. */
+@media (max-width: 639.98px) {
+  .safe-top-fullscreen {
+    border-top-width: var(--safe-area-top) !important;
+    border-top-color: transparent !important;
+  }
+}
+
 /* Font overrides - outside @layer to ensure higher specificity */
 body {
   font-family: var(--font-family-sans) !important;
