@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { invoke } from '@/lib/transport'
+import { invokeForOptionalServer } from '@/lib/transport'
+import { useOptionalSettingsTargetServerId } from '@/lib/settings-target'
 import { openExternal } from '@/lib/platform'
 import { useUIStore } from '@/store/ui-store'
 import { Button } from '@/components/ui/button'
@@ -340,12 +341,14 @@ function PluginCard({
   const [loggingIn, setLoggingIn] = useState<'claude' | 'codex' | null>(null)
   const loginPending = useRef(false)
   const openCliLoginModal = useUIStore(state => state.openCliLoginModal)
+  const serverId = useOptionalSettingsTargetServerId()
   const cliLoginOpen = useUIStore(state => state.cliLoginModalOpen)
 
   const checkStatus = useCallback(async () => {
     setChecking(true)
     try {
-      const result = await invoke<PluginStatus>(
+      const result = await invokeForOptionalServer<PluginStatus>(
+        serverId,
         'check_opinionated_plugin_status',
         { pluginName: plugin.id }
       )
@@ -357,7 +360,7 @@ function PluginCard({
     } finally {
       setChecking(false)
     }
-  }, [plugin.id, onInstalledChange])
+  }, [plugin.id, onInstalledChange, serverId])
 
   React.useEffect(() => {
     checkStatus()
@@ -368,9 +371,13 @@ function PluginCard({
     const toastId = toast.loading(`Installing ${plugin.name}...`)
 
     try {
-      const message = await invoke<string>('install_opinionated_plugin', {
-        pluginName: plugin.id,
-      })
+      const message = await invokeForOptionalServer<string>(
+        serverId,
+        'install_opinionated_plugin',
+        {
+          pluginName: plugin.id,
+        }
+      )
       toast.success(message, { id: toastId })
     } catch (error) {
       toast.error(`Failed to install ${plugin.name}: ${error}`, {
@@ -380,7 +387,7 @@ function PluginCard({
       setInstalling(false)
       await checkStatus()
     }
-  }, [plugin.id, plugin.name, checkStatus])
+  }, [plugin.id, plugin.name, checkStatus, serverId])
 
   const handleControl = useCallback(
     async (action: 'start' | 'stop') => {
@@ -391,7 +398,8 @@ function PluginCard({
           : `Stopping ${plugin.name}...`
       )
       try {
-        const message = await invoke<string>(
+        const message = await invokeForOptionalServer<string>(
+          serverId,
           action === 'start'
             ? 'start_opinionated_plugin'
             : 'stop_opinionated_plugin',
@@ -407,7 +415,7 @@ function PluginCard({
         await checkStatus()
       }
     },
-    [plugin.id, plugin.name, checkStatus]
+    [plugin.id, plugin.name, checkStatus, serverId]
   )
 
   const present = status ? isPluginPresent(status) : false
@@ -432,22 +440,25 @@ function PluginCard({
         : ` (v${status.version.replace(/^v/, '')})`
       : null
 
-  const handleRefreshModels = useCallback(async (quiet = false) => {
-    const toastId = quiet ? undefined : toast.loading('Reading models...')
-    try {
-      const models = await invoke<{
-        opus: string | null
-        sonnet: string | null
-        haiku: string | null
-      }>('refresh_cliproxyapi_models')
-      const names = [models.opus, models.sonnet, models.haiku].filter(Boolean)
-      toast.success(`Models from CLIProxyAPI: ${names.join(', ')}`, {
-        id: toastId,
-      })
-    } catch (error) {
-      toast.error(`${error}`, { id: toastId })
-    }
-  }, [])
+  const handleRefreshModels = useCallback(
+    async (quiet = false) => {
+      const toastId = quiet ? undefined : toast.loading('Reading models...')
+      try {
+        const models = await invokeForOptionalServer<{
+          opus: string | null
+          sonnet: string | null
+          haiku: string | null
+        }>(serverId, 'refresh_cliproxyapi_models')
+        const names = [models.opus, models.sonnet, models.haiku].filter(Boolean)
+        toast.success(`Models from CLIProxyAPI: ${names.join(', ')}`, {
+          id: toastId,
+        })
+      } catch (error) {
+        toast.error(`${error}`, { id: toastId })
+      }
+    },
+    [serverId]
+  )
 
   useEffect(() => {
     if (plugin.id !== 'cliproxyapi') return
@@ -464,13 +475,21 @@ function PluginCard({
       const label = provider === 'claude' ? 'Claude' : 'Codex'
       const toastId = toast.loading(`Opening ${label} account login...`)
       try {
-        const launch = await invoke<AccountLoginLaunch>(
+        const launch = await invokeForOptionalServer<AccountLoginLaunch>(
+          serverId,
           'prepare_cliproxyapi_account_login',
           { provider }
         )
         toast.success(launch.message, { id: toastId })
         loginPending.current = true
-        openCliLoginModal('cliproxyapi', launch.binary, launch.args)
+        openCliLoginModal(
+          'cliproxyapi',
+          launch.binary,
+          launch.args,
+          undefined,
+          undefined,
+          serverId
+        )
       } catch (error) {
         toast.error(`Failed to open ${label} account login: ${error}`, {
           id: toastId,
@@ -480,7 +499,7 @@ function PluginCard({
         await checkStatus()
       }
     },
-    [checkStatus, openCliLoginModal]
+    [checkStatus, openCliLoginModal, serverId]
   )
 
   const handleOpenManagement = useCallback(async () => {
@@ -493,9 +512,13 @@ function PluginCard({
     setControlling(true)
     const toastId = toast.loading(`Starting ${plugin.name}...`)
     try {
-      const message = await invoke<string>('start_opinionated_plugin', {
-        pluginName: plugin.id,
-      })
+      const message = await invokeForOptionalServer<string>(
+        serverId,
+        'start_opinionated_plugin',
+        {
+          pluginName: plugin.id,
+        }
+      )
       toast.success(message, { id: toastId })
       openExternal(url)
     } catch (error) {
@@ -508,6 +531,7 @@ function PluginCard({
     }
   }, [
     checkStatus,
+    serverId,
     plugin.id,
     plugin.name,
     status?.management_url,
@@ -519,9 +543,13 @@ function PluginCard({
     const toastId = toast.loading(`Uninstalling ${plugin.name}...`)
 
     try {
-      const message = await invoke<string>('uninstall_opinionated_plugin', {
-        pluginName: plugin.id,
-      })
+      const message = await invokeForOptionalServer<string>(
+        serverId,
+        'uninstall_opinionated_plugin',
+        {
+          pluginName: plugin.id,
+        }
+      )
       toast.success(message, { id: toastId })
     } catch (error) {
       toast.error(`Failed to uninstall ${plugin.name}: ${error}`, {
@@ -531,7 +559,7 @@ function PluginCard({
       setUninstalling(false)
       await checkStatus()
     }
-  }, [plugin.id, plugin.name, checkStatus])
+  }, [plugin.id, plugin.name, checkStatus, serverId])
 
   return (
     <ExtensionRow

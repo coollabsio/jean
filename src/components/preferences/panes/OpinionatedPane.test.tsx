@@ -1,14 +1,22 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import userEvent from '@testing-library/user-event'
 import { render, screen, waitFor, within } from '@/test/test-utils'
-import { invoke } from '@/lib/transport'
+import { invoke, invokeForOptionalServer } from '@/lib/transport'
+import { SettingsTargetProvider } from '@/lib/settings-target'
 import { openExternal } from '@/lib/platform'
 import { useUIStore } from '@/store/ui-store'
 import { OpinionatedPane } from './OpinionatedPane'
 
-vi.mock('@/lib/transport', () => ({
-  invoke: vi.fn(),
-}))
+vi.mock('@/lib/transport', () => {
+  const invoke = vi.fn()
+  return {
+    invoke,
+    invokeForOptionalServer: vi.fn(
+      (_serverId: string | undefined, command: string, args?: unknown) =>
+        invoke(command, args)
+    ),
+  }
+})
 
 vi.mock('@/lib/platform', () => ({
   openExternal: vi.fn(),
@@ -69,6 +77,36 @@ describe('OpinionatedPane', () => {
         pluginName: 'superpowers',
       })
     })
+  })
+
+  it('sends plugin commands to the server picked in Settings', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <SettingsTargetProvider serverId="devserver">
+        <OpinionatedPane />
+      </SettingsTargetProvider>
+    )
+
+    await screen.findByRole('button', { name: /Superpowers/i })
+    const row = screen.getByText('Superpowers').closest('.rounded-md')
+    if (!row) throw new Error('Expected Superpowers row')
+    await user.click(
+      within(row as HTMLElement).getByRole('button', { name: /Uninstall/i })
+    )
+
+    await waitFor(() => {
+      expect(invokeForOptionalServer).toHaveBeenCalledWith(
+        'devserver',
+        'uninstall_opinionated_plugin',
+        { pluginName: 'superpowers' }
+      )
+    })
+    expect(invokeForOptionalServer).toHaveBeenCalledWith(
+      'devserver',
+      'check_opinionated_plugin_status',
+      { pluginName: 'superpowers' }
+    )
   })
 
   it('lists installed plugins first within a section', async () => {

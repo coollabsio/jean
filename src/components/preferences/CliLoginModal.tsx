@@ -57,6 +57,7 @@ export function CliLoginModal() {
     commandArgs,
     action,
     mcpContext,
+    serverId,
     closeModal,
   } = useUIStore(
     useShallow(state => ({
@@ -66,6 +67,7 @@ export function CliLoginModal() {
       commandArgs: state.cliLoginModalCommandArgs,
       action: state.cliLoginModalAction,
       mcpContext: state.cliLoginModalMcpContext,
+      serverId: state.cliLoginModalServerId,
       closeModal: state.closeCliLoginModal,
     }))
   )
@@ -81,6 +83,7 @@ export function CliLoginModal() {
       commandArgs={commandArgs}
       action={action}
       mcpContext={mcpContext}
+      serverId={serverId}
       onClose={closeModal}
       onRetry={() => setRetryKey(k => k + 1)}
     />
@@ -93,6 +96,7 @@ interface CliLoginModalContentProps {
   commandArgs: string[] | null
   action: 'login' | 'update' | 'install'
   mcpContext: McpLoginContext | null
+  serverId: string | null
   onClose: () => void
   onRetry: () => void
 }
@@ -103,9 +107,11 @@ function CliLoginModalContent({
   commandArgs,
   action,
   mcpContext,
+  serverId,
   onClose,
   onRetry,
 }: CliLoginModalContentProps) {
+  const ownerServerId = mcpContext?.serverId ?? serverId ?? undefined
   const queryClient = useQueryClient()
   const [exitStatus, setExitStatus] = useState<{
     exitCode: number | null
@@ -169,13 +175,13 @@ function CliLoginModalContent({
       cliName
     )
 
-  const target = updateTargetLabel(mcpContext?.serverId)
+  const target = updateTargetLabel(ownerServerId)
 
   // Generate unique terminal ID for this login session
   const [terminalId] = useState(() => {
     const id = `cli-login-${generateId()}`
-    return mcpContext?.serverId && mcpContext.serverId !== 'local'
-      ? serverResourceKey({ serverId: mcpContext.serverId, resourceId: id })
+    return ownerServerId && ownerServerId !== 'local'
+      ? serverResourceKey({ serverId: ownerServerId, resourceId: id })
       : id
   })
 
