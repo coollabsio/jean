@@ -1398,6 +1398,8 @@ export interface AppPreferences {
   /** @deprecated Client-local only (issue #622). Kept for one-time seed/migration. */
   sync_zoom_levels?: boolean // Keep desktop and mobile zoom levels in sync (default true)
   custom_cli_profiles: CustomCliProfile[] // Custom CLI settings profiles (e.g., OpenRouter, MiniMax)
+  /** Extra Claude model ids shown in the picker (models newer than this build) */
+  custom_claude_models?: string[]
   default_provider: string | null // Default Claude provider profile name (null = Anthropic direct)
   /** Codex custom model_provider profiles (OpenRouter, OpenAI-compatible, etc.) */
   custom_codex_providers: CodexProviderProfile[]
@@ -1728,6 +1730,15 @@ export const DEFAULT_CLAUDE_MODEL: ClaudeModel = 'claude-opus-5-5'
 
 /** Plausible Claude model id: `claude-...` with optional `[1m]` / `-fast`. */
 const CLAUDE_MODEL_ID_PATTERN = /^claude-[a-z0-9][a-z0-9.-]*(\[1m\])?(-fast)?$/i
+
+/**
+ * Whether a string looks like a Claude model id. Used to validate custom model
+ * ids typed in Settings, which is how users reach a model released after this
+ * Jean build without waiting for a catalog update.
+ */
+export function isClaudeModelId(value: string): boolean {
+  return CLAUDE_MODEL_ID_PATTERN.test(value.trim())
+}
 
 /**
  * Normalize a Claude model id.
@@ -2592,6 +2603,7 @@ export const defaultPreferences: AppPreferences = {
   mobile_zoom_level: ZOOM_LEVEL_DEFAULT,
   sync_zoom_levels: true,
   custom_cli_profiles: [],
+  custom_claude_models: [],
   default_provider: null,
   custom_codex_providers: [],
   default_codex_provider: null,

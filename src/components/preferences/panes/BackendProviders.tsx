@@ -20,14 +20,105 @@ import {
   PREDEFINED_CLI_PROFILES,
   PREDEFINED_CODEX_PROVIDERS,
   PREDEFINED_PI_PROVIDERS,
+  isClaudeModelId,
 } from '@/types/preferences'
 import { SettingsSection } from '../SettingsSection'
 import { InlineField } from '../InlineField'
+
+/**
+ * Escape hatch for Claude models released after this build. Jean cannot
+ * discover them from the Claude CLI (it exposes no model list, and OAuth
+ * tokens cannot call /v1/models), so the user can add the id here until the
+ * bundled list or the CDN catalog catches up.
+ */
+const CustomClaudeModelsEditor: React.FC<{
+  models: string[]
+  onSave: (models: string[]) => void
+}> = ({ models, onSave }) => {
+  const [isEditing, setIsEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  const startEdit = () => {
+    setDraft(models.join('\n'))
+    setError(null)
+    setIsEditing(true)
+  }
+
+  const cancelEdit = () => {
+    setIsEditing(false)
+    setError(null)
+  }
+
+  const save = () => {
+    const lines = draft
+      .split('\n')
+      .map(line => line.trim())
+      .filter(Boolean)
+    const invalid = lines.find(line => !isClaudeModelId(line))
+    if (invalid) {
+      setError(`Not a Claude model id: ${invalid}`)
+      return
+    }
+    onSave([...new Set(lines)])
+    setIsEditing(false)
+    setError(null)
+  }
+
+  return (
+    <div className="space-y-1">
+      {models.map(model => (
+        <div key={model} className="flex items-center gap-2 py-1">
+          <span className="min-w-0 flex-1 truncate font-mono text-sm">
+            {model}
+          </span>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="text-destructive hover:text-destructive"
+            onClick={() => onSave(models.filter(item => item !== model))}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      ))}
+
+      {isEditing ? (
+        <div className="space-y-2">
+          <Textarea
+            placeholder={'One model id per line\ne.g. claude-fable-5-2'}
+            value={draft}
+            onChange={e => {
+              setDraft(e.target.value)
+              setError(null)
+            }}
+            className="min-h-[80px] font-mono text-base md:text-xs"
+          />
+          {error && <p className="text-xs text-destructive">{error}</p>}
+          <div className="flex gap-2">
+            <Button size="sm" onClick={save}>
+              Save
+            </Button>
+            <Button size="sm" variant="ghost" onClick={cancelEdit}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <Button variant="outline" size="sm" onClick={startEdit}>
+          <Plus className="mr-1 h-3.5 w-3.5" />
+          Add model id
+        </Button>
+      )}
+    </div>
+  )
+}
 
 export const ClaudeProvidersSection: React.FC = () => {
   const { data: preferences } = usePreferences()
   const patchPreferences = usePatchPreferences()
   const profiles = preferences?.custom_cli_profiles ?? []
+  const customModels = preferences?.custom_claude_models ?? []
   const defaultProvider = preferences?.default_provider ?? null
 
   return (
@@ -42,6 +133,18 @@ export const ClaudeProvidersSection: React.FC = () => {
           patchPreferences.mutate({ custom_cli_profiles: updated })
         }
       />
+
+      <InlineField
+        label="Custom model IDs"
+        description="Claude models released after this Jean build. They appear in the Claude model picker."
+      >
+        <CustomClaudeModelsEditor
+          models={customModels}
+          onSave={updated =>
+            patchPreferences.mutate({ custom_claude_models: updated })
+          }
+        />
+      </InlineField>
 
       {profiles.length > 0 && (
         <InlineField

@@ -51,19 +51,43 @@ describe('useToolbarDerivedState', () => {
       })
     )
 
-    expect(result.current.backendModelSections).toEqual([
-      {
-        backend: 'claude',
-        label: 'Claude',
-        options: [{ value: 'claude-remote', label: 'Remote' }],
-      },
-      {
-        backend: 'codex',
-        label: 'Codex',
-        options: [{ value: 'gpt-remote', label: 'GPT Remote' }],
-      },
+    const sections = result.current.backendModelSections
+    expect(sections.map(section => section.backend)).toEqual([
+      'claude',
+      'codex',
+    ])
+    expect(sections[0]?.options).toContainEqual({
+      value: 'claude-remote',
+      label: 'Remote',
+    })
+    // Regression: a CDN catalog that predates a release must not hide a model
+    // bundled in this build.
+    expect(sections[0]?.options).toContainEqual({
+      value: 'claude-fable-5-2',
+      label: 'Fable 5.2',
+    })
+    expect(sections[1]?.options).toEqual([
+      { value: 'gpt-remote', label: 'GPT Remote' },
     ])
     expect(result.current.selectedModelLabel).toBe('Remote')
+  })
+
+  it('shows custom Claude model ids before catalog options', () => {
+    const { result } = renderHook(() =>
+      useToolbarDerivedState({
+        selectedBackend: 'claude',
+        selectedProvider: null,
+        selectedModel: 'claude-fable-6',
+        customCliProfiles: [],
+        customClaudeModels: ['claude-fable-6'],
+        installedBackends: ['claude'],
+      })
+    )
+
+    expect(result.current.backendModelSections[0]?.options[0]).toEqual({
+      value: 'claude-fable-6',
+      label: 'claude-fable-6 (custom)',
+    })
   })
 
   it('adds CDN models and reasoning metadata for non-Codex backends', () => {
