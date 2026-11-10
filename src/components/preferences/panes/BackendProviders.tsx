@@ -20,9 +20,41 @@ import {
   PREDEFINED_CLI_PROFILES,
   PREDEFINED_CODEX_PROVIDERS,
   PREDEFINED_PI_PROVIDERS,
+  QWENCLOUD_REGIONS,
+  qwenCloudOpenAiBaseUrl,
+  qwenCloudRegionFromValue,
+  withQwenCloudRegion,
 } from '@/types/preferences'
 import { SettingsSection } from '../SettingsSection'
 import { InlineField } from '../InlineField'
+
+/**
+ * QwenCloud API keys are region-scoped. Show this picker whenever a provider
+ * being added or edited points at a QwenCloud endpoint, and rewrite the base
+ * URL (or the Claude CLI settings JSON) to match the selected region.
+ */
+const QwenCloudRegionSelect: React.FC<{
+  value: string
+  onValueChange: (regionId: string) => void
+}> = ({ value, onValueChange }) => (
+  <div className="space-y-1">
+    <p className="text-xs text-muted-foreground">
+      QwenCloud region — use an API key created in the same region.
+    </p>
+    <Select value={value} onValueChange={onValueChange}>
+      <SelectTrigger className="w-full sm:w-80">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {QWENCLOUD_REGIONS.map(region => (
+          <SelectItem key={region.id} value={region.id}>
+            {region.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  </div>
+)
 
 export const ClaudeProvidersSection: React.FC = () => {
   const { data: preferences } = usePreferences()
@@ -290,6 +322,14 @@ const CliProfilesEditor: React.FC<{
             onChange={e => setEditName(e.target.value)}
             className="h-8"
           />
+          {qwenCloudRegionFromValue(editJson) && (
+            <QwenCloudRegionSelect
+              value={qwenCloudRegionFromValue(editJson) ?? ''}
+              onValueChange={regionId =>
+                setEditJson(current => withQwenCloudRegion(current, regionId))
+              }
+            />
+          )}
           <Textarea
             placeholder='{"env": {"ANTHROPIC_BASE_URL": "...", "ANTHROPIC_AUTH_TOKEN": "..."}}'
             value={editJson}
@@ -505,6 +545,14 @@ const CodexProvidersEditor: React.FC<{
             onChange={e => setEditBaseUrl(e.target.value)}
             className="h-8 font-mono text-sm"
           />
+          {qwenCloudRegionFromValue(editBaseUrl) && (
+            <QwenCloudRegionSelect
+              value={qwenCloudRegionFromValue(editBaseUrl) ?? ''}
+              onValueChange={regionId =>
+                setEditBaseUrl(qwenCloudOpenAiBaseUrl(regionId))
+              }
+            />
+          )}
           <Input
             placeholder="Env key (e.g. OPENROUTER_API_KEY)"
             value={editEnvKey}
@@ -575,6 +623,8 @@ const PiProvidersEditor: React.FC<{
   const [editModels, setEditModels] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [fetchingModels, setFetchingModels] = useState(false)
+  const [fetchNotice, setFetchNotice] = useState<string | null>(null)
 
   const existingNames = new Set(providers.map(p => p.name))
   const availableTemplates = PREDEFINED_PI_PROVIDERS.filter(
@@ -588,12 +638,55 @@ const PiProvidersEditor: React.FC<{
     setEditApiKeyEnv('')
     setEditModels('')
     setError(null)
+    setFetchNotice(null)
   }
 
   const cancelEdit = () => {
     setEditingIndex(null)
     setIsAdding(false)
     resetForm()
+  }
+
+  /**
+   * QwenCloud exposes `GET {base_url}/models`. The Rust side reads the API key
+   * from its own environment, so no secret crosses the WebSocket transport.
+   * Silent mode is a best-effort autofetch: failures keep the curated model
+   * list instead of surfacing an error on first open.
+   */
+  const fetchModelsFromQwenCloud = async (
+    baseUrlOverride?: string,
+    apiKeyEnvOverride?: string,
+    silent = false
+  ) => {
+    const baseUrl = (baseUrlOverride ?? editBaseUrl).trim()
+    if (!qwenCloudRegionFromValue(baseUrl)) return
+    setFetchingModels(true)
+    setFetchNotice(null)
+    if (!silent) setError(null)
+    try {
+      const ids = await invoke<string[]>('fetch_qwencloud_models', {
+        baseUrl,
+        apiKeyEnv: (apiKeyEnvOverride ?? editApiKeyEnv).trim() || undefined,
+      })
+      if (ids.length === 0) {
+        if (!silent) setError('QwenCloud returned no models')
+        return
+      }
+      setEditModels(ids.join('\n'))
+      setFetchNotice(`Loaded ${ids.length} models from QwenCloud`)
+    } catch (e) {
+      if (!silent) {
+        setError(
+          `Could not fetch models: ${e}. Check the API key env var and region.`
+        )
+      } else {
+        setFetchNotice(
+          "Using the bundled model list - set the API key in Jean's environment to autofetch."
+        )
+      }
+    } finally {
+      setFetchingModels(false)
+    }
   }
 
   const startEdit = (index: number) => {
@@ -609,6 +702,7 @@ const PiProvidersEditor: React.FC<{
       p.models.map(m => (m.name ? `${m.id}|${m.name}` : m.id)).join('\n')
     )
     setError(null)
+    setFetchNotice(null)
   }
 
   const startAdd = (template?: PiProviderProfile) => {
@@ -624,6 +718,16 @@ const PiProvidersEditor: React.FC<{
         .join('\n') ?? ''
     )
     setError(null)
+    setFetchNotice(null)
+    // Model availability differs per region, so refresh as soon as the
+    // QwenCloud preset is picked. Failure is silent and keeps the fallback.
+    if (template && qwenCloudRegionFromValue(template.base_url)) {
+      void fetchModelsFromQwenCloud(
+        template.base_url,
+        template.api_key_env,
+        true
+      )
+    }
   }
 
   const parseModels = (): PiProviderProfile['models'] | null => {
@@ -756,6 +860,17 @@ const PiProvidersEditor: React.FC<{
             onChange={e => setEditBaseUrl(e.target.value)}
             className="h-8 font-mono text-sm"
           />
+          {qwenCloudRegionFromValue(editBaseUrl) && (
+            <QwenCloudRegionSelect
+              value={qwenCloudRegionFromValue(editBaseUrl) ?? ''}
+              onValueChange={regionId => {
+                const baseUrl = qwenCloudOpenAiBaseUrl(regionId)
+                setEditBaseUrl(baseUrl)
+                // Model availability differs by region - refresh silently.
+                void fetchModelsFromQwenCloud(baseUrl, undefined, true)
+              }}
+            />
+          )}
           <Select
             value={editApi}
             onValueChange={v => setEditApi(v as PiProviderProfile['api'])}
@@ -782,6 +897,21 @@ const PiProvidersEditor: React.FC<{
             onChange={e => setEditApiKeyEnv(e.target.value)}
             className="h-8 font-mono text-sm"
           />
+          {qwenCloudRegionFromValue(editBaseUrl) && (
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={fetchingModels || saving}
+                onClick={() => void fetchModelsFromQwenCloud()}
+              >
+                {fetchingModels ? 'Fetching…' : 'Fetch models from QwenCloud'}
+              </Button>
+              {fetchNotice && (
+                <p className="text-xs text-muted-foreground">{fetchNotice}</p>
+              )}
+            </div>
+          )}
           <Textarea
             placeholder={
               'Models (one per line)\nid or id|Display name\ne.g. anthropic/claude-sonnet-4|Sonnet 4'

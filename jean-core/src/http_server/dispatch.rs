@@ -4126,6 +4126,12 @@ pub async fn dispatch_command(
             crate::pi_cli::delete_pi_provider(name).await?;
             Ok(Value::Null)
         }
+        "fetch_qwencloud_models" => {
+            let base_url: String = field(&args, "baseUrl", "base_url")?;
+            let api_key_env: Option<String> = field_opt(&args, "apiKeyEnv", "api_key_env")?;
+            let result = crate::qwencloud::fetch_qwencloud_models(base_url, api_key_env).await?;
+            to_value(result)
+        }
 
         // =====================================================================
         // Background Tasks (additional)

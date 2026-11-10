@@ -3,6 +3,13 @@ import {
   PREDEFINED_CLI_PROFILES,
   PREDEFINED_CODEX_PROVIDERS,
   PREDEFINED_PI_PROVIDERS,
+  QWENCLOUD_DEFAULT_REGION_ID,
+  QWENCLOUD_REGIONS,
+  qwenCloudAnthropicBaseUrl,
+  qwenCloudOpenAiBaseUrl,
+  qwenCloudRegionById,
+  qwenCloudRegionFromValue,
+  withQwenCloudRegion,
 } from './preferences'
 
 const OPENAI_BASE_URL =
@@ -63,5 +70,71 @@ describe('QwenCloud provider presets', () => {
     const profile = PREDEFINED_CLI_PROFILES.find(p => p.name === 'QwenCloud')
     expect(profile?.settings_json).toContain('<your-qwencloud-api-key>')
     expect(profile?.settings_json).not.toContain('sk-')
+  })
+})
+
+describe('QwenCloud regions', () => {
+  it('offers every pay-as-you-go region plus Token Plan', () => {
+    expect(QWENCLOUD_REGIONS.map(region => region.id)).toEqual([
+      'ap-southeast-1',
+      'cn-beijing',
+      'eu-central-1',
+      'cn-hongkong',
+      'ap-northeast-1',
+      'us-east-1',
+      'token-plan',
+    ])
+    expect(QWENCLOUD_DEFAULT_REGION_ID).toBe('ap-southeast-1')
+  })
+
+  it('builds both protocol URLs for every region', () => {
+    for (const region of QWENCLOUD_REGIONS) {
+      expect(qwenCloudOpenAiBaseUrl(region.id)).toBe(
+        `https://${region.domain}/compatible-mode/v1`
+      )
+      expect(qwenCloudAnthropicBaseUrl(region.id)).toBe(
+        `https://${region.domain}/apps/anthropic`
+      )
+    }
+  })
+
+  it('falls back to Singapore for an unknown region', () => {
+    expect(qwenCloudRegionById('not-a-region').id).toBe('ap-southeast-1')
+    expect(qwenCloudOpenAiBaseUrl('not-a-region')).toBe(
+      qwenCloudOpenAiBaseUrl('ap-southeast-1')
+    )
+  })
+
+  it('detects the region from a URL, a settings JSON blob, and the bare alias', () => {
+    expect(qwenCloudRegionFromValue(qwenCloudOpenAiBaseUrl('cn-beijing'))).toBe(
+      'cn-beijing'
+    )
+    expect(
+      qwenCloudRegionFromValue(
+        JSON.stringify({
+          env: { ANTHROPIC_BASE_URL: qwenCloudAnthropicBaseUrl('us-east-1') },
+        })
+      )
+    ).toBe('us-east-1')
+    expect(
+      qwenCloudRegionFromValue(
+        'https://maas.qwencloudapi.com/compatible-mode/v1'
+      )
+    ).toBe('ap-southeast-1')
+    expect(qwenCloudRegionFromValue('https://openrouter.ai/api/v1')).toBeNull()
+  })
+
+  it('rewrites every QwenCloud domain without corrupting settings JSON', () => {
+    const profile = PREDEFINED_CLI_PROFILES.find(p => p.name === 'QwenCloud')
+    if (!profile) throw new Error('QwenCloud CLI profile is missing')
+    const rewritten = withQwenCloudRegion(profile.settings_json, 'cn-beijing')
+    const settings = JSON.parse(rewritten) as { env: Record<string, string> }
+    expect(settings.env.ANTHROPIC_BASE_URL).toBe(
+      'https://cn-beijing.maas.qwencloudapi.com/apps/anthropic'
+    )
+    expect(rewritten).not.toContain('ap-southeast-1')
+    expect(
+      withQwenCloudRegion(qwenCloudOpenAiBaseUrl('eu-central-1'), 'token-plan')
+    ).toBe('https://token-plan.maas.qwencloudapi.com/compatible-mode/v1')
   })
 })
