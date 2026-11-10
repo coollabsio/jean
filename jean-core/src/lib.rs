@@ -323,6 +323,8 @@ pub struct AppPreferences {
     #[serde(default)]
     pub favorite_base_branches: Vec<String>, // Starred base branches ("project_id:branch") for new worktree picker
     #[serde(default)]
+    pub favorite_magic_options: Vec<String>, // Starred Magic menu option ids shown first in the mobile Magic sheet
+    #[serde(default)]
     pub fast_mode_models: Vec<String>, // Model keys ("backend:baseModel") with fast tier last enabled
     #[serde(default = "default_canvas_layout")]
     pub canvas_layout: String, // Canvas display mode: grid or list
@@ -3405,6 +3407,7 @@ impl Default for AppPreferences {
             favorite_models: Vec::new(),
             favorite_package_scripts: Vec::new(),
             favorite_base_branches: Vec::new(),
+            favorite_magic_options: Vec::new(),
             fast_mode_models: Vec::new(),
             canvas_layout: default_canvas_layout(),
             default_execution_mode: default_execution_mode(),

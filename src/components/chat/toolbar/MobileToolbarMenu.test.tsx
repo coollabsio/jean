@@ -3,7 +3,21 @@ import userEvent from '@testing-library/user-event'
 import { render, screen, waitFor, within } from '@/test/test-utils'
 import { MobileToolbarMenu } from './MobileToolbarMenu'
 
+const mocks = vi.hoisted(() => ({
+  favoriteMagicOptions: [] as string[],
+  patchPreferences: vi.fn(),
+}))
+
+vi.mock('@/services/preferences', () => ({
+  usePreferences: () => ({
+    data: { favorite_magic_options: mocks.favoriteMagicOptions },
+  }),
+  usePatchPreferences: () => ({ mutate: mocks.patchPreferences }),
+}))
+
 beforeEach(() => {
+  mocks.favoriteMagicOptions = []
+  mocks.patchPreferences.mockReset()
   vi.stubGlobal(
     'matchMedia',
     vi.fn().mockImplementation(() => ({
@@ -489,5 +503,70 @@ describe('MobileToolbarMenu', () => {
 
     expect(screen.queryByText('Magic')).not.toBeInTheDocument()
     expect(onOpenMagicModal).not.toHaveBeenCalled()
+  })
+
+  it('shows favorited options first on mobile and toggles favorites', async () => {
+    const user = userEvent.setup()
+    const originalInnerWidth = window.innerWidth
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      value: 390,
+    })
+    mocks.favoriteMagicOptions = ['sync', 'not-a-real-option']
+
+    render(
+      <MobileToolbarMenu
+        isDisabled={false}
+        hasOpenPr={false}
+        hasIssueContexts={false}
+        hasPrContexts={false}
+        onLoadContext={vi.fn()}
+        onCommit={vi.fn()}
+        onCommitAndPush={vi.fn()}
+        onRevertLastCommit={vi.fn()}
+        onOpenPr={vi.fn()}
+        onReview={vi.fn()}
+        onMerge={vi.fn()}
+        onMergePr={vi.fn()}
+        handleSyncClick={vi.fn()}
+        handlePullClick={vi.fn()}
+        handlePushClick={vi.fn()}
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: /more actions/i }))
+
+    const sheet = screen.getByRole('dialog', { name: 'Magic' })
+    const regions = within(sheet).getAllByRole('region')
+    expect(regions[0]).toHaveAccessibleName('Favorites')
+    expect(
+      within(regions[0]!).getByRole('button', { name: 'Sync' })
+    ).toBeInTheDocument()
+    expect(
+      within(within(sheet).getByRole('region', { name: 'Sync' })).queryByRole(
+        'button',
+        { name: 'Sync' }
+      )
+    ).not.toBeInTheDocument()
+
+    await user.click(
+      within(sheet).getByRole('button', { name: 'Favorite Commit' })
+    )
+    expect(mocks.patchPreferences).toHaveBeenCalledWith({
+      favorite_magic_options: ['sync', 'not-a-real-option', 'commit'],
+    })
+
+    await user.click(
+      within(sheet).getByRole('button', { name: 'Unfavorite Sync' })
+    )
+    expect(mocks.patchPreferences).toHaveBeenLastCalledWith({
+      favorite_magic_options: ['not-a-real-option'],
+    })
+    expect(screen.getByRole('dialog', { name: 'Magic' })).toBeInTheDocument()
+
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      value: originalInnerWidth,
+    })
   })
 })

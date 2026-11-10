@@ -1409,6 +1409,7 @@ export interface AppPreferences {
   favorite_package_scripts?: string[] // Favourited package script keys ("project_id:script")
   /** Starred base branches for new worktrees ("project_id:branch"), shown at top of picker */
   favorite_base_branches?: string[]
+  favorite_magic_options?: string[] // Starred Magic menu option ids shown first in the mobile Magic sheet
   fast_mode_models: string[] // Model keys ("backend:baseModel") with fast tier last enabled
 
   default_execution_mode: ExecutionMode // Default workflow/permission policy for new sessions
@@ -2598,6 +2599,7 @@ export const defaultPreferences: AppPreferences = {
   favorite_models: [],
   favorite_package_scripts: [],
   favorite_base_branches: [],
+  favorite_magic_options: [],
   fast_mode_models: [],
   default_execution_mode: 'yolo', // Default: Full access
   default_backend: 'claude', // Default: Claude
