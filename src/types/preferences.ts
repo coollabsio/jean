@@ -1526,6 +1526,18 @@ export interface PiProviderProfile {
   models: { id: string; name?: string }[]
 }
 
+/**
+ * QwenCloud pay-as-you-go endpoints (Singapore / `ap-southeast-1`, the region
+ * the docs default to). API keys are region-scoped: a key created in another
+ * region only works with that region's base URL. See docs/developer/qwencloud.md
+ * for the region list and the separate Token Plan endpoint.
+ */
+const QWENCLOUD_OPENAI_BASE_URL =
+  'https://ap-southeast-1.maas.qwencloudapi.com/compatible-mode/v1'
+const QWENCLOUD_ANTHROPIC_BASE_URL =
+  'https://ap-southeast-1.maas.qwencloudapi.com/apps/anthropic'
+const QWENCLOUD_API_KEY_ENV = 'DASHSCOPE_API_KEY'
+
 export const PREDEFINED_CODEX_PROVIDERS: CodexProviderProfile[] = [
   {
     name: 'OpenRouter',
@@ -1539,6 +1551,15 @@ export const PREDEFINED_CODEX_PROVIDERS: CodexProviderProfile[] = [
     provider_id: 'cliproxyapi',
     base_url: 'http://127.0.0.1:8317/v1',
     env_key: 'CLIPROXYAPI_API_KEY',
+    wire_api: 'responses',
+  },
+  {
+    name: 'QwenCloud',
+    provider_id: 'qwencloud',
+    base_url: QWENCLOUD_OPENAI_BASE_URL,
+    env_key: QWENCLOUD_API_KEY_ENV,
+    // QwenCloud supports both OpenAI wire formats and recommends Responses for
+    // new integrations, which is also what Codex app-server speaks.
     wire_api: 'responses',
   },
 ]
@@ -1559,6 +1580,17 @@ export const PREDEFINED_PI_PROVIDERS: PiProviderProfile[] = [
     base_url: 'http://localhost:11434/v1',
     api: 'openai-completions',
     models: [{ id: 'llama3.2', name: 'Llama 3.2' }],
+  },
+  {
+    name: 'qwencloud',
+    base_url: QWENCLOUD_OPENAI_BASE_URL,
+    api: 'openai-completions',
+    api_key_env: QWENCLOUD_API_KEY_ENV,
+    models: [
+      { id: 'qwen3.8-max', name: 'Qwen 3.8 Max' },
+      { id: 'qwen3.7-plus', name: 'Qwen 3.7 Plus' },
+      { id: 'qwen3.8-flash', name: 'Qwen 3.8 Flash' },
+    ],
   },
 ]
 
@@ -1646,6 +1678,33 @@ export const PREDEFINED_CLI_PROFILES: CustomCliProfile[] = [
           ANTHROPIC_DEFAULT_OPUS_MODEL: 'kimi-k2.5',
           ANTHROPIC_DEFAULT_SONNET_MODEL: 'kimi-k2.5',
           ANTHROPIC_DEFAULT_HAIKU_MODEL: 'kimi-k2.5',
+        },
+      },
+      null,
+      2
+    ),
+  },
+  {
+    name: 'QwenCloud',
+    // QwenCloud's Messages API supports thinking, but `thinking.budget_tokens`
+    // is deprecated and model-dependent. Claude CLI sends that parameter when
+    // thinking is enabled, so hide Jean's thinking control like other
+    // Anthropic-compatible third-party profiles.
+    supports_thinking: false,
+    settings_json: JSON.stringify(
+      {
+        env: {
+          ANTHROPIC_BASE_URL: QWENCLOUD_ANTHROPIC_BASE_URL,
+          ANTHROPIC_API_KEY: '',
+          ANTHROPIC_AUTH_TOKEN: '<your-qwencloud-api-key>',
+          API_TIMEOUT_MS: '600000',
+          // The Anthropic-compatible endpoint has no /v1/models listing, so
+          // model discovery must stay off and aliases must be explicit.
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+          ANTHROPIC_MODEL: 'qwen3.8-max',
+          ANTHROPIC_DEFAULT_OPUS_MODEL: 'qwen3.8-max',
+          ANTHROPIC_DEFAULT_SONNET_MODEL: 'qwen3.7-plus',
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: 'qwen3.8-flash',
         },
       },
       null,
