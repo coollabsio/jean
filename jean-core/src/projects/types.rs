@@ -559,6 +559,38 @@ impl ProjectsData {
             .find(|w| w.project_id == project_id && w.session_type == SessionType::Base)
     }
 
+    /// Give every project with an existing checkout exactly one active base
+    /// session: unarchive a legacy archived base, and add a record when the
+    /// project has none. Returns `(project_id, worktree_id)` of added records.
+    pub fn ensure_base_sessions(
+        &mut self,
+        path_exists: impl Fn(&str) -> bool,
+        mut new_id: impl FnMut() -> String,
+        created_at: u64,
+    ) -> Vec<(String, String)> {
+        for worktree in &mut self.worktrees {
+            if worktree.session_type == SessionType::Base {
+                worktree.archived_at = None;
+            }
+        }
+        let missing: Vec<Project> = self
+            .projects
+            .iter()
+            .filter(|p| !p.is_folder && path_exists(&p.path))
+            .filter(|p| self.find_base_session(&p.id).is_none())
+            .cloned()
+            .collect();
+        missing
+            .iter()
+            .map(|project| {
+                let base = Worktree::new_base(project, new_id(), created_at);
+                let added = (project.id.clone(), base.id.clone());
+                self.add_worktree(base);
+                added
+            })
+            .collect()
+    }
+
     // =========================================================================
     // Folder-related methods
     // =========================================================================
@@ -825,6 +857,54 @@ pub struct WorktreeBranchExistsEvent {
 }
 
 impl Worktree {
+    /// Base session record for a project: it uses the project's own checkout,
+    /// so no git worktree exists for it. Always first in the list.
+    pub fn new_base(project: &Project, id: String, created_at: u64) -> Self {
+        Worktree {
+            id,
+            project_id: project.id.clone(),
+            name: project.default_branch.clone(),
+            path: project.path.clone(), // Uses project's base directory directly
+            branch: project.default_branch.clone(),
+            base_branch: None,
+            base_remote: None,
+            created_at,
+            setup_output: None,
+            setup_script: None,
+            setup_success: None,
+            session_type: SessionType::Base,
+            pr_number: None,
+            pr_url: None,
+            issue_number: None,
+            linear_issue_identifier: None,
+            security_alert_number: None,
+            security_alert_url: None,
+            advisory_ghsa_id: None,
+            advisory_url: None,
+            cached_pr_status: None,
+            cached_check_status: None,
+            cached_behind_count: None,
+            cached_ahead_count: None,
+            cached_status_at: None,
+            cached_uncommitted_added: None,
+            cached_uncommitted_removed: None,
+            cached_branch_diff_added: None,
+            cached_branch_diff_removed: None,
+            cached_base_branch_ahead_count: None,
+            cached_base_branch_behind_count: None,
+            cached_worktree_ahead_count: None,
+            cached_unpushed_count: None,
+            pr_push_remote: None,
+            pr_push_branch: None,
+            order: 0, // Base sessions are always first
+            origin: None,
+            archived_at: None,
+            labels: Vec::new(),
+            label: None,
+            last_opened_at: None,
+        }
+    }
+
     /// Normalize legacy single-label worktrees into the multi-label field.
     pub fn normalize_labels(&mut self) {
         if self.labels.is_empty() {

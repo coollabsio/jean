@@ -1679,7 +1679,7 @@ export function useWorktreeEvents() {
         invalidateProjectLists(queryClient)
 
         // Clear chat/selection if this worktree was active
-        // (handles cases where worktree:deleting wasn't emitted, e.g. close_base_session)
+        // (handles cases where worktree:deleting wasn't emitted, e.g. project removal)
         const { activeWorktreeId, clearActiveWorktree } =
           useChatStore.getState()
         if (activeWorktreeId === id) {
@@ -2092,108 +2092,6 @@ export function useCreateBaseSession() {
             : 'Unknown error occurred'
       logger.error('Failed to create base session', { error })
       toast.error('Failed to create base session', { description: message })
-    },
-  })
-}
-
-/**
- * Hook to close a base session (removes record, no git operations)
- * Preserves sessions for later restoration
- */
-export function useCloseBaseSession() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: async ({
-      worktreeId,
-    }: {
-      worktreeId: string
-      projectId: string
-    }): Promise<void> => {
-      if (!isTauri()) {
-        throw new Error('Not in Tauri context')
-      }
-
-      logger.debug('Closing base session', { worktreeId })
-      await invoke('close_base_session', { worktreeId })
-      logger.info('Base session closed')
-    },
-    onSuccess: (_, { projectId, worktreeId }) => {
-      queryClient.invalidateQueries({
-        queryKey: projectsQueryKeys.worktrees(projectId),
-      })
-
-      // Cleanup terminal instances for this worktree
-      clearLocalWorktreeState(worktreeId, queryClient)
-
-      // Clear chat if the closed session was active
-      const { activeWorktreeId, clearActiveWorktree } = useChatStore.getState()
-      if (activeWorktreeId === worktreeId) {
-        clearActiveWorktree()
-      }
-
-      toast.success('Base session closed')
-    },
-    onError: error => {
-      const message =
-        error instanceof Error
-          ? error.message
-          : typeof error === 'string'
-            ? error
-            : 'Unknown error occurred'
-      logger.error('Failed to close session', { error })
-      toast.error('Failed to close session', { description: message })
-    },
-  })
-}
-
-/**
- * Hook to close a base session with clean state (no session preservation)
- * The base session will start fresh when reopened
- */
-export function useCloseBaseSessionClean() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: async ({
-      worktreeId,
-    }: {
-      worktreeId: string
-      projectId: string
-    }): Promise<void> => {
-      if (!isTauri()) {
-        throw new Error('Not in Tauri context')
-      }
-
-      logger.debug('Closing base session (clean)', { worktreeId })
-      await invoke('close_base_session_clean', { worktreeId })
-      logger.info('Base session closed (clean)')
-    },
-    onSuccess: (_, { projectId, worktreeId }) => {
-      queryClient.invalidateQueries({
-        queryKey: projectsQueryKeys.worktrees(projectId),
-      })
-
-      // Cleanup terminal instances for this worktree
-      clearLocalWorktreeState(worktreeId, queryClient)
-
-      // Clear chat if the closed session was active
-      const { activeWorktreeId, clearActiveWorktree } = useChatStore.getState()
-      if (activeWorktreeId === worktreeId) {
-        clearActiveWorktree()
-      }
-
-      toast.success('Base session closed')
-    },
-    onError: error => {
-      const message =
-        error instanceof Error
-          ? error.message
-          : typeof error === 'string'
-            ? error
-            : 'Unknown error occurred'
-      logger.error('Failed to close session (clean)', { error })
-      toast.error('Failed to close session', { description: message })
     },
   })
 }

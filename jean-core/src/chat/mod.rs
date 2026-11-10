@@ -41,7 +41,7 @@ pub(crate) use commands::purge_session;
 pub use commands::*;
 pub use mcp_auth::*;
 pub use native_history::*;
-pub use storage::{preserve_base_sessions, restore_base_sessions};
+pub use storage::restore_base_sessions;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 

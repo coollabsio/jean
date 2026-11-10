@@ -1956,18 +1956,6 @@ pub async fn dispatch_command(
             emit_cache_invalidation(app, &["projects"]);
             to_value(result)
         }
-        "close_base_session" => {
-            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
-            crate::projects::close_base_session(app.clone(), worktree_id).await?;
-            emit_cache_invalidation(app, &["projects"]);
-            Ok(Value::Null)
-        }
-        "close_base_session_clean" => {
-            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
-            crate::projects::close_base_session_clean(app.clone(), worktree_id).await?;
-            emit_cache_invalidation(app, &["projects"]);
-            Ok(Value::Null)
-        }
         "import_worktree" => {
             let project_id: String = field(&args, "projectId", "project_id")?;
             let path: String = from_field(&args, "path")?;

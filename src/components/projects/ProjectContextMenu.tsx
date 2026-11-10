@@ -60,12 +60,15 @@ export function ProjectContextMenu({
   const cachedWorktrees = queryClient.getQueryData<Worktree[]>(
     projectsQueryKeys.worktrees(project.id)
   )
-  // Prefer loaded worktrees: project.worktree_count can be stale
-  const worktreeCount = cachedWorktrees?.length ?? project.worktree_count ?? 0
-  const hasBaseSession =
-    project.has_base_session === true ||
-    (cachedWorktrees?.some(worktree => worktree.session_type === 'base') ??
-      false)
+  // Prefer loaded worktrees: project.worktree_count can be stale. The
+  // permanent base session does not count: it never blocks project removal.
+  const worktreeCount = cachedWorktrees
+    ? cachedWorktrees.filter(worktree => worktree.session_type !== 'base')
+        .length
+    : Math.max(
+        0,
+        (project.worktree_count ?? 0) - (project.has_base_session ? 1 : 0)
+      )
   const { data: preferences } = usePreferences()
   const openProjectSettings = useProjectsStore(
     state => state.openProjectSettings
@@ -144,7 +147,7 @@ export function ProjectContextMenu({
 
         <ContextMenuItem onClick={handleNewBaseSession}>
           <Home className="mr-2 h-4 w-4" />
-          {hasBaseSession ? 'Open Base Session' : 'New Base Session'}
+          Open Base Session
         </ContextMenuItem>
 
         <ContextMenuItem onClick={handleOpenSettings}>

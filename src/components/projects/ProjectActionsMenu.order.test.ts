@@ -18,7 +18,6 @@ const expectProjectActionOrder = (source: string, separator: string) => {
   expect(removeProject).toBeGreaterThan(projectSettings)
   expect(source).not.toContain('closeBaseSession.mutate')
   expect(source).toContain('createBaseSession.mutate')
-  expect(source).toContain("'New Base Session'")
 }
 
 describe('project action menus', () => {
