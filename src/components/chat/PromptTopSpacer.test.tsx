@@ -8,26 +8,32 @@ const CLIENT_HEIGHT = 500
 
 let resize: () => void = () => undefined
 
-function Harness() {
+function Harness({
+  promptIds,
+  sessionId = 's1',
+}: {
+  promptIds: string[]
+  sessionId?: string
+}) {
   const viewportRef = useRef<HTMLDivElement>(null)
   return (
     <div ref={viewportRef} data-testid="viewport">
       <div style={{ padding: 0 }}>
         <div>
-          <div data-user-prompt="" />
-          <div data-user-prompt="" data-testid="last-prompt" />
+          {promptIds.map(id => (
+            <div key={id} data-user-prompt="" data-message-anchor-id={id} />
+          ))}
         </div>
-        <PromptTopSpacer viewportRef={viewportRef} />
+        <PromptTopSpacer viewportRef={viewportRef} sessionId={sessionId} />
       </div>
     </div>
   )
 }
 
-function setup(scrollTop: number) {
-  const utils = render(<Harness />)
+function setup(scrollTop: number, promptIds = ['p1', 'p2']) {
+  const utils = render(<Harness promptIds={promptIds} />)
   const viewport = utils.getByTestId('viewport')
   const spacer = viewport.firstElementChild?.lastElementChild as HTMLElement
-  const prompt = utils.getByTestId('last-prompt')
 
   Object.defineProperty(viewport, 'clientHeight', { value: CLIENT_HEIGHT })
   Object.defineProperty(viewport, 'scrollHeight', {
@@ -37,14 +43,28 @@ function setup(scrollTop: number) {
     value: scrollTop,
     writable: true,
   })
-  // Last prompt starts 100px above the end of the content.
-  prompt.getBoundingClientRect = () => ({ top: 900 }) as DOMRect
-  spacer.getBoundingClientRect = () => ({ top: 1000 }) as DOMRect
+  // Every prompt starts 100px above the end of the content.
+  HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+    return { top: this === spacer ? 1000 : 900 } as DOMRect
+  }
 
-  return { viewport, spacer }
+  // The session opens with this history.
+  resize()
+
+  // A new prompt arrives while the session is displayed.
+  const sendPrompt = (id: string, sessionId = 's1') => {
+    utils.rerender(
+      <Harness promptIds={[...promptIds, id]} sessionId={sessionId} />
+    )
+    resize()
+  }
+
+  return { viewport, spacer, sendPrompt, rerender: utils.rerender }
 }
 
 describe('PromptTopSpacer', () => {
+  const originalRect = HTMLElement.prototype.getBoundingClientRect
+
   beforeEach(() => {
     vi.stubGlobal(
       'ResizeObserver',
@@ -63,24 +83,45 @@ describe('PromptTopSpacer', () => {
   })
 
   afterEach(() => {
+    HTMLElement.prototype.getBoundingClientRect = originalRect
     vi.unstubAllGlobals()
   })
 
-  it('keeps a bottom-pinned chat at the bottom when the spacer grows', () => {
+  it('adds no space when a session opens, so its last reply ends at the bottom', () => {
     const { viewport, spacer } = setup(CONTENT_HEIGHT - CLIENT_HEIGHT)
 
-    resize()
+    expect(spacer.style.height).toBe('0px')
+    expect(viewport.scrollHeight).toBe(CONTENT_HEIGHT)
+  })
+
+  it('keeps a bottom-pinned chat at the bottom when a new prompt grows the spacer', () => {
+    const { viewport, spacer, sendPrompt } = setup(
+      CONTENT_HEIGHT - CLIENT_HEIGHT
+    )
+
+    sendPrompt('p3')
 
     expect(spacer.style.height).toBe('400px')
     expect(viewport.scrollTop).toBe(viewport.scrollHeight)
   })
 
   it('does not move a chat that is scrolled up', () => {
-    const { viewport, spacer } = setup(300)
+    const { viewport, spacer, sendPrompt } = setup(300)
 
-    resize()
+    sendPrompt('p3')
 
     expect(spacer.style.height).toBe('400px')
     expect(viewport.scrollTop).toBe(300)
+  })
+
+  it('removes the space when another session opens', () => {
+    const { spacer, sendPrompt, rerender } = setup(300)
+    sendPrompt('p3')
+    expect(spacer.style.height).toBe('400px')
+
+    rerender(<Harness promptIds={['q1', 'q2']} sessionId="s2" />)
+    resize()
+
+    expect(spacer.style.height).toBe('0px')
   })
 })

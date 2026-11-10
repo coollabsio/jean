@@ -3129,7 +3129,10 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                 />
                               )}
                             </div>
-                            <PromptTopSpacer viewportRef={scrollViewportRef} />
+                            <PromptTopSpacer
+                              viewportRef={scrollViewportRef}
+                              sessionId={deferredSessionId}
+                            />
                           </div>
                         </ScrollArea>
 

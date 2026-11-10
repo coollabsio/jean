@@ -6,13 +6,19 @@ import { useEffect, useRef, type RefObject } from 'react'
  * top, with its reply growing below it.
  *
  * Render it as the next sibling of the message content, inside the padded
- * wrapper. Prompts are elements with `data-user-prompt`. With one prompt or
- * fewer there is no history above, so the spacer stays empty.
+ * wrapper. Prompts are elements with `data-user-prompt` (and
+ * `data-message-anchor-id`). With one prompt or fewer there is no history
+ * above, so the spacer stays empty.
+ *
+ * Only prompts that arrive while the session is displayed get the space. When
+ * a session opens, its last reply ends at the composer, as a normal chat does.
  */
 export function PromptTopSpacer({
   viewportRef,
+  sessionId,
 }: {
   viewportRef: RefObject<HTMLElement | null>
+  sessionId: string | null | undefined
 }) {
   const ref = useRef<HTMLDivElement>(null)
 
@@ -23,9 +29,17 @@ export function PromptTopSpacer({
     const wrapper = spacer?.parentElement
     if (!spacer || !viewport || !content || !wrapper) return
 
+    // Last prompt shown when this session opened. It never gets the space.
+    let openedPromptId: string | null | undefined
+
     const update = () => {
-      const prompts = content.querySelectorAll('[data-user-prompt]')
-      const prompt = prompts.length > 1 ? prompts[prompts.length - 1] : null
+      const prompts =
+        content.querySelectorAll<HTMLElement>('[data-user-prompt]')
+      const last = prompts[prompts.length - 1]
+      const lastId = last?.dataset.messageAnchorId ?? null
+      if (openedPromptId === undefined && last) openedPromptId = lastId
+      const prompt =
+        prompts.length > 1 && lastId !== openedPromptId ? last : null
       let height = 0
       if (prompt) {
         const style = getComputedStyle(wrapper)
@@ -53,7 +67,7 @@ export function PromptTopSpacer({
     observer.observe(viewport)
     observer.observe(content)
     return () => observer.disconnect()
-  }, [viewportRef])
+  }, [viewportRef, sessionId])
 
   return <div ref={ref} aria-hidden="true" />
 }
