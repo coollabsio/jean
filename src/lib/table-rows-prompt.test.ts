@@ -50,8 +50,9 @@ describe('table rows prompt', () => {
       '| a\\|b |\n| --- |\n| x y |'
     )
     expect(formatTableRowsPrompt(DATA, [2, 0])).toContain(
-      '| Issue | State |\n| --- | --- |\n| #3 | a \\| b |\n| #1 | Open |'
+      '#3 | a \\| b\n#1 | Open\n'
     )
+    expect(formatTableRowsPrompt(DATA, [2, 0])).not.toContain('Issue')
   })
 
   it('creates one chip, adds rows in table order, and deletes it when empty', async () => {
@@ -67,7 +68,7 @@ describe('table rows prompt', () => {
       rows: [1],
       notes: {},
     })
-    expect(chip()?.content).toContain('| #2 | Closed |')
+    expect(chip()?.content).toContain('#2 | Closed')
 
     await setTableRowInPrompt('s1', 'm:0', 0, DATA, '')
     expect(useChatStore.getState().pendingTextFiles['s1']).toHaveLength(1)
@@ -87,14 +88,12 @@ describe('table rows prompt', () => {
     })
   })
 
-  it('adds a Note column for rows with a note, and keeps notes on update', async () => {
+  it('appends the note to its row, and keeps notes on update', async () => {
     await setTableRowInPrompt('s1', 'm:0', 1, DATA, '  fix first ')
-    expect(chip()?.content).toContain(
-      '| Issue | State | Note |\n| --- | --- | --- |\n| #2 | Closed | fix first |'
-    )
+    expect(chip()?.content).toContain('#2 | Closed | Note: fix first\n')
     await setTableRowInPrompt('s1', 'm:0', 0, DATA, '')
     expect(chip()?.content).toContain(
-      '| #1 | Open |  |\n| #2 | Closed | fix first |'
+      '#1 | Open\n#2 | Closed | Note: fix first\n'
     )
 
     // Editing the note keeps the row once, with the new text
@@ -102,11 +101,10 @@ describe('table rows prompt', () => {
     expect(chip()?.tableRows?.rows).toEqual([0, 1])
     expect(chip()?.tableRows?.notes).toEqual({ 1: 'later' })
 
-    // Removing the noted row drops the Note column
+    // Removing the noted row drops its note
     await setTableRowInPrompt('s1', 'm:0', 1, DATA, null)
-    expect(chip()?.content).toContain(
-      '| Issue | State |\n| --- | --- |\n| #1 | Open |'
-    )
+    expect(chip()?.content).toContain('#1 | Open\n')
+    expect(chip()?.content).not.toContain('Note:')
   })
 
   it('does not create a chip when removing a row that is not in the prompt', async () => {
