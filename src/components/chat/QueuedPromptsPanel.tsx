@@ -220,7 +220,7 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
                       'flex shrink-0 items-center gap-1 transition-opacity',
                       isEditing
                         ? 'opacity-100'
-                        : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100',
+                        : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100',
                       isSelected &&
                         !isEditing &&
                         'group-focus-within/list:opacity-100'
