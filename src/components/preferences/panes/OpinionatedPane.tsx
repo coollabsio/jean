@@ -316,6 +316,15 @@ interface BackendPluginStatus {
   installed: boolean
 }
 
+// The backend reports `installed` only when every detected CLI has the pack.
+// A pack that some backends have is still present (shown as Partial).
+function isPluginPresent(status: PluginStatus): boolean {
+  return (
+    status.installed ||
+    (status.backends?.some(backend => backend.installed) ?? false)
+  )
+}
+
 function PluginCard({
   plugin,
   onInstalledChange,
@@ -341,7 +350,7 @@ function PluginCard({
         { pluginName: plugin.id }
       )
       setStatus(result)
-      onInstalledChange(plugin.id, result.installed)
+      onInstalledChange(plugin.id, isPluginPresent(result))
     } catch {
       setStatus({ installed: false, version: null })
       onInstalledChange(plugin.id, false)
@@ -401,6 +410,7 @@ function PluginCard({
     [plugin.id, plugin.name, checkStatus]
   )
 
+  const present = status ? isPluginPresent(status) : false
   const hasMissingBackend =
     plugin.scope === 'ai-backends' &&
     (status?.backends?.some(backend => !backend.installed) ?? false)
@@ -416,7 +426,7 @@ function PluginCard({
   const canUninstall = plugin.scope === 'ai-backends' || supervises
   const busy = installing || uninstalling || controlling || loggingIn !== null
   const versionText =
-    status?.installed && status.version
+    present && status?.version
       ? plugin.scope === 'ai-backends'
         ? ` (${status.version})`
         : ` (v${status.version.replace(/^v/, '')})`
@@ -527,7 +537,7 @@ function PluginCard({
     <ExtensionRow
       name={plugin.name}
       status={
-        checking ? null : status?.installed ? (
+        checking ? null : present ? (
           <Badge
             variant="success"
             title={`${statusLabel}${versionText ?? ''}`}
@@ -549,7 +559,7 @@ function PluginCard({
       actions={
         checking ? (
           <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-        ) : status?.installed ? (
+        ) : present ? (
           <>
             <Button
               variant="ghost"

@@ -224,6 +224,40 @@ describe('OpinionatedPane', () => {
     ).toBeInTheDocument()
   })
 
+  it('shows partial status when some backends have the pack but not all detected CLIs', async () => {
+    vi.mocked(invoke).mockImplementation(async (command, args) => {
+      const pluginName = (args as { pluginName?: string })?.pluginName
+      if (command === 'check_opinionated_plugin_status') {
+        if (pluginName === 'pstack') {
+          return {
+            installed: false,
+            version: 'claude',
+            backends: [
+              { id: 'claude', label: 'Claude', installed: true },
+              { id: 'codex', label: 'Codex', installed: false },
+            ],
+          }
+        }
+        return { installed: false, version: null, install_supported: true }
+      }
+      throw new Error(`Unexpected command ${command}`)
+    })
+
+    render(<OpinionatedPane />)
+
+    const pstackLabel = await screen.findByText('pstack')
+    const pstackHeader = pstackLabel.closest('.rounded-md')
+    if (!pstackHeader) throw new Error('Expected pstack card header')
+
+    await within(pstackHeader as HTMLElement).findByText('Partial')
+    expect(
+      within(pstackHeader as HTMLElement).getByText('Reinstall')
+    ).toBeInTheDocument()
+    expect(
+      within(pstackHeader as HTMLElement).queryByText('Not installed')
+    ).not.toBeInTheDocument()
+  })
+
   it('groups recommended plugins into kind sections', async () => {
     render(<OpinionatedPane />)
 
