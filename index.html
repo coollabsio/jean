@@ -32,6 +32,11 @@
             : savedTheme
         document.documentElement.classList.add(resolvedTheme)
         document.documentElement.style.colorScheme = resolvedTheme
+        // iOS Home Screen app: iOS blurs the top ~20px of the page below the
+        // status bar. App.css adds that space to --safe-area-top.
+        if (navigator.standalone === true) {
+          document.documentElement.classList.add('ios-standalone')
+        }
       })()
     </script>
     <title>Jean</title>

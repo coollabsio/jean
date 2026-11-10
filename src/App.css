@@ -118,6 +118,12 @@
   --safe-area-left: env(safe-area-inset-left, 0px);
 }
 
+/* iOS 26+ Home Screen app blurs the top ~20px of the page under the opaque
+   status bar (safe-area-inset-top is 0 there). Keep content out of it. */
+html.ios-standalone {
+  --safe-area-top: calc(env(safe-area-inset-top, 0px) + 20px);
+}
+
 .dark {
   /* Prefer dark native form controls so spin buttons/chevrons are light */
   color-scheme: dark;
