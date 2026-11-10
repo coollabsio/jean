@@ -28,7 +28,6 @@ pub const CODEX_ENV_KEY: &str = "CLIPROXYAPI_API_KEY";
 pub const RELEASE_API: &str =
     "https://api.github.com/repos/router-for-me/CLIProxyAPI/releases/latest";
 pub const GITHUB_URL: &str = "https://github.com/router-for-me/CLIProxyAPI";
-pub const LICENSE_URL: &str = "https://github.com/router-for-me/CLIProxyAPI/blob/main/LICENSE";
 const PANEL_REPOSITORY: &str = "https://github.com/router-for-me/Cli-Proxy-API-Management-Center";
 const MAX_ARCHIVE_BYTES: usize = 80 * 1024 * 1024;
 const BINARY_NAME: &str = if cfg!(windows) {
@@ -435,7 +434,6 @@ pub async fn install() -> Result<InstallOutcome, String> {
         },
     )?;
     export_client_key_to_process();
-    let login = login_hint(&paths);
     let home_for_start = home.clone();
     let started = tokio::task::spawn_blocking(move || start_in_home(&home_for_start))
         .await
@@ -444,16 +442,14 @@ pub async fn install() -> Result<InstallOutcome, String> {
         Ok(()) => (
             true,
             format!(
-                "CLIProxyAPI {version} installed at {}. Listening on {} (localhost only). Select the CLIProxyAPI provider for Claude or Codex. Pooling stays in CLIProxyAPI, not Jean. Restart Jean if Codex was already running so it receives {CODEX_ENV_KEY}. {login} License: {LICENSE_URL}",
-                paths.binary.display(),
+                "CLIProxyAPI {version} is running on {}. Next: add accounts in Preferences → Opinionated, then select the CLIProxyAPI provider for Claude or Codex. Restart Jean if Codex is already running.",
                 endpoint_url(DEFAULT_PORT)
             ),
         ),
         Err(error) => (
             false,
             format!(
-                "CLIProxyAPI {version} installed at {} but did not stay running: {error}. {login}",
-                paths.binary.display()
+                "CLIProxyAPI {version} is installed but did not start: {error}"
             ),
         ),
     };
@@ -987,17 +983,6 @@ fn write_manifest(path: &Path, manifest: &Manifest) -> Result<(), String> {
     std::fs::write(path, json)
         .map_err(|error| format!("Failed to write CLIProxyAPI manifest: {error}"))?;
     Ok(())
-}
-
-fn login_hint(paths: &InstallLayout) -> String {
-    format!(
-        "Add Claude or Codex subscription accounts from Preferences → Opinionated → CLIProxyAPI. Jean runs `{} --config {} -claude-login` or `-codex-login` and does not store those logins. Tokens stay in {}. Management page: {} (key file: {}).",
-        paths.binary.display(),
-        paths.config.display(),
-        paths.auth_dir.display(),
-        management_url(configured_port(paths)),
-        paths.management_key.display()
-    )
 }
 
 /// Count CLIProxyAPI auth files by name. Does not open them.

@@ -421,31 +421,22 @@ describe('OpinionatedPane', () => {
     await user.click(label)
 
     expect(
-      within(card as HTMLElement).getByText(
-        /pooling and round-robin outside Jean/i
-      )
+      within(card as HTMLElement).getByText(/pools several Claude and Codex/i)
     ).toBeInTheDocument()
     expect(
-      within(card as HTMLElement).getByText(
-        /does not store extra Claude or Codex/i
-      )
+      within(card as HTMLElement).getByText(/Preferences → Providers/i)
     ).toBeInTheDocument()
     expect(
-      within(card as HTMLElement).getByText(/127\.0\.0\.1:8317\/v1/)
+      within(card as HTMLElement).getByText(/127\.0\.0\.1:8317/)
     ).toBeInTheDocument()
     expect(
-      within(card as HTMLElement).getByText(/-claude-login/)
+      within(card as HTMLElement).getByText(/listens on localhost only/i)
     ).toBeInTheDocument()
     expect(
       within(card as HTMLElement).getByText(/not in Jean/i)
     ).toBeInTheDocument()
     expect(
-      within(card as HTMLElement).getByText(/0 OAuth files in CLIProxyAPI/)
-    ).toBeInTheDocument()
-    expect(
-      within(card as HTMLElement).getByText(
-        /Jean does not read or copy those files/
-      )
+      within(card as HTMLElement).getByText(/0 accounts added/)
     ).toBeInTheDocument()
     expect(
       within(card as HTMLElement).getByRole('button', { name: 'MIT license' })

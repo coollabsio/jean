@@ -50,7 +50,7 @@ const PLUGINS: PluginDefinition[] = [
     id: 'cliproxyapi',
     name: 'CLIProxyAPI',
     description:
-      'Local MIT-licensed proxy (router-for-me/CLIProxyAPI). CLIProxyAPI keeps multi-account pooling and round-robin outside Jean. Jean installs the official binary, runs it on 127.0.0.1:8317, and adds Claude and Codex profiles that point at that localhost URL. Jean does not store extra Claude or Codex subscription logins and does not switch accounts for you.',
+      'Local proxy that pools several Claude and Codex subscription accounts. Jean installs it and runs it on 127.0.0.1:8317.',
     githubUrl: 'https://github.com/router-for-me/CLIProxyAPI',
     links: [
       {
@@ -66,13 +66,13 @@ const PLUGINS: PluginDefinition[] = [
     backends: ['Claude', 'Codex'],
     usage: [
       {
-        note: 'Install downloads the official release for this OS into ~/.jean/opinionated/cliproxyapi and binds 127.0.0.1:8317. LAN access stays off unless you edit server.host in that config.yaml yourself.',
+        note: 'Add accounts with the buttons above. The logins stay in CLIProxyAPI, not in Jean.',
       },
       {
-        note: 'After install, pick the CLIProxyAPI provider on a Claude or Codex session (Preferences → Providers). Codex is injected per session (base_url http://127.0.0.1:8317/v1, wire_api responses). Jean does not rewrite ~/.codex/config.toml.',
+        note: 'Select the CLIProxyAPI provider for a Claude or Codex session (Preferences → Providers).',
       },
       {
-        note: 'Subscription accounts stay in CLIProxyAPI (~/.jean/opinionated/cliproxyapi/auths), not in Jean. Jean does not store those logins and does not switch accounts. Add Claude account and Add Codex account run CLIProxyAPI -claude-login and -codex-login. If the sidecar is stopped, Jean starts it first, then CLIProxyAPI opens the provider login. The management page key file is ~/.jean/opinionated/cliproxyapi/management-key.',
+        note: 'Files are in ~/.jean/opinionated/cliproxyapi. The proxy listens on localhost only.',
       },
     ],
   },
@@ -418,7 +418,7 @@ function PluginCard({
     status?.installed && status.version
       ? plugin.scope === 'ai-backends'
         ? ` (${status.version})`
-        : ` (v${status.version})`
+        : ` (v${status.version.replace(/^v/, '')})`
       : null
 
   useEffect(() => {
@@ -694,11 +694,10 @@ function PluginCard({
             </div>
             <p className="text-xs text-muted-foreground">
               {typeof status.auth_file_count === 'number'
-                ? `${status.auth_file_count} OAuth file${
+                ? `${status.auth_file_count} account${
                     status.auth_file_count === 1 ? '' : 's'
-                  } in CLIProxyAPI. `
+                  } added.`
                 : ''}
-              Jean does not read or copy those files.
             </p>
           </div>
         )}
