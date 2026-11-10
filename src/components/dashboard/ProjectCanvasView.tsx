@@ -721,7 +721,7 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
 
   const compactContent = compact && (
     <div className="flex min-w-0 items-start gap-2.5">
-      <span className="flex h-5 w-3.5 shrink-0 items-center justify-center">
+      <span className="flex h-lh w-3.5 shrink-0 items-center justify-center">
         {waitingCount > 0 ? (
           <span
             role="img"
