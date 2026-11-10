@@ -157,7 +157,7 @@ export function AgentTasks({
         open={openTask !== null && workdir !== undefined}
         onOpenChange={open => !open && setOpenTask(null)}
       >
-        <DialogContent className="safe-top-fullscreen !fixed !inset-0 !translate-x-0 !translate-y-0 !w-screen !h-[100dvh] !max-w-none !max-h-none !rounded-none !p-0 sm:!inset-auto sm:!top-[50%] sm:!left-[50%] sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:!w-[90vw] sm:!max-w-[90vw] sm:!h-[90dvh] sm:!max-h-[90dvh] sm:!rounded-lg flex flex-col gap-0 overflow-hidden">
+        <DialogContent className="!fixed !inset-0 !translate-x-0 !translate-y-0 !w-screen !h-[100dvh] !max-w-none !max-h-none !rounded-none !p-0 sm:!inset-auto sm:!top-[50%] sm:!left-[50%] sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:!w-[90vw] sm:!max-w-[90vw] sm:!h-[90dvh] sm:!max-h-[90dvh] sm:!rounded-lg flex flex-col gap-0 overflow-hidden">
           {openTask && workdir && (
             <>
               <DialogHeader className="shrink-0 space-y-1 border-b px-4 py-3 pr-12 text-left">

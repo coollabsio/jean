@@ -326,7 +326,7 @@ export function LoadContextModal({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="overflow-hidden p-0 safe-top-fullscreen !w-screen !h-dvh !max-w-screen !max-h-none !rounded-none sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-[85vh] sm:!rounded-lg font-sans flex flex-col"
+        className="overflow-hidden p-0 !w-screen !h-dvh !max-w-screen !max-h-none !rounded-none sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-[85vh] sm:!rounded-lg font-sans flex flex-col"
         onOpenAutoFocus={e => {
           e.preventDefault()
           searchInputRef.current?.focus()
@@ -607,7 +607,7 @@ export function LoadContextModal({
               open={true}
               onOpenChange={() => handlers.setViewingContext(null)}
             >
-              <DialogContent className="safe-top-fullscreen !w-screen !h-dvh !max-w-screen !max-h-none !rounded-none sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-[85vh] sm:!rounded-lg flex flex-col">
+              <DialogContent className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-[85vh] sm:!rounded-lg flex flex-col">
                 <DialogHeader>
                   <DialogTitle className="flex items-center gap-2">
                     {handlers.viewingContext.type === 'security' ? (

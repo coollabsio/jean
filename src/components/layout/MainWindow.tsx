@@ -572,8 +572,7 @@ export function MainWindow() {
     <div
       ref={isTouch ? swipeDown.containerRef : undefined}
       className={cn(
-        // Clear the iOS status bar (viewport-fit=cover puts the page under it)
-        'flex h-dvh w-full flex-col overflow-hidden bg-background pt-[var(--safe-area-top)]',
+        'flex h-dvh w-full flex-col overflow-hidden bg-background',
         roundedClass
       )}
     >
@@ -612,7 +611,7 @@ export function MainWindow() {
               ? leftSidebarSize + 1 // sidebar + 1px resize handle
               : 0
         }
-        className="absolute top-[var(--safe-area-top)] left-0 right-0"
+        className="absolute top-0 left-0 right-0"
       />
 
       {/* Dev Mode Banner */}

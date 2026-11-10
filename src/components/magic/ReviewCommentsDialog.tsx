@@ -753,7 +753,7 @@ export function ReviewCommentsDialog() {
     <Dialog open={reviewCommentsModalOpen} onOpenChange={handleOpenChange}>
       <DialogContent
         onKeyDown={handleDialogKeyDown}
-        className="safe-top-fullscreen !fixed !inset-0 !translate-x-0 !translate-y-0 !w-screen !h-dvh !max-w-screen !max-h-none !rounded-none flex flex-col overflow-hidden sm:!inset-auto sm:!top-[50%] sm:!left-[50%] sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:!w-[calc(100vw-4rem)] sm:!h-[85vh] sm:!max-w-none sm:!rounded-lg"
+        className="!fixed !inset-0 !translate-x-0 !translate-y-0 !w-screen !h-dvh !max-w-screen !max-h-none !rounded-none flex flex-col overflow-hidden sm:!inset-auto sm:!top-[50%] sm:!left-[50%] sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:!w-[calc(100vw-4rem)] sm:!h-[85vh] sm:!max-w-none sm:!rounded-lg"
       >
         <DialogHeader className="pr-10 sm:pr-0">
           <DialogTitle>

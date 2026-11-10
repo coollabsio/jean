@@ -54,7 +54,7 @@ export function ContextViewerDialog({
 
   return (
     <Dialog open={true} onOpenChange={onClose}>
-      <DialogContent className="safe-top-fullscreen !w-screen !h-dvh !max-w-screen !max-h-none !rounded-none sm:!w-[calc(100vw-8rem)] sm:!max-w-[calc(100vw-8rem)] sm:!h-[calc(100vh-8rem)] sm:!rounded-lg flex flex-col">
+      <DialogContent className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none sm:!w-[calc(100vw-8rem)] sm:!max-w-[calc(100vw-8rem)] sm:!h-[calc(100vh-8rem)] sm:!rounded-lg flex flex-col">
         {isMobile ? (
           <DialogHeader className="text-left pr-10">
             <DialogTitle className="text-sm font-semibold leading-snug truncate">

@@ -254,7 +254,7 @@ export function RecentContexts({
       {/* Preview dialog */}
       {preview && (
         <Dialog open={true} onOpenChange={() => setPreview(null)}>
-          <DialogContent className="safe-top-fullscreen !w-screen !h-dvh !max-w-screen !max-h-none !rounded-none sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-[calc(100vh-4rem)] sm:!rounded-xl font-sans flex flex-col">
+          <DialogContent className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-[calc(100vh-4rem)] sm:!rounded-xl font-sans flex flex-col">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <FileText className="h-4 w-4" />

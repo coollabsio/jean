@@ -118,12 +118,6 @@
   --safe-area-left: env(safe-area-inset-left, 0px);
 }
 
-/* iOS 26+ Home Screen app blurs the top ~20px of the page under the opaque
-   status bar (safe-area-inset-top is 0 there). Keep content out of it. */
-html.ios-standalone {
-  --safe-area-top: calc(env(safe-area-inset-top, 0px) + 20px);
-}
-
 .dark {
   /* Prefer dark native form controls so spin buttons/chevrons are light */
   color-scheme: dark;
@@ -601,16 +595,6 @@ html.ios-standalone {
   margin-left: 8px;
   padding-left: var(--mac-titlebar-action-left-inset, 68px);
   padding-top: var(--mac-titlebar-action-top-inset, 4px);
-}
-
-/* Full-screen mobile dialogs: keep content (and the absolute close button)
-   below the iOS status bar. A transparent top border is painted by the
-   dialog background, so each dialog keeps its own padding. */
-@media (max-width: 639.98px) {
-  .safe-top-fullscreen {
-    border-top-width: var(--safe-area-top) !important;
-    border-top-color: transparent !important;
-  }
 }
 
 /* Font overrides - outside @layer to ensure higher specificity */
