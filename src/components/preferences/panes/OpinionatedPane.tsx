@@ -299,6 +299,7 @@ interface PluginStatus {
   management_url?: string | null
   lan_exposed?: boolean
   auth_file_count?: number | null
+  host?: string | null
 }
 
 interface AccountLoginLaunch {
@@ -720,6 +721,12 @@ function PluginCard({
                 </Button>
               )}
             </div>
+            {status.host && (
+              <p className="text-xs text-muted-foreground">
+                Runs on {status.host}. Chats on this machine connect to it at
+                127.0.0.1.
+              </p>
+            )}
             <p className="text-xs text-muted-foreground">
               {typeof status.auth_file_count === 'number'
                 ? `${status.auth_file_count} account${

@@ -19,6 +19,8 @@ use std::path::{Path, PathBuf};
 
 pub const PLUGIN_ID: &str = "cliproxyapi";
 pub const PROFILE_NAME: &str = "CLIProxyAPI";
+/// Token text of the predefined (not yet installed) CLIProxyAPI profile.
+pub const KEY_PLACEHOLDER: &str = "<filled when Opinionated CLIProxyAPI is installed>";
 pub const DEFAULT_HOST: &str = "127.0.0.1";
 pub const DEFAULT_PORT: u16 = 8317;
 pub const CLAUDE_BASE_URL: &str = "http://127.0.0.1:8317";
@@ -365,6 +367,30 @@ fn trusted_release_url(url: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Name of the machine that runs this backend (and so the sidecar).
+fn machine_name() -> Option<String> {
+    std::env::var("HOSTNAME")
+        .ok()
+        .or_else(|| std::fs::read_to_string("/etc/hostname").ok())
+        .or_else(|| {
+            let output = silent_command("hostname").output().ok()?;
+            String::from_utf8(output.stdout).ok()
+        })
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
+}
+
+/// Why a session cannot use the CLIProxyAPI profile, if it cannot.
+pub fn profile_not_ready_reason(profile_json: &str) -> Option<String> {
+    if !profile_json.contains(KEY_PLACEHOLDER) {
+        return None;
+    }
+    let host = machine_name().unwrap_or_else(|| "this machine".to_string());
+    Some(format!(
+        "CLIProxyAPI is not installed on {host}, where this chat runs. Install it there in Preferences → Opinionated → CLIProxyAPI."
+    ))
+}
+
 pub async fn check_status() -> Result<crate::opinionated::commands::PluginStatus, String> {
     let unsupported_reason = current_install_unsupported_reason();
     let home = home_dir()?;
@@ -392,6 +418,7 @@ pub async fn check_status() -> Result<crate::opinionated::commands::PluginStatus
         management_url: Some(management_url(port)),
         lan_exposed,
         auth_file_count: Some(count_auth_files(&paths.auth_dir)),
+        host: machine_name(),
     })
 }
 
@@ -1569,5 +1596,15 @@ mod tests {
         );
         assert!(value["env"].get("ANTHROPIC_DEFAULT_HAIKU_MODEL").is_none());
         assert_eq!(value["env"]["ANTHROPIC_AUTH_TOKEN"].as_str(), Some("k"));
+    }
+
+    #[test]
+    fn placeholder_profile_is_not_ready_and_installed_profile_is() {
+        let reason = profile_not_ready_reason(&format!(
+            r#"{{"env":{{"ANTHROPIC_AUTH_TOKEN":"{KEY_PLACEHOLDER}"}}}}"#
+        ))
+        .expect("placeholder must block");
+        assert!(reason.contains("not installed on"));
+        assert!(profile_not_ready_reason(&claude_settings_json("real-key")).is_none());
     }
 }

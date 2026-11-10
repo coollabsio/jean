@@ -28,6 +28,9 @@ pub struct PluginStatus {
     /// JSON files in the sidecar auth directory. Jean counts names only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auth_file_count: Option<u32>,
+    /// Machine that runs the sidecar (the backend host).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone, PartialEq)]
@@ -258,6 +261,7 @@ async fn check_rtk_status(app: &AppHandle) -> Result<PluginStatus, String> {
                 management_url: None,
                 lan_exposed: None,
                 auth_file_count: None,
+                host: None,
             })
         }
         _ => Ok(PluginStatus {
@@ -271,6 +275,7 @@ async fn check_rtk_status(app: &AppHandle) -> Result<PluginStatus, String> {
             management_url: None,
             lan_exposed: None,
             auth_file_count: None,
+            host: None,
         }),
     }
 }
@@ -303,6 +308,7 @@ async fn check_caveman_status(app: &AppHandle) -> Result<PluginStatus, String> {
         management_url: None,
         lan_exposed: None,
         auth_file_count: None,
+        host: None,
     })
 }
 
@@ -913,6 +919,7 @@ async fn check_superpowers_status(app: &AppHandle) -> Result<PluginStatus, Strin
         management_url: None,
         lan_exposed: None,
         auth_file_count: None,
+        host: None,
     })
 }
 
@@ -936,6 +943,7 @@ async fn check_pstack_status(app: &AppHandle) -> Result<PluginStatus, String> {
         management_url: None,
         lan_exposed: None,
         auth_file_count: None,
+        host: None,
     })
 }
 
@@ -970,6 +978,7 @@ async fn check_copied_skill_pack_status(
         management_url: None,
         lan_exposed: None,
         auth_file_count: None,
+        host: None,
     })
 }
 

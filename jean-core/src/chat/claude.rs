@@ -1628,6 +1628,22 @@ pub fn execute_claude_detached(
         return Err(error_msg);
     }
 
+    if custom_profile_name == Some(crate::opinionated::cliproxyapi::PROFILE_NAME) {
+        let not_ready = crate::get_cli_profile_path(crate::opinionated::cliproxyapi::PROFILE_NAME)
+            .ok()
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .and_then(|json| crate::opinionated::cliproxyapi::profile_not_ready_reason(&json));
+        if let Some(error_msg) = not_ready {
+            let error_event = ErrorEvent {
+                session_id: session_id.to_string(),
+                worktree_id: worktree_id.to_string(),
+                error: error_msg.clone(),
+            };
+            let _ = app.emit_all("chat:error", &error_event);
+            return Err(error_msg);
+        }
+    }
+
     // Build args
     let (args, env_vars) = build_claude_args(
         app,

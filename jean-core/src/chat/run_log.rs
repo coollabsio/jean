@@ -2590,6 +2590,51 @@ Move services between instances without downtime.
     }
 
     #[test]
+    fn cancelled_content_keeps_unconsumed_steer_without_duplicates() {
+        let run = sample_run();
+        // Codex writes its steer on accept; the Claude host writes it only
+        // when the CLI consumes it, so "pending" is not on disk at cancel.
+        let mut lines = vec![
+            r#"{"_run_meta":true}"#.to_string(),
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}"#
+                .to_string(),
+            r#"{"type":"steered_user_message","text":"on disk"}"#.to_string(),
+        ];
+        let blocks = vec![
+            ContentBlock::Text {
+                text: "working".to_string(),
+            },
+            ContentBlock::UserInput {
+                text: "on disk".to_string(),
+            },
+            ContentBlock::UserInput {
+                text: "pending".to_string(),
+            },
+        ];
+
+        let missing = missing_cancelled_content_lines(&lines, "working", &[], &blocks);
+        assert_eq!(
+            missing,
+            vec![serde_json::json!({"type": "steered_user_message", "text": "pending"})]
+        );
+
+        lines.extend(missing.iter().map(|l| l.to_string()));
+        let message = parse_run_to_message(&lines, &run).unwrap();
+        let steers: Vec<&str> = message
+            .content_blocks
+            .iter()
+            .filter_map(|b| match b {
+                ContentBlock::UserInput { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(steers, vec!["on disk", "pending"]);
+
+        // Persisting again is a no-op.
+        assert!(missing_cancelled_content_lines(&lines, "working", &[], &blocks).is_empty());
+    }
+
+    #[test]
     fn parse_run_preserves_steered_user_messages() {
         let run = sample_run();
         let lines = vec![
@@ -3229,29 +3274,75 @@ pub fn persist_partial_cancelled_content(
         .ok_or("No cancelled run found")?;
 
     let path = get_run_log_path(app, session_id, &run.run_id)?;
-
-    // Reconcile the frontend's authoritative streaming view with whatever the
-    // backend already managed to flush before the kill. The previous "skip if
-    // any assistant content exists" logic dropped tool calls in web access mode
-    // where the backend's incremental writes lagged behind frontend Zustand state.
-    //
-    // We scan the existing JSONL for tool_use ids, tool_result ids, and whether
-    // any text-bearing assistant block is present. Then we append only the
-    // pieces the disk is missing. parse_run_to_message() accumulates tool_calls
-    // and text across multiple assistant lines, so appending will not duplicate.
     let existing_lines = read_run_log(app, session_id, &run.run_id).unwrap_or_default();
+    let missing_lines =
+        missing_cancelled_content_lines(&existing_lines, content, tool_calls, content_blocks);
+
+    if missing_lines.is_empty() {
+        log::trace!(
+            "JSONL already in sync with frontend payload for session {session_id}, skipping persist"
+        );
+        return Ok(());
+    }
+
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|e| format!("Failed to open run log for partial content: {e}"))?;
+    for line in &missing_lines {
+        writeln!(file, "{line}").map_err(|e| format!("Failed to write partial content: {e}"))?;
+    }
+    file.flush()
+        .map_err(|e| format!("Failed to flush partial content: {e}"))?;
+
+    log::trace!(
+        "Reconciled partial cancelled content for session {session_id} \
+         (appended {} lines; total payload: {} chars, {} blocks, {} tool calls)",
+        missing_lines.len(),
+        content.len(),
+        content_blocks.len(),
+        tool_calls.len(),
+    );
+    Ok(())
+}
+
+/// JSONL lines to append so the cancelled run log holds everything the
+/// frontend showed when the user cancelled.
+///
+/// The frontend's streaming view is authoritative: the backend's incremental
+/// writes can lag behind it (web access), and a Claude steer accepted by the
+/// host is only written when the CLI consumes it, so a steer cancelled before
+/// that point exists only in the frontend. Only the pieces the disk is missing
+/// are returned. parse_run_to_message() accumulates tool calls and text across
+/// assistant lines, so appending does not duplicate.
+fn missing_cancelled_content_lines(
+    existing_lines: &[String],
+    content: &str,
+    tool_calls: &[ToolCall],
+    content_blocks: &[ContentBlock],
+) -> Vec<serde_json::Value> {
     let mut existing_tool_use_ids: std::collections::HashSet<String> =
         std::collections::HashSet::new();
     let mut existing_tool_result_ids: std::collections::HashSet<String> =
         std::collections::HashSet::new();
+    // Steer texts on disk, with counts: the same text can be steered twice.
+    let mut existing_steers: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
     let mut existing_has_text = false;
 
-    for line in &existing_lines {
+    for line in existing_lines {
         let msg: serde_json::Value = match serde_json::from_str(line) {
             Ok(m) => m,
             Err(_) => continue,
         };
         let msg_type = msg.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        if msg_type == "steered_user_message" {
+            if let Some(text) = msg.get("text").and_then(|v| v.as_str()) {
+                *existing_steers.entry(text.to_string()).or_default() += 1;
+            }
+            continue;
+        }
         let blocks = msg
             .get("message")
             .and_then(|m| m.get("content"))
@@ -3281,89 +3372,81 @@ pub fn persist_partial_cancelled_content(
         }
     }
 
-    // Determine what's missing from disk
-    let missing_tool_calls: Vec<&ToolCall> = tool_calls
-        .iter()
-        .filter(|tc| !existing_tool_use_ids.contains(&tc.id))
-        .collect();
-    let missing_tool_results: Vec<&ToolCall> = tool_calls
-        .iter()
-        .filter(|tc| tc.output.is_some() && !existing_tool_result_ids.contains(&tc.id))
-        .collect();
     let needs_text = !existing_has_text
         && !content.trim().is_empty()
         && !is_claude_compaction_summary_text(content);
 
-    if missing_tool_calls.is_empty() && missing_tool_results.is_empty() && !needs_text {
-        log::trace!(
-            "JSONL already in sync with frontend payload for session {session_id}, skipping persist"
-        );
-        return Ok(());
-    }
-
-    use std::io::Write;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .map_err(|e| format!("Failed to open run log for partial content: {e}"))?;
-
-    // Build a single synthetic assistant line containing only the blocks the
-    // disk is missing. We prefer the order from `content_blocks` when present
-    // so text/tool_use interleaving roughly matches the original stream.
+    let mut lines: Vec<serde_json::Value> = Vec::new();
+    // Blocks for the next synthetic assistant line. Flushed before each
+    // missing steer so the steer keeps its place in the stream order.
     let mut blocks: Vec<serde_json::Value> = Vec::new();
+    let mut has_new_assistant_content = false;
     let mut wrote_text = !needs_text;
+    let flush = |blocks: &mut Vec<serde_json::Value>,
+                 has_new: &mut bool,
+                 lines: &mut Vec<serde_json::Value>| {
+        if *has_new {
+            lines.push(serde_json::json!({
+                "type": "assistant",
+                "message": { "content": std::mem::take(blocks) }
+            }));
+        }
+        blocks.clear();
+        *has_new = false;
+    };
 
-    if !content_blocks.is_empty() {
-        for cb in content_blocks {
-            match cb {
-                ContentBlock::Text { text } => {
-                    if !wrote_text
-                        && !text.trim().is_empty()
-                        && !is_claude_compaction_summary_text(text)
-                    {
-                        blocks.push(serde_json::json!({"type": "text", "text": text}));
-                        wrote_text = true;
-                    }
+    for cb in content_blocks {
+        match cb {
+            ContentBlock::Text { text } => {
+                if !wrote_text
+                    && !text.trim().is_empty()
+                    && !is_claude_compaction_summary_text(text)
+                {
+                    blocks.push(serde_json::json!({"type": "text", "text": text}));
+                    wrote_text = true;
+                    has_new_assistant_content = true;
                 }
-                ContentBlock::ToolUse { tool_call_id } => {
-                    if existing_tool_use_ids.contains(tool_call_id) {
-                        continue;
-                    }
-                    if let Some(tc) = tool_calls.iter().find(|t| t.id == *tool_call_id) {
-                        blocks.push(serde_json::json!({
-                            "type": "tool_use",
-                            "id": tc.id,
-                            "name": tc.name,
-                            "input": tc.input
-                        }));
-                    } else {
-                        blocks.push(serde_json::json!({
-                            "type": "tool_use",
-                            "id": tool_call_id,
-                            "name": "",
-                            "input": null
-                        }));
-                    }
+            }
+            ContentBlock::ToolUse { tool_call_id } => {
+                if existing_tool_use_ids.contains(tool_call_id) {
+                    continue;
                 }
-                ContentBlock::Thinking { thinking } => {
-                    blocks.push(serde_json::json!({"type": "thinking", "thinking": thinking}));
+                let (name, input) = tool_calls
+                    .iter()
+                    .find(|t| t.id == *tool_call_id)
+                    .map(|tc| (tc.name.as_str(), tc.input.clone()))
+                    .unwrap_or(("", serde_json::Value::Null));
+                blocks.push(serde_json::json!({
+                    "type": "tool_use",
+                    "id": tool_call_id,
+                    "name": name,
+                    "input": input
+                }));
+                has_new_assistant_content = true;
+            }
+            ContentBlock::Thinking { thinking } => {
+                // Rides along with new content only, so a cancel with nothing
+                // else missing does not duplicate thinking already on disk.
+                blocks.push(serde_json::json!({"type": "thinking", "thinking": thinking}));
+            }
+            ContentBlock::UserInput { text } => {
+                if let Some(count) = existing_steers.get_mut(text).filter(|c| **c > 0) {
+                    *count -= 1;
+                    continue;
                 }
-                ContentBlock::UserInput { text } => {
-                    blocks.push(serde_json::json!({"type": "user_input", "text": text}));
-                }
+                flush(&mut blocks, &mut has_new_assistant_content, &mut lines);
+                lines.push(serde_json::json!({"type": "steered_user_message", "text": text}));
             }
         }
     }
 
-    // Append any tool_calls that weren't represented in content_blocks (e.g.,
-    // when the frontend payload had tool_calls without matching ToolUse blocks).
-    for tc in &missing_tool_calls {
-        let already_in_blocks = blocks.iter().any(|b| {
-            b.get("type").and_then(|v| v.as_str()) == Some("tool_use")
-                && b.get("id").and_then(|v| v.as_str()) == Some(tc.id.as_str())
-        });
-        if already_in_blocks {
+    // Tool calls without a matching ToolUse block in the payload.
+    for tc in tool_calls {
+        if existing_tool_use_ids.contains(&tc.id)
+            || content_blocks.iter().any(
+                |cb| matches!(cb, ContentBlock::ToolUse { tool_call_id } if *tool_call_id == tc.id),
+            )
+        {
             continue;
         }
         blocks.push(serde_json::json!({
@@ -3372,54 +3455,35 @@ pub fn persist_partial_cancelled_content(
             "name": tc.name,
             "input": tc.input
         }));
+        has_new_assistant_content = true;
     }
 
-    // Fallback: text-only when no structured blocks were supplied.
-    if blocks.is_empty() && !wrote_text && !content.trim().is_empty() {
+    // Text the disk needs but no Text block carried (e.g. text-only payload).
+    if !wrote_text {
         blocks.push(serde_json::json!({"type": "text", "text": content}));
-        wrote_text = true;
+        has_new_assistant_content = true;
     }
+    flush(&mut blocks, &mut has_new_assistant_content, &mut lines);
 
-    if !blocks.is_empty() {
-        let synthetic = serde_json::json!({
-            "type": "assistant",
-            "message": { "content": blocks }
-        });
-        writeln!(file, "{synthetic}")
-            .map_err(|e| format!("Failed to write partial content: {e}"))?;
-    }
-
-    // Write any tool_results the disk is missing as separate user messages so
-    // parse_run_to_message() can associate outputs with their tool calls.
-    for tc in &missing_tool_results {
-        let output = tc.output.as_deref().unwrap_or("");
-        let tool_result = serde_json::json!({
+    // Tool results the disk is missing, as user lines so parse_run_to_message()
+    // can attach outputs to their tool calls.
+    for tc in tool_calls {
+        if tc.output.is_none() || existing_tool_result_ids.contains(&tc.id) {
+            continue;
+        }
+        lines.push(serde_json::json!({
             "type": "user",
             "message": {
                 "content": [{
                     "type": "tool_result",
                     "tool_use_id": tc.id,
-                    "content": output
+                    "content": tc.output.as_deref().unwrap_or("")
                 }]
             }
-        });
-        writeln!(file, "{tool_result}").map_err(|e| format!("Failed to write tool result: {e}"))?;
+        }));
     }
 
-    file.flush()
-        .map_err(|e| format!("Failed to flush partial content: {e}"))?;
-
-    log::trace!(
-        "Reconciled partial cancelled content for session {session_id} \
-         (added {} tool_uses, {} tool_results, text_added={}; total payload: {} chars, {} blocks, {} tool calls)",
-        missing_tool_calls.len(),
-        missing_tool_results.len(),
-        wrote_text && needs_text,
-        content.len(),
-        content_blocks.len(),
-        tool_calls.len(),
-    );
-    Ok(())
+    lines
 }
 
 // ============================================================================
