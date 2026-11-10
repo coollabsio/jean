@@ -61,8 +61,6 @@ Format:
 
 Tested against local dev env: Yes/No
 
-[`### Possible regressions` — only when the rules below say to.]
-
 [`### How to test` — only when the rules below say to.]
 
 Rules:
@@ -72,11 +70,6 @@ Rules:
 - Keep links: write every issue, PR, commit, advisory, Linear/Sentry issue, or URL with a known link as a Markdown link (for example `[#123](https://github.com/owner/repo/pull/123)`). Do not invent URLs.
 - `Tested against local dev env: Yes` or `Tested against local dev env: No`: include it only when the turn changed code, config, or behavior; Yes only if you verified it in a running local dev env.
 - `### How to test`: only when the turn made changes the user can verify. Max 5 numbered steps, each one plain action with the exact URL or command and the expected result — a manual smoke test of the main behavior if it makes sense. Omit it on read-only turns; never write placeholders like \"N/A\".
-- `### Possible regressions`: only when the turn changed functional behavior (logic, data flow, state, persistence, APIs, commands, parsing, shared code). Omit it for visual-only, docs, comments, prompt text, tests-only, and read-only turns. Table, riskiest first: | # | What the user would see | Cause in this change | Proof it still works | Check it yourself |.
-  - `What the user would see`: an action and its wrong result (for example `Delete server with \"remove SSH key\" → key stays`), not the code change.
-  - `Proof it still works` starts with one label: `Old test:` <name>, `New test:` <name> (weak proof), `Ran in dev env:` <what>, `Callers read:` <which>, or `Not verified`.
-  - `Check it yourself`: one short manual step; `—` only for `Old test:` or `Ran in dev env:`.
-  - Check callers, shared types, persistence, other backends, web access, and mobile. Only real failure paths. If none, write `No possible regressions found` and the reason.
 - If the turn ends with a question for the user, put the question at the end of the recap: one line with the question, then `Reply with a number:`, then 2-8 numbered short options. Jean shows them as buttons. Ask the question exactly once: never before the `## Recap` heading, not even in an earlier message of the same turn or when a skill says so.
 - Screenshots or images the user should see: list them in a fenced code block with the language `screenshots`, one absolute path or URL per line, in viewing order. Do not also link them.
 - Plan mode: still call the native plan tool (Claude ExitPlanMode, Codex `<proposed_plan>`, Cursor/OpenCode equivalent). The recap never replaces it.
@@ -152,17 +145,6 @@ mod tests {
     fn recap_requests_local_dev_env_tested_line() {
         assert!(RECAP_INSTRUCTION.contains("Tested against local dev env: Yes"));
         assert!(RECAP_INSTRUCTION.contains("Tested against local dev env: No"));
-    }
-
-    #[test]
-    fn recap_requests_possible_regressions_table() {
-        assert!(RECAP_INSTRUCTION.contains("### Possible regressions"));
-        assert!(
-            RECAP_INSTRUCTION.contains("| # | What the user would see | Cause in this change |")
-        );
-        assert!(RECAP_INSTRUCTION.contains("`New test:`"));
-        assert!(RECAP_INSTRUCTION.contains("Check it yourself"));
-        assert!(RECAP_INSTRUCTION.contains("No possible regressions found"));
     }
 
     #[test]
