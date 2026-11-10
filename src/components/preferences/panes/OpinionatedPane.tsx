@@ -421,13 +421,31 @@ function PluginCard({
         : ` (v${status.version.replace(/^v/, '')})`
       : null
 
+  const handleRefreshModels = useCallback(async (quiet = false) => {
+    const toastId = quiet ? undefined : toast.loading('Reading models...')
+    try {
+      const models = await invoke<{
+        opus: string | null
+        sonnet: string | null
+        haiku: string | null
+      }>('refresh_cliproxyapi_models')
+      const names = [models.opus, models.sonnet, models.haiku].filter(Boolean)
+      toast.success(`Models from CLIProxyAPI: ${names.join(', ')}`, {
+        id: toastId,
+      })
+    } catch (error) {
+      toast.error(`${error}`, { id: toastId })
+    }
+  }, [])
+
   useEffect(() => {
     if (plugin.id !== 'cliproxyapi') return
     if (!cliLoginOpen && loginPending.current) {
       loginPending.current = false
       void checkStatus()
+      void handleRefreshModels(true)
     }
-  }, [cliLoginOpen, checkStatus, plugin.id])
+  }, [cliLoginOpen, checkStatus, handleRefreshModels, plugin.id])
 
   const handleAccountLogin = useCallback(
     async (provider: 'claude' | 'codex') => {
@@ -678,6 +696,16 @@ function PluginCard({
                   <LogIn className="h-4 w-4" />
                 )}
                 Add Codex account
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => handleRefreshModels()}
+                disabled={busy}
+              >
+                <RefreshCw className="h-4 w-4" />
+                Refresh models
               </Button>
               {status.management_url && (
                 <Button

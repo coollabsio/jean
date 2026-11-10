@@ -460,6 +460,126 @@ pub async fn install() -> Result<InstallOutcome, String> {
     })
 }
 
+/// Claude models the running proxy serves, newest per family.
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+pub struct DiscoveredClaudeModels {
+    pub opus: Option<String>,
+    pub sonnet: Option<String>,
+    pub haiku: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ModelList {
+    data: Vec<ModelEntry>,
+}
+
+#[derive(Deserialize)]
+struct ModelEntry {
+    id: String,
+}
+
+/// Numeric version parts of a model id after the family name, ignoring
+/// 8-digit date suffixes: `claude-opus-4-5-20251101` -> `[4, 5]`.
+fn version_key(id: &str, family: &str) -> Option<Vec<u32>> {
+    let rest = id.strip_prefix("claude-")?;
+    let rest = rest
+        .strip_prefix(&format!("{family}-"))
+        .or_else(|| rest.strip_suffix(&format!("-{family}")))?;
+    let parts: Vec<u32> = rest
+        .split('-')
+        .filter(|part| part.len() < 8)
+        .filter_map(|part| part.parse().ok())
+        .collect();
+    Some(parts)
+}
+
+pub fn pick_latest(ids: &[String], family: &str) -> Option<String> {
+    ids.iter()
+        .filter_map(|id| version_key(id, family).map(|key| (key, id)))
+        .max_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(b.1)))
+        .map(|(_, id)| id.clone())
+}
+
+pub fn discovered_from_ids(ids: &[String]) -> DiscoveredClaudeModels {
+    DiscoveredClaudeModels {
+        opus: pick_latest(ids, "opus"),
+        sonnet: pick_latest(ids, "sonnet"),
+        haiku: pick_latest(ids, "haiku"),
+    }
+}
+
+/// Ask the running proxy which Claude models it serves. No guessed names: any
+/// failure is returned to the caller.
+pub async fn discover_claude_models() -> Result<DiscoveredClaudeModels, String> {
+    let home = home_dir()?;
+    let paths = layout(&home);
+    if !paths.binary.is_file() {
+        return Err("CLIProxyAPI is not installed".to_string());
+    }
+    if !pid_is_cliproxy(&paths.pid) {
+        return Err(
+            "CLIProxyAPI is not running. Start it in Preferences → Opinionated.".to_string(),
+        );
+    }
+    let key = std::fs::read_to_string(&paths.client_key)
+        .map_err(|error| format!("Failed to read CLIProxyAPI client key: {error}"))?;
+    let url = format!("{}/v1/models", endpoint_url(configured_port(&paths)));
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|error| format!("Failed to create HTTP client: {error}"))?;
+    let list: ModelList = client
+        .get(url)
+        .bearer_auth(key.trim())
+        .header("anthropic-version", "2023-06-01")
+        .send()
+        .await
+        .map_err(|error| format!("CLIProxyAPI is not reachable: {error}"))?
+        .error_for_status()
+        .map_err(|error| format!("CLIProxyAPI rejected the model list request: {error}"))?
+        .json()
+        .await
+        .map_err(|error| format!("CLIProxyAPI returned an unreadable model list: {error}"))?;
+    let ids: Vec<String> = list.data.into_iter().map(|entry| entry.id).collect();
+    let found = discovered_from_ids(&ids);
+    if found == DiscoveredClaudeModels::default() {
+        return Err(
+            "CLIProxyAPI serves no Claude models. Add a Claude account in Preferences → Opinionated."
+                .to_string(),
+        );
+    }
+    Ok(found)
+}
+
+/// Write discovered model ids into a Claude profile's `settings_json` env.
+/// A family the proxy does not serve has its key removed, so no stale name stays.
+pub fn apply_models_to_settings(
+    settings_json: &str,
+    models: &DiscoveredClaudeModels,
+) -> Result<String, String> {
+    let mut value: serde_json::Value = serde_json::from_str(settings_json)
+        .map_err(|error| format!("Invalid CLIProxyAPI profile JSON: {error}"))?;
+    let env = value
+        .get_mut("env")
+        .and_then(|env| env.as_object_mut())
+        .ok_or_else(|| "CLIProxyAPI profile has no env".to_string())?;
+    for (key, model) in [
+        ("ANTHROPIC_DEFAULT_OPUS_MODEL", &models.opus),
+        ("ANTHROPIC_DEFAULT_SONNET_MODEL", &models.sonnet),
+        ("ANTHROPIC_DEFAULT_HAIKU_MODEL", &models.haiku),
+    ] {
+        match model {
+            Some(id) => {
+                env.insert(key.to_string(), serde_json::Value::String(id.clone()));
+            }
+            None => {
+                env.remove(key);
+            }
+        }
+    }
+    serde_json::to_string_pretty(&value).map_err(|error| error.to_string())
+}
+
 pub async fn uninstall() -> Result<String, String> {
     let home = home_dir()?;
     let home_for_stop = home.clone();
@@ -1407,5 +1527,47 @@ mod tests {
             .expect("append");
         let encoder = builder.into_inner().expect("builder");
         encoder.finish().expect("gzip")
+    }
+
+    #[test]
+    fn picks_newest_model_per_family_and_ignores_dates() {
+        let ids: Vec<String> = [
+            "claude-opus-4-5-20251101",
+            "claude-opus-4-8",
+            "claude-opus-5-5",
+            "claude-sonnet-4-6",
+            "claude-sonnet-5-5",
+            "claude-haiku-4-5",
+            "claude-fable-5-2",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let found = discovered_from_ids(&ids);
+        assert_eq!(found.opus.as_deref(), Some("claude-opus-5-5"));
+        assert_eq!(found.sonnet.as_deref(), Some("claude-sonnet-5-5"));
+        assert_eq!(found.haiku.as_deref(), Some("claude-haiku-4-5"));
+        assert_eq!(discovered_from_ids(&[]), DiscoveredClaudeModels::default());
+    }
+
+    #[test]
+    fn applying_models_sets_found_families_and_drops_missing_ones() {
+        let base = claude_settings_json("k");
+        let with_all = apply_models_to_settings(
+            &base,
+            &DiscoveredClaudeModels {
+                opus: Some("claude-opus-5-5".into()),
+                sonnet: Some("claude-sonnet-5-5".into()),
+                haiku: None,
+            },
+        )
+        .expect("apply");
+        let value: serde_json::Value = serde_json::from_str(&with_all).expect("json");
+        assert_eq!(
+            value["env"]["ANTHROPIC_DEFAULT_OPUS_MODEL"].as_str(),
+            Some("claude-opus-5-5")
+        );
+        assert!(value["env"].get("ANTHROPIC_DEFAULT_HAIKU_MODEL").is_none());
+        assert_eq!(value["env"]["ANTHROPIC_AUTH_TOKEN"].as_str(), Some("k"));
     }
 }

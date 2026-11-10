@@ -300,6 +300,18 @@ struct CompactingEvent {
     worktree_id: String,
 }
 
+/// Payload for Claude CLI `api_retry` events sent to frontend.
+/// Signals the CLI is retrying a failed API request (e.g. unreachable base URL).
+#[derive(serde::Serialize, Clone)]
+struct ApiRetryEvent {
+    session_id: String,
+    worktree_id: String,
+    attempt: u64,
+    max_retries: u64,
+    retry_delay_ms: u64,
+    error: Option<String>,
+}
+
 /// Payload for compaction-complete events sent to frontend
 /// Contains metadata about the compaction that occurred
 #[derive(serde::Serialize, Clone)]
@@ -2757,6 +2769,24 @@ pub fn tail_claude_output(
                             }
                         }
                         // Fall through to skip the compact_boundary branch.
+                    } else if subtype == "api_retry" {
+                        let retry_event = ApiRetryEvent {
+                            session_id: session_id.to_string(),
+                            worktree_id: worktree_id.to_string(),
+                            attempt: msg.get("attempt").and_then(|v| v.as_u64()).unwrap_or(0),
+                            max_retries: msg
+                                .get("max_retries")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(0),
+                            retry_delay_ms: msg
+                                .get("retry_delay_ms")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(0),
+                            error: msg.get("error").and_then(|v| v.as_str()).map(String::from),
+                        };
+                        if let Err(e) = app.emit_all("chat:api-retry", &retry_event) {
+                            log::error!("Failed to emit api-retry: {e}");
+                        }
                     } else if subtype == "compact_boundary" {
                         log::trace!("Detected compact_boundary system message");
 

@@ -639,6 +639,18 @@ export interface CompactingEvent {
 }
 
 /**
+ * Event payload when the Claude CLI retries a failed API request
+ */
+export interface ApiRetryEvent {
+  session_id: string
+  worktree_id: string
+  attempt: number
+  max_retries: number
+  retry_delay_ms: number
+  error: string | null
+}
+
+/**
  * Event payload for context compaction complete from Rust
  */
 export interface CompactedEvent {

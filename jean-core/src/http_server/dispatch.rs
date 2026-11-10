@@ -4221,6 +4221,11 @@ pub async fn dispatch_command(
                 crate::opinionated::stop_opinionated_plugin(app.clone(), plugin_name).await?;
             to_value(result)
         }
+        "refresh_cliproxyapi_models" => {
+            let result = crate::opinionated::refresh_cliproxyapi_models(app.clone()).await?;
+            emit_cache_invalidation(app, &["preferences"]);
+            to_value(result)
+        }
         "prepare_cliproxyapi_account_login" => {
             let provider: String = from_field(&args, "provider")?;
             let result = crate::opinionated::prepare_cliproxyapi_account_login(provider).await?;

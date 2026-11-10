@@ -4345,6 +4345,22 @@ pub(crate) async fn upsert_cliproxyapi_provider_profiles(
     save_preferences(app.clone(), preferences).await
 }
 
+/// Write the models the running proxy serves into the CLIProxyAPI Claude profile.
+pub(crate) async fn apply_cliproxyapi_models(
+    app: &AppHandle,
+    models: &opinionated::cliproxyapi::DiscoveredClaudeModels,
+) -> Result<(), String> {
+    let mut preferences = load_preferences(app.clone()).await?;
+    let profile = preferences
+        .custom_cli_profiles
+        .iter_mut()
+        .find(|profile| profile.name == opinionated::cliproxyapi::PROFILE_NAME)
+        .ok_or_else(|| "CLIProxyAPI profile is missing. Install CLIProxyAPI first.".to_string())?;
+    profile.settings_json =
+        opinionated::cliproxyapi::apply_models_to_settings(&profile.settings_json, models)?;
+    save_preferences(app.clone(), preferences).await
+}
+
 /// Remove CLIProxyAPI provider profiles and the Claude settings file they use.
 pub(crate) async fn remove_cliproxyapi_provider_profiles(app: &AppHandle) -> Result<(), String> {
     let mut preferences = load_preferences(app.clone()).await?;

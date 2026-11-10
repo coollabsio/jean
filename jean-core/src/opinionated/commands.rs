@@ -149,11 +149,17 @@ pub async fn uninstall_opinionated_plugin(
 }
 
 pub async fn start_opinionated_plugin(
-    _app: AppHandle,
+    app: AppHandle,
     plugin_name: String,
 ) -> Result<String, String> {
     match plugin_name.as_str() {
-        "cliproxyapi" => super::cliproxyapi::start().await,
+        "cliproxyapi" => {
+            let message = super::cliproxyapi::start().await?;
+            if let Err(error) = refresh_cliproxyapi_models(app).await {
+                log::info!("CLIProxyAPI model discovery after start: {error}");
+            }
+            Ok(message)
+        }
         _ => Err(format!(
             "{plugin_name} does not run as a supervised sidecar"
         )),
@@ -178,11 +184,21 @@ pub async fn prepare_cliproxyapi_account_login(
     super::cliproxyapi::prepare_account_login(&provider).await
 }
 
+pub async fn refresh_cliproxyapi_models(
+    app: AppHandle,
+) -> Result<super::cliproxyapi::DiscoveredClaudeModels, String> {
+    let models = super::cliproxyapi::discover_claude_models().await?;
+    crate::apply_cliproxyapi_models(&app, &models).await?;
+    Ok(models)
+}
+
 async fn install_cliproxyapi(app: &AppHandle) -> Result<String, String> {
     let outcome = super::cliproxyapi::install().await?;
     crate::upsert_cliproxyapi_provider_profiles(app, &outcome.client_key).await?;
     if !outcome.running {
         log::warn!("{}", outcome.message);
+    } else if let Err(error) = refresh_cliproxyapi_models(app.clone()).await {
+        log::info!("CLIProxyAPI model discovery after install: {error}");
     }
     Ok(outcome.message)
 }
