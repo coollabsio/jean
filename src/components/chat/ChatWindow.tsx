@@ -218,6 +218,7 @@ import { useRemotePicker } from '@/hooks/useRemotePicker'
 import {
   getModelImpliedBackend,
   providerSupportsAdaptiveThinking,
+  targetUsesEffort,
 } from '@/lib/model-utils'
 import { copyToClipboard, copyHtmlToClipboard } from '@/lib/clipboard'
 import {
@@ -1470,8 +1471,12 @@ const ChatWindowContent = memo(function ChatWindowContent({
   const selectedProviderRef = useRef(selectedProvider)
   const selectedThinkingLevelRef = useRef(selectedThinkingLevel)
   const selectedEffortLevelRef = useRef(selectedEffortLevel)
-  const useAdaptiveThinkingRef = useRef(useAdaptiveThinkingFlag)
-  const isCodexBackendRef = useRef(isCodexBackend)
+  const reasoningContextRef = useRef({
+    modelCatalog,
+    provider: selectedProvider,
+    customCliProfiles: preferences?.custom_cli_profiles,
+    cliVersion: cliStatus?.version ?? null,
+  })
   const executionModeRef = useRef(executionMode)
   const projectIdRef = useRef<string | null>(worktree?.project_id ?? null)
   const enabledMcpServersRef = useRef(enabledMcpServers)
@@ -1501,14 +1506,42 @@ const ChatWindowContent = memo(function ChatWindowContent({
     selectedProviderRef.current = selectedProvider
     selectedThinkingLevelRef.current = selectedThinkingLevel
     selectedEffortLevelRef.current = selectedEffortLevel
-    useAdaptiveThinkingRef.current = useAdaptiveThinkingFlag
-    isCodexBackendRef.current = isCodexBackend
+    reasoningContextRef.current = {
+      modelCatalog,
+      provider: selectedProvider,
+      customCliProfiles: preferences?.custom_cli_profiles,
+      cliVersion: cliStatus?.version ?? null,
+    }
     executionModeRef.current = executionMode
     projectIdRef.current = worktree?.project_id ?? null
     enabledMcpServersRef.current = enabledMcpServers
     mcpServersDataRef.current = availableMcpServers
     selectedBackendRef.current = selectedBackend
   })
+
+  // Stable check: does a turn on `backend`/`model` take an effort level? Uses
+  // the target model, so build/yolo model overrides get the right level.
+  const usesEffortFor = useCallback((backend: CliBackend, model: string) => {
+    const { modelCatalog, provider, customCliProfiles, cliVersion } =
+      reasoningContextRef.current
+    const targetProvider = backend === 'claude' ? provider : null
+    const reasoning = getCatalogModelReasoning(
+      modelCatalog,
+      backend,
+      (targetProvider
+        ? resolveProviderModelId(model, targetProvider, customCliProfiles)
+        : undefined) ?? model
+    )
+    return targetUsesEffort({
+      backend,
+      model,
+      provider: targetProvider,
+      customCliProfiles,
+      cliVersion,
+      catalogUsesEffort:
+        reasoning === undefined ? undefined : reasoning?.type === 'effort',
+    })
+  }, [])
 
   // Stable callback for useMessageHandlers to build MCP config from current refs
   const getMcpConfig = useCallback(
@@ -1850,8 +1883,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
     selectedThinkingLevelRef,
     selectedEffortLevelRef,
     executionModeRef,
-    useAdaptiveThinkingRef,
-    isCodexBackendRef,
+    usesEffortFor,
     mcpServersDataRef,
     enabledMcpServersRef,
     selectedBackendRef,
@@ -1895,7 +1927,10 @@ const ChatWindowContent = memo(function ChatWindowContent({
       provider: selectedProviderRef.current,
       executionMode: executionModeRef.current,
       thinkingLevel: selectedThinkingLevelRef.current,
-      effortLevel: useAdaptiveThinkingRef.current
+      effortLevel: usesEffortFor(
+        selectedBackendRef.current,
+        selectedModelRef.current
+      )
         ? selectedEffortLevelRef.current
         : undefined,
       mcpConfig: getMcpConfig(),
@@ -1926,7 +1961,10 @@ const ChatWindowContent = memo(function ChatWindowContent({
       provider: selectedProviderRef.current,
       executionMode: executionModeRef.current,
       thinkingLevel: selectedThinkingLevelRef.current,
-      effortLevel: useAdaptiveThinkingRef.current
+      effortLevel: usesEffortFor(
+        selectedBackendRef.current,
+        selectedModelRef.current
+      )
         ? selectedEffortLevelRef.current
         : undefined,
       mcpConfig: getMcpConfig(),
@@ -1960,7 +1998,10 @@ const ChatWindowContent = memo(function ChatWindowContent({
       provider: selectedProviderRef.current,
       executionMode: executionModeRef.current,
       thinkingLevel: selectedThinkingLevelRef.current,
-      effortLevel: useAdaptiveThinkingRef.current
+      effortLevel: usesEffortFor(
+        selectedBackendRef.current,
+        selectedModelRef.current
+      )
         ? selectedEffortLevelRef.current
         : undefined,
       mcpConfig: getMcpConfig(),
@@ -2004,7 +2045,10 @@ const ChatWindowContent = memo(function ChatWindowContent({
         provider: selectedProviderRef.current,
         executionMode: executionModeRef.current,
         thinkingLevel: selectedThinkingLevelRef.current,
-        effortLevel: useAdaptiveThinkingRef.current
+        effortLevel: usesEffortFor(
+          selectedBackendRef.current,
+          selectedModelRef.current
+        )
           ? selectedEffortLevelRef.current
           : undefined,
         mcpConfig: getMcpConfig(),
@@ -2071,6 +2115,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
     sendMessage,
     selectedThinkingLevelRef,
     selectedEffortLevelRef,
+    cliVersion: cliStatus?.version ?? null,
     mcpServersDataRef,
     enabledMcpServersRef,
   })
@@ -2351,7 +2396,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
     executionModeRef,
     selectedThinkingLevelRef,
     selectedEffortLevelRef,
-    useAdaptiveThinkingRef,
+    usesEffortFor,
     getMcpConfig,
     sendMessage,
     createSession,
@@ -2574,8 +2619,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
     executionModeRef,
     selectedThinkingLevelRef,
     selectedEffortLevelRef,
-    useAdaptiveThinkingRef,
-    isCodexBackendRef,
+    usesEffortFor,
     mcpServersDataRef,
     enabledMcpServersRef,
     selectedBackendRef,

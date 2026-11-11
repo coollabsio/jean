@@ -14,6 +14,7 @@ import { chatQueryKeys, refreshWorktreeSessionsCaches } from '@/services/chat'
 import { startCommitJob } from '@/services/commit-jobs'
 import { resolveDefaultModelForBackend } from '@/lib/session-defaults'
 import { buildMcpConfigJson } from '@/services/mcp'
+import { resolveSendReasoning, targetUsesEffort } from '@/lib/model-utils'
 import {
   saveWorktreePr,
   linkWorktreePr,
@@ -98,6 +99,7 @@ interface UseGitOperationsParams {
   sendMessage: SendMessageMutation
   selectedThinkingLevelRef: RefObject<ThinkingLevel>
   selectedEffortLevelRef: RefObject<EffortLevel>
+  cliVersion: string | null
   mcpServersDataRef: RefObject<McpServerInfo[] | undefined>
   enabledMcpServersRef: RefObject<string[]>
 }
@@ -158,6 +160,7 @@ export function useGitOperations({
   sendMessage,
   selectedThinkingLevelRef,
   selectedEffortLevelRef,
+  cliVersion,
   mcpServersDataRef,
   enabledMcpServersRef,
 }: UseGitOperationsParams): UseGitOperationsReturn {
@@ -304,8 +307,19 @@ export function useGitOperations({
 
       const isCustomProvider = Boolean(provider && provider !== '__anthropic__')
       const customProfileName = isCustomProvider ? provider : undefined
-      const usesEffortLevel =
-        backend === 'codex' || backend === 'opencode' || backend === 'pi'
+      // Effort targets must not get the session thinking level: it would add
+      // an "ultrathink" keyword that the toolbar does not show.
+      const usesEffortLevel = targetUsesEffort({
+        backend,
+        model,
+        provider,
+        customCliProfiles: preferences?.custom_cli_profiles,
+        cliVersion,
+      })
+      const effortOverride = preferences?.magic_prompt_efforts
+        ?.resolve_conflicts_effort as EffortLevel | null | undefined
+      if (usesEffortLevel && effortOverride)
+        store.setEffortLevel(session.id, effortOverride)
 
       sendMessage.mutate(
         {
@@ -315,10 +329,11 @@ export function useGitOperations({
           message: prompt,
           model,
           executionMode,
-          thinkingLevel: selectedThinkingLevelRef.current,
-          effortLevel: usesEffortLevel
-            ? selectedEffortLevelRef.current
-            : undefined,
+          ...resolveSendReasoning(
+            usesEffortLevel,
+            selectedThinkingLevelRef.current,
+            effortOverride ?? selectedEffortLevelRef.current
+          ),
           mcpConfig: buildMcpConfigJson(
             mcpServersDataRef.current ?? [],
             enabledMcpServersRef.current,
@@ -336,11 +351,14 @@ export function useGitOperations({
       )
     },
     [
+      cliVersion,
       enabledMcpServersRef,
       inputRef,
       mcpServersDataRef,
       preferences?.ai_language,
       preferences?.chrome_enabled,
+      preferences?.custom_cli_profiles,
+      preferences?.magic_prompt_efforts?.resolve_conflicts_effort,
       preferences?.magic_prompts?.parallel_execution,
       selectedEffortLevelRef,
       selectedThinkingLevelRef,

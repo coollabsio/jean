@@ -687,6 +687,29 @@ fn resolve_send_model(
         .or_else(|| normalize_optional_string(backend_default_model))
 }
 
+/// Resolve the reasoning levels used for a send.
+///
+/// Claude uses the effort level when one is present and ignores the thinking
+/// level. A Claude send that carries only a thinking level (a thinking model
+/// such as Sonnet) must not take the session's saved effort level, or the CLI
+/// gets `--effort` and no thinking. So Claude falls back to the session levels
+/// only when the send carries neither. Other backends fall back per field.
+fn resolve_send_reasoning(
+    backend: &Backend,
+    thinking_level: Option<ThinkingLevel>,
+    effort_level: Option<EffortLevel>,
+    session_thinking_level: Option<ThinkingLevel>,
+    session_effort_level: Option<EffortLevel>,
+) -> (Option<ThinkingLevel>, Option<EffortLevel>) {
+    if *backend == Backend::Claude && (thinking_level.is_some() || effort_level.is_some()) {
+        return (thinking_level, effort_level);
+    }
+    (
+        thinking_level.or(session_thinking_level),
+        effort_level.or(session_effort_level),
+    )
+}
+
 fn validate_execution_policy(mode: &str, backend: &Backend) -> Result<(), String> {
     let supported = match mode {
         "plan" | "yolo" => true,
@@ -3183,8 +3206,6 @@ async fn send_chat_message_inner(
             prefs.as_ref().map(|p| p.default_execution_mode.clone()),
         ),
     );
-    let thinking_level = thinking_level.or(session_selected_thinking_level);
-    let effort_level = effort_level.or(session_selected_effort_level);
 
     // Determine backend from session (or explicit param, or default to claude)
     let effective_backend = match backend.as_deref() {
@@ -3207,6 +3228,14 @@ async fn send_chat_message_inner(
     } else {
         effective_backend
     };
+
+    let (thinking_level, effort_level) = resolve_send_reasoning(
+        &effective_backend,
+        thinking_level,
+        effort_level,
+        session_selected_thinking_level,
+        session_selected_effort_level,
+    );
 
     if let Some(mode) = execution_mode.as_deref() {
         validate_execution_policy(mode, &effective_backend)?;
@@ -12405,6 +12434,44 @@ mod tests {
         assert_eq!(
             resolve_send_provider(None, None, || some("__anthropic__")),
             None
+        );
+    }
+
+    #[test]
+    fn resolve_send_reasoning_claude_thinking_send_ignores_saved_effort() {
+        assert_eq!(
+            resolve_send_reasoning(
+                &Backend::Claude,
+                Some(ThinkingLevel::Ultrathink),
+                None,
+                None,
+                Some(EffortLevel::Medium),
+            ),
+            (Some(ThinkingLevel::Ultrathink), None)
+        );
+    }
+
+    #[test]
+    fn resolve_send_reasoning_falls_back_when_send_has_no_levels() {
+        assert_eq!(
+            resolve_send_reasoning(
+                &Backend::Claude,
+                None,
+                None,
+                Some(ThinkingLevel::Think),
+                Some(EffortLevel::High),
+            ),
+            (Some(ThinkingLevel::Think), Some(EffortLevel::High))
+        );
+        assert_eq!(
+            resolve_send_reasoning(
+                &Backend::Codex,
+                Some(ThinkingLevel::Off),
+                None,
+                None,
+                Some(EffortLevel::High),
+            ),
+            (Some(ThinkingLevel::Off), Some(EffortLevel::High))
         );
     }
 

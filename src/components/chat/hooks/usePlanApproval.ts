@@ -10,7 +10,8 @@ import {
 } from '@/services/chat'
 import { invoke } from '@/lib/transport'
 import { useClaudeCliStatus } from '@/services/claude-cli'
-import { providerSupportsAdaptiveThinking } from '@/lib/model-utils'
+import { targetUsesEffort } from '@/lib/model-utils'
+import type { CliBackend } from '@/types/preferences'
 import type {
   EffortLevel,
   Session,
@@ -190,25 +191,19 @@ export function usePlanApproval({
           : 'off'
 
       const isCodex = sessionBackend === 'codex'
-      const isPi = sessionBackend === 'pi'
       const isGrok = sessionBackend === 'grok'
       const isAntigravity = sessionBackend === 'antigravity'
       const isMuse = sessionBackend === 'muse'
       const buildEffortOverride = overridesApply
         ? preferences?.build_effort_level
         : null
-      const effortAppliesBuild =
-        isCodex ||
-        isPi ||
-        isGrok ||
-        isAntigravity ||
-        isMuse ||
-        providerSupportsAdaptiveThinking(
-          model,
-          card.session.selected_provider,
-          preferences?.custom_cli_profiles,
-          cliStatus?.version ?? null
-        )
+      const effortAppliesBuild = targetUsesEffort({
+        backend: sessionBackend as CliBackend,
+        model,
+        provider: card.session.selected_provider,
+        customCliProfiles: preferences?.custom_cli_profiles,
+        cliVersion: cliStatus?.version ?? null,
+      })
       const defaultGrokEffort = isEffortLevel(
         preferences?.default_grok_reasoning_effort
       )
@@ -416,25 +411,19 @@ export function usePlanApproval({
           : 'off'
 
       const isCodexYolo = sessionBackend === 'codex'
-      const isPiYolo = sessionBackend === 'pi'
       const isGrokYolo = sessionBackend === 'grok'
       const isAntigravityYolo = sessionBackend === 'antigravity'
       const isMuseYolo = sessionBackend === 'muse'
       const yoloEffortOverride = overridesApplyYolo
         ? preferences?.yolo_effort_level
         : null
-      const effortAppliesYolo =
-        isCodexYolo ||
-        isPiYolo ||
-        isGrokYolo ||
-        isAntigravityYolo ||
-        isMuseYolo ||
-        providerSupportsAdaptiveThinking(
-          model,
-          card.session.selected_provider,
-          preferences?.custom_cli_profiles,
-          cliStatus?.version ?? null
-        )
+      const effortAppliesYolo = targetUsesEffort({
+        backend: sessionBackend as CliBackend,
+        model,
+        provider: card.session.selected_provider,
+        customCliProfiles: preferences?.custom_cli_profiles,
+        cliVersion: cliStatus?.version ?? null,
+      })
       const defaultGrokEffortYolo = isEffortLevel(
         preferences?.default_grok_reasoning_effort
       )

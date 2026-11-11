@@ -8,6 +8,7 @@
  */
 
 import { compareVersions } from './version-utils'
+import type { EffortLevel, ThinkingLevel } from '@/types/chat'
 import {
   resolveProviderModelId,
   type CliBackend,
@@ -97,6 +98,57 @@ export function providerSupportsAdaptiveThinking(
     modelId !== undefined &&
     supportsAdaptiveThinking(modelId, cliVersion, catalogUsesEffort)
   )
+}
+
+/** Backends whose chat turns always take an effort level. */
+const EFFORT_BACKENDS: ReadonlySet<CliBackend> = new Set<CliBackend>([
+  'codex',
+  'opencode',
+  'pi',
+  'grok',
+  'kimi',
+  'antigravity',
+  'muse',
+])
+
+/** The backend and model that one chat turn runs on. */
+export interface ReasoningTarget {
+  backend: CliBackend
+  model: string
+  provider?: string | null
+  customCliProfiles?: readonly CustomCliProfile[] | null
+  cliVersion?: string | null
+  /** Effort support from the model catalog, when known. */
+  catalogUsesEffort?: boolean
+}
+
+/**
+ * True when a turn on `target` takes an effort level, not a thinking level.
+ * Decide this from the model the turn runs on, not from the model of the
+ * session that started it: a build override can change the model.
+ */
+export function targetUsesEffort(target: ReasoningTarget): boolean {
+  if (EFFORT_BACKENDS.has(target.backend)) return true
+  if (target.backend !== 'claude') return false
+  return providerSupportsAdaptiveThinking(
+    target.model,
+    target.provider,
+    target.customCliProfiles,
+    target.cliVersion,
+    target.catalogUsesEffort
+  )
+}
+
+/**
+ * The reasoning fields of a send: an effort level for effort targets, else a
+ * thinking level. Never both, so the message badge matches what ran.
+ */
+export function resolveSendReasoning(
+  usesEffort: boolean,
+  thinkingLevel: ThinkingLevel,
+  effortLevel: EffortLevel
+): { thinkingLevel?: ThinkingLevel; effortLevel?: EffortLevel } {
+  return usesEffort ? { effortLevel } : { thinkingLevel }
 }
 
 function getRawModelSortKey(value: string): {

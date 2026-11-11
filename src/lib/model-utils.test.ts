@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  resolveSendReasoning,
+  targetUsesEffort,
   providerSupportsAdaptiveThinking,
   getModelImpliedBackend,
   getOlderModelValues,
@@ -123,6 +125,56 @@ describe('providerSupportsAdaptiveThinking', () => {
     expect(
       providerSupportsAdaptiveThinking('opus', null, profiles, '2.2.0')
     ).toBe(false)
+  })
+})
+
+describe('targetUsesEffort', () => {
+  const cliVersion = '2.5.0'
+
+  it('decides from the target model, not the session model', () => {
+    expect(
+      targetUsesEffort({
+        backend: 'claude',
+        model: 'claude-opus-5-5',
+        cliVersion,
+      })
+    ).toBe(true)
+    expect(
+      targetUsesEffort({
+        backend: 'claude',
+        model: 'claude-sonnet-4-6',
+        cliVersion,
+      })
+    ).toBe(false)
+  })
+
+  it('treats effort backends as effort targets', () => {
+    expect(targetUsesEffort({ backend: 'codex', model: 'gpt-5.5' })).toBe(true)
+    expect(targetUsesEffort({ backend: 'cursor', model: 'cursor/auto' })).toBe(
+      false
+    )
+  })
+
+  it('follows the catalog when it knows the model', () => {
+    expect(
+      targetUsesEffort({
+        backend: 'claude',
+        model: 'claude-sonnet-4-6',
+        cliVersion,
+        catalogUsesEffort: true,
+      })
+    ).toBe(true)
+  })
+})
+
+describe('resolveSendReasoning', () => {
+  it('sends exactly one level', () => {
+    expect(resolveSendReasoning(true, 'ultrathink', 'medium')).toEqual({
+      effortLevel: 'medium',
+    })
+    expect(resolveSendReasoning(false, 'ultrathink', 'medium')).toEqual({
+      thinkingLevel: 'ultrathink',
+    })
   })
 })
 

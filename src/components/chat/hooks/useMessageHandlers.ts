@@ -40,6 +40,7 @@ import {
 } from '../permission-approval-utils'
 import { isCodexDevUserInputRequest } from '../codex-dev-flows'
 import { generateId } from '@/lib/uuid'
+import { resolveSendReasoning } from '@/lib/model-utils'
 import { preferencesQueryKeys } from '@/services/preferences'
 import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
@@ -115,7 +116,8 @@ interface UseMessageHandlersParams {
   executionModeRef: RefObject<ExecutionMode>
   selectedThinkingLevelRef: RefObject<ThinkingLevel>
   selectedEffortLevelRef: RefObject<EffortLevel>
-  useAdaptiveThinkingRef: RefObject<boolean>
+  /** Whether a turn on this backend and model takes an effort level. */
+  usesEffortFor: (backend: CliBackend, model: string) => boolean
   // MCP config builder (reads current refs internally)
   getMcpConfig: () => string | undefined
   // Actions
@@ -363,7 +365,7 @@ export function useMessageHandlers({
   executionModeRef,
   selectedThinkingLevelRef,
   selectedEffortLevelRef,
-  useAdaptiveThinkingRef,
+  usesEffortFor,
   getMcpConfig,
   sendMessage,
   createSession,
@@ -510,7 +512,10 @@ export function useMessageHandlers({
           model: selectedModelRef.current,
           executionMode: executionModeRef.current,
           thinkingLevel: selectedThinkingLevelRef.current,
-          effortLevel: useAdaptiveThinkingRef.current
+          effortLevel: usesEffortFor(
+            selectedBackendRef.current,
+            selectedModelRef.current
+          )
             ? selectedEffortLevelRef.current
             : undefined,
           mcpConfig: getMcpConfig(),
@@ -531,7 +536,7 @@ export function useMessageHandlers({
       executionModeRef,
       selectedThinkingLevelRef,
       selectedEffortLevelRef,
-      useAdaptiveThinkingRef,
+      usesEffortFor,
       getMcpConfig,
       getCustomProfileName,
       sendMessageMutate,
@@ -793,10 +798,11 @@ export function useMessageHandlers({
               message,
               model: buildModel,
               executionMode: 'build',
-              thinkingLevel: buildThinking,
-              effortLevel: useAdaptiveThinkingRef.current
-                ? buildEffort
-                : undefined,
+              ...resolveSendReasoning(
+                usesEffortFor(sessionBackend, buildModel),
+                buildThinking,
+                buildEffort
+              ),
               mcpConfig: getMcpConfig(),
               customProfileName: getCustomProfileName(),
             },
@@ -815,7 +821,7 @@ export function useMessageHandlers({
       selectedModelRef,
       selectedThinkingLevelRef,
       selectedEffortLevelRef,
-      useAdaptiveThinkingRef,
+      usesEffortFor,
       buildModelRef,
       buildBackendRef,
       buildThinkingLevelRef,
@@ -965,10 +971,11 @@ export function useMessageHandlers({
               message,
               model: yoloModel,
               executionMode: 'yolo',
-              thinkingLevel: yoloThinking,
-              effortLevel: useAdaptiveThinkingRef.current
-                ? yoloEffort
-                : undefined,
+              ...resolveSendReasoning(
+                usesEffortFor(sessionBackendYolo, yoloModel),
+                yoloThinking,
+                yoloEffort
+              ),
               mcpConfig: getMcpConfig(),
               customProfileName: getCustomProfileName(),
             },
@@ -987,7 +994,7 @@ export function useMessageHandlers({
       selectedModelRef,
       selectedThinkingLevelRef,
       selectedEffortLevelRef,
-      useAdaptiveThinkingRef,
+      usesEffortFor,
       yoloModelRef,
       yoloBackendRef,
       yoloThinkingLevelRef,
@@ -1079,10 +1086,11 @@ export function useMessageHandlers({
         message: buildApprovalMsg,
         model: streamBuildModel,
         executionMode: 'build',
-        thinkingLevel: streamBuildThinking,
-        effortLevel: useAdaptiveThinkingRef.current
-          ? streamBuildEffort
-          : undefined,
+        ...resolveSendReasoning(
+          usesEffortFor(streamBuildSessionBackend, streamBuildModel),
+          streamBuildThinking,
+          streamBuildEffort
+        ),
         mcpConfig: getMcpConfig(),
         customProfileName: getCustomProfileName(),
       },
@@ -1099,7 +1107,7 @@ export function useMessageHandlers({
     selectedModelRef,
     selectedThinkingLevelRef,
     selectedEffortLevelRef,
-    useAdaptiveThinkingRef,
+    usesEffortFor,
     buildModelRef,
     buildBackendRef,
     buildThinkingLevelRef,
@@ -1179,10 +1187,11 @@ export function useMessageHandlers({
         message: yoloApprovalMsg,
         model: streamYoloModel,
         executionMode: 'yolo',
-        thinkingLevel: streamYoloThinking,
-        effortLevel: useAdaptiveThinkingRef.current
-          ? streamYoloEffort
-          : undefined,
+        ...resolveSendReasoning(
+          usesEffortFor(streamYoloSessionBackend, streamYoloModel),
+          streamYoloThinking,
+          streamYoloEffort
+        ),
         mcpConfig: getMcpConfig(),
         customProfileName: getCustomProfileName(),
       },
@@ -1199,7 +1208,7 @@ export function useMessageHandlers({
     selectedModelRef,
     selectedThinkingLevelRef,
     selectedEffortLevelRef,
-    useAdaptiveThinkingRef,
+    usesEffortFor,
     yoloModelRef,
     yoloBackendRef,
     yoloThinkingLevelRef,
@@ -1385,25 +1394,16 @@ export function useMessageHandlers({
         )
       }
 
-      const effectiveBackend = resolvedBackend ?? currentSessionBackend
-      let resolvedThinkingLevel: ThinkingLevel =
-        selectedThinkingLevelRef.current
-      let resolvedEffortLevel: EffortLevel | undefined = undefined
-      if (isThinkingLevel(modeThinkingRef.current)) {
-        resolvedThinkingLevel = modeThinkingRef.current
-      }
-      if (effectiveBackend === 'codex' || effectiveBackend === 'pi') {
-        resolvedThinkingLevel = 'off'
-      }
-      if (
-        effectiveBackend === 'codex' ||
-        effectiveBackend === 'pi' ||
-        useAdaptiveThinkingRef.current
-      ) {
-        resolvedEffortLevel =
-          mapCodexReasoningToEffort(modeEffortRef.current) ??
+      const effectiveBackend =
+        resolvedBackend ?? currentSessionBackend ?? 'claude'
+      const resolvedReasoning = resolveSendReasoning(
+        usesEffortFor(effectiveBackend, resolvedModel),
+        isThinkingLevel(modeThinkingRef.current)
+          ? modeThinkingRef.current
+          : selectedThinkingLevelRef.current,
+        mapCodexReasoningToEffort(modeEffortRef.current) ??
           selectedEffortLevelRef.current
-      }
+      )
       sendMessageMutate({
         sessionId: newSession.id,
         worktreeId,
@@ -1411,8 +1411,7 @@ export function useMessageHandlers({
         message: planMessage,
         model: resolvedModel,
         executionMode: mode,
-        thinkingLevel: resolvedThinkingLevel,
-        effortLevel: resolvedEffortLevel,
+        ...resolvedReasoning,
         mcpConfig: getMcpConfig(),
         customProfileName: getCustomProfileName(),
         backend: resolvedBackend,
@@ -1442,7 +1441,7 @@ export function useMessageHandlers({
       yoloEffortLevelRef,
       selectedThinkingLevelRef,
       selectedEffortLevelRef,
-      useAdaptiveThinkingRef,
+      usesEffortFor,
       getMcpConfig,
       getCustomProfileName,
       createSessionMutateAsync,
@@ -1598,25 +1597,16 @@ export function useMessageHandlers({
         )
       }
 
-      const effectiveBackend = resolvedBackend ?? currentSessionBackend
-      let resolvedThinkingLevel: ThinkingLevel =
-        selectedThinkingLevelRef.current
-      let resolvedEffortLevel: EffortLevel | undefined = undefined
-      if (isThinkingLevel(modeThinkingRef.current)) {
-        resolvedThinkingLevel = modeThinkingRef.current
-      }
-      if (effectiveBackend === 'codex' || effectiveBackend === 'pi') {
-        resolvedThinkingLevel = 'off'
-      }
-      if (
-        effectiveBackend === 'codex' ||
-        effectiveBackend === 'pi' ||
-        useAdaptiveThinkingRef.current
-      ) {
-        resolvedEffortLevel =
-          mapCodexReasoningToEffort(modeEffortRef.current) ??
+      const effectiveBackend =
+        resolvedBackend ?? currentSessionBackend ?? 'claude'
+      const resolvedReasoning = resolveSendReasoning(
+        usesEffortFor(effectiveBackend, resolvedModel),
+        isThinkingLevel(modeThinkingRef.current)
+          ? modeThinkingRef.current
+          : selectedThinkingLevelRef.current,
+        mapCodexReasoningToEffort(modeEffortRef.current) ??
           selectedEffortLevelRef.current
-      }
+      )
       sendMessageMutate({
         sessionId: newSession.id,
         worktreeId,
@@ -1624,8 +1614,7 @@ export function useMessageHandlers({
         message: planMessage,
         model: resolvedModel,
         executionMode: mode,
-        thinkingLevel: resolvedThinkingLevel,
-        effortLevel: resolvedEffortLevel,
+        ...resolvedReasoning,
         mcpConfig: getMcpConfig(),
         customProfileName: getCustomProfileName(),
         backend: resolvedBackend,
@@ -1655,7 +1644,7 @@ export function useMessageHandlers({
       yoloEffortLevelRef,
       selectedThinkingLevelRef,
       selectedEffortLevelRef,
-      useAdaptiveThinkingRef,
+      usesEffortFor,
       getMcpConfig,
       getCustomProfileName,
       createSessionMutateAsync,
@@ -1919,25 +1908,16 @@ export function useMessageHandlers({
         )
       }
 
-      const effectiveBackend = resolvedBackend ?? currentSessionBackend
-      let resolvedThinkingLevel: ThinkingLevel =
-        selectedThinkingLevelRef.current
-      let resolvedEffortLevel: EffortLevel | undefined = undefined
-      if (isThinkingLevel(modeThinkingRef.current)) {
-        resolvedThinkingLevel = modeThinkingRef.current
-      }
-      if (effectiveBackend === 'codex' || effectiveBackend === 'pi') {
-        resolvedThinkingLevel = 'off'
-      }
-      if (
-        effectiveBackend === 'codex' ||
-        effectiveBackend === 'pi' ||
-        useAdaptiveThinkingRef.current
-      ) {
-        resolvedEffortLevel =
-          mapCodexReasoningToEffort(modeEffortRef.current) ??
+      const effectiveBackend =
+        resolvedBackend ?? currentSessionBackend ?? 'claude'
+      const resolvedReasoning = resolveSendReasoning(
+        usesEffortFor(effectiveBackend, resolvedModel),
+        isThinkingLevel(modeThinkingRef.current)
+          ? modeThinkingRef.current
+          : selectedThinkingLevelRef.current,
+        mapCodexReasoningToEffort(modeEffortRef.current) ??
           selectedEffortLevelRef.current
-      }
+      )
       sendMessageMutate({
         sessionId: newSession.id,
         worktreeId: readyWorktree.id,
@@ -1945,8 +1925,7 @@ export function useMessageHandlers({
         message: planMessage,
         model: resolvedModel,
         executionMode: mode,
-        thinkingLevel: resolvedThinkingLevel,
-        effortLevel: resolvedEffortLevel,
+        ...resolvedReasoning,
         mcpConfig: getMcpConfig(),
         customProfileName: getCustomProfileName(),
         backend: resolvedBackend,
@@ -1976,7 +1955,7 @@ export function useMessageHandlers({
       yoloEffortLevelRef,
       selectedThinkingLevelRef,
       selectedEffortLevelRef,
-      useAdaptiveThinkingRef,
+      usesEffortFor,
       getMcpConfig,
       getCustomProfileName,
       sendMessageMutate,
@@ -2209,25 +2188,16 @@ export function useMessageHandlers({
         )
       }
 
-      const effectiveBackend = resolvedBackend ?? currentSessionBackend
-      let resolvedThinkingLevel: ThinkingLevel =
-        selectedThinkingLevelRef.current
-      let resolvedEffortLevel: EffortLevel | undefined = undefined
-      if (isThinkingLevel(modeThinkingRef.current)) {
-        resolvedThinkingLevel = modeThinkingRef.current
-      }
-      if (effectiveBackend === 'codex' || effectiveBackend === 'pi') {
-        resolvedThinkingLevel = 'off'
-      }
-      if (
-        effectiveBackend === 'codex' ||
-        effectiveBackend === 'pi' ||
-        useAdaptiveThinkingRef.current
-      ) {
-        resolvedEffortLevel =
-          mapCodexReasoningToEffort(modeEffortRef.current) ??
+      const effectiveBackend =
+        resolvedBackend ?? currentSessionBackend ?? 'claude'
+      const resolvedReasoning = resolveSendReasoning(
+        usesEffortFor(effectiveBackend, resolvedModel),
+        isThinkingLevel(modeThinkingRef.current)
+          ? modeThinkingRef.current
+          : selectedThinkingLevelRef.current,
+        mapCodexReasoningToEffort(modeEffortRef.current) ??
           selectedEffortLevelRef.current
-      }
+      )
       sendMessageMutate({
         sessionId: newSession.id,
         worktreeId: readyWorktree.id,
@@ -2235,8 +2205,7 @@ export function useMessageHandlers({
         message: planMessage,
         model: resolvedModel,
         executionMode: mode,
-        thinkingLevel: resolvedThinkingLevel,
-        effortLevel: resolvedEffortLevel,
+        ...resolvedReasoning,
         mcpConfig: getMcpConfig(),
         customProfileName: getCustomProfileName(),
         backend: resolvedBackend,
@@ -2266,7 +2235,7 @@ export function useMessageHandlers({
       yoloEffortLevelRef,
       selectedThinkingLevelRef,
       selectedEffortLevelRef,
-      useAdaptiveThinkingRef,
+      usesEffortFor,
       getMcpConfig,
       getCustomProfileName,
       sendMessageMutate,
@@ -2488,7 +2457,7 @@ export function useMessageHandlers({
           executionMode: modeToUse,
           thinkingLevel:
             context.thinkingLevel ?? selectedThinkingLevelRef.current,
-          effortLevel: useAdaptiveThinkingRef.current
+          effortLevel: usesEffortFor(selectedBackendRef.current, modelToUse)
             ? selectedEffortLevelRef.current
             : undefined,
           allowedTools: [...GIT_ALLOWED_TOOLS, ...allApprovedTools],
@@ -2509,7 +2478,7 @@ export function useMessageHandlers({
       executionModeRef,
       selectedThinkingLevelRef,
       selectedEffortLevelRef,
-      useAdaptiveThinkingRef,
+      usesEffortFor,
       getMcpConfig,
       getCustomProfileName,
       scrollToBottom,
@@ -2689,7 +2658,7 @@ export function useMessageHandlers({
           executionMode: 'yolo',
           thinkingLevel:
             context.thinkingLevel ?? selectedThinkingLevelRef.current,
-          effortLevel: useAdaptiveThinkingRef.current
+          effortLevel: usesEffortFor(selectedBackendRef.current, modelToUse)
             ? selectedEffortLevelRef.current
             : undefined,
           mcpConfig: getMcpConfig(),
@@ -2708,7 +2677,7 @@ export function useMessageHandlers({
       selectedModelRef,
       selectedThinkingLevelRef,
       selectedEffortLevelRef,
-      useAdaptiveThinkingRef,
+      usesEffortFor,
       getMcpConfig,
       getCustomProfileName,
       scrollToBottom,
@@ -3295,7 +3264,10 @@ Please apply this fix to the file.`
           provider: getCustomProfileName() ?? null,
           executionMode: 'build' as const,
           thinkingLevel: selectedThinkingLevelRef.current,
-          effortLevel: useAdaptiveThinkingRef.current
+          effortLevel: usesEffortFor(
+            selectedBackendRef.current,
+            selectedModelRef.current
+          )
             ? selectedEffortLevelRef.current
             : undefined,
           mcpConfig: getMcpConfig(),
@@ -3322,7 +3294,10 @@ Please apply this fix to the file.`
           model: selectedModelRef.current,
           executionMode: 'build',
           thinkingLevel: selectedThinkingLevelRef.current,
-          effortLevel: useAdaptiveThinkingRef.current
+          effortLevel: usesEffortFor(
+            selectedBackendRef.current,
+            selectedModelRef.current
+          )
             ? selectedEffortLevelRef.current
             : undefined,
           mcpConfig: getMcpConfig(),
@@ -3342,7 +3317,7 @@ Please apply this fix to the file.`
       selectedModelRef,
       selectedThinkingLevelRef,
       selectedEffortLevelRef,
-      useAdaptiveThinkingRef,
+      usesEffortFor,
       getMcpConfig,
       getCustomProfileName,
       sendMessageMutate,
@@ -3436,7 +3411,10 @@ Please apply all these fixes to the respective files.`
           provider: getCustomProfileName() ?? null,
           executionMode: 'build' as const,
           thinkingLevel: selectedThinkingLevelRef.current,
-          effortLevel: useAdaptiveThinkingRef.current
+          effortLevel: usesEffortFor(
+            selectedBackendRef.current,
+            selectedModelRef.current
+          )
             ? selectedEffortLevelRef.current
             : undefined,
           mcpConfig: getMcpConfig(),
@@ -3463,7 +3441,10 @@ Please apply all these fixes to the respective files.`
           model: selectedModelRef.current,
           executionMode: 'build',
           thinkingLevel: selectedThinkingLevelRef.current,
-          effortLevel: useAdaptiveThinkingRef.current
+          effortLevel: usesEffortFor(
+            selectedBackendRef.current,
+            selectedModelRef.current
+          )
             ? selectedEffortLevelRef.current
             : undefined,
           mcpConfig: getMcpConfig(),
@@ -3483,7 +3464,7 @@ Please apply all these fixes to the respective files.`
       selectedModelRef,
       selectedThinkingLevelRef,
       selectedEffortLevelRef,
-      useAdaptiveThinkingRef,
+      usesEffortFor,
       getMcpConfig,
       getCustomProfileName,
       sendMessageMutate,

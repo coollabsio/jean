@@ -1,4 +1,5 @@
 import { act, renderHook } from '@testing-library/react'
+import { targetUsesEffort } from '@/lib/model-utils'
 import { QueryClient } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useChatStore } from '@/store/chat-store'
@@ -170,8 +171,7 @@ function renderUseMessageSending({
       selectedThinkingLevelRef: { current: 'off' },
       selectedEffortLevelRef: { current: selectedEffortLevel },
       executionModeRef,
-      useAdaptiveThinkingRef: { current: false },
-      isCodexBackendRef: { current: selectedBackend === 'codex' },
+      usesEffortFor: (backend, model) => targetUsesEffort({ backend, model }),
       mcpServersDataRef: { current: [] },
       enabledMcpServersRef: { current: [] },
       selectedBackendRef: { current: selectedBackend },
