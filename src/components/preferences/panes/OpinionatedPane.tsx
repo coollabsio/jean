@@ -23,6 +23,7 @@ import {
   Check,
 } from '@/components/icons/reicon'
 import { copyToClipboard } from '@/lib/clipboard'
+import { isNewerVersion } from '@/lib/version-utils'
 import { toast } from 'sonner'
 import { SettingsSection } from '../SettingsSection'
 import { ExtensionGroup, ExtensionLink, ExtensionRow } from '../ExtensionRow'
@@ -319,6 +320,7 @@ interface PluginStatus {
   lan_exposed?: boolean
   auth_file_count?: number | null
   host?: string | null
+  latest_version?: string | null
 }
 
 interface AccountLoginLaunch {
@@ -456,6 +458,13 @@ function PluginCard({
       ? plugin.scope === 'ai-backends'
         ? ` (${status.version})`
         : ` (v${status.version.replace(/^v/, '')})`
+      : null
+  const updateVersion =
+    present &&
+    status?.version &&
+    status.latest_version &&
+    isNewerVersion(status.latest_version, status.version)
+      ? status.latest_version
       : null
 
   const handleRefreshModels = useCallback(
@@ -616,6 +625,21 @@ function PluginCard({
             >
               <RefreshCw className="h-4 w-4" />
             </Button>
+            {updateVersion && (
+              <Button
+                size="sm"
+                onClick={handleInstall}
+                disabled={busy}
+                className="flex-1 sm:flex-none"
+              >
+                {installing ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4" />
+                )}
+                Update to v{updateVersion}
+              </Button>
+            )}
             {supervises && (
               <Button
                 variant="outline"

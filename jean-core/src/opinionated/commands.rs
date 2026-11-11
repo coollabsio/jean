@@ -31,6 +31,9 @@ pub struct PluginStatus {
     /// Machine that runs the sidecar (the backend host).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub host: Option<String>,
+    /// Newest upstream release, when Jean can check it (RTK only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest_version: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone, PartialEq)]
@@ -254,6 +257,7 @@ async fn check_rtk_status(app: &AppHandle) -> Result<PluginStatus, String> {
         Ok(output) if output.status.success() => {
             let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
             let version = extract_version(&stdout);
+            let latest_version = fetch_rtk_latest_version().await;
             Ok(PluginStatus {
                 installed: true,
                 version,
@@ -266,6 +270,7 @@ async fn check_rtk_status(app: &AppHandle) -> Result<PluginStatus, String> {
                 lan_exposed: None,
                 auth_file_count: None,
                 host: None,
+                latest_version,
             })
         }
         _ => Ok(PluginStatus {
@@ -280,6 +285,7 @@ async fn check_rtk_status(app: &AppHandle) -> Result<PluginStatus, String> {
             lan_exposed: None,
             auth_file_count: None,
             host: None,
+            latest_version: None,
         }),
     }
 }
@@ -313,6 +319,7 @@ async fn check_caveman_status(app: &AppHandle) -> Result<PluginStatus, String> {
         lan_exposed: None,
         auth_file_count: None,
         host: None,
+        latest_version: None,
     })
 }
 
@@ -449,6 +456,32 @@ struct RtkAsset {
 #[derive(Debug, serde::Deserialize)]
 struct RtkGitHubRelease {
     assets: Vec<RtkGitHubAsset>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct RtkGitHubReleaseTag {
+    tag_name: String,
+}
+
+/// Best effort: a network or rate-limit failure only hides the update hint.
+async fn fetch_rtk_latest_version() -> Option<String> {
+    let client = reqwest::Client::builder()
+        .user_agent("Jean-App/1.0")
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .ok()?;
+    let release: RtkGitHubReleaseTag = client
+        .get(RTK_RELEASE_LATEST_API)
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?
+        .json()
+        .await
+        .ok()?;
+    extract_version(&release.tag_name)
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -924,6 +957,7 @@ async fn check_superpowers_status(app: &AppHandle) -> Result<PluginStatus, Strin
         lan_exposed: None,
         auth_file_count: None,
         host: None,
+        latest_version: None,
     })
 }
 
@@ -948,6 +982,7 @@ async fn check_pstack_status(app: &AppHandle) -> Result<PluginStatus, String> {
         lan_exposed: None,
         auth_file_count: None,
         host: None,
+        latest_version: None,
     })
 }
 
@@ -983,6 +1018,7 @@ async fn check_copied_skill_pack_status(
         lan_exposed: None,
         auth_file_count: None,
         host: None,
+        latest_version: None,
     })
 }
 

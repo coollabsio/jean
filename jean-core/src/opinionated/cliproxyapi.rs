@@ -533,6 +533,7 @@ pub async fn check_status() -> Result<crate::opinionated::commands::PluginStatus
         lan_exposed,
         auth_file_count: Some(count_auth_files(&paths.auth_dir)),
         host: machine_name(),
+        latest_version: None,
     })
 }
 
