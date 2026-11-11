@@ -144,3 +144,82 @@ export function sortModelOptionsByRawModel<T extends { value: string }>(
 ): T[] {
   return [...options].sort((a, b) => compareRawModelValues(a.value, b.value))
 }
+
+interface ParsedModelVersion {
+  family: string
+  line: string
+  version: number[]
+}
+
+function parseModelVersion(value: string): ParsedModelVersion {
+  // Drop variant suffixes like `[1m]`, then split letters from digits so
+  // `kimi-k2.5`, `o4-mini`, and `gpt-5.4-mini` all yield comparable parts.
+  const tokens =
+    value
+      .toLowerCase()
+      .replace(/\[[^\]]*\]/g, '')
+      .match(/[a-z]+|\d+/g) ?? []
+  const words: string[] = []
+  const lineWords: string[] = []
+  const version: number[] = []
+  for (const token of tokens) {
+    if (/^\d+$/.test(token)) {
+      // Long digit runs are release dates (`20251101`), not versions.
+      if (token.length < 6) version.push(Number(token))
+    } else {
+      words.push(token)
+      if (version.length === 0) lineWords.push(token)
+    }
+  }
+  return {
+    family: words.join(' '),
+    line: lineWords.join(' '),
+    version,
+  }
+}
+
+function compareVersionParts(left: number[], right: number[]): number {
+  for (let i = 0; i < Math.max(left.length, right.length); i++) {
+    const diff = (left[i] ?? -1) - (right[i] ?? -1)
+    if (diff !== 0) return diff
+  }
+  return 0
+}
+
+/**
+ * Return the model values that a newer model supersedes.
+ *
+ * A model is older when its family (name without numbers, e.g. `claude opus`
+ * or `gpt mini`) has a higher version, or when its line (name before the
+ * first number, e.g. `gpt`) has a higher major version. Models without a
+ * version number (aliases like `haiku`, `auto`) are never older.
+ */
+export function getOlderModelValues(values: readonly string[]): Set<string> {
+  const parsed = values.map(value => ({ value, ...parseModelVersion(value) }))
+  const newestByFamily = new Map<string, number[]>()
+  const newestMajorByLine = new Map<string, number>()
+  for (const model of parsed) {
+    if (model.version.length === 0) continue
+    const newest = newestByFamily.get(model.family)
+    if (!newest || compareVersionParts(model.version, newest) > 0) {
+      newestByFamily.set(model.family, model.version)
+    }
+    const major = model.version[0] ?? 0
+    if (major > (newestMajorByLine.get(model.line) ?? -1)) {
+      newestMajorByLine.set(model.line, major)
+    }
+  }
+  const older = new Set<string>()
+  for (const model of parsed) {
+    if (model.version.length === 0) continue
+    const newest = newestByFamily.get(model.family) ?? model.version
+    const newestMajor = newestMajorByLine.get(model.line) ?? 0
+    if (
+      compareVersionParts(model.version, newest) < 0 ||
+      (model.version[0] ?? 0) < newestMajor
+    ) {
+      older.add(model.value)
+    }
+  }
+  return older
+}

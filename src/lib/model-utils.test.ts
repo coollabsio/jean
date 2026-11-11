@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   providerSupportsAdaptiveThinking,
   getModelImpliedBackend,
+  getOlderModelValues,
   isGeminiModel,
   resolveBackend,
   supportsAdaptiveThinking,
@@ -122,5 +123,65 @@ describe('providerSupportsAdaptiveThinking', () => {
     expect(
       providerSupportsAdaptiveThinking('opus', null, profiles, '2.2.0')
     ).toBe(false)
+  })
+})
+
+describe('getOlderModelValues', () => {
+  it('keeps only the newest Claude model of each family', () => {
+    const older = getOlderModelValues([
+      'claude-fable-5-1',
+      'claude-fable-5',
+      'claude-opus-5-5',
+      'claude-opus-5',
+      'claude-sonnet-5-5',
+      'claude-haiku-5-5',
+      'claude-sonnet-5',
+      'claude-opus-4-8[1m]',
+      'claude-opus-4-8',
+      'claude-opus-4-5-20251101',
+      'claude-sonnet-4-6[1m]',
+      'haiku',
+    ])
+    expect([...older].sort()).toEqual([
+      'claude-fable-5',
+      'claude-opus-4-5-20251101',
+      'claude-opus-4-8',
+      'claude-opus-4-8[1m]',
+      'claude-opus-5',
+      'claude-sonnet-4-6[1m]',
+      'claude-sonnet-5',
+    ])
+  })
+
+  it('hides Codex models from an older major version line', () => {
+    const older = getOlderModelValues([
+      'gpt-6.1-sol',
+      'gpt-6.1-terra',
+      'gpt-6-astra',
+      'gpt-6-sol',
+      'gpt-6-luna',
+      'gpt-5.6-sol',
+      'gpt-5.6-luna',
+      'gpt-5.5',
+      'gpt-5.3-codex-spark',
+    ])
+    expect([...older].sort()).toEqual([
+      'gpt-5.3-codex-spark',
+      'gpt-5.5',
+      'gpt-5.6-luna',
+      'gpt-5.6-sol',
+      'gpt-6-sol',
+    ])
+  })
+
+  it('compares families separately across providers', () => {
+    const older = getOlderModelValues([
+      'anthropic/claude-opus-4-5',
+      'anthropic/claude-opus-4-1',
+      'openai/gpt-5.4',
+      'google/gemini-3-pro',
+      'cursor/auto',
+    ])
+    expect([...older]).toEqual(['anthropic/claude-opus-4-1'])
   })
 })
