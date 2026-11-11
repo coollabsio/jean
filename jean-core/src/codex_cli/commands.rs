@@ -1326,8 +1326,7 @@ pub(crate) fn codex_usage_snapshot_from_response(
         format!("Failed to parse Codex usage response JSON: {e}. Body starts with: {snippet}")
     })?;
 
-    let session = if let Some(percent) = parse_header_f64(headers, "x-codex-primary-used-percent")
-    {
+    let session = if let Some(percent) = parse_header_f64(headers, "x-codex-primary-used-percent") {
         Some(CodexUsageWindowSnapshot {
             used_percent: percent,
             resets_at: usage
