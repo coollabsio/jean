@@ -44,6 +44,8 @@ interface ExtensionRowProps {
   /** Buttons on the right side of the row. */
   actions?: React.ReactNode
   anchorId?: string
+  /** Content under the row that stays visible when collapsed. */
+  summary?: React.ReactNode
   /** Details shown when the row is expanded. */
   children: React.ReactNode
 }
@@ -55,6 +57,7 @@ export function ExtensionRow({
   iconAction,
   actions,
   anchorId,
+  summary,
   children,
 }: ExtensionRowProps) {
   const [open, setOpen] = useState(false)
@@ -86,6 +89,7 @@ export function ExtensionRow({
           </span>
         )}
       </div>
+      {summary && <div className="pb-2 pl-7 pr-2">{summary}</div>}
       <CollapsibleContent className="space-y-3 pb-3 pl-7 pr-2">
         {children}
       </CollapsibleContent>

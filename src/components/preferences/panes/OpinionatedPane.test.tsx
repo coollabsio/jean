@@ -523,6 +523,16 @@ describe('OpinionatedPane', () => {
       within(card as HTMLElement).queryByText('Local proxy (localhost)')
     ).not.toBeInTheDocument()
 
+    // Account buttons and count stay visible while the row is collapsed.
+    expect(
+      within(card as HTMLElement).getByRole('button', {
+        name: 'Add Codex account',
+      })
+    ).toBeInTheDocument()
+    expect(
+      within(card as HTMLElement).queryByText(/pools several Claude and Codex/i)
+    ).not.toBeInTheDocument()
+
     await user.click(label)
 
     expect(
@@ -532,8 +542,8 @@ describe('OpinionatedPane', () => {
       within(card as HTMLElement).getByText(/Preferences → Providers/i)
     ).toBeInTheDocument()
     expect(
-      within(card as HTMLElement).getByText(/127\.0\.0\.1:8317/)
-    ).toBeInTheDocument()
+      within(card as HTMLElement).getAllByText(/127\.0\.0\.1:8317/).length
+    ).toBeGreaterThan(0)
     expect(
       within(card as HTMLElement).getByText(/listens on localhost only/i)
     ).toBeInTheDocument()

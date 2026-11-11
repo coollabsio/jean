@@ -1,8 +1,7 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useState } from 'react'
 import { invokeForOptionalServer } from '@/lib/transport'
 import { useOptionalSettingsTargetServerId } from '@/lib/settings-target'
 import { openExternal } from '@/lib/platform'
-import { useUIStore } from '@/store/ui-store'
 import { Button } from '@/components/ui/button'
 import {
   Tooltip,
@@ -18,7 +17,6 @@ import {
   Trash2,
   Play,
   Square,
-  LogIn,
   Copy,
   Check,
 } from '@/components/icons/reicon'
@@ -27,6 +25,10 @@ import { isNewerVersion } from '@/lib/version-utils'
 import { toast } from 'sonner'
 import { SettingsSection } from '../SettingsSection'
 import { ExtensionGroup, ExtensionLink, ExtensionRow } from '../ExtensionRow'
+import {
+  CliproxyAddAccountButton,
+  useCliproxyAccountLogin,
+} from '../CliproxyAccountLogin'
 
 interface UsageStep {
   /** Starts a new titled group of steps. */
@@ -323,14 +325,6 @@ interface PluginStatus {
   latest_version?: string | null
 }
 
-interface AccountLoginLaunch {
-  provider: string
-  binary: string
-  args: string[]
-  started_proxy: boolean
-  message: string
-}
-
 interface BackendPluginStatus {
   id: string
   label: string
@@ -358,11 +352,7 @@ function PluginCard({
   const [installing, setInstalling] = useState(false)
   const [uninstalling, setUninstalling] = useState(false)
   const [controlling, setControlling] = useState(false)
-  const [loggingIn, setLoggingIn] = useState<'claude' | 'codex' | null>(null)
-  const loginPending = useRef(false)
-  const openCliLoginModal = useUIStore(state => state.openCliLoginModal)
   const serverId = useOptionalSettingsTargetServerId()
-  const cliLoginOpen = useUIStore(state => state.cliLoginModalOpen)
 
   const checkStatus = useCallback(async () => {
     setChecking(true)
@@ -438,6 +428,8 @@ function PluginCard({
     [plugin.id, plugin.name, checkStatus, serverId]
   )
 
+  const { loggingIn, login: handleAccountLogin } =
+    useCliproxyAccountLogin(checkStatus)
   const present = status ? isPluginPresent(status) : false
   const hasMissingBackend =
     plugin.scope === 'ai-backends' &&
@@ -467,67 +459,22 @@ function PluginCard({
       ? status.latest_version
       : null
 
-  const handleRefreshModels = useCallback(
-    async (quiet = false) => {
-      const toastId = quiet ? undefined : toast.loading('Reading models...')
-      try {
-        const models = await invokeForOptionalServer<{
-          opus: string | null
-          sonnet: string | null
-          haiku: string | null
-        }>(serverId, 'refresh_cliproxyapi_models')
-        const names = [models.opus, models.sonnet, models.haiku].filter(Boolean)
-        toast.success(`Models from CLIProxyAPI: ${names.join(', ')}`, {
-          id: toastId,
-        })
-      } catch (error) {
-        toast.error(`${error}`, { id: toastId })
-      }
-    },
-    [serverId]
-  )
-
-  useEffect(() => {
-    if (plugin.id !== 'cliproxyapi') return
-    if (!cliLoginOpen && loginPending.current) {
-      loginPending.current = false
-      void checkStatus()
-      void handleRefreshModels(true)
+  const handleRefreshModels = useCallback(async () => {
+    const toastId = toast.loading('Reading models...')
+    try {
+      const models = await invokeForOptionalServer<{
+        opus: string | null
+        sonnet: string | null
+        haiku: string | null
+      }>(serverId, 'refresh_cliproxyapi_models')
+      const names = [models.opus, models.sonnet, models.haiku].filter(Boolean)
+      toast.success(`Models from CLIProxyAPI: ${names.join(', ')}`, {
+        id: toastId,
+      })
+    } catch (error) {
+      toast.error(`${error}`, { id: toastId })
     }
-  }, [cliLoginOpen, checkStatus, handleRefreshModels, plugin.id])
-
-  const handleAccountLogin = useCallback(
-    async (provider: 'claude' | 'codex') => {
-      setLoggingIn(provider)
-      const label = provider === 'claude' ? 'Claude' : 'Codex'
-      const toastId = toast.loading(`Opening ${label} account login...`)
-      try {
-        const launch = await invokeForOptionalServer<AccountLoginLaunch>(
-          serverId,
-          'prepare_cliproxyapi_account_login',
-          { provider }
-        )
-        toast.success(launch.message, { id: toastId })
-        loginPending.current = true
-        openCliLoginModal(
-          'cliproxyapi',
-          launch.binary,
-          launch.args,
-          undefined,
-          undefined,
-          serverId
-        )
-      } catch (error) {
-        toast.error(`Failed to open ${label} account login: ${error}`, {
-          id: toastId,
-        })
-      } finally {
-        setLoggingIn(null)
-        await checkStatus()
-      }
-    },
-    [checkStatus, openCliLoginModal, serverId]
-  )
+  }, [serverId])
 
   const handleOpenManagement = useCallback(async () => {
     const url = status?.management_url
@@ -727,6 +674,27 @@ function PluginCard({
           </Button>
         )
       }
+      summary={
+        supervises && status?.installed ? (
+          <div className="flex flex-wrap items-center gap-2">
+            {(['claude', 'codex'] as const).map(provider => (
+              <CliproxyAddAccountButton
+                key={provider}
+                provider={provider}
+                loading={loggingIn === provider}
+                disabled={busy}
+                onClick={() => handleAccountLogin(provider)}
+              />
+            ))}
+            {typeof status.auth_file_count === 'number' && (
+              <span className="text-xs text-muted-foreground">
+                {status.auth_file_count} account
+                {status.auth_file_count === 1 ? '' : 's'} added
+              </span>
+            )}
+          </div>
+        ) : undefined
+      }
     >
       <div className="pt-1 space-y-1">
         <div className="text-2xs text-muted-foreground">
@@ -754,35 +722,7 @@ function PluginCard({
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={() => handleAccountLogin('claude')}
-                disabled={busy}
-              >
-                {loggingIn === 'claude' ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <LogIn className="h-4 w-4" />
-                )}
-                Add Claude account
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => handleAccountLogin('codex')}
-                disabled={busy}
-              >
-                {loggingIn === 'codex' ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <LogIn className="h-4 w-4" />
-                )}
-                Add Codex account
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => handleRefreshModels()}
+                onClick={handleRefreshModels}
                 disabled={busy}
               >
                 <RefreshCw className="h-4 w-4" />
@@ -807,13 +747,6 @@ function PluginCard({
                 127.0.0.1.
               </p>
             )}
-            <p className="text-xs text-muted-foreground">
-              {typeof status.auth_file_count === 'number'
-                ? `${status.auth_file_count} account${
-                    status.auth_file_count === 1 ? '' : 's'
-                  } added.`
-                : ''}
-            </p>
           </div>
         )}
         {status?.lan_exposed && (

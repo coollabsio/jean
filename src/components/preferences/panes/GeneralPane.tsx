@@ -1,5 +1,6 @@
 import { useInstalledBackends } from '@/hooks/useInstalledBackends'
 import { useSettingsTargetServerId } from '@/lib/settings-target'
+import { CliproxyBackendAccountAction } from '../CliproxyAccountLogin'
 import React, {
   useState,
   useCallback,
@@ -1862,6 +1863,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               authenticated={!!claudeAuth?.authenticated}
               onSignIn={handleClaudeLogin}
               onSignInAgain={handleClaudeRelogin}
+              extra={<CliproxyBackendAccountAction provider="claude" />}
             />
           }
         >
@@ -2122,6 +2124,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               authenticated={!!codexAuth?.authenticated}
               onSignIn={handleCodexLogin}
               onSignInAgain={handleCodexRelogin}
+              extra={<CliproxyBackendAccountAction provider="codex" />}
             />
           }
         >
