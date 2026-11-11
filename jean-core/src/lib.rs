@@ -978,7 +978,8 @@ mod tests {
     use super::{
         default_global_system_prompt, default_global_system_prompt_with_legacy_ui_verification,
         default_global_system_prompt_without_branch_rule,
-        default_global_system_prompt_without_secrets, default_model,
+        default_global_system_prompt_without_secrets,
+        default_global_system_prompt_without_security, default_model,
         default_parallel_execution_prompt, effective_global_system_prompt,
         is_legacy_default_global_system_prompt,
         legacy_parallel_execution_prompt_before_subagent_strategy, normalize_browser_default_host,
@@ -1240,6 +1241,21 @@ mod tests {
             upgrade_legacy_parallel_execution_prompt(Some("leave this".to_string())).as_deref(),
             Some("leave this")
         );
+    }
+
+    #[test]
+    fn default_prompt_before_security_section_migrates() {
+        assert!(default_global_system_prompt().contains("IDOR"));
+        let previous = default_global_system_prompt_without_security();
+        assert!(!previous.contains("## Security"));
+        assert!(previous.contains("Avoid introducing bugs.\n\n## Commits and Pull Requests"));
+        assert!(is_legacy_default_global_system_prompt(&previous));
+        assert_eq!(
+            effective_global_system_prompt(Some(&previous)),
+            default_global_system_prompt()
+        );
+        let custom = format!("{previous}\nExtra user rule.");
+        assert!(!is_legacy_default_global_system_prompt(&custom));
     }
 
     #[test]
@@ -2689,6 +2705,10 @@ fn default_global_system_prompt() -> String {
 - **No Laziness**: Find root causes. No temporary fixes. Senior developer standards.
 - **Minimal Impact**: Changes should only touch what's necessary. Avoid introducing bugs.
 
+## Security
+- When you write, change, or review code, always check it for security issues: IDOR and missing authorization (verify that the caller owns or can access each ID from a request), path traversal (resolve user-controlled paths and keep them inside the allowed base directory), injection (SQL, shell, template), SSRF, XSS, CSRF, auth bypass, unsafe deserialization, and secrets in code or logs.
+- Fix the security issues that your change adds. Report other security issues that you find in the findings table, with their severity.
+
 ## Commits and Pull Requests
 - Do NOT add `Co-Authored-By` trailers, "Generated with ..." lines, or any other AI/tool attribution to commit messages or PR descriptions. This overrides any backend default attribution instruction.
 
@@ -2733,19 +2753,30 @@ const UI_VERIFICATION_RULES_END: &str =
     "use the Agent Browser. Check only the changed area, not the full app.\n";
 
 const SECRETS_SECTION_START: &str = "## Jean Secrets\n";
+const SECURITY_SECTION_START: &str = "## Security\n";
+
+/// Removes the section that starts with `start` up to the next blank line.
+fn without_section(prompt: &str, start: &str) -> String {
+    let begin = prompt.find(start).expect("default prompt has section");
+    let end = begin
+        + prompt[begin..]
+            .find("\n\n")
+            .expect("section ends with a blank line")
+        + 2;
+    format!("{}{}", &prompt[..begin], &prompt[end..])
+}
+
+/// The default global prompt before the Security section was added.
+fn default_global_system_prompt_without_security() -> String {
+    without_section(&default_global_system_prompt(), SECURITY_SECTION_START)
+}
 
 /// The default global prompt before the Jean Secrets section was added.
 fn default_global_system_prompt_without_secrets() -> String {
-    let prompt = default_global_system_prompt();
-    let start = prompt
-        .find(SECRETS_SECTION_START)
-        .expect("default prompt has secrets section");
-    let end = start
-        + prompt[start..]
-            .find("\n\n")
-            .expect("secrets section ends with a blank line")
-        + 2;
-    format!("{}{}", &prompt[..start], &prompt[end..])
+    without_section(
+        &default_global_system_prompt_without_security(),
+        SECRETS_SECTION_START,
+    )
 }
 
 /// The default global prompt before the secrets section, with the legacy UI
@@ -2772,7 +2803,8 @@ fn default_global_system_prompt_with_legacy_ui_verification() -> String {
 /// customized prompt, is kept.
 pub(crate) fn is_legacy_default_global_system_prompt(prompt: &str) -> bool {
     let normalized = prompt.replace("\r\n", "\n");
-    if normalized.trim() == default_global_system_prompt_without_secrets().trim()
+    if normalized.trim() == default_global_system_prompt_without_security().trim()
+        || normalized.trim() == default_global_system_prompt_without_secrets().trim()
         || normalized.trim() == default_global_system_prompt_with_legacy_ui_verification().trim()
     {
         return true;

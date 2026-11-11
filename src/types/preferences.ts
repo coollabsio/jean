@@ -746,6 +746,10 @@ export const DEFAULT_GLOBAL_SYSTEM_PROMPT = `Always use ASD-STE100 Simplified Te
 - **No Laziness**: Find root causes. No temporary fixes. Senior developer standards.
 - **Minimal Impact**: Changes should only touch what's necessary. Avoid introducing bugs.
 
+## Security
+- When you write, change, or review code, always check it for security issues: IDOR and missing authorization (verify that the caller owns or can access each ID from a request), path traversal (resolve user-controlled paths and keep them inside the allowed base directory), injection (SQL, shell, template), SSRF, XSS, CSRF, auth bypass, unsafe deserialization, and secrets in code or logs.
+- Fix the security issues that your change adds. Report other security issues that you find in the findings table, with their severity.
+
 ## Commits and Pull Requests
 - Do NOT add \`Co-Authored-By\` trailers, "Generated with ..." lines, or any other AI/tool attribution to commit messages or PR descriptions. This overrides any backend default attribution instruction.
 

@@ -96,6 +96,10 @@ Always use ASD-STE100 Simplified Technical English when you talk to me.\n\
 - **No Laziness**: Find root causes. No temporary fixes. Senior developer standards.\n\
 - **Minimal Impact**: Changes should only touch what's necessary. Avoid introducing bugs.\n\
 \n\
+## Security\n\
+- When you write, change, or review code, always check it for security issues: IDOR and missing authorization (verify that the caller owns or can access each ID from a request), path traversal (resolve user-controlled paths and keep them inside the allowed base directory), injection (SQL, shell, template), SSRF, XSS, CSRF, auth bypass, unsafe deserialization, and secrets in code or logs.\n\
+- Fix the security issues that your change adds. Report other security issues that you find in the findings table, with their severity.\n\
+\n\
 ## Commits and Pull Requests\n\
 - Do NOT add `Co-Authored-By` trailers, \"Generated with ...\" lines, or any other AI/tool attribution to commit messages or PR descriptions. This overrides any backend default attribution instruction.\n\
 \n\
