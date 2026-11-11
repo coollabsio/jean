@@ -3310,6 +3310,28 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                     onClearGoal={handleClearGoal}
                                   />
                                 )}
+                                {mergeableStatus === 'conflicting' && (
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          handleResolvePrConflicts()
+                                        }
+                                        className={cn(
+                                          COMPOSER_TAB_CLASS,
+                                          'text-warning hover:text-warning'
+                                        )}
+                                      >
+                                        <GitMerge className="h-3.5 w-3.5" />
+                                        <span>Conflicts</span>
+                                      </button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                      PR has merge conflicts — click to resolve
+                                    </TooltipContent>
+                                  </Tooltip>
+                                )}
                                 <PinnedTablesButton
                                   sessionId={activeSessionId}
                                   onShowInChat={handleShowTableInChat}
@@ -3719,7 +3741,6 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                         prNumber={worktree?.pr_number}
                                         displayStatus={displayStatus}
                                         checkStatus={checkStatus}
-                                        mergeableStatus={mergeableStatus}
                                         activeWorktreePath={activeWorktreePath}
                                         worktreeId={activeWorktreeId ?? null}
                                         activeSessionId={activeSessionId}
@@ -3770,9 +3791,6 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                         onReview={handleOpenReviewMethodModal}
                                         onMerge={handleMerge}
                                         onMergePr={handleMergePr}
-                                        onResolvePrConflicts={
-                                          handleResolvePrConflicts
-                                        }
                                         onBackendModelChange={
                                           handleToolbarBackendModelChange
                                         }

@@ -51,7 +51,7 @@ import type {
 import type { LoadedLinearIssueContext } from '@/types/linear'
 import type { SentryIssueContext } from '@/types/sentry'
 import { LinearIcon } from '@/components/icons/LinearIcon'
-import type { MergeableStatus, PrDisplayStatus } from '@/types/pr-status'
+import type { PrDisplayStatus } from '@/types/pr-status'
 import { openExternal } from '@/lib/platform'
 import {
   hostedRepoWebUrl,
@@ -106,7 +106,6 @@ interface DesktopToolbarControlsProps {
   prUrl: string | undefined
   prNumber: number | undefined
   displayStatus: PrDisplayStatus | undefined
-  mergeableStatus: MergeableStatus | undefined
   activeWorktreePath: string | undefined
 
   availableMcpServers: McpServerInfo[]
@@ -133,7 +132,6 @@ interface DesktopToolbarControlsProps {
 
   onOpenMagicModal?: () => void
   onOpenProjectSettings?: () => void
-  onResolvePrConflicts: () => void
   onLoadContext: () => void
   onAttach: () => void
   installedBackends: CliBackend[]
@@ -177,7 +175,6 @@ export function DesktopToolbarControls({
   prUrl,
   prNumber,
   displayStatus,
-  mergeableStatus,
   activeWorktreePath,
   availableMcpServers: _availableMcpServers,
   enabledMcpServers: _enabledMcpServers,
@@ -200,7 +197,6 @@ export function DesktopToolbarControls({
   onMcpDropdownOpenChange: _onMcpDropdownOpenChange,
   onOpenMagicModal,
   onOpenProjectSettings: _onOpenProjectSettings,
-  onResolvePrConflicts,
   onLoadContext,
   onAttach,
   installedBackends,
@@ -728,26 +724,6 @@ export function DesktopToolbarControls({
               : `PR #${prNumber}`}
           </TooltipContent>
         </Tooltip>
-      )}
-
-      {mergeableStatus === 'conflicting' && (
-        <>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                className="hidden @xl:flex h-8 items-center gap-1.5 px-3 text-xs font-medium text-warning transition-colors cursor-pointer hover:bg-muted/80"
-                onClick={onResolvePrConflicts}
-              >
-                <GitMerge className="h-3 w-3" />
-                <span>Conflicts</span>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>
-              PR has merge conflicts — click to resolve
-            </TooltipContent>
-          </Tooltip>
-        </>
       )}
 
       {showProviderDropdown && (

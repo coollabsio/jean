@@ -101,7 +101,6 @@ export const ChatToolbar = memo(function ChatToolbar({
   prUrl,
   prNumber,
   displayStatus,
-  mergeableStatus,
   activeWorktreePath,
   worktreeId,
   activeSessionId,
@@ -125,7 +124,6 @@ export const ChatToolbar = memo(function ChatToolbar({
   onReview,
   onMerge,
   onMergePr,
-  onResolvePrConflicts,
   onResolveConflicts,
   hasOpenPr,
   installedBackends,
@@ -598,7 +596,6 @@ export const ChatToolbar = memo(function ChatToolbar({
               prUrl={isModal ? undefined : prUrl}
               prNumber={prNumber}
               displayStatus={displayStatus}
-              mergeableStatus={mergeableStatus}
               activeWorktreePath={activeWorktreePath}
               availableMcpServers={availableMcpServers}
               enabledMcpServers={enabledMcpServers}
@@ -621,7 +618,6 @@ export const ChatToolbar = memo(function ChatToolbar({
               onMcpDropdownOpenChange={handleMcpDropdownOpenChange}
               onOpenMagicModal={onOpenMagicModal}
               onOpenProjectSettings={onOpenProjectSettings}
-              onResolvePrConflicts={onResolvePrConflicts}
               onLoadContext={onLoadContext}
               onAttach={onAttach}
               installedBackends={installedBackends}
