@@ -8,6 +8,20 @@ const CLIENT_HEIGHT = 500
 
 let resize: () => void = () => undefined
 
+/** Resolve the spacer's CSS height, with the composer height as `--chat-composer-height`. */
+function spacerHeight(spacer: HTMLElement): number {
+  const value = spacer.style.height
+  const match =
+    /^max\(0px, (-?\d+)px - var\(--chat-composer-height, 0px\)\)$/.exec(value)
+  if (!match) return parseFloat(value) || 0
+  const composer =
+    parseFloat(
+      spacer.parentElement?.style.getPropertyValue('--chat-composer-height') ??
+        ''
+    ) || 0
+  return Math.max(0, Number(match[1]) - composer)
+}
+
 function Harness({
   promptIds,
   sessionId = 's1',
@@ -24,7 +38,11 @@ function Harness({
             <div key={id} data-user-prompt="" data-message-anchor-id={id} />
           ))}
         </div>
-        <PromptTopSpacer viewportRef={viewportRef} sessionId={sessionId} />
+        <PromptTopSpacer
+          viewportRef={viewportRef}
+          sessionId={sessionId}
+          bottomInset="var(--chat-composer-height, 0px)"
+        />
       </div>
     </div>
   )
@@ -37,7 +55,7 @@ function setup(scrollTop: number, promptIds = ['p1', 'p2']) {
 
   Object.defineProperty(viewport, 'clientHeight', { value: CLIENT_HEIGHT })
   Object.defineProperty(viewport, 'scrollHeight', {
-    get: () => CONTENT_HEIGHT + (parseFloat(spacer.style.height) || 0),
+    get: () => CONTENT_HEIGHT + spacerHeight(spacer),
   })
   Object.defineProperty(viewport, 'scrollTop', {
     value: scrollTop,
@@ -90,7 +108,7 @@ describe('PromptTopSpacer', () => {
   it('adds no space when a session opens, so its last reply ends at the bottom', () => {
     const { viewport, spacer } = setup(CONTENT_HEIGHT - CLIENT_HEIGHT)
 
-    expect(spacer.style.height).toBe('0px')
+    expect(spacerHeight(spacer)).toBe(0)
     expect(viewport.scrollHeight).toBe(CONTENT_HEIGHT)
   })
 
@@ -101,7 +119,7 @@ describe('PromptTopSpacer', () => {
 
     sendPrompt('p3')
 
-    expect(spacer.style.height).toBe('400px')
+    expect(spacerHeight(spacer)).toBe(400)
     expect(viewport.scrollTop).toBe(viewport.scrollHeight)
   })
 
@@ -110,18 +128,31 @@ describe('PromptTopSpacer', () => {
 
     sendPrompt('p3')
 
-    expect(spacer.style.height).toBe('400px')
+    expect(spacerHeight(spacer)).toBe(400)
     expect(viewport.scrollTop).toBe(300)
   })
 
   it('removes the space when another session opens', () => {
     const { spacer, sendPrompt, rerender } = setup(300)
     sendPrompt('p3')
-    expect(spacer.style.height).toBe('400px')
+    expect(spacerHeight(spacer)).toBe(400)
 
     rerender(<Harness promptIds={['q1', 'q2']} sessionId="s2" />)
     resize()
 
-    expect(spacer.style.height).toBe('0px')
+    expect(spacerHeight(spacer)).toBe(0)
+  })
+
+  it('shrinks by the composer growth, so a taller composer does not push the prompt above the top', () => {
+    const { spacer, sendPrompt } = setup(CONTENT_HEIGHT - CLIENT_HEIGHT)
+    sendPrompt('p3')
+    expect(spacerHeight(spacer)).toBe(400)
+
+    // Queued prompts panel opens: the composer and the bottom padding grow by
+    // 60px. CSS shrinks the spacer by the same amount, with no JS update, so
+    // padding + spacer (and the prompt position) stay the same.
+    spacer.parentElement?.style.setProperty('--chat-composer-height', '60px')
+
+    expect(spacerHeight(spacer)).toBe(340)
   })
 })

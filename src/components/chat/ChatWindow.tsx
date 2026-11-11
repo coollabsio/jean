@@ -297,6 +297,10 @@ import {
 import { navigateToForkedSession } from './fork-session-navigation'
 import { COMPOSER_SURFACE_CLASS, COMPOSER_TAB_CLASS } from './composer-surface'
 
+// Messages pad by the floating composer height so the last line can scroll
+// above it. The prompt spacer subtracts the same inset in CSS.
+const MESSAGES_BOTTOM_INSET = 'calc(var(--chat-composer-height, 0px) + 1.5rem)'
+
 // PERFORMANCE: Stable empty array references to prevent infinite render loops
 // When Zustand selectors return [], a new reference is created each time
 // Using these constants ensures referential equality for empty states
@@ -2757,7 +2761,10 @@ const ChatWindowContent = memo(function ChatWindowContent({
                           viewportClassName="will-change-scroll"
                           onScroll={handleScroll}
                         >
-                          <div className="mx-auto max-w-7xl px-4 pt-[calc(var(--chat-top-inset,0px)+1rem)] pb-[calc(var(--chat-composer-height,0px)+1.5rem)] md:px-6 min-w-0 w-full">
+                          <div
+                            className="mx-auto max-w-7xl px-4 pt-[calc(var(--chat-top-inset,0px)+1rem)] md:px-6 min-w-0 w-full"
+                            style={{ paddingBottom: MESSAGES_BOTTOM_INSET }}
+                          >
                             <div
                               className="select-text space-y-4 font-mono text-sm min-w-0 break-words overflow-x-clip"
                               // Suppress browser default menu on empty thread chrome
@@ -3132,6 +3139,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
                             <PromptTopSpacer
                               viewportRef={scrollViewportRef}
                               sessionId={deferredSessionId}
+                              bottomInset={MESSAGES_BOTTOM_INSET}
                             />
                           </div>
                         </ScrollArea>

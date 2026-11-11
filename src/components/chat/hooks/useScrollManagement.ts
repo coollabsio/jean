@@ -637,8 +637,11 @@ export function useScrollManagement({
     })
 
     // observe() delivers an initial callback, which pins the tail when
-    // streaming starts.
+    // streaming starts. Observe the viewport too: it changes height during a
+    // run (mobile browser bars, keyboard), and the size-sync observer does not
+    // pin while sending, so the chat would stay off the bottom.
     observer.observe(viewport.firstElementChild)
+    observer.observe(viewport)
     return () => observer.disconnect()
   }, [isSending, isMobile])
 
