@@ -806,7 +806,7 @@ export function DesktopToolbarControls({
                   onValueChange={handleProviderChange}
                 >
                   <DropdownMenuRadioItem value="__default__">
-                    Default (OpenAI)
+                    OpenAI
                     <Kbd className="ml-auto text-2xs">1</Kbd>
                   </DropdownMenuRadioItem>
                   <DropdownMenuSeparator />

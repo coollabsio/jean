@@ -745,7 +745,7 @@ export function MobileSettingsMenu({
                       value="__default__"
                       onSelect={keepMenuOpenOnSelect}
                     >
-                      Default (OpenAI)
+                      OpenAI
                     </DropdownMenuRadioItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuLabel className="text-xs text-muted-foreground">
