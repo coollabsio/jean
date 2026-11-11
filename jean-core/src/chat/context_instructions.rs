@@ -123,24 +123,7 @@ fn build_system_prompt_parts(
     }
 
     crate::gh_cli::config::append_gh_cli_system_prompt(&mut parts, app);
-    if let Ok(claude_binary) = crate::claude_cli::get_cli_binary_path(app) {
-        if claude_binary.exists() {
-            parts.push(format!(
-                "When running Claude CLI commands, use the full path to the embedded binary: {}\n\
-                 Do NOT use bare `claude` — always use the full path above.",
-                claude_binary.display()
-            ));
-        }
-    }
-    if let Ok(codex_binary) = crate::codex_cli::get_cli_binary_path(app) {
-        if codex_binary.exists() {
-            parts.push(format!(
-                "When running Codex CLI commands, use the full path to the embedded binary: {}\n\
-                 Do NOT use bare `codex` — always use the full path above.",
-                codex_binary.display()
-            ));
-        }
-    }
+    super::push_embedded_cli_paths(&mut parts, app);
 
     if include_recap {
         parts.push(super::RECAP_INSTRUCTION.to_string());

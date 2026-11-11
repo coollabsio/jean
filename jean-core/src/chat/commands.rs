@@ -161,6 +161,12 @@ fn now_ms() -> u64 {
 const CODEX_DEFAULT_NOT_PLAN_MODE_PROMPT: &str = "\
 ## Not Plan Mode
 
+- When multiple independent operations are needed, batch them into parallel tool calls.";
+/// Codex build-mode block before its rules that repeat the global prompt
+/// were removed. Kept so a stored copy still counts as a default.
+const LEGACY_CODEX_DEFAULT_NOT_PLAN_MODE_PROMPT: &str = "\
+## Not Plan Mode
+
 - **VERY IMPORTANT: Keep Code Simple**: Do not over-engineer. Always implement the simplest maintainable solution. Avoid extra abstractions, frameworks, configuration, or future-proofing unless clearly required.
 - **Clickable References**: When output mentions issues, PRs, security advisories/alerts, Linear issues, or other external resources, include clickable links when available so users can open them directly.
 - **Tables for Findings**: When you report found issues, gaps, risks, or recommended fixes, present them in a Markdown table (for example: | # | Finding | Location | Impact | Recommended fix |) instead of long prose lists.
@@ -293,6 +299,7 @@ fn is_codex_default_global_system_prompt(prompt: &str) -> bool {
         || crate::is_legacy_default_global_system_prompt(trimmed)
         || trimmed == CODEX_DEFAULT_PLAN_MODE_PROMPT.trim()
         || trimmed == CODEX_DEFAULT_NOT_PLAN_MODE_PROMPT.trim()
+        || trimmed == LEGACY_CODEX_DEFAULT_NOT_PLAN_MODE_PROMPT.trim()
         || (trimmed.contains("### 1. Plan Mode Default")
             && trimmed.contains("Every Codex plan-mode response")
             && trimmed.contains("Jean Worktree Policy"))
@@ -4121,24 +4128,7 @@ async fn send_chat_message_inner(
                         &mut system_prompt_parts,
                         &thread_app,
                     );
-                    if let Ok(claude_binary) = crate::claude_cli::get_cli_binary_path(&thread_app) {
-                        if claude_binary.exists() {
-                            system_prompt_parts.push(format!(
-                                "When running Claude CLI commands, use the full path to the embedded binary: {}\n\
-                                 Do NOT use bare `claude` — always use the full path above.",
-                                claude_binary.display()
-                            ));
-                        }
-                    }
-                    if let Ok(codex_binary) = crate::codex_cli::get_cli_binary_path(&thread_app) {
-                        if codex_binary.exists() {
-                            system_prompt_parts.push(format!(
-                                "When running Codex CLI commands, use the full path to the embedded binary: {}\n\
-                                 Do NOT use bare `codex` — always use the full path above.",
-                                codex_binary.display()
-                            ));
-                        }
-                    }
+                    super::push_embedded_cli_paths(&mut system_prompt_parts, &thread_app);
 
                     // End-of-turn recap instruction (compact view surfaces this block)
                     if thread_include_recap {
@@ -4515,24 +4505,7 @@ async fn send_chat_message_inner(
                         &mut system_prompt_parts,
                         &thread_app,
                     );
-                    if let Ok(claude_binary) = crate::claude_cli::get_cli_binary_path(&thread_app) {
-                        if claude_binary.exists() {
-                            system_prompt_parts.push(format!(
-                                "When running Claude CLI commands, use the full path to the embedded binary: {}\n\
-                                 Do NOT use bare `claude` — always use the full path above.",
-                                claude_binary.display()
-                            ));
-                        }
-                    }
-                    if let Ok(codex_binary) = crate::codex_cli::get_cli_binary_path(&thread_app) {
-                        if codex_binary.exists() {
-                            system_prompt_parts.push(format!(
-                                "When running Codex CLI commands, use the full path to the embedded binary: {}\n\
-                                 Do NOT use bare `codex` — always use the full path above.",
-                                codex_binary.display()
-                            ));
-                        }
-                    }
+                    super::push_embedded_cli_paths(&mut system_prompt_parts, &thread_app);
 
                     // End-of-turn recap instruction (compact view surfaces this block)
                     if thread_include_recap {
@@ -4845,24 +4818,7 @@ async fn send_chat_message_inner(
                     }
 
                     crate::gh_cli::config::append_gh_cli_system_prompt(&mut parts, &thread_app);
-                    if let Ok(claude_binary) = crate::claude_cli::get_cli_binary_path(&thread_app) {
-                        if claude_binary.exists() {
-                            parts.push(format!(
-                                "When running Claude CLI commands, use the full path to the embedded binary: {}\n\
-                                 Do NOT use bare `claude` — always use the full path above.",
-                                claude_binary.display()
-                            ));
-                        }
-                    }
-                    if let Ok(codex_binary) = crate::codex_cli::get_cli_binary_path(&thread_app) {
-                        if codex_binary.exists() {
-                            parts.push(format!(
-                                "When running Codex CLI commands, use the full path to the embedded binary: {}\n\
-                                 Do NOT use bare `codex` — always use the full path above.",
-                                codex_binary.display()
-                            ));
-                        }
-                    }
+                    super::push_embedded_cli_paths(&mut parts, &thread_app);
 
                     // End-of-turn recap instruction (compact view surfaces this block)
                     if thread_include_recap {
@@ -5015,24 +4971,7 @@ async fn send_chat_message_inner(
                     }
 
                     crate::gh_cli::config::append_gh_cli_system_prompt(&mut parts, &thread_app);
-                    if let Ok(claude_binary) = crate::claude_cli::get_cli_binary_path(&thread_app) {
-                        if claude_binary.exists() {
-                            parts.push(format!(
-                                "When running Claude CLI commands, use the full path to the embedded binary: {}\n\
-                                 Do NOT use bare `claude` — always use the full path above.",
-                                claude_binary.display()
-                            ));
-                        }
-                    }
-                    if let Ok(codex_binary) = crate::codex_cli::get_cli_binary_path(&thread_app) {
-                        if codex_binary.exists() {
-                            parts.push(format!(
-                                "When running Codex CLI commands, use the full path to the embedded binary: {}\n\
-                                 Do NOT use bare `codex` — always use the full path above.",
-                                codex_binary.display()
-                            ));
-                        }
-                    }
+                    super::push_embedded_cli_paths(&mut parts, &thread_app);
 
                     if thread_include_recap {
                         parts.push(super::RECAP_INSTRUCTION.to_string());
@@ -5139,24 +5078,7 @@ async fn send_chat_message_inner(
                     }
 
                     crate::gh_cli::config::append_gh_cli_system_prompt(&mut parts, &thread_app);
-                    if let Ok(claude_binary) = crate::claude_cli::get_cli_binary_path(&thread_app) {
-                        if claude_binary.exists() {
-                            parts.push(format!(
-                                "When running Claude CLI commands, use the full path to the embedded binary: {}\n\
-                                 Do NOT use bare `claude` — always use the full path above.",
-                                claude_binary.display()
-                            ));
-                        }
-                    }
-                    if let Ok(codex_binary) = crate::codex_cli::get_cli_binary_path(&thread_app) {
-                        if codex_binary.exists() {
-                            parts.push(format!(
-                                "When running Codex CLI commands, use the full path to the embedded binary: {}\n\
-                                 Do NOT use bare `codex` — always use the full path above.",
-                                codex_binary.display()
-                            ));
-                        }
-                    }
+                    super::push_embedded_cli_paths(&mut parts, &thread_app);
 
                     if thread_include_recap {
                         parts.push(super::RECAP_INSTRUCTION.to_string());
@@ -12503,21 +12425,17 @@ mod tests {
         assert!(!build_prompt.contains("<proposed_plan>"));
         assert!(!build_prompt.contains("CodexPlan"));
         assert!(build_prompt.contains("## Not Plan Mode"));
-        assert!(build_prompt.contains("Jean Worktree Policy"));
-        assert!(build_prompt.contains("Do NOT create git worktrees manually"));
-        assert!(build_prompt.contains("Jean MCP/tools"));
-        assert!(build_prompt.contains("VERY IMPORTANT: Keep Code Simple"));
-        assert!(build_prompt.contains("Always implement the simplest maintainable solution"));
-        assert!(build_prompt.contains("Clickable References"));
-        assert!(build_prompt.contains("include clickable links when available"));
+        // Shared rules come once, from the global default prompt.
+        let resolved = resolve_codex_global_system_prompt(None, Some("build"));
+        assert!(resolved.contains("## Not Plan Mode"));
+        assert_eq!(resolved.matches("Jean Worktree Policy").count(), 1);
+        assert_eq!(resolved.matches("Keep Code Simple").count(), 1);
 
         let yolo_prompt = codex_default_global_system_prompt(Some("yolo"));
         assert!(!yolo_prompt.contains("## Plan Mode"));
         assert!(!yolo_prompt.contains("<proposed_plan>"));
         assert!(!yolo_prompt.contains("CodexPlan"));
         assert!(yolo_prompt.contains("## Not Plan Mode"));
-        assert!(yolo_prompt.contains("VERY IMPORTANT: Keep Code Simple"));
-        assert!(yolo_prompt.contains("Clickable References"));
     }
 
     #[test]
