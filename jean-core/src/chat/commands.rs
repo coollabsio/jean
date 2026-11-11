@@ -571,6 +571,40 @@ fn normalize_optional_string(value: Option<String>) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// Provider for a send: the explicit value, else the session choice, else the
+/// backend default. The sentinels `__anthropic__` / `__default__` mean the user
+/// picked the built-in provider, so they resolve to no custom profile.
+fn resolve_send_provider(
+    explicit: Option<String>,
+    session: Option<String>,
+    backend_default: impl FnOnce() -> Option<String>,
+) -> Option<String> {
+    normalize_optional_string(explicit)
+        .or_else(|| normalize_optional_string(session))
+        .or_else(|| normalize_optional_string(backend_default()))
+        .filter(|provider| provider != "__anthropic__" && provider != "__default__")
+}
+
+/// Default provider for a backend: project then global for Claude, global for Codex.
+fn default_provider_for_backend(
+    app: &AppHandle,
+    worktree_id: &str,
+    backend: &Backend,
+    prefs: Option<&crate::AppPreferences>,
+) -> Option<String> {
+    match backend {
+        Backend::Claude => load_projects_data(app)
+            .ok()
+            .and_then(|data| {
+                let project_id = data.find_worktree(worktree_id)?.project_id.clone();
+                data.find_project(&project_id)?.default_provider.clone()
+            })
+            .or_else(|| prefs.and_then(|p| p.default_provider.clone())),
+        Backend::Codex => prefs.and_then(|p| p.default_codex_provider.clone()),
+        _ => None,
+    }
+}
+
 fn resolve_global_system_prompt(preferences_prompt: Option<&str>) -> String {
     crate::effective_global_system_prompt(preferences_prompt)
 }
@@ -3151,12 +3185,6 @@ async fn send_chat_message_inner(
     );
     let thinking_level = thinking_level.or(session_selected_thinking_level);
     let effort_level = effort_level.or(session_selected_effort_level);
-    // selected_provider may be a sentinel (__anthropic__/__default__) rather than
-    // a real custom profile name — only use it when it looks like a profile id.
-    let custom_profile_name = normalize_optional_string(custom_profile_name).or_else(|| {
-        normalize_optional_string(session_selected_provider)
-            .filter(|provider| provider != "__anthropic__" && provider != "__default__")
-    });
 
     // Determine backend from session (or explicit param, or default to claude)
     let effective_backend = match backend.as_deref() {
@@ -3183,6 +3211,11 @@ async fn send_chat_message_inner(
     if let Some(mode) = execution_mode.as_deref() {
         validate_execution_policy(mode, &effective_backend)?;
     }
+
+    let custom_profile_name =
+        resolve_send_provider(custom_profile_name, session_selected_provider, || {
+            default_provider_for_backend(&app, &worktree_id, &effective_backend, prefs.as_ref())
+        });
 
     // Final model fallback: preferences default for the resolved backend.
     // Covers sessions created before selected_model was persisted, or when
@@ -12334,6 +12367,44 @@ mod tests {
         assert_eq!(
             default_model_for_backend(&Backend::Commandcode, &prefs),
             Some("commandcode/deepseek/deepseek-v4-flash".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_send_provider_uses_default_only_when_nothing_was_chosen() {
+        let some = |s: &str| Some(s.to_string());
+        let default = || some("CLIProxyAPI");
+        // New session: no explicit or saved choice, so the default applies.
+        assert_eq!(
+            resolve_send_provider(None, None, default),
+            some("CLIProxyAPI")
+        );
+        assert_eq!(
+            resolve_send_provider(None, some("  "), default),
+            some("CLIProxyAPI")
+        );
+        // Saved built-in choice blocks the default.
+        assert_eq!(
+            resolve_send_provider(None, some("__anthropic__"), default),
+            None
+        );
+        assert_eq!(
+            resolve_send_provider(some("__default__"), None, default),
+            None
+        );
+        // Explicit value wins over the saved choice.
+        assert_eq!(
+            resolve_send_provider(some("MiniMax"), some("__anthropic__"), default),
+            some("MiniMax")
+        );
+        assert_eq!(
+            resolve_send_provider(None, some("MiniMax"), default),
+            some("MiniMax")
+        );
+        // Default set to the built-in provider.
+        assert_eq!(
+            resolve_send_provider(None, None, || some("__anthropic__")),
+            None
         );
     }
 

@@ -250,11 +250,15 @@ export function useToolbarHandlers({
               ? applySessionSettingToSession(old, 'provider', provider ?? '')
               : old
         )
+        // Save the built-in provider as a sentinel: a saved null means
+        // "use the default provider" for the session.
         setSessionProvider.mutate({
           sessionId: activeSessionId,
           worktreeId: activeWorktreeId,
           worktreePath: activeWorktreePath,
-          provider,
+          provider:
+            provider ??
+            (selectedBackend === 'codex' ? '__default__' : '__anthropic__'),
         })
         invoke('broadcast_session_setting', {
           sessionId: activeSessionId,
@@ -269,6 +273,7 @@ export function useToolbarHandlers({
       activeWorktreeId,
       activeWorktreePath,
       queryClient,
+      selectedBackend,
       setSessionProvider,
     ]
   )

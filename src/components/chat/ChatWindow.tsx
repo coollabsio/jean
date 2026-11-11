@@ -935,8 +935,12 @@ const ChatWindowContent = memo(function ChatWindowContent({
   )
   // Prefer in-memory toolbar selection when present so mid-session provider
   // switches apply immediately (session query can lag until invalidate).
+  // A saved null means "no choice yet", so the backend default applies; an
+  // explicit built-in choice is saved as a sentinel (__anthropic__/__default__).
   const sessionProvider =
-    zustandProvider !== undefined ? zustandProvider : session?.selected_provider
+    zustandProvider !== undefined
+      ? zustandProvider
+      : (session?.selected_provider ?? undefined)
 
   // Installed backends (only these should be selectable)
   const targetServerId = activeWorktreeId
