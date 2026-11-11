@@ -67,6 +67,11 @@ const SCROLL_EPSILON_PX = 2
 const MAX_PENDING_RESTORE_ATTEMPTS = 20
 /** Re-check a still-pending restore when ResizeObserver goes quiet (history trim, etc.). */
 const PENDING_RESTORE_RETRY_MS = 50
+/**
+ * After a run ends, WebKit can report a stale, clamped scroll position some
+ * frames after the tail was pinned. Treat scroll-ups in this window as layout.
+ */
+const RUN_END_SETTLE_MS = 500
 
 function hasScrollableOverflow(viewport: HTMLDivElement) {
   return viewport.scrollHeight - viewport.clientHeight > SCROLL_EPSILON_PX
@@ -144,6 +149,9 @@ export function useScrollManagement({
   // scrollHeight at the last scroll event. A scrollTop drop that comes with a
   // height change is layout (clamp on shrink, reflow), not the user.
   const lastScrollHeightRef = useRef(0)
+  // Until this time, a scroll away from the tail that the user did not start
+  // re-pins the tail (see RUN_END_SETTLE_MS).
+  const runEndSettleUntilRef = useRef(0)
   const touchStartYRef = useRef<number | null>(null)
   // Last known good scroll snapshot for the displayed session. Updated on every
   // real scroll; used when leaving a session so Loading placeholders cannot
@@ -654,6 +662,7 @@ export function useScrollManagement({
   useEffect(() => {
     // Streaming just ended — pin to actual bottom
     if (wasSendingRef.current && !isSending && isFollowingTailRef.current) {
+      runEndSettleUntilRef.current = Date.now() + RUN_END_SETTLE_MS
       let cancelled = false
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
@@ -754,6 +763,27 @@ export function useScrollManagement({
       }
 
       const target = e.target as HTMLDivElement
+
+      // When a run ends, the message list swaps the streaming reply for the
+      // saved one. WebKit clamps scrollTop while the content is briefly
+      // shorter, then fires a late scroll event to that stale position, after
+      // the tail was already pinned. Without this, the drop below reads as a
+      // scrollbar drag and the new prompt slides down from the top. Wheel,
+      // touch, and keyboard input stop following the tail first, so the user
+      // can still scroll away.
+      const now = Date.now()
+      if (
+        now < runEndSettleUntilRef.current &&
+        now >= userScrollUpUntilRef.current &&
+        isFollowingTailRef.current &&
+        !isViewportAtBottom(target)
+      ) {
+        scrollToTail(target)
+        lastScrollTopRef.current = target.scrollTop
+        lastScrollHeightRef.current = target.scrollHeight
+        return
+      }
+
       const previousScrollTop = lastScrollTopRef.current
       const contentHeightChanged =
         target.scrollHeight !== lastScrollHeightRef.current

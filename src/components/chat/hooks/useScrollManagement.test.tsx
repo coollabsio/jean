@@ -456,6 +456,38 @@ describe('useScrollManagement streaming auto-scroll', () => {
     expect(getByTestId('is-at-bottom')).toHaveTextContent('true')
   })
 
+  it('re-pins the tail when a stale scroll position arrives after a run ends', () => {
+    isMobile = true
+    const { getByTestId, viewport, rerenderSession } = setupHook()
+    viewport.scrollTop = 1600
+    fireEvent.scroll(viewport)
+    rerenderSession({ sending: false })
+
+    // WebKit reports a clamped position after the tail was pinned. No input.
+    viewport.scrollTop = 1513
+    fireEvent.scroll(viewport)
+
+    expect(viewport.scrollTop).toBe(2000)
+    expect(getByTestId('is-at-bottom')).toHaveTextContent('true')
+  })
+
+  it('lets the user scroll up right after a run ends', () => {
+    isMobile = true
+    const { getByTestId, viewport, rerenderSession } = setupHook()
+    viewport.scrollTop = 1600
+    fireEvent.scroll(viewport)
+    rerenderSession({ sending: false })
+
+    act(() => {
+      viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }))
+    })
+    viewport.scrollTop = 1500
+    fireEvent.scroll(viewport)
+
+    expect(viewport.scrollTop).toBe(1500)
+    expect(getByTestId('is-at-bottom')).toHaveTextContent('false')
+  })
+
   it('stops following the tail when a scrollbar drag moves the viewport up', async () => {
     const { viewport, setScrollHeight } = setupHook({ isSending: false })
     viewport.scrollTop = 1600
