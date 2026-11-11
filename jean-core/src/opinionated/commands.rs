@@ -187,6 +187,11 @@ pub async fn prepare_cliproxyapi_account_login(
     super::cliproxyapi::prepare_account_login(&provider).await
 }
 
+pub async fn get_cliproxyapi_usage(
+) -> Result<Vec<super::cliproxyapi_usage::CliproxyAccountUsage>, String> {
+    super::cliproxyapi_usage::get_usage().await
+}
+
 pub async fn refresh_cliproxyapi_models(
     app: AppHandle,
 ) -> Result<super::cliproxyapi::DiscoveredClaudeModels, String> {

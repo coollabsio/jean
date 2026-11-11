@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   useGrokCliStatus: vi.fn(),
   useGrokCliAuth: vi.fn(),
   useGrokUsage: vi.fn(),
+  useCliproxyapiUsage: vi.fn(),
 }))
 
 vi.mock('@/services/claude-cli', () => ({
@@ -31,6 +32,10 @@ vi.mock('@/services/grok-cli', () => ({
   useGrokCliStatus: () => mocks.useGrokCliStatus(),
   useGrokCliAuth: () => mocks.useGrokCliAuth(),
   useGrokUsage: () => mocks.useGrokUsage(),
+}))
+
+vi.mock('@/services/cliproxyapi', () => ({
+  useCliproxyapiUsage: () => mocks.useCliproxyapiUsage(),
 }))
 
 function idleQuery(data: unknown = undefined) {
@@ -68,6 +73,72 @@ describe('UsagePane', () => {
       idleQuery({ authenticated: true, error: null, timedOut: false })
     )
     mocks.useGrokUsage.mockReturnValue(idleQuery())
+    mocks.useCliproxyapiUsage.mockReturnValue(idleQuery([]))
+  })
+
+  it('renders one card per CLIProxyAPI account', () => {
+    const now = Math.floor(Date.now() / 1000)
+    const account = {
+      provider: 'claude',
+      status: 'active',
+      disabled: false,
+      claude: null,
+      codex: null,
+      error: null,
+    }
+    mocks.useCliproxyapiUsage.mockReturnValue(
+      idleQuery([
+        {
+          ...account,
+          authIndex: 'a',
+          label: 'one@example.com',
+          claude: {
+            planType: null,
+            planTier: null,
+            session: null,
+            weekly: { usedPercent: 60, resetsAt: now + 86_400 },
+            sonnetWeekly: null,
+            extraUsageSpent: null,
+            extraUsageLimit: null,
+            fetchedAt: now,
+          },
+        },
+        {
+          ...account,
+          authIndex: 'b',
+          label: 'two@example.com',
+          error: 'Login expired. Sign in to this account again in CLIProxyAPI.',
+        },
+        {
+          ...account,
+          authIndex: 'c',
+          label: 'off@example.com',
+          disabled: true,
+        },
+        {
+          ...account,
+          authIndex: 'd',
+          label: 'gem@example.com',
+          provider: 'gemini',
+        },
+      ])
+    )
+
+    render(<UsagePane />)
+
+    expect(screen.getByText('CLIProxyAPI accounts')).toBeInTheDocument()
+    expect(screen.getByText('one@example.com')).toBeInTheDocument()
+    expect(screen.getByText('60%')).toBeInTheDocument()
+    expect(screen.getByText(/Login expired/)).toBeInTheDocument()
+    expect(screen.getByText('Disabled in CLIProxyAPI.')).toBeInTheDocument()
+    expect(
+      screen.getByText(/Usage is not available for gemini accounts/)
+    ).toBeInTheDocument()
+  })
+
+  it('hides the CLIProxyAPI section when there are no accounts', () => {
+    render(<UsagePane />)
+    expect(screen.queryByText('CLIProxyAPI accounts')).not.toBeInTheDocument()
   })
 
   it('renders Claude plan summary and usage windows', () => {

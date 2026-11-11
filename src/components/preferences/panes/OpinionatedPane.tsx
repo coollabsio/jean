@@ -75,6 +75,14 @@ const PLUGINS: PluginDefinition[] = [
       {
         note: 'Files are in ~/.jean/opinionated/cliproxyapi. The proxy listens on localhost only.',
       },
+      {
+        note: 'The management page asks for the management key. Jean keeps it in ~/.jean/opinionated/cliproxyapi/management-key. To show it, run on the machine where CLIProxyAPI runs:',
+        command: 'cat ~/.jean/opinionated/cliproxyapi/management-key',
+      },
+      {
+        note: 'When Jean runs on a remote server, forward the proxy port over SSH. Run this on your local machine, then open http://127.0.0.1:8317/management.html:',
+        command: 'ssh -N -L 8317:127.0.0.1:8317 user@remote-host',
+      },
     ],
   },
   {

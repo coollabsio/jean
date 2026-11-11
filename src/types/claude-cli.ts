@@ -24,6 +24,8 @@ export interface ClaudeAuthStatus {
   authenticated: boolean
   /** Error message if authentication check failed */
   error: string | null
+  /** Email of the claude.ai login, when known */
+  email?: string | null
 }
 
 /**

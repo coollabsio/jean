@@ -623,6 +623,9 @@ pub struct ClaudeAuthStatus {
     pub authenticated: bool,
     /// Error message if authentication check failed
     pub error: Option<String>,
+    /// Email of the claude.ai login, when `claude auth status` reports one
+    #[serde(default)]
+    pub email: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1413,6 +1416,7 @@ pub async fn check_claude_cli_auth(app: AppHandle) -> Result<ClaudeAuthStatus, S
     if !wsl.enabled && !binary_path.exists() {
         return Ok(ClaudeAuthStatus {
             authenticated: false,
+            email: None,
             error: Some("Claude CLI not installed".to_string()),
         });
     }
@@ -1426,6 +1430,7 @@ pub async fn check_claude_cli_auth(app: AppHandle) -> Result<ClaudeAuthStatus, S
         if !installed {
             return Ok(ClaudeAuthStatus {
                 authenticated: false,
+                email: None,
                 error: Some("Claude CLI not installed inside WSL".to_string()),
             });
         }
@@ -1443,13 +1448,18 @@ pub async fn check_claude_cli_auth(app: AppHandle) -> Result<ClaudeAuthStatus, S
         let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
         log::trace!("Claude CLI auth check output: {stdout}");
         // Parse JSON response: {"loggedIn": true, ...}
-        let logged_in = serde_json::from_str::<serde_json::Value>(&stdout)
-            .ok()
+        let status = serde_json::from_str::<serde_json::Value>(&stdout).ok();
+        let logged_in = status
+            .as_ref()
             .and_then(|v| v.get("loggedIn")?.as_bool())
             .unwrap_or(false);
         if logged_in {
             return Ok(ClaudeAuthStatus {
                 authenticated: true,
+                email: status
+                    .as_ref()
+                    .and_then(|v| v.get("email")?.as_str())
+                    .map(str::to_string),
                 error: None,
             });
         }
@@ -1461,11 +1471,13 @@ pub async fn check_claude_cli_auth(app: AppHandle) -> Result<ClaudeAuthStatus, S
             );
             return Ok(ClaudeAuthStatus {
                 authenticated: true,
+                email: None,
                 error: None,
             });
         }
         Ok(ClaudeAuthStatus {
             authenticated: false,
+            email: None,
             error: Some(if stdout.is_empty() {
                 "Not authenticated".to_string()
             } else {
@@ -1481,11 +1493,13 @@ pub async fn check_claude_cli_auth(app: AppHandle) -> Result<ClaudeAuthStatus, S
             );
             return Ok(ClaudeAuthStatus {
                 authenticated: true,
+                email: None,
                 error: None,
             });
         }
         Ok(ClaudeAuthStatus {
             authenticated: false,
+            email: None,
             error: Some(if stderr.is_empty() {
                 "Not authenticated".to_string()
             } else {
@@ -1661,15 +1675,34 @@ async fn fetch_claude_usage_from_api(
         .text()
         .await
         .map_err(|e| format!("Failed to read Claude usage response body: {e}"))?;
-    let usage = serde_json::from_str::<ClaudeUsageApiResponse>(&body).map_err(|e| {
-        let snippet = body.chars().take(200).collect::<String>();
-        format!("Failed to parse Claude usage response JSON: {e}. Body starts with: {snippet}")
-    })?;
-
     let fetched_at = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
+    let oauth = credentials.claude_ai_oauth.as_ref();
+    let snapshot = claude_usage_snapshot_from_body(
+        &body,
+        oauth.and_then(|o| o.subscription_type.clone()),
+        oauth.and_then(|o| o.rate_limit_tier.clone()),
+        fetched_at,
+    )?;
+
+    save_cached_claude_usage(&snapshot, fetched_at);
+    log::trace!("Claude usage fetch success (source={request_source})");
+    Ok(snapshot)
+}
+
+/// Parse an `api/oauth/usage` response body into a snapshot.
+pub(crate) fn claude_usage_snapshot_from_body(
+    body: &str,
+    plan_type: Option<String>,
+    plan_tier: Option<String>,
+    fetched_at: u64,
+) -> Result<ClaudeUsageSnapshot, String> {
+    let usage = serde_json::from_str::<ClaudeUsageApiResponse>(body).map_err(|e| {
+        let snippet = body.chars().take(200).collect::<String>();
+        format!("Failed to parse Claude usage response JSON: {e}. Body starts with: {snippet}")
+    })?;
 
     let map_window = |window: Option<ClaudeUsageWindow>| -> Option<ClaudeUsageWindowSnapshot> {
         let w = window?;
@@ -1691,14 +1724,8 @@ async fn fetch_claude_usage_from_api(
         .unwrap_or((None, None));
 
     let snapshot = ClaudeUsageSnapshot {
-        plan_type: credentials
-            .claude_ai_oauth
-            .as_ref()
-            .and_then(|o| o.subscription_type.clone()),
-        plan_tier: credentials
-            .claude_ai_oauth
-            .as_ref()
-            .and_then(|o| o.rate_limit_tier.clone()),
+        plan_type,
+        plan_tier,
         session: map_window(usage.five_hour),
         weekly: map_window(usage.seven_day),
         sonnet_weekly: map_window(usage.seven_day_sonnet),
@@ -1707,8 +1734,6 @@ async fn fetch_claude_usage_from_api(
         fetched_at,
     };
 
-    save_cached_claude_usage(&snapshot, fetched_at);
-    log::trace!("Claude usage fetch success (source={request_source})");
     Ok(snapshot)
 }
 

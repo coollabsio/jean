@@ -218,9 +218,18 @@ import {
   supportsAdaptiveThinking,
 } from '@/lib/model-utils'
 import { copyToClipboard, copyHtmlToClipboard } from '@/lib/clipboard'
-import { useClaudeCliStatus, useClaudeUsage } from '@/services/claude-cli'
+import {
+  useClaudeCliAuth,
+  useClaudeCliStatus,
+  useClaudeUsage,
+} from '@/services/claude-cli'
+import { useCliproxyapiUsage } from '@/services/cliproxyapi'
 import { useCodexUsage } from '@/services/codex-cli'
-import { getLimitResetAtMs, isUsageLimitError } from '@/lib/usage-limit'
+import {
+  getLimitResetAtMs,
+  isClaudeTermsError,
+  isUsageLimitError,
+} from '@/lib/usage-limit'
 import {
   getCatalogModelReasoning,
   supportedReasoningLevel,
@@ -1222,6 +1231,31 @@ const ChatWindowContent = memo(function ChatWindowContent({
     supportsAutoResume && limitResetAtMs != null && deferredSessionId != null
   const autoResumeAtMs = useChatStore(state =>
     deferredSessionId ? (state.autoResume[deferredSessionId] ?? null) : null
+  )
+
+  // Claude asks the account owner to accept updated terms on claude.ai. Name
+  // the accounts that can be blocked: the proxy's Claude accounts, or the
+  // local Claude login.
+  const isTermsError = isClaudeTermsError(currentError)
+  const usesCliproxyapi = selectedProvider === 'CLIProxyAPI'
+  const { data: cliproxyAccounts } = useCliproxyapiUsage({
+    enabled: isTermsError && usesCliproxyapi,
+  })
+  const { data: claudeAuth } = useClaudeCliAuth({
+    enabled: isTermsError && !isCustomProvider,
+  })
+  const termsAccountEmails = !isTermsError
+    ? []
+    : usesCliproxyapi
+      ? (cliproxyAccounts ?? [])
+          .filter(account => account.provider === 'claude' && !account.disabled)
+          .map(account => account.label)
+      : !isCustomProvider && claudeAuth?.email
+        ? [claudeAuth.email]
+        : []
+  // Retry reuses the auto-continue resend path, armed for now.
+  const canRetry = useChatStore(state =>
+    deferredSessionId ? Boolean(state.lastSentArgs[deferredSessionId]) : false
   )
 
   // Per-worktree setup script result (stays at worktree level)
@@ -3172,6 +3206,16 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                 onCancelAutoContinue={
                                   deferredSessionId
                                     ? () => disarmAutoResume(deferredSessionId)
+                                    : undefined
+                                }
+                                termsAccountEmails={termsAccountEmails}
+                                onRetry={
+                                  isTermsError && canRetry && deferredSessionId
+                                    ? () =>
+                                        armAutoResume(
+                                          deferredSessionId,
+                                          Date.now()
+                                        )
                                     : undefined
                                 }
                                 isAutoResumeArmed={autoResumeAtMs != null}

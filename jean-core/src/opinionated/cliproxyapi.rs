@@ -107,7 +107,7 @@ pub fn layout(home: &Path) -> InstallLayout {
     }
 }
 
-fn home_dir() -> Result<PathBuf, String> {
+pub(super) fn home_dir() -> Result<PathBuf, String> {
     dirs::home_dir().ok_or_else(|| "Cannot determine home directory".to_string())
 }
 
@@ -1193,7 +1193,7 @@ fn spawn_proxy(paths: &InstallLayout) -> Result<u32, String> {
     }
 }
 
-fn configured_port(paths: &InstallLayout) -> u16 {
+pub(super) fn configured_port(paths: &InstallLayout) -> u16 {
     std::fs::read_to_string(&paths.config)
         .ok()
         .as_deref()
@@ -1207,7 +1207,7 @@ fn port_is_open(port: u16) -> bool {
     std::net::TcpStream::connect_timeout(&address, std::time::Duration::from_millis(200)).is_ok()
 }
 
-fn pid_is_cliproxy(pid_path: &Path) -> bool {
+pub(super) fn pid_is_cliproxy(pid_path: &Path) -> bool {
     let Some(pid) = read_pid(pid_path) else {
         return false;
     };
