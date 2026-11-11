@@ -666,6 +666,43 @@ describe('MagicPromptsPane', () => {
     }
   )
 
+  it('applies a custom Claude provider to every magic prompt', async () => {
+    preferencesMock = {
+      ...defaultPreferences,
+      custom_cli_profiles: [
+        {
+          name: 'CLIProxyAPI',
+          settings_json: '{}',
+          supports_thinking: false,
+        },
+      ],
+    }
+    const user = userEvent.setup()
+    render(<MagicPromptsPane />)
+    await user.click(
+      screen.getByRole('combobox', { name: 'Model for all prompts' })
+    )
+    await user.click(screen.getByRole('tab', { name: 'Claude' }))
+    await user.click(
+      screen.getByRole('combobox', { name: 'Investigation provider' })
+    )
+    await user.click(screen.getByRole('option', { name: 'CLIProxyAPI' }))
+    await user.click(
+      screen.getByRole('button', { name: 'Apply to all prompts' })
+    )
+
+    const patch = mutateMock.mock.calls[0]?.[0]
+    expect(new Set(Object.values(patch.magic_prompt_providers))).toEqual(
+      new Set(['CLIProxyAPI'])
+    )
+    expect(new Set(Object.values(patch.magic_prompt_backends))).toEqual(
+      new Set(['claude'])
+    )
+    expect(new Set(Object.values(patch.magic_prompt_models))).toEqual(
+      new Set(['sonnet'])
+    )
+  })
+
   it('applies the fast variant and yolo mode to every magic prompt', async () => {
     const user = userEvent.setup()
     render(<MagicPromptsPane />)

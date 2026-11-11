@@ -696,6 +696,9 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     model: MagicPromptModel
     label: string
   } | null>(null)
+  // Claude custom provider (e.g. CLIProxyAPI) for "Apply to all prompts".
+  // null = Anthropic / global default provider.
+  const [bulkProvider, setBulkProvider] = useState<string | null>(null)
   const [bulkFast, setBulkFast] = useState(false)
   const [bulkMode, setBulkMode] = useState<MagicPromptExecutionMode>('plan')
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -1485,14 +1488,47 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     [preferences, patchPreferences, currentModes, selectedConfig.modeKey]
   )
 
+  const getBulkModelOptions = (
+    backend: CliBackend,
+    provider: string | null
+  ): { value: string; label: string }[] => {
+    if (backend !== 'claude') return getReviewModelOptions(backend)
+    const settingsJson = provider
+      ? profiles.find(p => p.name === provider)?.settings_json
+      : undefined
+    return settingsJson
+      ? getProviderAliasModelOptions(settingsJson)
+      : claudeModelOptions
+  }
+
+  const selectBulkModel = (
+    backend: CliBackend,
+    model: string,
+    provider: string | null
+  ) => {
+    const label =
+      getBulkModelOptions(backend, provider).find(
+        option => option.value === model
+      )?.label ?? model
+    setBulkSelection({ backend, model: model as MagicPromptModel, label })
+  }
+
   const handleBulkModelChange = (backend: CliBackend, model: string) => {
-    const options =
-      backend === 'claude' ? claudeModelOptions : getReviewModelOptions(backend)
-    setBulkSelection({
-      backend,
-      model: model as MagicPromptModel,
-      label: options.find(option => option.value === model)?.label ?? model,
-    })
+    const provider = backend === 'claude' ? bulkProvider : null
+    setBulkProvider(provider)
+    selectBulkModel(backend, model, provider)
+  }
+
+  const handleBulkProviderChange = (value: string) => {
+    const provider = value === '__anthropic__' ? null : value
+    setBulkProvider(provider)
+    // Provider model lists differ (a custom provider only maps the
+    // opus/sonnet/haiku aliases), so start from a model it supports.
+    selectBulkModel(
+      'claude',
+      provider ? 'sonnet' : (claudeModelOptions[0]?.value ?? 'sonnet'),
+      provider
+    )
   }
 
   const bulkFastModel = bulkSelection
@@ -1512,10 +1548,13 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     const models = { ...currentModels }
     const backends = { ...currentBackends }
     const modes = { ...currentModes, code_review_fix_mode: bulkMode }
+    const providers = { ...DEFAULT_MAGIC_PROMPT_PROVIDERS }
+    const provider = backend === 'claude' ? bulkProvider : null
     for (const config of PROMPT_CONFIGS) {
       if (config.modelKey) models[config.modelKey] = model
       if (config.backendKey) backends[config.backendKey] = backend
       if (config.modeKey) modes[config.modeKey] = bulkMode
+      if (config.providerKey) providers[config.providerKey] = provider
     }
     patchPreferences.mutate({
       magic_prompt_models: models,
@@ -1525,7 +1564,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
           fix_mode: bulkMode,
         },
       ],
-      magic_prompt_providers: DEFAULT_MAGIC_PROMPT_PROVIDERS,
+      magic_prompt_providers: providers,
       magic_prompt_backends: backends,
       magic_prompt_modes: modes,
       magic_prompt_efforts: getBulkReasoningEfforts(
@@ -1537,6 +1576,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
   }, [
     preferences,
     bulkSelection,
+    bulkProvider,
     bulkFast,
     bulkFastModel,
     bulkMode,
@@ -1599,8 +1639,11 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
             >
               {bulkSelection ? (
                 <>
-                  {getBackendPlainLabel(bulkSelection.backend)} ·{' '}
-                  {bulkSelection.label}
+                  {getBackendPlainLabel(bulkSelection.backend)}
+                  {bulkSelection.backend === 'claude' && bulkProvider
+                    ? ` (${bulkProvider})`
+                    : ''}{' '}
+                  · {bulkSelection.label}
                 </>
               ) : (
                 'Select model'
@@ -1618,9 +1661,12 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                 bulkSelection?.backend ?? installedBackends[0] ?? 'claude'
               }
               selectedModel={bulkSelection?.model ?? ''}
-              selectedProvider={null}
+              selectedProvider={bulkProvider}
               installedBackends={installedBackends}
               customCliProfiles={profiles}
+              onProviderChange={
+                profiles.length > 0 ? handleBulkProviderChange : undefined
+              }
               onModelChange={model =>
                 handleBulkModelChange(
                   bulkSelection?.backend ?? installedBackends[0] ?? 'claude',
