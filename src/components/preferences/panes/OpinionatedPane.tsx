@@ -19,12 +19,17 @@ import {
   Play,
   Square,
   LogIn,
+  Copy,
+  Check,
 } from '@/components/icons/reicon'
+import { copyToClipboard } from '@/lib/clipboard'
 import { toast } from 'sonner'
 import { SettingsSection } from '../SettingsSection'
 import { ExtensionGroup, ExtensionLink, ExtensionRow } from '../ExtensionRow'
 
 interface UsageStep {
+  /** Starts a new titled group of steps. */
+  section?: string
   label?: string
   command?: string
   note?: string
@@ -67,19 +72,24 @@ const PLUGINS: PluginDefinition[] = [
     backends: ['Claude', 'Codex'],
     usage: [
       {
+        section: 'Accounts',
         note: 'Add accounts with the buttons above. The logins stay in CLIProxyAPI, not in Jean.',
       },
       {
+        section: 'Use in sessions',
         note: 'Select the CLIProxyAPI provider for a Claude, Codex, or PI session (Preferences → Providers). Jean adds it to each backend automatically.',
       },
       {
+        section: 'Files',
         note: 'Files are in ~/.jean/opinionated/cliproxyapi. The proxy listens on localhost only.',
       },
       {
+        section: 'Management key',
         note: 'The management page asks for the management key. Jean keeps it in ~/.jean/opinionated/cliproxyapi/management-key. To show it, run on the machine where CLIProxyAPI runs:',
         command: 'cat ~/.jean/opinionated/cliproxyapi/management-key',
       },
       {
+        section: 'Remote server (SSH tunnel)',
         note: 'When Jean runs on a remote server, forward the proxy port over SSH. Run this on your local machine, then open http://127.0.0.1:8317/management.html:',
         command: 'ssh -N -L 8317:127.0.0.1:8317 user@remote-host',
       },
@@ -825,21 +835,57 @@ function PluginCard({
                 key={step.command ?? step.label ?? step.note}
                 className="text-xs text-muted-foreground space-y-1"
               >
+                {step.section && (
+                  <div className="pt-1 font-medium text-foreground/80">
+                    {step.section}
+                  </div>
+                )}
                 {step.note && <div>{step.note}</div>}
                 {step.label && (
                   <div className="text-foreground/70">{step.label}:</div>
                 )}
-                {step.command && (
-                  <code className="block rounded bg-muted px-2 py-1 font-mono text-2xs text-foreground">
-                    {step.command}
-                  </code>
-                )}
+                {step.command && <CopyableCommand command={step.command} />}
               </li>
             ))}
           </ul>
         </div>
       )}
     </ExtensionRow>
+  )
+}
+
+function CopyableCommand({ command }: { command: string }) {
+  const [copied, setCopied] = useState(false)
+  const handleCopy = useCallback(async () => {
+    try {
+      await copyToClipboard(command)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      toast.error('Failed to copy')
+    }
+  }, [command])
+
+  return (
+    <div className="flex items-center gap-1 rounded bg-muted py-0.5 pl-2 pr-0.5">
+      <code className="min-w-0 flex-1 select-all break-all font-mono text-2xs text-foreground">
+        {command}
+      </code>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="size-6 shrink-0"
+        onClick={handleCopy}
+        aria-label="Copy command"
+      >
+        {copied ? (
+          <Check className="size-3.5" />
+        ) : (
+          <Copy className="size-3.5" />
+        )}
+      </Button>
+    </div>
   )
 }
 
