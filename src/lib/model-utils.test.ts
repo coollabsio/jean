@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  providerSupportsAdaptiveThinking,
   getModelImpliedBackend,
   isGeminiModel,
   resolveBackend,
@@ -75,5 +76,51 @@ describe('supportsAdaptiveThinking', () => {
     expect(supportsAdaptiveThinking('claude-sonnet-4-6[1m]', '2.1.32')).toBe(
       false
     )
+  })
+})
+
+describe('providerSupportsAdaptiveThinking', () => {
+  const profile = (name: string, env: Record<string, string>) => ({
+    name,
+    settings_json: JSON.stringify({ env }),
+  })
+  const profiles = [
+    profile('CLIProxyAPI', { ANTHROPIC_DEFAULT_OPUS_MODEL: 'claude-opus-5-5' }),
+    profile('Zai', { ANTHROPIC_DEFAULT_OPUS_MODEL: 'glm-4.7' }),
+    profile('Empty', {}),
+  ]
+
+  it('uses effort when a provider maps the alias to an effort Claude model', () => {
+    expect(
+      providerSupportsAdaptiveThinking('opus', 'CLIProxyAPI', profiles, '2.2.0')
+    ).toBe(true)
+  })
+
+  it('uses thinking when the alias maps to a non-Claude model', () => {
+    expect(
+      providerSupportsAdaptiveThinking('opus', 'Zai', profiles, '2.2.0')
+    ).toBe(false)
+  })
+
+  it('uses thinking when the provider does not map the alias', () => {
+    expect(
+      providerSupportsAdaptiveThinking('opus', 'Empty', profiles, '2.2.0')
+    ).toBe(false)
+  })
+
+  it('checks the model itself without a custom provider', () => {
+    for (const provider of [null, '__anthropic__', '__default__']) {
+      expect(
+        providerSupportsAdaptiveThinking(
+          'claude-opus-5-5',
+          provider,
+          profiles,
+          '2.2.0'
+        )
+      ).toBe(true)
+    }
+    expect(
+      providerSupportsAdaptiveThinking('opus', null, profiles, '2.2.0')
+    ).toBe(false)
   })
 })

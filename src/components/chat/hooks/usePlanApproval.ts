@@ -10,7 +10,7 @@ import {
 } from '@/services/chat'
 import { invoke } from '@/lib/transport'
 import { useClaudeCliStatus } from '@/services/claude-cli'
-import { supportsAdaptiveThinking } from '@/lib/model-utils'
+import { providerSupportsAdaptiveThinking } from '@/lib/model-utils'
 import type {
   EffortLevel,
   Session,
@@ -203,7 +203,12 @@ export function usePlanApproval({
         isGrok ||
         isAntigravity ||
         isMuse ||
-        supportsAdaptiveThinking(model, cliStatus?.version ?? null)
+        providerSupportsAdaptiveThinking(
+          model,
+          card.session.selected_provider,
+          preferences?.custom_cli_profiles,
+          cliStatus?.version ?? null
+        )
       const defaultGrokEffort = isEffortLevel(
         preferences?.default_grok_reasoning_effort
       )
@@ -424,7 +429,12 @@ export function usePlanApproval({
         isGrokYolo ||
         isAntigravityYolo ||
         isMuseYolo ||
-        supportsAdaptiveThinking(model, cliStatus?.version ?? null)
+        providerSupportsAdaptiveThinking(
+          model,
+          card.session.selected_provider,
+          preferences?.custom_cli_profiles,
+          cliStatus?.version ?? null
+        )
       const defaultGrokEffortYolo = isEffortLevel(
         preferences?.default_grok_reasoning_effort
       )

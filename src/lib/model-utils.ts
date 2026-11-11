@@ -8,7 +8,11 @@
  */
 
 import { compareVersions } from './version-utils'
-import type { CliBackend } from '@/types/preferences'
+import {
+  resolveProviderModelId,
+  type CliBackend,
+  type CustomCliProfile,
+} from '@/types/preferences'
 
 export type ModelBackend = CliBackend
 
@@ -74,6 +78,25 @@ export function supportsAdaptiveThinking(
   if (!usesEffortLevels) return false
   if (!cliVersion) return false
   return compareVersions(cliVersion, ADAPTIVE_THINKING_MIN_CLI_VERSION) >= 0
+}
+
+/**
+ * Effort support for `model` sent through `provider`, decided by the
+ * upstream model id: CLIProxyAPI maps `opus` to `claude-opus-5-5`, which
+ * supports effort; a profile that maps `opus` to `glm-4.7` does not.
+ */
+export function providerSupportsAdaptiveThinking(
+  model: string,
+  provider: string | null | undefined,
+  customCliProfiles: readonly CustomCliProfile[] | null | undefined,
+  cliVersion: string | null | undefined,
+  catalogUsesEffort?: boolean
+): boolean {
+  const modelId = resolveProviderModelId(model, provider, customCliProfiles)
+  return (
+    modelId !== undefined &&
+    supportsAdaptiveThinking(modelId, cliVersion, catalogUsesEffort)
+  )
 }
 
 function getRawModelSortKey(value: string): {

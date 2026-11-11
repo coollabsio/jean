@@ -1812,18 +1812,23 @@ export function formatProviderAliasModelLabel(
   return `${name} ${version}${oneMillion ? ' (1M)' : ''}`
 }
 
+function parseProfileEnv(
+  settingsJson?: string | null
+): Record<string, string | undefined> | undefined {
+  if (!settingsJson) return undefined
+  try {
+    return (JSON.parse(settingsJson) as { env?: Record<string, string> })?.env
+  } catch {
+    // Ignore invalid profile JSON; callers fall back to the alias.
+    return undefined
+  }
+}
+
 /** opus/sonnet/haiku options labeled from a CLI profile's settings JSON env. */
 export function getProviderAliasModelOptions(
   settingsJson?: string | null
 ): { value: ClaudeModel; label: string }[] {
-  let env: Record<string, string | undefined> | undefined
-  if (settingsJson) {
-    try {
-      env = (JSON.parse(settingsJson) as { env?: Record<string, string> })?.env
-    } catch {
-      // Ignore invalid profile JSON; fall back to short labels.
-    }
-  }
+  const env = parseProfileEnv(settingsJson)
   return CLAUDE_ALIASES.map(({ value, label, envKey }) => ({
     value,
     label: formatProviderAliasModelLabel(
@@ -1831,6 +1836,27 @@ export function getProviderAliasModelOptions(
       env?.[envKey] || env?.ANTHROPIC_MODEL
     ),
   }))
+}
+
+/**
+ * Upstream model id the Claude CLI requests for `model` under `provider`.
+ * A custom provider maps the opus/sonnet/haiku aliases through its profile
+ * env (`opus` -> `claude-opus-5-5` for CLIProxyAPI). Returns undefined when
+ * the profile does not map the alias, so the upstream model is unknown.
+ */
+export function resolveProviderModelId(
+  model: string,
+  provider: string | null | undefined,
+  customCliProfiles: readonly CustomCliProfile[] | null | undefined
+): string | undefined {
+  if (!provider || provider === '__anthropic__' || provider === '__default__')
+    return model
+  const alias = CLAUDE_ALIASES.find(a => a.value === model)
+  if (!alias) return model
+  const env = parseProfileEnv(
+    customCliProfiles?.find(p => p.name === provider)?.settings_json
+  )
+  return env?.[alias.envKey] || env?.ANTHROPIC_MODEL || undefined
 }
 
 // Claude models that support fast service tier. Fast mode is exposed via a

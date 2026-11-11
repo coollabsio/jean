@@ -102,6 +102,7 @@ import {
   PREDEFINED_CLI_PROFILES,
   resolveMagicPromptBackend,
   resolveMagicPromptProvider,
+  resolveProviderModelId,
   type CliBackend,
   type CodexProviderProfile,
   type CustomCliProfile,
@@ -215,7 +216,7 @@ import { useGitStatus } from '@/services/git-status'
 import { useRemotePicker } from '@/hooks/useRemotePicker'
 import {
   getModelImpliedBackend,
-  supportsAdaptiveThinking,
+  providerSupportsAdaptiveThinking,
 } from '@/lib/model-utils'
 import { copyToClipboard, copyHtmlToClipboard } from '@/lib/clipboard'
 import {
@@ -1078,10 +1079,18 @@ const ChatWindowContent = memo(function ChatWindowContent({
   // CLI version for adaptive thinking feature detection
   const { data: cliStatus } = useClaudeCliStatus({ serverId: targetServerId })
   const { data: modelCatalog } = useModelCatalog()
+  // Custom providers map aliases to an upstream id (`opus` -> `claude-opus-5-5`
+  // for CLIProxyAPI); its catalog entry decides effort vs thinking.
   const selectedModelReasoning = getCatalogModelReasoning(
     modelCatalog,
     selectedBackend,
-    selectedModel
+    (selectedBackend === 'claude'
+      ? resolveProviderModelId(
+          selectedModel,
+          selectedProvider,
+          preferences?.custom_cli_profiles
+        )
+      : undefined) ?? selectedModel
   )
   // A saved level the current model does not support falls back to the
   // model's default, without a write back to the session.
@@ -1097,18 +1106,18 @@ const ChatWindowContent = memo(function ChatWindowContent({
     'thinking',
     rawSelectedThinkingLevel
   )
-  // Custom providers don't support Opus 4.6 adaptive thinking — use thinking levels instead
   const useAdaptiveThinkingFlag =
     selectedBackend === 'antigravity' ||
     selectedBackend === 'muse' ||
-    (!isCustomProvider &&
-      supportsAdaptiveThinking(
-        selectedModel,
-        cliStatus?.version ?? null,
-        selectedModelReasoning === undefined
-          ? undefined
-          : selectedModelReasoning?.type === 'effort'
-      ))
+    providerSupportsAdaptiveThinking(
+      selectedModel,
+      selectedProvider,
+      preferences?.custom_cli_profiles,
+      cliStatus?.version ?? null,
+      selectedModelReasoning === undefined
+        ? undefined
+        : selectedModelReasoning?.type === 'effort'
+    )
 
   // Hide thinking level UI entirely for providers that don't support it
   const customCliProfiles = preferences?.custom_cli_profiles ?? []

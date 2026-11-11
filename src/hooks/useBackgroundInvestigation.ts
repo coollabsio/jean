@@ -8,7 +8,10 @@ import {
   usePreferences,
 } from '@/services/preferences'
 import { chatQueryKeys } from '@/services/chat'
-import { resolveBackend, supportsAdaptiveThinking } from '@/lib/model-utils'
+import {
+  providerSupportsAdaptiveThinking,
+  resolveBackend,
+} from '@/lib/model-utils'
 import { applyYoloInvestigationFixDirective } from '@/lib/investigation-prompt'
 import {
   DEFAULT_INVESTIGATE_ISSUE_PROMPT,
@@ -591,9 +594,12 @@ export async function processBackgroundInvestigation(
   }
 
   // Determine adaptive thinking
-  const isCustomProvider = Boolean(provider && provider !== '__anthropic__')
-  const useAdaptive =
-    !isCustomProvider && supportsAdaptiveThinking(selectedModel, cliVersion)
+  const useAdaptive = providerSupportsAdaptiveThinking(
+    selectedModel,
+    provider,
+    preferences?.custom_cli_profiles,
+    cliVersion
+  )
   const effortLevel =
     preferences?.magic_prompt_efforts?.[effortKey] ??
     (useAdaptive ? 'high' : undefined)
