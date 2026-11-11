@@ -91,7 +91,8 @@ describe('UsagePane', () => {
         {
           ...account,
           authIndex: 'a',
-          label: 'one@example.com',
+          label: 'one note',
+          email: 'one@example.com',
           claude: {
             planType: null,
             planTier: null,
@@ -106,19 +107,22 @@ describe('UsagePane', () => {
         {
           ...account,
           authIndex: 'b',
-          label: 'two@example.com',
+          label: 'two note',
+          email: 'two@example.com',
           error: 'Login expired. Sign in to this account again in CLIProxyAPI.',
         },
         {
           ...account,
           authIndex: 'c',
-          label: 'off@example.com',
+          label: 'off note',
+          email: 'off@example.com',
           disabled: true,
         },
         {
           ...account,
           authIndex: 'd',
-          label: 'gem@example.com',
+          label: 'gem note',
+          email: 'gem@example.com',
           provider: 'gemini',
         },
       ])
@@ -127,7 +131,8 @@ describe('UsagePane', () => {
     render(<UsagePane />)
 
     expect(screen.getByText('CLIProxyAPI accounts')).toBeInTheDocument()
-    expect(screen.getByText('one@example.com')).toBeInTheDocument()
+    expect(screen.getByText('one note')).toBeInTheDocument()
+    expect(screen.queryByText('one@example.com')).not.toBeInTheDocument()
     expect(screen.getByText('60%')).toBeInTheDocument()
     expect(screen.getByText(/Login expired/)).toBeInTheDocument()
     expect(screen.getByText('Disabled in CLIProxyAPI.')).toBeInTheDocument()

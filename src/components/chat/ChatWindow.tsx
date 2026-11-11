@@ -1269,7 +1269,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
     : usesCliproxyapi
       ? (cliproxyAccounts ?? [])
           .filter(account => account.provider === 'claude' && !account.disabled)
-          .map(account => account.label)
+          .map(account => account.email ?? account.label)
       : !isCustomProvider && claudeAuth?.email
         ? [claudeAuth.email]
         : []

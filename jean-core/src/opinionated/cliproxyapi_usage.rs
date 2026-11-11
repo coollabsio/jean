@@ -23,8 +23,11 @@ const CODEX_USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
 pub struct CliproxyAccountUsage {
     pub auth_index: String,
     pub provider: String,
-    /// Email or account name shown on the card.
+    /// Card title: the auth file's `note`, else "<Provider> account <n>".
+    /// Never the email, so the usage page does not show account names.
     pub label: String,
+    /// Account email, for messages that must name the account (Claude terms).
+    pub email: Option<String>,
     pub status: Option<String>,
     pub disabled: bool,
     pub claude: Option<ClaudeUsageSnapshot>,
@@ -114,7 +117,9 @@ pub async fn get_usage() -> Result<Vec<CliproxyAccountUsage>, String> {
 
     let list: AuthFileList = serde_json::from_value(management.get("auth-files").await?)
         .map_err(|e| format!("CLIProxyAPI returned an unreadable account list: {e}"))?;
-    let accounts = list.files.iter().filter_map(account_from_entry);
+    let mut accounts: Vec<_> = list.files.iter().filter_map(account_from_entry).collect();
+    number_unnamed_accounts(&mut accounts);
+    let accounts = accounts.into_iter();
     Ok(join_all(accounts.map(|account| load_usage(&management, account))).await)
 }
 
@@ -134,14 +139,11 @@ fn account_from_entry(entry: &Value) -> Option<(CliproxyAccountUsage, Option<Str
         .or_else(|| str_field(entry, "type"))
         .unwrap_or_else(|| "unknown".to_string())
         .to_lowercase();
-    let label = ["email", "account", "label", "name"]
-        .iter()
-        .find_map(|key| str_field(entry, key))
-        .unwrap_or_else(|| auth_index.clone());
     let account = CliproxyAccountUsage {
         auth_index,
         provider,
-        label,
+        label: str_field(entry, "note").unwrap_or_default(),
+        email: str_field(entry, "email"),
         status: str_field(entry, "status"),
         disabled: entry.get("disabled").and_then(Value::as_bool) == Some(true),
         claude: None,
@@ -149,6 +151,24 @@ fn account_from_entry(entry: &Value) -> Option<(CliproxyAccountUsage, Option<Str
         error: None,
     };
     Some((account, codex_account_id(entry)))
+}
+
+/// Give accounts without a note a generic "<Provider> account <n>" title,
+/// numbered per provider in list order.
+fn number_unnamed_accounts(accounts: &mut [(CliproxyAccountUsage, Option<String>)]) {
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for (account, _) in accounts.iter_mut() {
+        let n = counts.entry(account.provider.clone()).or_default();
+        *n += 1;
+        if account.label.is_empty() {
+            let mut chars = account.provider.chars();
+            let provider = chars
+                .next()
+                .map(|c| c.to_uppercase().chain(chars).collect::<String>())
+                .unwrap_or_default();
+            account.label = format!("{provider} account {n}");
+        }
+    }
 }
 
 /// ChatGPT account id from the entry, its metadata, or its `id_token` claims.
@@ -280,21 +300,47 @@ mod tests {
     use super::*;
 
     #[test]
-    fn account_from_entry_reads_label_provider_and_status() {
+    fn account_from_entry_reads_note_provider_and_status() {
         let entry = json!({
             "auth_index": "abc",
             "provider": "Claude",
             "email": "dev@example.com",
+            "note": " Work ",
             "status": "active",
             "disabled": false,
         });
         let (account, codex_id) = account_from_entry(&entry).expect("account");
         assert_eq!(account.auth_index, "abc");
         assert_eq!(account.provider, "claude");
-        assert_eq!(account.label, "dev@example.com");
+        assert_eq!(account.label, "Work");
+        assert_eq!(account.email.as_deref(), Some("dev@example.com"));
         assert_eq!(account.status.as_deref(), Some("active"));
         assert!(!account.disabled);
         assert_eq!(codex_id, None);
+    }
+
+    #[test]
+    fn accounts_without_note_get_numbered_generic_label_not_email() {
+        let mut accounts: Vec<_> = [
+            json!({ "auth_index": "a", "provider": "claude", "email": "a@example.com" }),
+            json!({ "auth_index": "b", "provider": "codex", "email": "b@example.com" }),
+            json!({ "auth_index": "c", "provider": "claude", "note": "Personal" }),
+            json!({ "auth_index": "d", "provider": "claude", "email": "d@example.com", "note": "" }),
+        ]
+        .iter()
+        .filter_map(account_from_entry)
+        .collect();
+        number_unnamed_accounts(&mut accounts);
+        let labels: Vec<_> = accounts.iter().map(|(a, _)| a.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            [
+                "Claude account 1",
+                "Codex account 1",
+                "Personal",
+                "Claude account 3"
+            ]
+        );
     }
 
     #[test]

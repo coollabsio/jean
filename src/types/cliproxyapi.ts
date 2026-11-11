@@ -5,8 +5,10 @@ import type { CodexUsageSnapshot } from './codex-cli'
 export interface CliproxyAccountUsage {
   authIndex: string
   provider: string
-  /** Email or account name. */
+  /** Card title: the CLIProxyAPI auth file note, or "<Provider> account <n>". Never the email. */
   label: string
+  /** Account email. Use only where the account must be named (Claude terms error). */
+  email: string | null
   status: string | null
   disabled: boolean
   claude: ClaudeUsageSnapshot | null
