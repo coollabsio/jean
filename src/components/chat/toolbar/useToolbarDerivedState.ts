@@ -1,6 +1,9 @@
 import { useMemo } from 'react'
 import type { CliBackend, CustomCliProfile } from '@/types/preferences'
-import { getProviderAliasModelOptions } from '@/types/preferences'
+import {
+  formatClaudeModelIdLabel,
+  getProviderAliasModelOptions,
+} from '@/types/preferences'
 import {
   CURSOR_MODEL_OPTIONS,
   COMMANDCODE_MODEL_OPTIONS,
@@ -356,9 +359,15 @@ export function useToolbarDerivedState({
     ? fastInfo.baseModel
     : effectiveSelectedModel
 
-  const matchedModelLabel = filteredModelOptions.find(
-    option => option.value === labelLookupKey
-  )?.label
+  // A custom provider lists only the opus/sonnet/haiku aliases, but the
+  // session can hold a full Claude id (the default `claude-opus-5-5`).
+  // Show its short name instead of the raw id.
+  const matchedModelLabel =
+    filteredModelOptions.find(option => option.value === labelLookupKey)
+      ?.label ??
+    (selectedBackend === 'claude'
+      ? formatClaudeModelIdLabel(labelLookupKey)
+      : undefined)
   const grokShortLabel = formatGrokPromptModelLabel(labelLookupKey)
   const selectedModelLabel = !isGrok
     ? (matchedModelLabel ?? labelLookupKey)

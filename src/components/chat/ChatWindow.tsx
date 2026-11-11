@@ -103,6 +103,7 @@ import {
   resolveMagicPromptBackend,
   resolveMagicPromptProvider,
   resolveProviderModelId,
+  toProviderAliasModel,
   type CliBackend,
   type CodexProviderProfile,
   type CustomCliProfile,
@@ -1010,12 +1011,18 @@ const ChatWindowContent = memo(function ChatWindowContent({
   )
 
   // Per-session model selection, falls back to preferences default (backend-aware)
-  const selectedModel = resolveSelectedModelForBackend(
+  const resolvedModel = resolveSelectedModelForBackend(
     selectedBackend,
     session?.selected_model,
     preferences,
     selectedBackend === 'pi' ? availablePiModelOptions : undefined
   )
+  // A custom provider offers only the opus/sonnet/haiku aliases, so the
+  // first-party default (`claude-opus-5-5`) becomes its alias (`opus`).
+  const selectedModel =
+    selectedBackend === 'claude' && isCustomProvider
+      ? toProviderAliasModel(resolvedModel)
+      : resolvedModel
   const buildNewContextLabel = resolveApprovalLabel(
     'build',
     preferences,

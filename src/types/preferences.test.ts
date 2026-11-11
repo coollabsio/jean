@@ -28,6 +28,7 @@ import {
   PI_DEFAULT_MAGIC_PROMPT_MODELS,
   resolveMagicPromptBackend,
   resolveMagicPromptProvider,
+  toProviderAliasModel,
 } from './preferences'
 
 describe('default release notes prompt', () => {
@@ -293,6 +294,20 @@ describe('magic prompt preference resolvers', () => {
         'OpenRouter'
       )
     ).toBeNull()
+  })
+})
+
+describe('toProviderAliasModel', () => {
+  it('maps full Claude ids to their provider alias', () => {
+    expect(toProviderAliasModel('claude-opus-5-5')).toBe('opus')
+    expect(toProviderAliasModel('claude-sonnet-4-6[1m]')).toBe('sonnet')
+    expect(toProviderAliasModel('claude-haiku-4-5-20251001')).toBe('haiku')
+  })
+
+  it('keeps aliases and ids that have no alias', () => {
+    expect(toProviderAliasModel('opus')).toBe('opus')
+    expect(toProviderAliasModel('claude-fable-5-2')).toBe('claude-fable-5-2')
+    expect(toProviderAliasModel('glm-4.7')).toBe('glm-4.7')
   })
 })
 

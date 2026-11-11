@@ -1794,6 +1794,19 @@ const CLAUDE_FAMILY_VERSION_PATTERN =
   /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?(\[1m\])?$/i
 
 /**
+ * Short display name for a Claude model id (`claude-opus-5-5` -> `Opus 5.5`).
+ * Returns undefined when `model` is not a Claude family/version id.
+ */
+export function formatClaudeModelIdLabel(model: string): string | undefined {
+  const match = CLAUDE_FAMILY_VERSION_PATTERN.exec(model)
+  if (!match) return undefined
+  const [, family = '', major, minor, oneMillion] = match
+  const name = family.charAt(0).toUpperCase() + family.slice(1).toLowerCase()
+  const version = minor ? `${major}.${minor}` : major
+  return `${name} ${version}${oneMillion ? ' (1M)' : ''}`
+}
+
+/**
  * Display label for a model that a provider maps to a Claude Code alias.
  * Claude ids get the same short names as first-party models
  * (`claude-opus-5-5` -> `Opus 5.5`). Other ids keep the alias name with the
@@ -1804,12 +1817,7 @@ export function formatProviderAliasModelLabel(
   model?: string
 ): string {
   if (!model) return aliasLabel
-  const match = CLAUDE_FAMILY_VERSION_PATTERN.exec(model)
-  if (!match) return `${aliasLabel} (${model})`
-  const [, family = '', major, minor, oneMillion] = match
-  const name = family.charAt(0).toUpperCase() + family.slice(1).toLowerCase()
-  const version = minor ? `${major}.${minor}` : major
-  return `${name} ${version}${oneMillion ? ' (1M)' : ''}`
+  return formatClaudeModelIdLabel(model) ?? `${aliasLabel} (${model})`
 }
 
 function parseProfileEnv(
@@ -1836,6 +1844,17 @@ export function getProviderAliasModelOptions(
       env?.[envKey] || env?.ANTHROPIC_MODEL
     ),
   }))
+}
+
+/**
+ * Claude Code alias for a full Claude id (`claude-opus-5-5` -> `opus`).
+ * Custom providers list only the aliases and map them through their profile
+ * env, so a first-party default must become the alias under such a provider.
+ * Ids with no alias (Fable, non-Claude) are returned unchanged.
+ */
+export function toProviderAliasModel(model: string): string {
+  const family = CLAUDE_FAMILY_VERSION_PATTERN.exec(model)?.[1]?.toLowerCase()
+  return CLAUDE_ALIASES.find(alias => alias.value === family)?.value ?? model
 }
 
 /**
