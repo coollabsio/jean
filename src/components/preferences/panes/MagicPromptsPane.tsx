@@ -110,6 +110,7 @@ import {
   type MagicCodeReviewConfig,
   type CliBackend,
   getProviderAliasModelOptions,
+  toProviderAliasModel,
 } from '@/types/preferences'
 import { cn } from '@/lib/utils'
 import {
@@ -919,7 +920,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
         return true
     }
   }
-  const currentModel = (() => {
+  const backendModel = (() => {
     if (!rawCurrentModel) return undefined
     if (modelMatchesEffectiveBackend(rawCurrentModel)) return rawCurrentModel
     if (effectiveBackend === 'codex') return codexModelOptions[0]?.value
@@ -935,6 +936,15 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     if (effectiveBackend === 'muse') return museModelOptions[0]?.value
     return selectedConfig.defaultModel ?? rawCurrentModel
   })()
+  // A custom provider offers only the opus/sonnet/haiku aliases, so the
+  // first-party default (`claude-opus-5-5`) becomes its alias (`opus`).
+  const isCustomClaudeProvider =
+    effectiveBackend === 'claude' &&
+    !!profiles.find(p => p.name === currentProvider)?.settings_json
+  const currentModel =
+    backendModel && isCustomClaudeProvider
+      ? toProviderAliasModel(backendModel)
+      : backendModel
   const modelReasoning = currentModel
     ? getMagicPromptModelReasoning(
         modelCatalog,
