@@ -109,6 +109,7 @@ import {
   type MagicPromptExecutionMode,
   type MagicCodeReviewConfig,
   type CliBackend,
+  getProviderAliasModelOptions,
 } from '@/types/preferences'
 import { cn } from '@/lib/utils'
 import {
@@ -983,28 +984,10 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     }
     const profile = profiles.find(p => p.name === currentProvider)
     if (!profile?.settings_json) return claudeModelOptions
-    try {
-      const settings = JSON.parse(profile.settings_json)
-      const env = settings?.env
-      if (!env) return claudeModelOptions
-      const suffix = (m?: string) => (m ? ` (${m})` : '')
-      return [
-        {
-          value: 'opus' as const,
-          label: `Opus${suffix(env.ANTHROPIC_DEFAULT_OPUS_MODEL || env.ANTHROPIC_MODEL)}`,
-        },
-        {
-          value: 'sonnet' as const,
-          label: `Sonnet${suffix(env.ANTHROPIC_DEFAULT_SONNET_MODEL || env.ANTHROPIC_MODEL)}`,
-        },
-        {
-          value: 'haiku' as const,
-          label: `Haiku${suffix(env.ANTHROPIC_DEFAULT_HAIKU_MODEL || env.ANTHROPIC_MODEL)}`,
-        },
-      ] as { value: MagicPromptModel; label: string }[]
-    } catch {
-      return claudeModelOptions
-    }
+    return getProviderAliasModelOptions(profile.settings_json) as {
+      value: MagicPromptModel
+      label: string
+    }[]
   }, [
     claudeModelOptions,
     currentProvider,

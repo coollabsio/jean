@@ -1777,31 +1777,60 @@ export function getClaudeModelOptionsForProvider(
   }
 
   const profile = customCliProfiles.find(p => p.name === provider)
-  let opusModel: string | undefined
-  let sonnetModel: string | undefined
-  let haikuModel: string | undefined
-  if (profile?.settings_json) {
+  return getProviderAliasModelOptions(profile?.settings_json)
+}
+
+const CLAUDE_ALIASES = [
+  { value: 'opus', label: 'Opus', envKey: 'ANTHROPIC_DEFAULT_OPUS_MODEL' },
+  {
+    value: 'sonnet',
+    label: 'Sonnet',
+    envKey: 'ANTHROPIC_DEFAULT_SONNET_MODEL',
+  },
+  { value: 'haiku', label: 'Haiku', envKey: 'ANTHROPIC_DEFAULT_HAIKU_MODEL' },
+] as const
+
+const CLAUDE_FAMILY_VERSION_PATTERN =
+  /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?(\[1m\])?$/i
+
+/**
+ * Display label for a model that a provider maps to a Claude Code alias.
+ * Claude ids get the same short names as first-party models
+ * (`claude-opus-5-5` -> `Opus 5.5`). Other ids keep the alias name with the
+ * raw id (`Opus (glm-4.7)`).
+ */
+export function formatProviderAliasModelLabel(
+  aliasLabel: string,
+  model?: string
+): string {
+  if (!model) return aliasLabel
+  const match = CLAUDE_FAMILY_VERSION_PATTERN.exec(model)
+  if (!match) return `${aliasLabel} (${model})`
+  const [, family = '', major, minor, oneMillion] = match
+  const name = family.charAt(0).toUpperCase() + family.slice(1).toLowerCase()
+  const version = minor ? `${major}.${minor}` : major
+  return `${name} ${version}${oneMillion ? ' (1M)' : ''}`
+}
+
+/** opus/sonnet/haiku options labeled from a CLI profile's settings JSON env. */
+export function getProviderAliasModelOptions(
+  settingsJson?: string | null
+): { value: ClaudeModel; label: string }[] {
+  let env: Record<string, string | undefined> | undefined
+  if (settingsJson) {
     try {
-      const settings = JSON.parse(profile.settings_json) as {
-        env?: Record<string, string>
-      }
-      const env = settings?.env
-      if (env) {
-        opusModel = env.ANTHROPIC_DEFAULT_OPUS_MODEL || env.ANTHROPIC_MODEL
-        sonnetModel = env.ANTHROPIC_DEFAULT_SONNET_MODEL || env.ANTHROPIC_MODEL
-        haikuModel = env.ANTHROPIC_DEFAULT_HAIKU_MODEL || env.ANTHROPIC_MODEL
-      }
+      env = (JSON.parse(settingsJson) as { env?: Record<string, string> })?.env
     } catch {
       // Ignore invalid profile JSON; fall back to short labels.
     }
   }
-
-  const suffix = (model?: string) => (model ? ` (${model})` : '')
-  return [
-    { value: 'opus', label: `Opus${suffix(opusModel)}` },
-    { value: 'sonnet', label: `Sonnet${suffix(sonnetModel)}` },
-    { value: 'haiku', label: `Haiku${suffix(haikuModel)}` },
-  ]
+  return CLAUDE_ALIASES.map(({ value, label, envKey }) => ({
+    value,
+    label: formatProviderAliasModelLabel(
+      label,
+      env?.[envKey] || env?.ANTHROPIC_MODEL
+    ),
+  }))
 }
 
 // Claude models that support fast service tier. Fast mode is exposed via a
