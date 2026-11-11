@@ -4488,28 +4488,79 @@ pub(crate) async fn upsert_cliproxyapi_provider_profiles(
     client_key: &str,
 ) -> Result<(), String> {
     let mut preferences = load_preferences(app.clone()).await?;
-    opinionated::cliproxyapi::upsert_provider_profiles(
+    if opinionated::cliproxyapi::upsert_provider_profiles(
         &mut preferences.custom_cli_profiles,
         &mut preferences.custom_codex_providers,
         client_key,
-    );
-    save_preferences(app.clone(), preferences).await
+    ) {
+        save_preferences(app.clone(), preferences).await?;
+    }
+    Ok(())
 }
 
-/// Write the models the running proxy serves into the CLIProxyAPI Claude profile.
+/// Write the models the running proxy serves into the CLIProxyAPI providers:
+/// all ids into the PI provider, the newest Claude per family into the Claude
+/// profile. Errors when the proxy serves no Claude model (PI is still synced).
 pub(crate) async fn apply_cliproxyapi_models(
     app: &AppHandle,
-    models: &opinionated::cliproxyapi::DiscoveredClaudeModels,
-) -> Result<(), String> {
+    ids: &[String],
+) -> Result<opinionated::cliproxyapi::DiscoveredClaudeModels, String> {
     let mut preferences = load_preferences(app.clone()).await?;
-    let profile = preferences
-        .custom_cli_profiles
-        .iter_mut()
-        .find(|profile| profile.name == opinionated::cliproxyapi::PROFILE_NAME)
-        .ok_or_else(|| "CLIProxyAPI profile is missing. Install CLIProxyAPI first.".to_string())?;
-    profile.settings_json =
-        opinionated::cliproxyapi::apply_models_to_settings(&profile.settings_json, models)?;
-    save_preferences(app.clone(), preferences).await
+    let mut changed = false;
+    if let Some(provider) = opinionated::cliproxyapi::pi_provider(ids) {
+        pi_cli::upsert_pi_provider(provider.clone()).await?;
+        changed |= opinionated::cliproxyapi::upsert_pi_provider_profile(
+            &mut preferences.custom_pi_providers,
+            provider,
+        );
+    }
+    let claude = opinionated::cliproxyapi::claude_models_from_ids(ids);
+    if let Ok(models) = &claude {
+        let profile = preferences
+            .custom_cli_profiles
+            .iter_mut()
+            .find(|profile| profile.name == opinionated::cliproxyapi::PROFILE_NAME)
+            .ok_or_else(|| {
+                "CLIProxyAPI profile is missing. Install CLIProxyAPI first.".to_string()
+            })?;
+        let settings_json =
+            opinionated::cliproxyapi::apply_models_to_settings(&profile.settings_json, models)?;
+        if profile.settings_json != settings_json {
+            profile.settings_json = settings_json;
+            changed = true;
+        }
+    }
+    if changed {
+        save_preferences(app.clone(), preferences).await?;
+    }
+    claude
+}
+
+/// When CLIProxyAPI is installed, make sure every backend with custom
+/// providers has the CLIProxyAPI provider, then sync the served models once
+/// the proxy answers. Covers installs made before a backend got support.
+async fn sync_cliproxyapi_providers_on_startup(app: &AppHandle) {
+    let Some(client_key) = opinionated::cliproxyapi::installed_client_key() else {
+        return;
+    };
+    if let Err(error) = upsert_cliproxyapi_provider_profiles(app, &client_key).await {
+        log::warn!("Failed to sync CLIProxyAPI providers: {error}");
+        return;
+    }
+    let mut last_error = String::new();
+    for _ in 0..5 {
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        match opinionated::cliproxyapi::list_model_ids().await {
+            Ok(ids) => {
+                if let Err(error) = apply_cliproxyapi_models(app, &ids).await {
+                    log::info!("CLIProxyAPI model sync on startup: {error}");
+                }
+                return;
+            }
+            Err(error) => last_error = error,
+        }
+    }
+    log::info!("CLIProxyAPI model sync on startup skipped: {last_error}");
 }
 
 /// Remove CLIProxyAPI provider profiles and the Claude settings file they use.
@@ -4518,6 +4569,7 @@ pub(crate) async fn remove_cliproxyapi_provider_profiles(app: &AppHandle) -> Res
     let changed = opinionated::cliproxyapi::detach_provider_profiles(
         &mut preferences.custom_cli_profiles,
         &mut preferences.custom_codex_providers,
+        &mut preferences.custom_pi_providers,
         &mut preferences.default_provider,
         &mut preferences.default_codex_provider,
     );
@@ -4526,6 +4578,11 @@ pub(crate) async fn remove_cliproxyapi_provider_profiles(app: &AppHandle) -> Res
             std::fs::remove_file(&path)
                 .map_err(|error| format!("Failed to delete CLIProxyAPI Claude profile: {error}"))?;
         }
+    }
+    if let Err(error) =
+        pi_cli::delete_pi_provider(opinionated::cliproxyapi::PROFILE_NAME.to_string()).await
+    {
+        log::warn!("Failed to remove CLIProxyAPI PI provider: {error}");
     }
     if changed {
         save_preferences(app.clone(), preferences).await?;
@@ -5653,6 +5710,10 @@ pub fn initialize_runtime(context: &RuntimeContext) -> Result<(), String> {
         }
         opinionated::cliproxyapi::export_client_key_to_process();
         opinionated::cliproxyapi::resume_if_enabled();
+    });
+    let cliproxy_context = context.clone();
+    async_runtime::spawn(async move {
+        sync_cliproxyapi_providers_on_startup(&cliproxy_context).await;
     });
     Ok(())
 }

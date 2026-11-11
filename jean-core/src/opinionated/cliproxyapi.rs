@@ -2,15 +2,18 @@
 //!
 //! CLIProxyAPI (MIT, https://github.com/router-for-me/CLIProxyAPI) owns
 //! multi-account pooling and round-robin. Jean only downloads the official
-//! release binary, supervises it on localhost, and points Claude/Codex at
-//! `http://127.0.0.1:8317` through the existing provider profiles.
+//! release binary, supervises it on localhost, and points every backend with a
+//! custom provider system (Claude, Codex, PI) at `http://127.0.0.1:8317`
+//! through the existing provider profiles. A new backend with custom providers
+//! must be added to `upsert_provider_profiles`, `detach_provider_profiles`,
+//! and (if it needs a model list) `pi_provider`-style model sync.
 //!
 //! Subscription login is CLIProxyAPI's own `-claude-login` / `-codex-login`.
 //! Jean can launch those against the managed binary and config. Tokens stay in
 //! CLIProxyAPI's auth directory. Jean does not store them or switch accounts.
 
 use crate::platform::{is_process_alive, kill_process_tree, silent_command, write_binary_file};
-use crate::{CodexProviderProfile, CustomCliProfile};
+use crate::{CodexProviderProfile, CustomCliProfile, PiProviderModel, PiProviderProfile};
 use serde::Deserialize;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -131,51 +134,162 @@ pub fn codex_provider() -> CodexProviderProfile {
     }
 }
 
-/// Insert or refresh the Jean-managed Claude and Codex profiles.
-/// Does not change the user's default provider.
+/// PI provider for the proxy's OpenAI-compatible endpoint. PI needs an explicit
+/// model list, so this is `None` until the proxy serves at least one model.
+pub fn pi_provider(model_ids: &[String]) -> Option<PiProviderProfile> {
+    if model_ids.is_empty() {
+        return None;
+    }
+    Some(PiProviderProfile {
+        name: PROFILE_NAME.to_string(),
+        base_url: CODEX_BASE_URL.to_string(),
+        api: "openai-completions".to_string(),
+        api_key_env: Some(CODEX_ENV_KEY.to_string()),
+        models: model_ids
+            .iter()
+            .map(|id| PiProviderModel {
+                id: id.clone(),
+                name: None,
+            })
+            .collect(),
+    })
+}
+
+const MODEL_ENV_KEYS: [&str; 3] = [
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+];
+
+/// `previous` Claude settings with the Jean-managed env keys set for
+/// `client_key`. Other keys (discovered models, user edits) stay.
+fn refreshed_claude_settings(previous: &str, client_key: &str) -> String {
+    let fresh = claude_settings_json(client_key);
+    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(previous) else {
+        return fresh;
+    };
+    let Ok(fresh_value) = serde_json::from_str::<serde_json::Value>(&fresh) else {
+        return fresh;
+    };
+    let (Some(env), Some(fresh_env)) = (
+        value.get_mut("env").and_then(|env| env.as_object_mut()),
+        fresh_value.get("env").and_then(|env| env.as_object()),
+    ) else {
+        return fresh;
+    };
+    for (key, managed) in fresh_env {
+        env.insert(key.clone(), managed.clone());
+    }
+    serde_json::to_string_pretty(&value).unwrap_or(fresh)
+}
+
+/// Insert or refresh the Jean-managed Claude and Codex profiles. Keeps the
+/// discovered Claude model ids. Does not change the user's default provider.
+/// Returns `true` when something changed.
 pub fn upsert_provider_profiles(
     claude: &mut Vec<CustomCliProfile>,
     codex: &mut Vec<CodexProviderProfile>,
     client_key: &str,
-) {
-    let settings_json = claude_settings_json(client_key);
+) -> bool {
+    let mut changed = false;
     if let Some(profile) = claude
         .iter_mut()
         .find(|profile| profile.name == PROFILE_NAME)
     {
-        profile.settings_json = settings_json;
-        profile.supports_thinking = Some(true);
+        let settings_json = refreshed_claude_settings(&profile.settings_json, client_key);
+        if profile.settings_json != settings_json || profile.supports_thinking != Some(true) {
+            profile.settings_json = settings_json;
+            profile.supports_thinking = Some(true);
+            changed = true;
+        }
     } else {
         claude.push(CustomCliProfile {
             name: PROFILE_NAME.to_string(),
-            settings_json,
+            settings_json: claude_settings_json(client_key),
             file_path: String::new(),
             supports_thinking: Some(true),
         });
+        changed = true;
     }
 
     let provider = codex_provider();
-    if let Some(existing) = codex
+    match codex
         .iter_mut()
         .find(|profile| profile.name == PROFILE_NAME)
     {
-        *existing = provider;
-    } else {
-        codex.push(provider);
+        Some(existing) => {
+            let same = existing.provider_id == provider.provider_id
+                && existing.base_url == provider.base_url
+                && existing.env_key == provider.env_key
+                && existing.wire_api == provider.wire_api;
+            if !same {
+                *existing = provider;
+                changed = true;
+            }
+        }
+        None => {
+            codex.push(provider);
+            changed = true;
+        }
     }
+    changed
+}
+
+/// Insert or replace the Jean-managed PI provider index entry.
+/// Returns `true` when something changed.
+pub fn upsert_pi_provider_profile(
+    pi: &mut Vec<PiProviderProfile>,
+    provider: PiProviderProfile,
+) -> bool {
+    let same_models = |existing: &PiProviderProfile| {
+        existing.base_url == provider.base_url
+            && existing.api == provider.api
+            && existing.api_key_env == provider.api_key_env
+            && existing.models.len() == provider.models.len()
+            && existing
+                .models
+                .iter()
+                .zip(&provider.models)
+                .all(|(a, b)| a.id == b.id && a.name == b.name)
+    };
+    match pi.iter_mut().find(|profile| profile.name == PROFILE_NAME) {
+        Some(existing) if same_models(existing) => false,
+        Some(existing) => {
+            *existing = provider;
+            true
+        }
+        None => {
+            pi.push(provider);
+            true
+        }
+    }
+}
+
+/// Client key of an installed CLIProxyAPI, or `None` when it is not installed.
+pub fn installed_client_key() -> Option<String> {
+    let home = home_dir().ok()?;
+    let paths = layout(&home);
+    if !paths.binary.is_file() {
+        return None;
+    }
+    let key = std::fs::read_to_string(&paths.client_key).ok()?;
+    let key = key.trim();
+    (!key.is_empty()).then(|| key.to_string())
 }
 
 /// Drop the Jean-managed profiles and clear them if they were the default.
 pub fn detach_provider_profiles(
     claude: &mut Vec<CustomCliProfile>,
     codex: &mut Vec<CodexProviderProfile>,
+    pi: &mut Vec<PiProviderProfile>,
     default_provider: &mut Option<String>,
     default_codex_provider: &mut Option<String>,
 ) -> bool {
-    let before = claude.len() + codex.len();
+    let before = claude.len() + codex.len() + pi.len();
     claude.retain(|profile| profile.name != PROFILE_NAME);
     codex.retain(|profile| profile.name != PROFILE_NAME);
-    let mut changed = claude.len() + codex.len() != before;
+    pi.retain(|profile| profile.name != PROFILE_NAME);
+    let mut changed = claude.len() + codex.len() + pi.len() != before;
     if default_provider.as_deref() == Some(PROFILE_NAME) {
         *default_provider = None;
         changed = true;
@@ -221,7 +335,7 @@ pub fn render_config(
     let yaml = serde_yaml::to_string(&value).map_err(|error| error.to_string())?;
     let mut rendered = String::from(
         "# Jean-managed CLIProxyAPI. Pooling stays in CLIProxyAPI (MIT).\n\
-         # Jean only points Claude and Codex at this process.\n\
+         # Jean only points Claude, Codex, and PI at this process.\n\
          # Localhost only. Change server.host yourself if you intentionally want LAN access.\n",
     );
     rendered.push_str(&yaml);
@@ -535,9 +649,9 @@ pub fn discovered_from_ids(ids: &[String]) -> DiscoveredClaudeModels {
     }
 }
 
-/// Ask the running proxy which Claude models it serves. No guessed names: any
+/// Ask the running proxy which model ids it serves. No guessed names: any
 /// failure is returned to the caller.
-pub async fn discover_claude_models() -> Result<DiscoveredClaudeModels, String> {
+pub async fn list_model_ids() -> Result<Vec<String>, String> {
     let home = home_dir()?;
     let paths = layout(&home);
     if !paths.binary.is_file() {
@@ -567,8 +681,12 @@ pub async fn discover_claude_models() -> Result<DiscoveredClaudeModels, String> 
         .json()
         .await
         .map_err(|error| format!("CLIProxyAPI returned an unreadable model list: {error}"))?;
-    let ids: Vec<String> = list.data.into_iter().map(|entry| entry.id).collect();
-    let found = discovered_from_ids(&ids);
+    Ok(list.data.into_iter().map(|entry| entry.id).collect())
+}
+
+/// Newest Claude model per family in `ids`. Errors when there is none.
+pub fn claude_models_from_ids(ids: &[String]) -> Result<DiscoveredClaudeModels, String> {
+    let found = discovered_from_ids(ids);
     if found == DiscoveredClaudeModels::default() {
         return Err(
             "CLIProxyAPI serves no Claude models. Add a Claude account in Preferences → Opinionated."
@@ -590,11 +708,11 @@ pub fn apply_models_to_settings(
         .get_mut("env")
         .and_then(|env| env.as_object_mut())
         .ok_or_else(|| "CLIProxyAPI profile has no env".to_string())?;
-    for (key, model) in [
-        ("ANTHROPIC_DEFAULT_OPUS_MODEL", &models.opus),
-        ("ANTHROPIC_DEFAULT_SONNET_MODEL", &models.sonnet),
-        ("ANTHROPIC_DEFAULT_HAIKU_MODEL", &models.haiku),
-    ] {
+    for (key, model) in
+        MODEL_ENV_KEYS
+            .into_iter()
+            .zip([&models.opus, &models.sonnet, &models.haiku])
+    {
         match model {
             Some(id) => {
                 env.insert(key.to_string(), serde_json::Value::String(id.clone()));
@@ -1362,8 +1480,9 @@ mod tests {
             supports_thinking: Some(true),
         }];
         let mut codex = Vec::new();
-        upsert_provider_profiles(&mut claude, &mut codex, "key-a");
-        upsert_provider_profiles(&mut claude, &mut codex, "key-b");
+        assert!(upsert_provider_profiles(&mut claude, &mut codex, "key-a"));
+        assert!(!upsert_provider_profiles(&mut claude, &mut codex, "key-a"));
+        assert!(upsert_provider_profiles(&mut claude, &mut codex, "key-b"));
         assert_eq!(claude.len(), 2);
         assert_eq!(codex.len(), 1);
         assert!(claude
@@ -1373,6 +1492,59 @@ mod tests {
             .settings_json
             .contains("key-b"));
         assert_eq!(codex[0].provider_id, CODEX_PROVIDER_ID);
+    }
+
+    #[test]
+    fn upsert_keeps_discovered_models_and_user_env() {
+        let with_models = apply_models_to_settings(
+            &claude_settings_json("key-a"),
+            &DiscoveredClaudeModels {
+                opus: Some("claude-opus-5-5".into()),
+                sonnet: None,
+                haiku: None,
+            },
+        )
+        .expect("apply");
+        let mut value: serde_json::Value = serde_json::from_str(&with_models).unwrap();
+        value["env"]["MY_VAR"] = "mine".into();
+        let mut claude = vec![CustomCliProfile {
+            name: PROFILE_NAME.to_string(),
+            settings_json: value.to_string(),
+            file_path: String::new(),
+            supports_thinking: Some(true),
+        }];
+        let mut codex = Vec::new();
+        assert!(upsert_provider_profiles(&mut claude, &mut codex, "key-b"));
+        let env: serde_json::Value = serde_json::from_str(&claude[0].settings_json).unwrap();
+        assert_eq!(
+            env["env"]["ANTHROPIC_DEFAULT_OPUS_MODEL"],
+            "claude-opus-5-5"
+        );
+        assert_eq!(env["env"]["MY_VAR"], "mine");
+        assert_eq!(env["env"]["ANTHROPIC_AUTH_TOKEN"], "key-b");
+        assert_eq!(env["env"]["ANTHROPIC_BASE_URL"], CLAUDE_BASE_URL);
+    }
+
+    #[test]
+    fn pi_provider_lists_every_served_model_and_upserts_once() {
+        assert!(pi_provider(&[]).is_none());
+        let ids = vec!["claude-opus-5-5".to_string(), "gpt-5".to_string()];
+        let provider = pi_provider(&ids).expect("pi");
+        assert_eq!(provider.name, PROFILE_NAME);
+        assert_eq!(provider.base_url, CODEX_BASE_URL);
+        assert_eq!(provider.api_key_env.as_deref(), Some(CODEX_ENV_KEY));
+        let model_ids: Vec<&str> = provider.models.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(model_ids, ["claude-opus-5-5", "gpt-5"]);
+
+        let mut pi = Vec::new();
+        assert!(upsert_pi_provider_profile(&mut pi, provider.clone()));
+        assert!(!upsert_pi_provider_profile(&mut pi, provider));
+        assert!(upsert_pi_provider_profile(
+            &mut pi,
+            pi_provider(&["gpt-5".to_string()]).expect("pi")
+        ));
+        assert_eq!(pi.len(), 1);
+        assert_eq!(pi[0].models.len(), 1);
     }
 
     #[test]
@@ -1392,17 +1564,20 @@ mod tests {
             },
         ];
         let mut codex = vec![codex_provider()];
+        let mut pi = vec![pi_provider(&["gpt-5".to_string()]).expect("pi")];
         let mut default_provider = Some(PROFILE_NAME.to_string());
         let mut default_codex = Some(PROFILE_NAME.to_string());
         assert!(detach_provider_profiles(
             &mut claude,
             &mut codex,
+            &mut pi,
             &mut default_provider,
             &mut default_codex
         ));
         assert_eq!(claude.len(), 1);
         assert_eq!(claude[0].name, "OpenRouter");
         assert!(codex.is_empty());
+        assert!(pi.is_empty());
         assert!(default_provider.is_none());
         assert!(default_codex.is_none());
     }

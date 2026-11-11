@@ -70,7 +70,7 @@ const PLUGINS: PluginDefinition[] = [
         note: 'Add accounts with the buttons above. The logins stay in CLIProxyAPI, not in Jean.',
       },
       {
-        note: 'Select the CLIProxyAPI provider for a Claude or Codex session (Preferences → Providers).',
+        note: 'Select the CLIProxyAPI provider for a Claude, Codex, or PI session (Preferences → Providers). Jean adds it to each backend automatically.',
       },
       {
         note: 'Files are in ~/.jean/opinionated/cliproxyapi. The proxy listens on localhost only.',

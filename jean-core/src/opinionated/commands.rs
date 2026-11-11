@@ -190,9 +190,8 @@ pub async fn prepare_cliproxyapi_account_login(
 pub async fn refresh_cliproxyapi_models(
     app: AppHandle,
 ) -> Result<super::cliproxyapi::DiscoveredClaudeModels, String> {
-    let models = super::cliproxyapi::discover_claude_models().await?;
-    crate::apply_cliproxyapi_models(&app, &models).await?;
-    Ok(models)
+    let ids = super::cliproxyapi::list_model_ids().await?;
+    crate::apply_cliproxyapi_models(&app, &ids).await
 }
 
 async fn install_cliproxyapi(app: &AppHandle) -> Result<String, String> {
