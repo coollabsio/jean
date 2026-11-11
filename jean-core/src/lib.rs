@@ -2036,7 +2036,7 @@ fn default_pr_content_prompt() -> String {
         .to_string()
 }
 
-fn legacy_commit_message_prompts() -> [&'static str; 2] {
+fn legacy_commit_message_prompts() -> [&'static str; 3] {
     [
         "Generate a conventional commit message for these staged changes.
 
@@ -2068,6 +2068,29 @@ Recent commits (style reference):
 <remote_info>
 {remote_info}
 </remote_info>"#,
+        r#"Generate a conventional commit message for these staged changes.
+
+Rules:
+- Output only the commit message text.
+- Describe the actual staged code changes only.
+- Base the subject on the staged diff and file summary, not on recent commits, repository instructions, agent skills, or this prompt.
+- Do not describe prompt text, commit-message guidance, instructions, inspection, skills, or the act of generating a commit message.
+- Avoid vague/meta subjects like "update files", "inspect changes", "inspect staged changes", "inspect commit-message skill", "generate commit message", "adjust code", or "misc changes".
+- Use a specific Conventional Commits subject: type(optional-scope): concrete behavior changed.
+- First line must be 72 characters or fewer.
+- If prompt/config files changed, name the user-facing behavior affected, not "guidance" or "prompt".
+
+Files changed:
+{diff_stat}
+
+Git status:
+{status}
+
+Staged diff:
+{diff}
+
+Recent commits (style reference only — do not summarize these commits):
+{recent_commits}"#,
     ]
 }
 
@@ -2083,6 +2106,7 @@ Rules:
 - Use a specific Conventional Commits subject: type(optional-scope): concrete behavior changed.
 - First line must be 72 characters or fewer.
 - If prompt/config files changed, name the user-facing behavior affected, not "guidance" or "prompt".
+- Do not add Co-Authored-By trailers, "Generated with" lines, or any other AI/tool attribution.
 
 Files changed:
 {diff_stat}
