@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react'
-import { Globe, Loader2, RefreshCw } from '@/components/icons/reicon'
+import { Loader2, RefreshCw } from '@/components/icons/reicon'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -42,6 +42,7 @@ import {
   type UsageWindowSpec,
 } from '@/components/usage/usage-windows'
 import { cn } from '@/lib/utils'
+import { proxyAccountIcon } from '@/components/usage/usage-entries'
 
 /** One section per backend: icon, name, plan badge, then usage windows. */
 function UsageCard({
@@ -261,12 +262,6 @@ function CodexUsageBody({
       />
     </div>
   )
-}
-
-function proxyAccountIcon(provider: string) {
-  if (provider === 'claude' || provider === 'anthropic') return ClaudeIcon
-  if (provider === 'codex' || provider === 'openai') return CodexIcon
-  return Globe
 }
 
 /** One card per CLIProxyAPI account, with the same charts as the backends. */

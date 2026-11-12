@@ -2,6 +2,7 @@ import type React from 'react'
 import { ClaudeIcon } from '@/components/icons/ClaudeIcon'
 import { CodexIcon } from '@/components/icons/CodexIcon'
 import { GrokIcon } from '@/components/icons/GrokIcon'
+import { Globe } from '@/components/icons/reicon'
 import {
   useClaudeCliAuth,
   useClaudeCliStatus,
@@ -17,6 +18,8 @@ import {
   useGrokCliStatus,
   useGrokUsage,
 } from '@/services/grok-cli'
+import { useCliproxyapiUsage } from '@/services/cliproxyapi'
+import type { CliproxyAccountUsage } from '@/types/cliproxyapi'
 import { DropdownMenuItem } from '@/components/ui/dropdown-menu'
 import {
   Tooltip,
@@ -32,15 +35,14 @@ import {
 } from '@/lib/usage-format'
 import { cn } from '@/lib/utils'
 
-export type UsageBackendId = 'claude' | 'codex' | 'grok'
-
 interface UsageWindow {
   usedPercent: number
   resetsAt: number | null
 }
 
 export interface UsageEntry {
-  id: UsageBackendId
+  /** `claude`, `codex`, `grok`, or `cliproxyapi-<authIndex>`. */
+  id: string
   label: string
   Icon: React.ComponentType<{ className?: string }>
   plan: string | null
@@ -49,8 +51,32 @@ export interface UsageEntry {
   weekly: UsageWindow | null
 }
 
+export function proxyAccountIcon(provider: string) {
+  if (provider === 'claude' || provider === 'anthropic') return ClaudeIcon
+  if (provider === 'codex' || provider === 'openai') return CodexIcon
+  return Globe
+}
+
+/** Quick-menu entry for one enabled CLIProxyAPI account. */
+function proxyAccountEntry(account: CliproxyAccountUsage): UsageEntry {
+  const usage = account.claude ?? account.codex
+  return {
+    id: `cliproxyapi-${account.authIndex}`,
+    label: account.label,
+    Icon: proxyAccountIcon(account.provider),
+    plan: formatPlanName(
+      usage?.planType,
+      account.claude?.planTier ?? undefined
+    ),
+    sessionLabel: 'Session',
+    session: usage?.session ?? null,
+    weekly: usage?.weekly ?? null,
+  }
+}
+
 /**
- * Usage of every installed + authenticated backend, for the quick menus.
+ * Usage of every installed + authenticated backend, then every enabled
+ * CLIProxyAPI account, for the quick menus.
  * `fetchEnabled` gates the usage queries (status/auth always run).
  */
 export function useUsageEntries(fetchEnabled: boolean): UsageEntry[] {
@@ -83,6 +109,8 @@ export function useUsageEntries(fetchEnabled: boolean): UsageEntry[] {
   const grokUsage = useGrokUsage({
     enabled: grokAvailable && fetchEnabled,
   })
+
+  const proxyUsage = useCliproxyapiUsage({ enabled: fetchEnabled })
 
   const entries: (UsageEntry & { available: boolean })[] = [
     {
@@ -119,7 +147,13 @@ export function useUsageEntries(fetchEnabled: boolean): UsageEntry[] {
       available: grokAvailable,
     },
   ]
-  return entries.filter(entry => entry.available)
+  const proxyEntries = (proxyUsage.data ?? [])
+    .filter(account => !account.disabled)
+    .map(proxyAccountEntry)
+  return [
+    ...entries.filter(entry => entry.available),
+    ...proxyEntries,
+  ]
 }
 
 function resetText(resetsAt: number, nowMs: number): string {
