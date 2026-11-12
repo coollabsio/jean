@@ -71,6 +71,7 @@ import {
 import {
   TOOL_CALL_ROW_CLASS,
   TOOL_CALL_DETAIL_PILL_CLASS,
+  TOOL_CALL_LABEL_CLASS,
   summarizeToolCall,
 } from './ToolCallInline'
 import type { MessageListHandle } from './message-list-handle'
@@ -472,7 +473,7 @@ const CompactActivityRow = memo(function CompactActivityRow({
           ) : (
             <Activity className="h-3.5 w-3.5 shrink-0 opacity-70" />
           )}
-          <span className="font-medium shrink-0 flex-none whitespace-nowrap">
+          <span className={TOOL_CALL_LABEL_CLASS} title={summary.label}>
             {summary.label}
           </span>
           {summary.detail && (

@@ -617,6 +617,10 @@ export const TOOL_CALL_SUB_ROW_CLASS =
 // Detail pill — sits AFTER label, snug to content (no flex-1 stretch).
 // Always font-sans: .font-mono forces --chat-font-size !important and blows
 // Read/Edit/Write filenames up to message size while Grep/Bash stay compact.
+// Label can shrink so long tool names (e.g. MCP tools) truncate instead of
+// pushing the chevron out of the row.
+export const TOOL_CALL_LABEL_CLASS = 'min-w-0 truncate font-medium'
+
 export const TOOL_CALL_DETAIL_PILL_CLASS =
   'min-w-0 max-w-[55%] sm:max-w-full truncate rounded px-1 text-[0.6875rem] font-sans leading-none'
 
@@ -673,7 +677,7 @@ export const ToolCallInline = memo(function ToolCallInline({
         <CollapsibleTrigger asChild>
           <div className={TOOL_CALL_ROW_CLASS}>
             {icon}
-            <span className="font-medium shrink-0 flex-none whitespace-nowrap">
+            <span className={TOOL_CALL_LABEL_CLASS} title={label}>
               {label}
             </span>
             {detail ? (
@@ -690,7 +694,7 @@ export const ToolCallInline = memo(function ToolCallInline({
               </button>
             ) : null}
             {isToolCallError(toolCall) ? <ToolErrorBadge /> : null}
-            <span className="ml-auto flex min-w-0 flex-1 items-center justify-end">
+            <span className="ml-auto flex flex-1 items-center justify-end">
               {isStreaming && isIncomplete ? (
                 <WorkingWaveform />
               ) : (
@@ -1101,7 +1105,7 @@ const SubToolItem = memo(function SubToolItem({
         <CollapsibleTrigger asChild>
           <div className={TOOL_CALL_SUB_ROW_CLASS}>
             <span className="shrink-0 [&>svg]:h-3 [&>svg]:w-3">{icon}</span>
-            <span className="font-medium shrink-0 flex-none whitespace-nowrap">
+            <span className={TOOL_CALL_LABEL_CLASS} title={label}>
               {label}
             </span>
             {detail ? (
@@ -1118,7 +1122,7 @@ const SubToolItem = memo(function SubToolItem({
               </button>
             ) : null}
             {isToolCallError(toolCall) ? <ToolErrorBadge compact /> : null}
-            <span className="ml-auto flex min-w-0 flex-1 items-center justify-end">
+            <span className="ml-auto flex flex-1 items-center justify-end">
               <ChevronRight
                 className={cn(
                   'h-2.5 w-2.5 transition-transform duration-200',
