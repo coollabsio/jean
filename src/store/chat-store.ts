@@ -412,6 +412,10 @@ interface ChatUIState {
   // Error state per session (for inline error display)
   errors: Record<string, string | null>
 
+  // Sessions whose queue is paused after a provider rejection (usage limit,
+  // auth, API error). The backend holds the queue until a turn succeeds.
+  queueHeld: Record<string, boolean>
+
   // Last sent message per session (for restoring on error)
   lastSentMessages: Record<string, string>
 
@@ -791,6 +795,7 @@ interface ChatUIState {
 
   // Actions - Error handling (session-based)
   setError: (sessionId: string, error: string | null) => void
+  setQueueHeld: (sessionId: string, held: boolean) => void
   setLastSentMessage: (sessionId: string, message: string) => void
   clearLastSentMessage: (sessionId: string) => void
   setLastSentArgs: (sessionId: string, args: SendMessageArgs) => void
@@ -1238,6 +1243,7 @@ export const useChatStore = create<ChatUIState>()(
       answeredQuestions: {},
       submittedAnswers: {},
       errors: {},
+      queueHeld: {},
       lastSentMessages: {},
       lastSentArgs: {},
       autoResume: {},
@@ -3232,6 +3238,15 @@ export const useChatStore = create<ChatUIState>()(
           }),
           undefined,
           'setError'
+        ),
+
+      setQueueHeld: (sessionId, held) =>
+        set(
+          state => ({
+            queueHeld: { ...state.queueHeld, [sessionId]: held },
+          }),
+          undefined,
+          'setQueueHeld'
         ),
 
       setLastSentMessage: (sessionId, message) =>
