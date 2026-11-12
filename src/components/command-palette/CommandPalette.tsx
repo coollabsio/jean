@@ -479,7 +479,7 @@ export function CommandPalette() {
       onOpenChange={handleOpenChange}
       title="Command Palette"
       description="Type a command or search..."
-      className="top-4 translate-y-0 sm:top-[50%] sm:translate-y-[-50%] sm:max-w-2xl"
+      className="max-sm:top-4 max-sm:bottom-auto sm:max-w-2xl"
       disablePointerSelection
     >
       <CommandInput

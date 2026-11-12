@@ -2082,7 +2082,7 @@ ${resolveInstructions}`
         <DialogContent
           ref={contentRef}
           tabIndex={-1}
-          className="max-h-[calc(100dvh-5.5rem-env(safe-area-inset-bottom))] overflow-hidden p-0 outline-none max-md:top-auto max-md:bottom-[calc(4.5rem+env(safe-area-inset-bottom))] max-md:w-[calc(100%-1rem)] max-md:max-w-none max-md:translate-y-0 max-md:rounded-xl sm:max-h-[min(90vh,760px)] sm:max-w-lg"
+          className="max-h-[calc(100dvh-5.5rem-env(safe-area-inset-bottom))] overflow-hidden p-0 outline-none max-md:top-auto max-md:bottom-[calc(4.5rem+env(safe-area-inset-bottom))] max-md:w-[calc(100%-1rem)] max-md:max-w-none max-md:rounded-xl sm:max-h-[min(90vh,760px)] sm:max-w-lg"
           onOpenAutoFocus={e => {
             e.preventDefault()
             contentRef.current?.focus()
