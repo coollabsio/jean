@@ -98,10 +98,16 @@ struct DevinInstallTarget {
 // Run blocking process work outside the async executor. Drain both pipes while
 // polling, so a large model list cannot fill a pipe and block process exit.
 async fn run_command_with_timeout(
-    mut command: Command,
+    command: Command,
     timeout: Duration,
 ) -> Result<Option<Output>, String> {
-    tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || run_command_blocking(command, timeout))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn run_command_blocking(mut command: Command, timeout: Duration) -> Result<Option<Output>, String> {
+    {
         command
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -160,12 +166,21 @@ async fn run_command_with_timeout(
             }
         }
         Ok(Some(output))
-    })
-    .await
-    .map_err(|error| error.to_string())?
+    }
 }
 
-pub(crate) fn auth_status_from_output(output: &Output) -> DevinAuthStatus {
+/// Blocking, bounded `devin auth status` check. Any failure or timeout reads as not logged in.
+pub(crate) fn is_cli_authenticated(app: &AppHandle) -> bool {
+    let binary = resolve_cli_binary(app);
+    let mut command = crate::platform::cli_command(&binary.to_string_lossy(), None);
+    command.args(["auth", "status"]);
+    matches!(
+        run_command_blocking(command, AUTH_TIMEOUT),
+        Ok(Some(output)) if auth_status_from_output(&output).authenticated
+    )
+}
+
+fn auth_status_from_output(output: &Output) -> DevinAuthStatus {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     // Keep JSON stdout separate from diagnostic stderr.
