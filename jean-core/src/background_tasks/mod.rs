@@ -21,7 +21,7 @@ use tauri::AppHandle;
 
 use crate::http_server::EmitExt;
 use crate::projects::git_status::{try_get_branch_status, ActiveWorktreeInfo, GitBranchStatus};
-use crate::projects::pr_status::{get_pr_status, PrStatus};
+use crate::projects::pr_status::{get_pr_status, MergeableStatus, PrStatus};
 
 pub mod commands;
 
@@ -254,6 +254,50 @@ fn sweep_pr_status(app: &AppHandle, worktrees: Vec<ActiveWorktreeInfo>) {
             }
             Err(e) => {
                 log::warn!("Sweep: failed PR status for #{pr_num}: {e}");
+            }
+        }
+    });
+}
+
+/// Seconds before the first PR status check after a push, so GitHub has seen it.
+const POST_PUSH_FIRST_CHECK_SECS: u64 = 3;
+/// Seconds between retries while GitHub still computes `mergeable`.
+const POST_PUSH_RETRY_SECS: u64 = 5;
+const POST_PUSH_MAX_CHECKS: usize = 4;
+
+/// Refresh a worktree's PR status (including conflict state) after a push.
+///
+/// A push can clear or create PR conflicts, but GitHub computes `mergeable`
+/// in the background, so it can be unknown for some seconds. Check again
+/// until it is known, then stop. Runs on its own thread.
+pub fn refresh_pr_status_after_push(
+    app: &AppHandle,
+    worktree_id: String,
+    worktree_path: String,
+    pr_number: u32,
+    pr_url: String,
+) {
+    let app = app.clone();
+    thread::spawn(move || {
+        thread::sleep(Duration::from_secs(POST_PUSH_FIRST_CHECK_SECS));
+        for attempt in 1..=POST_PUSH_MAX_CHECKS {
+            match get_pr_status(&app, &worktree_path, pr_number, &pr_url, &worktree_id) {
+                Ok(status) => {
+                    let known = !matches!(status.mergeable, Some(MergeableStatus::Unknown));
+                    if let Err(e) = emit_pr_status(&app, status) {
+                        log::error!("Post-push: failed to emit PR status: {e}");
+                    }
+                    if known {
+                        return;
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Post-push: failed PR status for #{pr_number}: {e}");
+                    return;
+                }
+            }
+            if attempt < POST_PUSH_MAX_CHECKS {
+                thread::sleep(Duration::from_secs(POST_PUSH_RETRY_SECS));
             }
         }
     });
