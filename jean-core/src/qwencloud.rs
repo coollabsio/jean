@@ -16,6 +16,7 @@ use serde::Deserialize;
 use std::time::Duration;
 
 const DEFAULT_API_KEY_ENV: &str = "DASHSCOPE_API_KEY";
+const ALLOWED_API_KEY_ENVS: [&str; 2] = [DEFAULT_API_KEY_ENV, "QWENCLOUD_TOKEN_PLAN_API_KEY"];
 
 #[derive(Debug, Deserialize)]
 struct OpenAiModelsResponse {
@@ -45,15 +46,24 @@ pub fn parse_openai_models(body: &str) -> Result<Vec<String>, String> {
 
 /// Only allow QwenCloud hosts. The API key is attached to this request, so an
 /// arbitrary base URL coming from the UI must never be able to receive it.
+/// The URL is parsed (not string-matched) so `#`, `?`, `\\` and `@` tricks
+/// cannot smuggle a different host past the check.
 fn validate_base_url(base_url: &str) -> Result<String, String> {
     let trimmed = base_url.trim().trim_end_matches('/');
-    let rest = trimmed
-        .strip_prefix("https://")
-        .ok_or_else(|| "QwenCloud base URL must use https".to_string())?;
-    let host = rest.split('/').next().unwrap_or("");
-    let is_bare_alias = host == "maas.qwencloudapi.com";
-    let is_region_host = host.ends_with(".maas.qwencloudapi.com") && !host.contains('@');
-    if !is_bare_alias && !is_region_host {
+    let url = reqwest::Url::parse(trimmed)
+        .map_err(|_| format!("Not a QwenCloud base URL: {base_url}"))?;
+    let host = url.host_str().unwrap_or("");
+    let host_ok = host == "maas.qwencloudapi.com" || host.ends_with(".maas.qwencloudapi.com");
+    if url.scheme() != "https" {
+        return Err("QwenCloud base URL must use https".to_string());
+    }
+    if !host_ok
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.port().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
         return Err(format!("Not a QwenCloud base URL: {base_url}"));
     }
     Ok(trimmed.to_string())
@@ -69,6 +79,10 @@ pub async fn fetch_qwencloud_models(
         .map(|name| name.trim().to_string())
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| DEFAULT_API_KEY_ENV.to_string());
+    // The env var name comes from the UI; never let it read arbitrary secrets.
+    if !ALLOWED_API_KEY_ENVS.contains(&env_name.as_str()) {
+        return Err(format!("API key env var not allowed: {env_name}"));
+    }
     let api_key = std::env::var(&env_name)
         .map_err(|_| format!("{env_name} is not set in Jean's environment"))?;
     if api_key.trim().is_empty() {
@@ -138,6 +152,10 @@ mod tests {
             "https://evil.example.com/compatible-mode/v1",
             "https://ap-southeast-1.maas.qwencloudapi.com.evil.com/v1",
             "https://evil.com@ap-southeast-1.maas.qwencloudapi.com/v1",
+            "https://evil.com#.maas.qwencloudapi.com/v1",
+            "https://evil.com?.maas.qwencloudapi.com/v1",
+            "https://evil.com\\.maas.qwencloudapi.com/v1",
+            "https://evil.com:443@x.maas.qwencloudapi.com/v1",
         ] {
             assert!(validate_base_url(url).is_err(), "accepted {url}");
         }
