@@ -246,7 +246,7 @@ describe('decideSessionClose', () => {
     options: {
       inputDrafts?: Record<string, string>
       onLastSession?: 'close-session' | 'confirm-worktree'
-      isServer?: boolean
+      keepWorktree?: boolean
       finishedSubSessionCount?: number
     } = {}
   ) =>
@@ -255,7 +255,7 @@ describe('decideSessionClose', () => {
       sessions,
       inputDrafts: options.inputDrafts ?? {},
       onLastSession: options.onLastSession ?? 'close-session',
-      isServer: options.isServer,
+      keepWorktree: options.keepWorktree,
       finishedSubSessionCount: options.finishedSubSessionCount,
     })
 
@@ -303,11 +303,11 @@ describe('decideSessionClose', () => {
   })
 
   it('never offers to close a server worktree', () => {
-    expect(decide(null, [], { isServer: true })).toBe('noop')
+    expect(decide(null, [], { keepWorktree: true })).toBe('noop')
     expect(
       decide(used, [used], {
         onLastSession: 'confirm-worktree',
-        isServer: true,
+        keepWorktree: true,
       })
     ).toBe('confirm-session')
   })

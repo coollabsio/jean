@@ -196,6 +196,8 @@ interface UIState {
   cliLoginModalCommandArgs: string[] | null
   cliLoginModalAction: 'login' | 'update' | 'install'
   cliLoginModalMcpContext: McpLoginContext | null
+  /** Jean server that runs the login terminal. Unset: the local instance. */
+  cliLoginModalServerId: string | null
   /** Active CLI update hidden from its modal while the process keeps running. */
   minimizedCliUpdate: MinimizedCliUpdate | null
   /** Worktree IDs that should auto-trigger investigate-issue when created */
@@ -334,7 +336,8 @@ interface UIState {
     command: string,
     commandArgs?: string[],
     action?: 'login' | 'update' | 'install',
-    mcpContext?: McpLoginContext
+    mcpContext?: McpLoginContext,
+    serverId?: string
   ) => void
   closeCliLoginModal: () => void
   setMinimizedCliUpdate: (update: MinimizedCliUpdate | null) => void
@@ -492,6 +495,7 @@ export const useUIStore = create<UIState>()(
       cliLoginModalCommandArgs: null,
       cliLoginModalAction: 'login',
       cliLoginModalMcpContext: null,
+      cliLoginModalServerId: null,
       minimizedCliUpdate: null,
       autoInvestigateWorktreeIds: new Set(),
       autoInvestigatePRWorktreeIds: new Set(),
@@ -1020,7 +1024,14 @@ export const useUIStore = create<UIState>()(
           'closeCliUpdateModal'
         ),
 
-      openCliLoginModal: (type, command, commandArgs, action, mcpContext) =>
+      openCliLoginModal: (
+        type,
+        command,
+        commandArgs,
+        action,
+        mcpContext,
+        serverId
+      ) =>
         set(
           {
             cliLoginModalOpen: true,
@@ -1029,6 +1040,7 @@ export const useUIStore = create<UIState>()(
             cliLoginModalCommandArgs: commandArgs ?? null,
             cliLoginModalAction: action ?? 'login',
             cliLoginModalMcpContext: mcpContext ?? null,
+            cliLoginModalServerId: serverId ?? null,
             minimizedCliUpdate: null,
           },
           undefined,
@@ -1044,6 +1056,7 @@ export const useUIStore = create<UIState>()(
             cliLoginModalCommandArgs: null,
             cliLoginModalAction: 'login',
             cliLoginModalMcpContext: null,
+            cliLoginModalServerId: null,
             minimizedCliUpdate: null,
           },
           undefined,

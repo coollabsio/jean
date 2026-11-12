@@ -3860,21 +3860,18 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"F
     }
 
     #[test]
-    fn mcp_session_recovery_does_not_bypass_inactive_worktree_or_reopen_closed_base() {
+    fn mcp_session_recovery_does_not_bypass_inactive_worktree() {
         let (_temp, app) = session_lookup_app();
         let index = crate::chat::storage::load_index(&app, "current-base").unwrap();
         let session_id = &index.sessions[0].id;
         let mut projects = crate::projects::storage::load_projects_data(&app).unwrap();
+        // A base session is never archived, so archive a regular worktree.
+        projects.worktrees[0].session_type = crate::projects::types::SessionType::Worktree;
         projects.worktrees[0].archived_at = Some(123);
         crate::projects::storage::save_projects_data(&app, &projects).unwrap();
         let (worktree_id, _) = resolve_session_worktree(&app, session_id).unwrap();
         assert!(ensure_mcp_session_can_run(&app, session_id, &worktree_id).is_err());
         assert!(ensure_mcp_worktree_not_archived(&app, &worktree_id).is_err());
-
-        crate::chat::storage::preserve_base_sessions(&app, "current-base", "project").unwrap();
-        projects.worktrees.clear();
-        crate::projects::storage::save_projects_data(&app, &projects).unwrap();
-        assert!(resolve_session_worktree(&app, session_id).is_err());
     }
 
     #[test]

@@ -12,12 +12,19 @@ use crate::muse_cli::{muse_mode, muse_model, muse_reasoning_effort, MuseMode};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, UNIX_EPOCH};
+#[cfg(unix)]
+use std::{
+    io::Read,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
+};
 use tauri::AppHandle;
 
 /// Jean self-relaunch flag for the detached Muse MSP host (Unix).

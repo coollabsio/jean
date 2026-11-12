@@ -712,12 +712,12 @@ export const SessionChatModal = memo(function SessionChatModal({
         sessions: tabSessions,
         inputDrafts: useChatStore.getState().inputDrafts,
         onLastSession: 'close-session',
-        isServer,
+        keepWorktree: isServer || isBase,
         finishedSubSessionCount: subSessionIds.length,
       })
       applyCloseDecision(decision, session.id, subSessionIds)
     },
-    [tabSessions, isServer, applyCloseDecision, finishedSubSessionsOf]
+    [tabSessions, isServer, isBase, applyCloseDecision, finishedSubSessionsOf]
   )
 
   const handleTabAuxClick = useCallback(
@@ -747,7 +747,7 @@ export const SessionChatModal = memo(function SessionChatModal({
         sessions: tabSessions,
         inputDrafts: useChatStore.getState().inputDrafts,
         onLastSession: 'close-session',
-        isServer,
+        keepWorktree: isServer || isBase,
         finishedSubSessionCount: subSessionIds.length,
       })
       applyCloseDecision(decision, currentSessionId, subSessionIds)
@@ -765,6 +765,7 @@ export const SessionChatModal = memo(function SessionChatModal({
     currentSessionId,
     applyCloseDecision,
     isServer,
+    isBase,
     finishedSubSessionsOf,
   ])
 

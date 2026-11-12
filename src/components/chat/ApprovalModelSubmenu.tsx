@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { ChevronRight } from '@/components/icons/reicon'
 import type { CliBackend, CustomCliProfile } from '@/types/preferences'
+import { getProviderAliasModelOptions } from '@/types/preferences'
 import { usePreferences } from '@/services/preferences'
 import { useInstalledBackends } from '@/hooks/useInstalledBackends'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -84,29 +85,7 @@ function getClaudeModelOptions(
   }
 
   const profile = customCliProfiles.find(p => p.name === selectedProvider)
-  let opusModel: string | undefined
-  let sonnetModel: string | undefined
-  let haikuModel: string | undefined
-  if (profile?.settings_json) {
-    try {
-      const settings = JSON.parse(profile.settings_json)
-      const env = settings?.env
-      if (env) {
-        opusModel = env.ANTHROPIC_DEFAULT_OPUS_MODEL || env.ANTHROPIC_MODEL
-        sonnetModel = env.ANTHROPIC_DEFAULT_SONNET_MODEL || env.ANTHROPIC_MODEL
-        haikuModel = env.ANTHROPIC_DEFAULT_HAIKU_MODEL || env.ANTHROPIC_MODEL
-      }
-    } catch {
-      // Ignore invalid profile JSON; fall back to short labels.
-    }
-  }
-
-  const suffix = (model?: string) => (model ? ` (${model})` : '')
-  return [
-    { value: 'opus', label: `Opus${suffix(opusModel)}` },
-    { value: 'sonnet', label: `Sonnet${suffix(sonnetModel)}` },
-    { value: 'haiku', label: `Haiku${suffix(haikuModel)}` },
-  ]
+  return getProviderAliasModelOptions(profile?.settings_json)
 }
 
 export function ApprovalModelSubmenu({

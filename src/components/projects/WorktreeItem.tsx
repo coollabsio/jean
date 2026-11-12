@@ -749,8 +749,9 @@ export const WorktreeItem = memo(function WorktreeItem({
   // Middle-click closes the worktree, mirroring the canvas/session-tab close,
   // always behind the confirmation dialog.
   const handleWorktreeMiddleClose = useCallback(() => {
+    if (isBase) return
     setCloseConfirm({ mode: 'worktree' })
-  }, [])
+  }, [isBase])
 
   // Middle-click or "Delete Session" on a conversation row, mirroring the
   // session tab: non-empty sessions confirm first, empty ones close at once.

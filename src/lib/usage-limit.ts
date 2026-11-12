@@ -57,3 +57,16 @@ export function getLimitResetAtMs(
     exhausted.length > 0 ? Math.max(...exhausted) : usage.session?.resetsAt
   return resetsAt != null ? toEpochMs(resetsAt) : null
 }
+
+/**
+ * Detect Anthropic's "accept the updated Consumer Terms" error. The account
+ * owner must accept them on claude.ai; a resend works right after that.
+ */
+export function isClaudeTermsError(error: string | null | undefined): boolean {
+  if (!error) return false
+  const lower = error.toLowerCase()
+  return (
+    lower.includes('consumer terms') ||
+    (lower.includes('privacy policy') && lower.includes('claude.ai'))
+  )
+}

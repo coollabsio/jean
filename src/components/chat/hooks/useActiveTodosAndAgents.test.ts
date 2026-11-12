@@ -347,17 +347,24 @@ describe('useActiveTodosAndAgents', () => {
     ])
   })
 
-  it('keeps earlier subagents visible after a later turn', () => {
+  it('removes subagents of earlier turns when a new prompt is sent', () => {
+    const user = (id: string) =>
+      ({
+        id,
+        role: 'user',
+        content: 'prompt',
+        tool_calls: [],
+      }) as unknown as ChatMessage
     const first = {
       id: 'assistant-1',
       role: 'assistant',
       content: '',
       tool_calls: [
-        toolCall('Agent', {
-          id: 'task-1',
-          description: 'Explore auth',
-          subagent_type: 'Explore',
-        }),
+        toolCall(
+          'Agent',
+          { id: 'task-1', description: 'Explore auth' },
+          'Report'
+        ),
       ],
     } as ChatMessage
     const second = {
@@ -367,19 +374,33 @@ describe('useActiveTodosAndAgents', () => {
       tool_calls: [] as ToolCall[],
     } as ChatMessage
 
-    const { result } = renderHook(() =>
-      useActiveTodosAndAgents({
-        activeSessionId: 'session-1',
-        isSending: false,
-        currentToolCalls: [],
-        lastAssistantMessage: second,
-        messages: [first, second],
-      })
+    const { result, rerender } = renderHook(
+      props =>
+        useActiveTodosAndAgents({
+          activeSessionId: 'session-1',
+          currentToolCalls: [],
+          lastAssistantMessage: first,
+          ...props,
+        }),
+      {
+        initialProps: {
+          isSending: false,
+          messages: [user('user-1'), first],
+        } as { isSending: boolean; messages: ChatMessage[] },
+      }
     )
-
     expect(result.current.activeAgents).toMatchObject([
-      { id: 'task-1', prompt: 'Explore auth', status: 'completed' },
+      { id: 'task-1', status: 'completed' },
     ])
+
+    rerender({ isSending: true, messages: [user('user-1'), first, user('u2')] })
+    expect(result.current.activeAgents).toEqual([])
+
+    rerender({
+      isSending: false,
+      messages: [user('user-1'), first, user('u2'), second],
+    })
+    expect(result.current.activeAgents).toEqual([])
   })
 
   it('keeps agents of a reopened running turn in progress', () => {

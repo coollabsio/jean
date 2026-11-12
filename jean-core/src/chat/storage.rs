@@ -1286,31 +1286,7 @@ pub fn get_closed_base_sessions_path(app: &AppHandle, project_id: &str) -> Resul
 // Base Session Preservation
 // ============================================================================
 
-/// Preserve sessions when closing a base session
-/// Moves index file to base-{project_id}.json
-pub fn preserve_base_sessions(
-    app: &AppHandle,
-    worktree_id: &str,
-    project_id: &str,
-) -> Result<(), String> {
-    let lock = get_index_lock(worktree_id);
-    let _guard = lock.lock().unwrap();
-
-    let current_path = get_index_path(app, worktree_id)?;
-    let preserved_path = get_base_index_path(app, project_id)?;
-
-    if current_path.exists() {
-        fs::rename(&current_path, &preserved_path).map_err(|e| {
-            log::error!("Failed to preserve base sessions: {e}");
-            format!("Failed to preserve base sessions: {e}")
-        })?;
-        log::trace!("Preserved base sessions from {current_path:?} to {preserved_path:?}");
-    }
-
-    Ok(())
-}
-
-/// Restore preserved sessions when reopening a base session
+/// Restore sessions that an older Jean preserved when it closed a base session.
 /// Loads from base-{project_id}.json and updates worktree_id
 pub fn restore_base_sessions(
     app: &AppHandle,
@@ -1610,7 +1586,11 @@ mod tests {
         );
         metadata.codex_thread_id = Some("resume-thread".to_string());
         save_metadata(&app, &metadata).unwrap();
-        preserve_base_sessions(&app, "old-base", "project").unwrap();
+        fs::rename(
+            get_index_path(&app, "old-base").unwrap(),
+            get_base_index_path(&app, "project").unwrap(),
+        )
+        .unwrap();
 
         let restored = restore_base_sessions(&app, "project", "new-base")
             .unwrap()

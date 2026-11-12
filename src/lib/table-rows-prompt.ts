@@ -17,25 +17,25 @@ export function tableToMarkdown(data: string[][]): string {
 }
 
 /**
- * Chip content: the header row plus the picked body rows, in table order.
- * When a row has a note, a "Note" column is added with the user's text.
+ * Chip content: the picked body rows, one plain line each, in table order.
+ * No header or markdown table, to keep tokens low. A row's note is appended
+ * as "Note: <text>".
  */
 export function formatTableRowsPrompt(
   data: string[][],
   rows: number[],
   notes: Record<number, string> = {}
 ): string {
-  const [header, ...body] = data
-  if (!header) return ''
-  const picked = rows.filter(i => body[i])
-  const hasNotes = picked.some(i => notes[i])
-  const table = hasNotes
-    ? [
-        [...header, 'Note'],
-        ...picked.map(i => [...(body[i] ?? []), notes[i] ?? '']),
-      ]
-    : [header, ...picked.map(i => body[i] ?? [])]
-  return `Rows referenced from a table in this chat:\n\n${tableToMarkdown(table)}\n`
+  const body = data.slice(1)
+  const lines = rows
+    .filter(i => body[i])
+    .map(i => {
+      const cells = (body[i] ?? []).map(escapeCell)
+      if (notes[i]) cells.push(`Note: ${escapeCell(notes[i])}`)
+      return cells.join(' | ')
+    })
+  if (lines.length === 0) return ''
+  return `Rows from a table in this chat:\n${lines.join('\n')}\n`
 }
 
 // One operation chain per table, so fast clicks cannot create two chips.

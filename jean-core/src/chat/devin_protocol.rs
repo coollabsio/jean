@@ -488,7 +488,7 @@ mod tests {
             paths,
             vec![
                 cwd.join("relative.txt").to_string_lossy(),
-                cwd.join("skill/SKILL.md").to_string_lossy(),
+                cwd.join("skill").join("SKILL.md").to_string_lossy(),
                 absolute.to_string_lossy()
             ]
         );

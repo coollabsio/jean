@@ -1,5 +1,7 @@
 import { Fragment, useMemo, useState } from 'react'
-import { Wand2 } from '@/components/icons/reicon'
+import { Star, Wand2 } from '@/components/icons/reicon'
+import { cn } from '@/lib/utils'
+import { usePatchPreferences, usePreferences } from '@/services/preferences'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,7 +22,36 @@ import {
   buildMagicColumns,
   isMagicOptionUnavailable,
   type MagicMenuOption,
+  type MagicSection,
 } from '@/components/magic/magic-options'
+
+const EMPTY_FAVORITES: string[] = []
+
+/** Moves favorited options into a leading "Favorites" section, in star order. */
+function withFavoritesFirst(
+  sections: MagicSection[],
+  favorites: string[]
+): MagicSection[] {
+  if (favorites.length === 0) return sections
+  const favoriteSet = new Set(favorites)
+  const byId = new Map(
+    sections.flatMap(section => section.options).map(o => [o.id, o] as const)
+  )
+  const favoriteOptions = favorites.flatMap(id => {
+    const option = byId.get(id as MagicMenuOption)
+    return option ? [option] : []
+  })
+  if (favoriteOptions.length === 0) return sections
+  return [
+    { header: 'Favorites', options: favoriteOptions },
+    ...sections
+      .map(section => ({
+        ...section,
+        options: section.options.filter(o => !favoriteSet.has(o.id)),
+      }))
+      .filter(section => section.options.length > 0),
+  ]
+}
 
 interface MobileToolbarMenuProps {
   isDisabled: boolean
@@ -65,6 +96,19 @@ export function MobileToolbarMenu({
   const isMobile = useIsMobile()
   const [menuOpen, setMenuOpen] = useState(false)
   const magicColumns = useMemo(() => buildMagicColumns(hasOpenPr), [hasOpenPr])
+  const { data: preferences } = usePreferences()
+  const patchPreferences = usePatchPreferences()
+  const favorites = preferences?.favorite_magic_options ?? EMPTY_FAVORITES
+  const mobileSections = useMemo(
+    () => withFavoritesFirst(magicColumns.all, favorites),
+    [magicColumns, favorites]
+  )
+  const toggleFavorite = (id: MagicMenuOption) =>
+    patchPreferences.mutate({
+      favorite_magic_options: favorites.includes(id)
+        ? favorites.filter(favorite => favorite !== id)
+        : [...favorites, id],
+    })
   const availability = {
     hasOpenPr,
     hasIssueContexts,
@@ -151,30 +195,50 @@ export function MobileToolbarMenu({
               </SheetDescription>
             </SheetHeader>
             <div className="overflow-y-auto px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)]">
-              {magicColumns.all.map(section => (
+              {mobileSections.map(section => (
                 <section key={section.header} aria-label={section.header}>
                   <h3 className="px-3 pt-3 pb-1 text-xs text-muted-foreground">
                     {section.header}
                   </h3>
                   {section.options.map(option => {
                     const Icon = option.icon
+                    const isFavorite = favorites.includes(option.id)
                     return (
-                      <button
-                        key={option.id}
-                        type="button"
-                        disabled={isMagicOptionUnavailable(
-                          option.id,
-                          availability
-                        )}
-                        className="flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-left active:bg-accent disabled:opacity-40"
-                        onClick={() => {
-                          setMenuOpen(false)
-                          handlers[option.id]()
-                        }}
-                      >
-                        <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-                        <span className="truncate text-sm">{option.label}</span>
-                      </button>
+                      <div key={option.id} className="flex items-center">
+                        <button
+                          type="button"
+                          disabled={isMagicOptionUnavailable(
+                            option.id,
+                            availability
+                          )}
+                          className="flex min-h-12 min-w-0 flex-1 items-center gap-3 rounded-lg px-3 text-left active:bg-accent disabled:opacity-40"
+                          onClick={() => {
+                            setMenuOpen(false)
+                            handlers[option.id]()
+                          }}
+                        >
+                          <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          <span className="truncate text-sm">
+                            {option.label}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`${isFavorite ? 'Unfavorite' : 'Favorite'} ${option.label}`}
+                          aria-pressed={isFavorite}
+                          className="flex size-12 shrink-0 items-center justify-center rounded-lg active:bg-accent"
+                          onClick={() => toggleFavorite(option.id)}
+                        >
+                          <Star
+                            className={cn(
+                              'h-4 w-4',
+                              isFavorite
+                                ? 'fill-warning text-warning'
+                                : 'text-muted-foreground/40'
+                            )}
+                          />
+                        </button>
+                      </div>
                     )
                   })}
                 </section>

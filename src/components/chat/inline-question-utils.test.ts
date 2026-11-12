@@ -86,7 +86,7 @@ describe('inlineQuestionAnswer', () => {
 describe('withoutInlineQuestion', () => {
   const text = 'Done.\n\nDo you want it?\nReply with a number:\n1. Yes\n2. No'
   const asked = parseInlineNumberedQuestion(text)
-  if (!asked) throw new Error('expected a parsed question')
+  if (!asked) throw new Error('missing inline question fixture')
 
   it('removes the question that the buttons show', () => {
     expect(withoutInlineQuestion(text, asked)).toBe('Done.')

@@ -1056,10 +1056,10 @@ pub async fn remove_project(app: AppHandle, project_id: String) -> Result<(), St
         return Err("Cannot remove: this is a folder, not a project.".to_string());
     }
 
-    let has_active_worktrees = data
-        .worktrees
-        .iter()
-        .any(|w| w.project_id == project_id && w.archived_at.is_none());
+    // The permanent base session does not block removal: it goes with the project.
+    let has_active_worktrees = data.worktrees.iter().any(|w| {
+        w.project_id == project_id && w.archived_at.is_none() && w.session_type != SessionType::Base
+    });
 
     if has_active_worktrees {
         return Err(
@@ -1067,18 +1067,16 @@ pub async fn remove_project(app: AppHandle, project_id: String) -> Result<(), St
         );
     }
 
-    // Legacy archived worktrees for this project are dropped with the project.
-    let archived_worktree_ids: Vec<String> = data
-        .worktrees
-        .iter()
-        .filter(|w| w.project_id == project_id && w.archived_at.is_some())
-        .map(|w| w.id.clone())
+    // The base session and legacy archived worktrees are dropped with the project.
+    let dropped_worktrees: Vec<Worktree> = data
+        .worktrees_for_project(&project_id)
+        .into_iter()
+        .cloned()
         .collect();
-
-    // Remove archived worktrees from data
-    for worktree_id in &archived_worktree_ids {
-        data.remove_worktree(worktree_id);
-        log::trace!("Removed archived worktree: {worktree_id}");
+    for worktree in &dropped_worktrees {
+        crate::chat::registry::cancel_processes_for_worktree(&app, &worktree.id);
+        data.remove_worktree(&worktree.id);
+        log::trace!("Removed worktree with project: {}", worktree.id);
     }
 
     // Clean up reciprocal linked project references
@@ -1092,14 +1090,31 @@ pub async fn remove_project(app: AppHandle, project_id: String) -> Result<(), St
 
     save_projects_data(&app, &data)?;
 
-    // Clean up sessions files for archived worktrees (in background, non-blocking)
-    for worktree_id in archived_worktree_ids {
-        if let Ok(sessions_file) = crate::chat::storage::get_sessions_path(&app, &worktree_id) {
+    // Clean up session data and sessions files of the dropped worktrees
+    for worktree in &dropped_worktrees {
+        let worktree_id = &worktree.id;
+        let deleted_event = WorktreeDeletedEvent {
+            id: worktree_id.clone(),
+            project_id: project_id.clone(),
+            teardown_output: None,
+        };
+        if let Err(e) = app.emit_all("worktree:deleted", &deleted_event) {
+            log::error!("Failed to emit worktree:deleted for {worktree_id}: {e}");
+        }
+        let session_ids: Vec<String> =
+            crate::chat::storage::load_sessions(&app, &worktree.path, worktree_id)
+                .map(|ws| ws.sessions.iter().map(|s| s.id.clone()).collect())
+                .unwrap_or_default();
+        for sid in &session_ids {
+            if let Err(e) = crate::chat::storage::delete_session_data(&app, sid) {
+                log::warn!("Failed to delete session data for {sid}: {e}");
+            }
+            crate::chat::storage::cleanup_combined_context_files(&app, sid);
+        }
+        if let Ok(sessions_file) = crate::chat::storage::get_sessions_path(&app, worktree_id) {
             if sessions_file.exists() {
                 if let Err(e) = std::fs::remove_file(&sessions_file) {
                     log::warn!("Failed to delete sessions file for {worktree_id}: {e}");
-                } else {
-                    log::trace!("Deleted sessions file for archived worktree: {worktree_id}");
                 }
             }
         }
@@ -4435,192 +4450,13 @@ pub async fn delete_worktree(
     Ok(())
 }
 
-/// Create or reopen a base branch session for a project
-/// Base sessions use the project's base directory directly (no git worktree creation)
-/// If a preserved sessions file exists from a previous close, it will be restored
+/// Return the project's base session. Every project has one: storage creates
+/// it on load (`ensure_base_sessions`), and it cannot be closed or deleted.
 pub async fn create_base_session(app: AppHandle, project_id: String) -> Result<Worktree, String> {
-    log::trace!("Creating base session for project: {project_id}");
-
-    let mut data = load_projects_data(&app)?;
-
-    // Check if base session already exists - return existing for reopening
-    if let Some(existing) = data.find_base_session(&project_id) {
-        log::trace!("Returning existing base session: {}", existing.name);
-        return Ok(existing.clone());
-    }
-
-    let project = data
-        .find_project(&project_id)
-        .ok_or_else(|| format!("Project not found: {project_id}"))?
-        .clone();
-
-    // Create base session record (NO git worktree creation)
-    // Base sessions always have order 0 (first in list)
-    let session = Worktree {
-        id: Uuid::new_v4().to_string(),
-        project_id: project_id.clone(),
-        name: project.default_branch.clone(),
-        path: project.path.clone(), // Uses project's base directory directly
-        branch: project.default_branch.clone(),
-        base_branch: None,
-        base_remote: None,
-        created_at: now(),
-        setup_output: None,
-        setup_script: None,
-        setup_success: None,
-        session_type: SessionType::Base,
-        pr_number: None,
-        pr_url: None,
-        issue_number: None,
-        linear_issue_identifier: None,
-        security_alert_number: None,
-        security_alert_url: None,
-        advisory_ghsa_id: None,
-        advisory_url: None,
-        cached_pr_status: None,
-        cached_check_status: None,
-        cached_behind_count: None,
-        cached_ahead_count: None,
-        cached_status_at: None,
-        cached_uncommitted_added: None,
-        cached_uncommitted_removed: None,
-        cached_branch_diff_added: None,
-        cached_branch_diff_removed: None,
-        cached_base_branch_ahead_count: None,
-        cached_base_branch_behind_count: None,
-        cached_worktree_ahead_count: None,
-        cached_unpushed_count: None,
-        pr_push_remote: None,
-        pr_push_branch: None,
-        order: 0, // Base sessions are always first
-        origin: None,
-        archived_at: None,
-        labels: Vec::new(),
-        label: None,
-        last_opened_at: None,
-    };
-
-    data.add_worktree(session.clone());
-    save_projects_data(&app, &data)?;
-
-    // Try to restore preserved sessions from a previous close
-    // This migrates base-{project_id}.json to {new_worktree_id}.json
-    match crate::chat::restore_base_sessions(&app, &project_id, &session.id) {
-        Ok(Some(_)) => {
-            log::trace!("Restored preserved sessions for base session");
-        }
-        Ok(None) => {
-            log::trace!("No preserved sessions to restore");
-        }
-        Err(e) => {
-            // Log error but don't fail - a fresh session will be created instead
-            log::warn!("Failed to restore preserved sessions: {e}");
-        }
-    }
-
-    log::trace!(
-        "Successfully created base session for project: {}",
-        project.name
-    );
-    Ok(session)
-}
-
-/// Close a base branch session (removes record only, no git operations)
-/// Preserves the sessions file so it can be restored when the base session is reopened
-pub async fn close_base_session(app: AppHandle, worktree_id: String) -> Result<(), String> {
-    log::info!("[BASE_CLOSE] close_base_session (preserve) called for {worktree_id}");
-    close_base_session_internal(&app, &worktree_id, true).await
-}
-
-/// Close a base branch session without preserving sessions (clean close)
-/// Deletes the sessions file entirely so the base session starts fresh on reopen
-pub async fn close_base_session_clean(app: AppHandle, worktree_id: String) -> Result<(), String> {
-    log::info!("[BASE_CLOSE] close_base_session_clean called for {worktree_id}");
-    close_base_session_internal(&app, &worktree_id, false).await
-}
-
-/// Internal implementation for closing a base session
-async fn close_base_session_internal(
-    app: &AppHandle,
-    worktree_id: &str,
-    preserve_sessions: bool,
-) -> Result<(), String> {
-    log::info!(
-        "[BASE_CLOSE] Closing base session: {worktree_id} (preserve_sessions: {preserve_sessions})"
-    );
-
-    let mut data = load_projects_data(app)?;
-
-    let worktree = data
-        .find_worktree(worktree_id)
-        .ok_or_else(|| format!("Session not found: {worktree_id}"))?
-        .clone();
-
-    // Verify it's a base session
-    if worktree.session_type != SessionType::Base {
-        return Err("Not a base session. Use delete_worktree instead.".to_string());
-    }
-
-    log::info!(
-        "[BASE_CLOSE] Found base session, session_type={:?}, path={}",
-        worktree.session_type,
-        worktree.path
-    );
-
-    if preserve_sessions {
-        // Preserve the sessions file before removing the worktree
-        // This renames {worktree_id}.json to base-{project_id}.json
-        log::info!(
-            "[BASE_CLOSE] Preserving sessions file for worktree_id={worktree_id}, project_id={}",
-            worktree.project_id
-        );
-        crate::chat::preserve_base_sessions(app, worktree_id, &worktree.project_id)?;
-    } else {
-        // Clean close: delete session data directories before removing the index
-        let session_ids: Vec<String> =
-            crate::chat::storage::load_sessions(app, &worktree.path, worktree_id)
-                .map(|ws| ws.sessions.iter().map(|s| s.id.clone()).collect())
-                .unwrap_or_default();
-
-        for sid in &session_ids {
-            if let Err(e) = crate::chat::storage::delete_session_data(app, sid) {
-                log::warn!("Failed to delete session data for {sid}: {e}");
-            }
-            crate::chat::storage::cleanup_combined_context_files(app, sid);
-        }
-
-        // Delete the sessions file entirely for a clean close
-        if let Ok(sessions_file) = crate::chat::storage::get_sessions_path(app, worktree_id) {
-            if sessions_file.exists() {
-                if let Err(e) = std::fs::remove_file(&sessions_file) {
-                    log::warn!("Failed to delete sessions file for {worktree_id}: {e}");
-                } else {
-                    log::trace!(
-                        "Deleted sessions file for clean base session close: {worktree_id}"
-                    );
-                }
-            }
-        }
-    }
-
-    let project_id = worktree.project_id.clone();
-
-    // Remove from data (NO git operations - we don't delete the project directory!)
-    data.remove_worktree(worktree_id);
-    save_projects_data(app, &data)?;
-
-    // Emit deleted event so other clients clear their ChatWindow state
-    let deleted_event = WorktreeDeletedEvent {
-        id: worktree_id.to_string(),
-        project_id,
-        teardown_output: None,
-    };
-    if let Err(e) = app.emit_all("worktree:deleted", &deleted_event) {
-        log::error!("Failed to emit worktree:deleted event for base session close: {e}");
-    }
-
-    log::trace!("Successfully closed base session: {}", worktree.name);
-    Ok(())
+    let data = load_projects_data(&app)?;
+    data.find_base_session(&project_id)
+        .cloned()
+        .ok_or_else(|| format!("Base session not found for project: {project_id}"))
 }
 
 /// Import an existing git worktree directory into Jean
@@ -9014,6 +8850,7 @@ Rules:
 - Use a specific Conventional Commits subject: type(optional-scope): concrete behavior changed.
 - First line must be 72 characters or fewer.
 - If prompt/config files changed, name the user-facing behavior affected, not "guidance" or "prompt".
+- Do not add Co-Authored-By trailers, "Generated with" lines, or any other AI/tool attribution.
 
 Files changed:
 {diff_stat}
@@ -15405,8 +15242,8 @@ mod tests {
     }
 
     #[test]
-    fn ai_review_timeout_is_five_minutes_and_not_an_approval() {
-        assert_eq!(AI_REVIEW_TIMEOUT, Duration::from_secs(300));
+    fn ai_review_timeout_is_ten_minutes_and_not_an_approval() {
+        assert_eq!(AI_REVIEW_TIMEOUT, Duration::from_secs(600));
         let error = review_timeout_error();
         assert!(error.contains("timed out"));
         assert!(!error.contains("approved"));
@@ -16506,9 +16343,12 @@ Body
 
 #[cfg(test)]
 mod import_worktree_tests {
-    use super::{import_worktree, list_unmanaged_worktrees};
-    use crate::projects::storage::save_projects_data;
-    use crate::projects::types::{Project, ProjectsData, Worktree};
+    use super::{
+        create_base_session, delete_worktree, import_worktree, list_unmanaged_worktrees,
+        remove_project,
+    };
+    use crate::projects::storage::{load_projects_data, save_projects_data};
+    use crate::projects::types::{Project, ProjectsData, SessionType, Worktree};
     use crate::projects::unmanaged_worktrees::BlockedImportKind;
     use std::path::{Path, PathBuf};
     use std::process::Command;
@@ -16588,6 +16428,57 @@ mod import_worktree_tests {
             value["archived_at"] = serde_json::json!(10);
         }
         serde_json::from_value(value).expect("worktree")
+    }
+
+    #[tokio::test]
+    async fn base_session_is_permanent_and_removed_with_project() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let app = test_app(root.path());
+        let repo = root.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let mut archived_base = worktree_json("old-base", "other", "", true);
+        archived_base.session_type = SessionType::Base;
+        archived_base.path = repo.to_string_lossy().to_string();
+        save_projects_data(
+            &app,
+            &ProjectsData {
+                projects: vec![project_json("p", &repo), project_json("other", &repo)],
+                worktrees: vec![archived_base],
+            },
+        )
+        .unwrap();
+
+        // Loading creates the missing base once and unarchives the old one.
+        load_projects_data(&app).unwrap();
+        let data = load_projects_data(&app).unwrap();
+        let bases: Vec<_> = data
+            .worktrees
+            .iter()
+            .filter(|w| w.session_type == SessionType::Base)
+            .collect();
+        assert_eq!(bases.len(), 2);
+        assert!(bases.iter().all(|w| w.archived_at.is_none()));
+        let base = create_base_session(app.clone(), "p".to_string())
+            .await
+            .unwrap();
+        assert_eq!(base.project_id, "p");
+        assert!(delete_worktree(app.clone(), base.id.clone(), None)
+            .await
+            .is_err());
+
+        // A regular worktree blocks removal; the base session does not.
+        let mut data = load_projects_data(&app).unwrap();
+        data.add_worktree(worktree_json("wt", "p", &repo.to_string_lossy(), false));
+        save_projects_data(&app, &data).unwrap();
+        assert!(remove_project(app.clone(), "p".to_string()).await.is_err());
+        let mut data = load_projects_data(&app).unwrap();
+        data.remove_worktree("wt");
+        save_projects_data(&app, &data).unwrap();
+        remove_project(app.clone(), "p".to_string()).await.unwrap();
+
+        let data = load_projects_data(&app).unwrap();
+        assert!(data.find_project("p").is_none());
+        assert!(data.worktrees_for_project("p").is_empty());
     }
 
     struct Fixture {

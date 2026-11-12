@@ -14,6 +14,7 @@ import { chatQueryKeys, refreshWorktreeSessionsCaches } from '@/services/chat'
 import { startCommitJob } from '@/services/commit-jobs'
 import { resolveDefaultModelForBackend } from '@/lib/session-defaults'
 import { buildMcpConfigJson } from '@/services/mcp'
+import { resolveSendReasoning, targetUsesEffort } from '@/lib/model-utils'
 import {
   saveWorktreePr,
   linkWorktreePr,
@@ -26,8 +27,6 @@ import {
   fetchWorktreesStatus,
   performGitPull,
 } from '@/services/git-status'
-import { prStatusQueryKeys } from '@/services/pr-status'
-import type { PrStatusEvent } from '@/types/pr-status'
 import { isBaseSession } from '@/types/projects'
 import type {
   CreatePrResponse,
@@ -98,6 +97,7 @@ interface UseGitOperationsParams {
   sendMessage: SendMessageMutation
   selectedThinkingLevelRef: RefObject<ThinkingLevel>
   selectedEffortLevelRef: RefObject<EffortLevel>
+  cliVersion: string | null
   mcpServersDataRef: RefObject<McpServerInfo[] | undefined>
   enabledMcpServersRef: RefObject<string[]>
 }
@@ -158,6 +158,7 @@ export function useGitOperations({
   sendMessage,
   selectedThinkingLevelRef,
   selectedEffortLevelRef,
+  cliVersion,
   mcpServersDataRef,
   enabledMcpServersRef,
 }: UseGitOperationsParams): UseGitOperationsReturn {
@@ -304,8 +305,19 @@ export function useGitOperations({
 
       const isCustomProvider = Boolean(provider && provider !== '__anthropic__')
       const customProfileName = isCustomProvider ? provider : undefined
-      const usesEffortLevel =
-        backend === 'codex' || backend === 'opencode' || backend === 'pi'
+      // Effort targets must not get the session thinking level: it would add
+      // an "ultrathink" keyword that the toolbar does not show.
+      const usesEffortLevel = targetUsesEffort({
+        backend,
+        model,
+        provider,
+        customCliProfiles: preferences?.custom_cli_profiles,
+        cliVersion,
+      })
+      const effortOverride = preferences?.magic_prompt_efforts
+        ?.resolve_conflicts_effort as EffortLevel | null | undefined
+      if (usesEffortLevel && effortOverride)
+        store.setEffortLevel(session.id, effortOverride)
 
       sendMessage.mutate(
         {
@@ -315,10 +327,11 @@ export function useGitOperations({
           message: prompt,
           model,
           executionMode,
-          thinkingLevel: selectedThinkingLevelRef.current,
-          effortLevel: usesEffortLevel
-            ? selectedEffortLevelRef.current
-            : undefined,
+          ...resolveSendReasoning(
+            usesEffortLevel,
+            selectedThinkingLevelRef.current,
+            effortOverride ?? selectedEffortLevelRef.current
+          ),
           mcpConfig: buildMcpConfigJson(
             mcpServersDataRef.current ?? [],
             enabledMcpServersRef.current,
@@ -336,11 +349,14 @@ export function useGitOperations({
       )
     },
     [
+      cliVersion,
       enabledMcpServersRef,
       inputRef,
       mcpServersDataRef,
       preferences?.ai_language,
       preferences?.chrome_enabled,
+      preferences?.custom_cli_profiles,
+      preferences?.magic_prompt_efforts?.resolve_conflicts_effort,
       preferences?.magic_prompts?.parallel_execution,
       selectedEffortLevelRef,
       selectedThinkingLevelRef,
@@ -590,6 +606,7 @@ export function useGitOperations({
           activeWorktreeId ?? undefined
         )
         triggerImmediateGitPoll()
+        triggerImmediateRemotePoll()
         if (result.permissionDenied) {
           opToast.error(
             `No permission to push to PR #${worktree?.pr_number}. Create a separate PR instead.`,
@@ -627,6 +644,24 @@ export function useGitOperations({
       worktree?.branch,
       worktree?.pr_number,
     ]
+  )
+
+  // A clean base merge stays local. GitHub keeps the PR "conflicting" until
+  // the merge commit is pushed, so offer the push instead of faking the status.
+  const notifyCleanBaseMerge = useCallback(
+    (toastId: string | number) => {
+      triggerImmediateGitPoll()
+      toast.success('No conflicts — base branch merged cleanly', {
+        id: toastId,
+        description: 'Push the merge commit to clear the conflict on the PR.',
+        duration: 10000,
+        action: {
+          label: toastActionLabel('Push'),
+          onClick: () => void handlePush(),
+        },
+      })
+    },
+    [handlePush]
   )
 
   const handleRevertLastCommit = useCallback(async () => {
@@ -1122,11 +1157,7 @@ export function useGitOperations({
           )
 
           if (!prResult.has_conflicts) {
-            toast.success('No conflicts — base branch merged cleanly', {
-              id: toastId,
-            })
-            triggerImmediateGitPoll()
-            triggerImmediateRemotePoll()
+            notifyCleanBaseMerge(toastId)
             return
           }
 
@@ -1282,6 +1313,7 @@ ${resolveInstructions}`
       cacheCreatedSession,
       resolveConflictSessionSelection,
       sendConflictResolutionPrompt,
+      notifyCleanBaseMerge,
     ]
   )
 
@@ -1301,22 +1333,7 @@ ${resolveInstructions}`
         )
 
         if (!result.has_conflicts) {
-          toast.success('No conflicts — base branch merged cleanly', {
-            id: toastId,
-          })
-          triggerImmediateGitPoll()
-
-          // Optimistically clear "Conflicts" button by updating cached PR status
-          const cached = queryClient.getQueryData<PrStatusEvent>(
-            prStatusQueryKeys.worktree(activeWorktreeId)
-          )
-          if (cached) {
-            queryClient.setQueryData(
-              prStatusQueryKeys.worktree(activeWorktreeId),
-              { ...cached, mergeable: 'mergeable' }
-            )
-          }
-          triggerImmediateRemotePoll()
+          notifyCleanBaseMerge(toastId)
           return
         }
 
@@ -1403,6 +1420,7 @@ ${resolveInstructions}`
       cacheCreatedSession,
       resolveConflictSessionSelection,
       sendConflictResolutionPrompt,
+      notifyCleanBaseMerge,
     ]
   )
 

@@ -177,6 +177,11 @@ describe('DesktopBackendModelPicker', () => {
     await user.click(
       within(list as HTMLElement).getByRole('tab', { name: 'Codex' })
     )
+    await user.click(
+      within(list as HTMLElement).getByRole('button', {
+        name: /show \d+ older model/i,
+      })
+    )
     await user.click(within(list as HTMLElement).getByText('GPT 5.4'))
 
     expect(onBackendModelChange).toHaveBeenCalledWith('codex', 'gpt-5.4')

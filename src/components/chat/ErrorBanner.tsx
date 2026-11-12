@@ -2,6 +2,7 @@ import { memo, useEffect, useState, type ReactNode } from 'react'
 import { AlertCircle, X } from '@/components/icons/reicon'
 import { openExternal } from '@/lib/platform'
 import { formatCompactDuration } from '@/lib/usage-format'
+import { isClaudeTermsError } from '@/lib/usage-limit'
 
 interface ErrorBannerProps {
   /** The error message to display */
@@ -19,6 +20,13 @@ interface ErrorBannerProps {
   isAutoResumeArmed?: boolean
   /** Reset time (epoch ms) for the countdown; null when unknown. */
   limitResetAtMs?: number | null
+  /**
+   * Claude accounts that can need the updated Consumer Terms, shown when the
+   * error asks the user to accept them on claude.ai.
+   */
+  termsAccountEmails?: string[]
+  /** Resend the failed message. */
+  onRetry?: () => void
 }
 
 const URL_REGEX = /(https?:\/\/[^\s<>"'`)]+[^\s<>"'`).,;:!?])/g
@@ -60,11 +68,18 @@ export const ErrorBanner = memo(function ErrorBanner({
   onCancelAutoContinue,
   isAutoResumeArmed = false,
   limitResetAtMs = null,
+  termsAccountEmails = [],
+  onRetry,
 }: ErrorBannerProps) {
   const lower = error.toLowerCase()
   const isCredits =
     lower.includes('insufficient balance') || lower.includes('creditserror')
-  const title = isCredits ? 'Out of credits' : 'Request failed'
+  const isTerms = isClaudeTermsError(error)
+  const title = isCredits
+    ? 'Out of credits'
+    : isTerms
+      ? 'Accept the updated Claude terms'
+      : 'Request failed'
 
   // Live-tick the countdown once a second while a reset time is shown.
   const [now, setNow] = useState(() => Date.now())
@@ -100,12 +115,41 @@ export const ErrorBanner = memo(function ErrorBanner({
               provider/model in the toolbar.
             </p>
           )}
+          {isTerms && (
+            <>
+              <p className="mt-1 text-xs text-destructive/70">
+                {termsAccountEmails.length > 0
+                  ? `Sign in to claude.ai as ${termsAccountEmails.join(' or ')} and accept the terms. Then retry.`
+                  : 'Sign in to claude.ai with the email of this Claude account and accept the terms. Then retry.'}
+              </p>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => openExternal('https://claude.ai')}
+                  className="rounded border border-destructive/30 px-2 py-0.5 font-medium hover:bg-destructive/20"
+                >
+                  Open claude.ai
+                </button>
+                {onRetry && !isAutoResumeArmed && (
+                  <button
+                    type="button"
+                    onClick={onRetry}
+                    className="rounded border border-destructive/30 px-2 py-0.5 font-medium hover:bg-destructive/20"
+                  >
+                    Retry
+                  </button>
+                )}
+              </div>
+            </>
+          )}
           {isAutoResumeArmed ? (
             <div className="mt-2 flex items-center gap-2 text-xs">
               <span className="text-destructive/80">
-                {countdown
-                  ? `Auto-continuing in ${countdown}`
-                  : 'Auto-continuing shortly'}
+                {isTerms
+                  ? 'Retrying shortly'
+                  : countdown
+                    ? `Auto-continuing in ${countdown}`
+                    : 'Auto-continuing shortly'}
               </span>
               {onCancelAutoContinue && (
                 <button

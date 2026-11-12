@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { invoke } from '@/lib/transport'
+import React, { useCallback, useState } from 'react'
+import { invokeForOptionalServer } from '@/lib/transport'
+import { useOptionalSettingsTargetServerId } from '@/lib/settings-target'
 import { openExternal } from '@/lib/platform'
-import { useUIStore } from '@/store/ui-store'
 import { Button } from '@/components/ui/button'
 import {
   Tooltip,
@@ -17,13 +17,22 @@ import {
   Trash2,
   Play,
   Square,
-  LogIn,
+  Copy,
+  Check,
 } from '@/components/icons/reicon'
+import { copyToClipboard } from '@/lib/clipboard'
+import { isNewerVersion } from '@/lib/version-utils'
 import { toast } from 'sonner'
 import { SettingsSection } from '../SettingsSection'
 import { ExtensionGroup, ExtensionLink, ExtensionRow } from '../ExtensionRow'
+import {
+  CliproxyAddAccountButton,
+  useCliproxyAccountLogin,
+} from '../CliproxyAccountLogin'
 
 interface UsageStep {
+  /** Starts a new titled group of steps. */
+  section?: string
   label?: string
   command?: string
   note?: string
@@ -50,7 +59,7 @@ const PLUGINS: PluginDefinition[] = [
     id: 'cliproxyapi',
     name: 'CLIProxyAPI',
     description:
-      'Local MIT-licensed proxy (router-for-me/CLIProxyAPI). CLIProxyAPI keeps multi-account pooling and round-robin outside Jean. Jean installs the official binary, runs it on 127.0.0.1:8317, and adds Claude and Codex profiles that point at that localhost URL. Jean does not store extra Claude or Codex subscription logins and does not switch accounts for you.',
+      'Local proxy that pools several Claude and Codex subscription accounts. Jean installs it and runs it on 127.0.0.1:8317.',
     githubUrl: 'https://github.com/router-for-me/CLIProxyAPI',
     links: [
       {
@@ -66,13 +75,26 @@ const PLUGINS: PluginDefinition[] = [
     backends: ['Claude', 'Codex'],
     usage: [
       {
-        note: 'Install downloads the official release for this OS into ~/.jean/opinionated/cliproxyapi and binds 127.0.0.1:8317. LAN access stays off unless you edit server.host in that config.yaml yourself.',
+        section: 'Accounts',
+        note: 'Add accounts with the buttons above. The logins stay in CLIProxyAPI, not in Jean.',
       },
       {
-        note: 'After install, pick the CLIProxyAPI provider on a Claude or Codex session (Preferences → Providers). Codex is injected per session (base_url http://127.0.0.1:8317/v1, wire_api responses). Jean does not rewrite ~/.codex/config.toml.',
+        section: 'Use in sessions',
+        note: 'Select the CLIProxyAPI provider for a Claude, Codex, or PI session (Preferences → Providers). Jean adds it to each backend automatically.',
       },
       {
-        note: 'Subscription accounts stay in CLIProxyAPI (~/.jean/opinionated/cliproxyapi/auths), not in Jean. Jean does not store those logins and does not switch accounts. Add Claude account and Add Codex account run CLIProxyAPI -claude-login and -codex-login. If the sidecar is stopped, Jean starts it first, then CLIProxyAPI opens the provider login. The management page key file is ~/.jean/opinionated/cliproxyapi/management-key.',
+        section: 'Files',
+        note: 'Files are in ~/.jean/opinionated/cliproxyapi. The proxy listens on localhost only.',
+      },
+      {
+        section: 'Management key',
+        note: 'The management page asks for the management key. Jean keeps it in ~/.jean/opinionated/cliproxyapi/management-key. To show it, run on the machine where CLIProxyAPI runs:',
+        command: 'cat ~/.jean/opinionated/cliproxyapi/management-key',
+      },
+      {
+        section: 'Remote server (SSH tunnel)',
+        note: 'When Jean runs on a remote server, forward the proxy port over SSH. Run this on your local machine, then open http://127.0.0.1:8317/management.html:',
+        command: 'ssh -N -L 8317:127.0.0.1:8317 user@remote-host',
       },
     ],
   },
@@ -256,6 +278,36 @@ const PLUGINS: PluginDefinition[] = [
       },
     ],
   },
+  {
+    id: 'security-audit',
+    name: 'Security Audit',
+    description:
+      "Cloudflare's source-first security audit skill. It maps trust boundaries, hunts by coverage, checks each candidate with a fresh verifier, and writes structured findings.",
+    githubUrl: 'https://github.com/cloudflare/security-audit-skill',
+    scope: 'ai-backends',
+    backends: [
+      'Claude',
+      'Codex',
+      'OpenCode',
+      'Cursor',
+      'Pi',
+      'Command Code',
+      'Grok',
+    ],
+    usage: [
+      {
+        note: 'Installs the upstream cloudflare/security-audit-skill pack as-is into each backend path and the Jean-global mirror. A full audit needs Node.js for the findings validators. The skill runs target code only inside an OS sandbox. Without that sandbox it keeps the lead as needs_validation.',
+      },
+      {
+        label: 'Audit a codebase',
+        command: 'security audit this codebase',
+      },
+      {
+        label: 'Review one area',
+        command: 'find security vulnerabilities in ./src',
+      },
+    ],
+  },
 ]
 
 interface PluginStatus {
@@ -269,20 +321,23 @@ interface PluginStatus {
   management_url?: string | null
   lan_exposed?: boolean
   auth_file_count?: number | null
-}
-
-interface AccountLoginLaunch {
-  provider: string
-  binary: string
-  args: string[]
-  started_proxy: boolean
-  message: string
+  host?: string | null
+  latest_version?: string | null
 }
 
 interface BackendPluginStatus {
   id: string
   label: string
   installed: boolean
+}
+
+// The backend reports `installed` only when every detected CLI has the pack.
+// A pack that some backends have is still present (shown as Partial).
+function isPluginPresent(status: PluginStatus): boolean {
+  return (
+    status.installed ||
+    (status.backends?.some(backend => backend.installed) ?? false)
+  )
 }
 
 function PluginCard({
@@ -297,27 +352,25 @@ function PluginCard({
   const [installing, setInstalling] = useState(false)
   const [uninstalling, setUninstalling] = useState(false)
   const [controlling, setControlling] = useState(false)
-  const [loggingIn, setLoggingIn] = useState<'claude' | 'codex' | null>(null)
-  const loginPending = useRef(false)
-  const openCliLoginModal = useUIStore(state => state.openCliLoginModal)
-  const cliLoginOpen = useUIStore(state => state.cliLoginModalOpen)
+  const serverId = useOptionalSettingsTargetServerId()
 
   const checkStatus = useCallback(async () => {
     setChecking(true)
     try {
-      const result = await invoke<PluginStatus>(
+      const result = await invokeForOptionalServer<PluginStatus>(
+        serverId,
         'check_opinionated_plugin_status',
         { pluginName: plugin.id }
       )
       setStatus(result)
-      onInstalledChange(plugin.id, result.installed)
+      onInstalledChange(plugin.id, isPluginPresent(result))
     } catch {
       setStatus({ installed: false, version: null })
       onInstalledChange(plugin.id, false)
     } finally {
       setChecking(false)
     }
-  }, [plugin.id, onInstalledChange])
+  }, [plugin.id, onInstalledChange, serverId])
 
   React.useEffect(() => {
     checkStatus()
@@ -328,9 +381,13 @@ function PluginCard({
     const toastId = toast.loading(`Installing ${plugin.name}...`)
 
     try {
-      const message = await invoke<string>('install_opinionated_plugin', {
-        pluginName: plugin.id,
-      })
+      const message = await invokeForOptionalServer<string>(
+        serverId,
+        'install_opinionated_plugin',
+        {
+          pluginName: plugin.id,
+        }
+      )
       toast.success(message, { id: toastId })
     } catch (error) {
       toast.error(`Failed to install ${plugin.name}: ${error}`, {
@@ -340,7 +397,7 @@ function PluginCard({
       setInstalling(false)
       await checkStatus()
     }
-  }, [plugin.id, plugin.name, checkStatus])
+  }, [plugin.id, plugin.name, checkStatus, serverId])
 
   const handleControl = useCallback(
     async (action: 'start' | 'stop') => {
@@ -351,7 +408,8 @@ function PluginCard({
           : `Stopping ${plugin.name}...`
       )
       try {
-        const message = await invoke<string>(
+        const message = await invokeForOptionalServer<string>(
+          serverId,
           action === 'start'
             ? 'start_opinionated_plugin'
             : 'stop_opinionated_plugin',
@@ -367,9 +425,12 @@ function PluginCard({
         await checkStatus()
       }
     },
-    [plugin.id, plugin.name, checkStatus]
+    [plugin.id, plugin.name, checkStatus, serverId]
   )
 
+  const { loggingIn, login: handleAccountLogin } =
+    useCliproxyAccountLogin(checkStatus)
+  const present = status ? isPluginPresent(status) : false
   const hasMissingBackend =
     plugin.scope === 'ai-backends' &&
     (status?.backends?.some(backend => !backend.installed) ?? false)
@@ -385,44 +446,35 @@ function PluginCard({
   const canUninstall = plugin.scope === 'ai-backends' || supervises
   const busy = installing || uninstalling || controlling || loggingIn !== null
   const versionText =
-    status?.installed && status.version
+    present && status?.version
       ? plugin.scope === 'ai-backends'
         ? ` (${status.version})`
-        : ` (v${status.version})`
+        : ` (v${status.version.replace(/^v/, '')})`
+      : null
+  const updateVersion =
+    present &&
+    status?.version &&
+    status.latest_version &&
+    isNewerVersion(status.latest_version, status.version)
+      ? status.latest_version
       : null
 
-  useEffect(() => {
-    if (plugin.id !== 'cliproxyapi') return
-    if (!cliLoginOpen && loginPending.current) {
-      loginPending.current = false
-      void checkStatus()
+  const handleRefreshModels = useCallback(async () => {
+    const toastId = toast.loading('Reading models...')
+    try {
+      const models = await invokeForOptionalServer<{
+        opus: string | null
+        sonnet: string | null
+        haiku: string | null
+      }>(serverId, 'refresh_cliproxyapi_models')
+      const names = [models.opus, models.sonnet, models.haiku].filter(Boolean)
+      toast.success(`Models from CLIProxyAPI: ${names.join(', ')}`, {
+        id: toastId,
+      })
+    } catch (error) {
+      toast.error(`${error}`, { id: toastId })
     }
-  }, [cliLoginOpen, checkStatus, plugin.id])
-
-  const handleAccountLogin = useCallback(
-    async (provider: 'claude' | 'codex') => {
-      setLoggingIn(provider)
-      const label = provider === 'claude' ? 'Claude' : 'Codex'
-      const toastId = toast.loading(`Opening ${label} account login...`)
-      try {
-        const launch = await invoke<AccountLoginLaunch>(
-          'prepare_cliproxyapi_account_login',
-          { provider }
-        )
-        toast.success(launch.message, { id: toastId })
-        loginPending.current = true
-        openCliLoginModal('cliproxyapi', launch.binary, launch.args)
-      } catch (error) {
-        toast.error(`Failed to open ${label} account login: ${error}`, {
-          id: toastId,
-        })
-      } finally {
-        setLoggingIn(null)
-        await checkStatus()
-      }
-    },
-    [checkStatus, openCliLoginModal]
-  )
+  }, [serverId])
 
   const handleOpenManagement = useCallback(async () => {
     const url = status?.management_url
@@ -434,9 +486,13 @@ function PluginCard({
     setControlling(true)
     const toastId = toast.loading(`Starting ${plugin.name}...`)
     try {
-      const message = await invoke<string>('start_opinionated_plugin', {
-        pluginName: plugin.id,
-      })
+      const message = await invokeForOptionalServer<string>(
+        serverId,
+        'start_opinionated_plugin',
+        {
+          pluginName: plugin.id,
+        }
+      )
       toast.success(message, { id: toastId })
       openExternal(url)
     } catch (error) {
@@ -449,6 +505,7 @@ function PluginCard({
     }
   }, [
     checkStatus,
+    serverId,
     plugin.id,
     plugin.name,
     status?.management_url,
@@ -460,9 +517,13 @@ function PluginCard({
     const toastId = toast.loading(`Uninstalling ${plugin.name}...`)
 
     try {
-      const message = await invoke<string>('uninstall_opinionated_plugin', {
-        pluginName: plugin.id,
-      })
+      const message = await invokeForOptionalServer<string>(
+        serverId,
+        'uninstall_opinionated_plugin',
+        {
+          pluginName: plugin.id,
+        }
+      )
       toast.success(message, { id: toastId })
     } catch (error) {
       toast.error(`Failed to uninstall ${plugin.name}: ${error}`, {
@@ -472,13 +533,13 @@ function PluginCard({
       setUninstalling(false)
       await checkStatus()
     }
-  }, [plugin.id, plugin.name, checkStatus])
+  }, [plugin.id, plugin.name, checkStatus, serverId])
 
   return (
     <ExtensionRow
       name={plugin.name}
       status={
-        checking ? null : status?.installed ? (
+        checking ? null : present ? (
           <Badge
             variant="success"
             title={`${statusLabel}${versionText ?? ''}`}
@@ -500,7 +561,7 @@ function PluginCard({
       actions={
         checking ? (
           <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-        ) : status?.installed ? (
+        ) : present ? (
           <>
             <Button
               variant="ghost"
@@ -511,6 +572,21 @@ function PluginCard({
             >
               <RefreshCw className="h-4 w-4" />
             </Button>
+            {updateVersion && (
+              <Button
+                size="sm"
+                onClick={handleInstall}
+                disabled={busy}
+                className="flex-1 sm:flex-none"
+              >
+                {installing ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4" />
+                )}
+                Update to v{updateVersion}
+              </Button>
+            )}
             {supervises && (
               <Button
                 variant="outline"
@@ -598,6 +674,27 @@ function PluginCard({
           </Button>
         )
       }
+      summary={
+        supervises && status?.installed ? (
+          <div className="flex flex-wrap items-center gap-2">
+            {(['claude', 'codex'] as const).map(provider => (
+              <CliproxyAddAccountButton
+                key={provider}
+                provider={provider}
+                loading={loggingIn === provider}
+                disabled={busy}
+                onClick={() => handleAccountLogin(provider)}
+              />
+            ))}
+            {typeof status.auth_file_count === 'number' && (
+              <span className="text-xs text-muted-foreground">
+                {status.auth_file_count} account
+                {status.auth_file_count === 1 ? '' : 's'} added
+              </span>
+            )}
+          </div>
+        ) : undefined
+      }
     >
       <div className="pt-1 space-y-1">
         <div className="text-2xs text-muted-foreground">
@@ -625,29 +722,11 @@ function PluginCard({
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={() => handleAccountLogin('claude')}
+                onClick={handleRefreshModels}
                 disabled={busy}
               >
-                {loggingIn === 'claude' ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <LogIn className="h-4 w-4" />
-                )}
-                Add Claude account
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => handleAccountLogin('codex')}
-                disabled={busy}
-              >
-                {loggingIn === 'codex' ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <LogIn className="h-4 w-4" />
-                )}
-                Add Codex account
+                <RefreshCw className="h-4 w-4" />
+                Refresh models
               </Button>
               {status.management_url && (
                 <Button
@@ -662,14 +741,12 @@ function PluginCard({
                 </Button>
               )}
             </div>
-            <p className="text-xs text-muted-foreground">
-              {typeof status.auth_file_count === 'number'
-                ? `${status.auth_file_count} OAuth file${
-                    status.auth_file_count === 1 ? '' : 's'
-                  } in CLIProxyAPI. `
-                : ''}
-              Jean does not read or copy those files.
-            </p>
+            {status.host && (
+              <p className="text-xs text-muted-foreground">
+                Runs on {status.host}. Chats on this machine connect to it at
+                127.0.0.1.
+              </p>
+            )}
           </div>
         )}
         {status?.lan_exposed && (
@@ -715,21 +792,57 @@ function PluginCard({
                 key={step.command ?? step.label ?? step.note}
                 className="text-xs text-muted-foreground space-y-1"
               >
+                {step.section && (
+                  <div className="pt-1 font-medium text-foreground/80">
+                    {step.section}
+                  </div>
+                )}
                 {step.note && <div>{step.note}</div>}
                 {step.label && (
                   <div className="text-foreground/70">{step.label}:</div>
                 )}
-                {step.command && (
-                  <code className="block rounded bg-muted px-2 py-1 font-mono text-2xs text-foreground">
-                    {step.command}
-                  </code>
-                )}
+                {step.command && <CopyableCommand command={step.command} />}
               </li>
             ))}
           </ul>
         </div>
       )}
     </ExtensionRow>
+  )
+}
+
+function CopyableCommand({ command }: { command: string }) {
+  const [copied, setCopied] = useState(false)
+  const handleCopy = useCallback(async () => {
+    try {
+      await copyToClipboard(command)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      toast.error('Failed to copy')
+    }
+  }, [command])
+
+  return (
+    <div className="flex items-center gap-1 rounded bg-muted py-0.5 pl-2 pr-0.5">
+      <code className="min-w-0 flex-1 select-all break-all font-mono text-2xs text-foreground">
+        {command}
+      </code>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="size-6 shrink-0"
+        onClick={handleCopy}
+        aria-label="Copy command"
+      >
+        {copied ? (
+          <Check className="size-3.5" />
+        ) : (
+          <Copy className="size-3.5" />
+        )}
+      </Button>
+    </div>
   )
 }
 

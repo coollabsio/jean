@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { Loader2 } from '@/components/icons/reicon'
 import { createPortal } from 'react-dom'
 import { useTheme } from '@/hooks/use-theme'
 import { isNativeApp } from '@/lib/environment'
@@ -249,6 +250,7 @@ const Toaster = ({
   position,
   style,
   expand = TOASTER_EXPAND_BY_DEFAULT,
+  icons,
   ...props
 }: ToasterProps) => {
   const { theme = 'system' } = useTheme()
@@ -261,6 +263,10 @@ const Toaster = ({
         position={resolvedPosition}
         expand={expand}
         className="toaster group"
+        icons={{
+          loading: <Loader2 className="size-4 animate-spin" />,
+          ...icons,
+        }}
         style={
           {
             '--normal-bg': 'var(--toast-background)',

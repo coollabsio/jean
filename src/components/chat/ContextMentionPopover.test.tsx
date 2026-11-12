@@ -63,7 +63,10 @@ vi.mock('@/components/worktree/IssuePreviewModal', () => ({
 }))
 
 vi.mock('./hooks/useContextMentionData', () => ({
-  useContextMentionData: useContextMentionDataMock,
+  useContextMentionData: (...args: unknown[]) => {
+    const result = useContextMentionDataMock(...args)
+    return { sections: result.groups, ...result }
+  },
 }))
 
 describe('ContextMentionPopover', () => {
@@ -117,6 +120,35 @@ describe('ContextMentionPopover', () => {
     ).toContainElement(
       screen.getByRole('button', { name: 'Include closed/merged' })
     )
+  })
+
+  it('shows a tab with 0 for an empty section and keeps it selectable', () => {
+    useContextMentionDataMock.mockImplementation(() => ({
+      groups: [{ id: 'issue', heading: 'GitHub Issues', items: [items[0]] }],
+      sections: [
+        { id: 'issue', heading: 'GitHub Issues', items: [items[0]] },
+        { id: 'pr', heading: 'GitHub Pull Requests', items: [] },
+      ],
+      isFetching: false,
+      loadMoreDiscussions: vi.fn(),
+    }))
+    render(
+      <ContextMentionPopover
+        projectPath="/tmp/repo"
+        projectId="project-1"
+        open
+        onOpenChange={vi.fn()}
+        onSelectContext={vi.fn()}
+        searchQuery=""
+        anchorPosition={{ top: 0, left: 0 }}
+        containerWidth={480}
+      />
+    )
+
+    const prTab = screen.getByRole('tab', { name: /^PRs\s*0$/ })
+    fireEvent.click(prTab)
+    expect(prTab).toHaveAttribute('aria-selected', 'true')
+    expect(screen.queryByText('Fix login bug')).not.toBeInTheDocument()
   })
 
   it('opens the issue preview without selecting or closing the list', () => {

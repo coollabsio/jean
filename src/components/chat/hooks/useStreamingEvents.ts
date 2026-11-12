@@ -59,6 +59,7 @@ import type {
   CodexUserInputRequestEvent,
   CodexMcpElicitationRequestEvent,
   CodexDynamicToolCallRequestEvent,
+  ApiRetryEvent,
   CompactingEvent,
   CompactedEvent,
   BackendRetryEvent,
@@ -134,6 +135,26 @@ const CLAUDE_COMPACTION_SUMMARY_PREFIX =
 
 function isClaudeCompactionSummaryText(text: string): boolean {
   return text.trimStart().startsWith(CLAUDE_COMPACTION_SUMMARY_PREFIX)
+}
+
+/**
+ * Steer texts the user added to a turn that was then withdrawn (cancelled
+ * before any output). They live only in the cancelled tail of the cache, so
+ * they must go back to the composer with the prompt or they are lost.
+ */
+export function withdrawnSteerTexts(messages: ChatMessage[] | undefined) {
+  const tail: ChatMessage[] = []
+  for (let i = (messages?.length ?? 0) - 1; i >= 0; i--) {
+    const message = messages?.[i]
+    if (!message || message.role === 'user') break
+    tail.unshift(message)
+  }
+  return tail
+    .filter(m => m.cancelled)
+    .flatMap(m => m.content_blocks ?? [])
+    .flatMap(block =>
+      block.type === 'user_input' && block.text.trim() ? [block.text] : []
+    )
 }
 
 function sanitizeCancelledContentBlocks(
@@ -2168,9 +2189,25 @@ export default function useStreamingEvents({
       )
       recordUserTurnOutcome(session_id, user_turn)
 
-      const restoreOwnPrompt = () => {
+      const restoreOwnPrompt = (withSteers = false) => {
         const draftBefore = store.inputDrafts[session_id]
-        restoreLastSentPrompt(session_id)
+        const restored = restoreLastSentPrompt(session_id)
+        const steers = withSteers
+          ? withdrawnSteerTexts(
+              queryClient.getQueryData<Session>(
+                chatQueryKeys.session(session_id)
+              )?.messages
+            )
+          : []
+        if (restored && steers.length > 0) {
+          const draft = useChatStore.getState().inputDrafts[session_id]?.trim()
+          useChatStore
+            .getState()
+            .setInputDraft(
+              session_id,
+              [draft, ...steers].filter(Boolean).join('\n\n')
+            )
+        }
         const draftAfter = useChatStore.getState().inputDrafts[session_id]
         if (draftAfter && draftAfter !== draftBefore) {
           toast.info('Message restored to input')
@@ -2178,15 +2215,18 @@ export default function useStreamingEvents({
       }
 
       if (restore_draft) {
-        restoreOwnPrompt()
+        restoreOwnPrompt(true)
         // The prompt is not in history: drop the optimistic user turn, then
         // refetch so an in-flight fetch from chat:cancelled cannot bring it back.
         queryClient.setQueryData<Session>(
           chatQueryKeys.session(session_id),
           old => {
             if (!old) return old
-            if (old.messages.at(-1)?.role !== 'user') return old
-            return { ...old, messages: old.messages.slice(0, -1) }
+            // Also drop the cancelled tail (e.g. a steer-only partial reply).
+            let end = old.messages.length
+            while (end > 0 && old.messages[end - 1]?.cancelled) end--
+            if (old.messages[end - 1]?.role !== 'user') return old
+            return { ...old, messages: old.messages.slice(0, end - 1) }
           }
         )
       } else if (failed) {
@@ -2222,6 +2262,24 @@ export default function useStreamingEvents({
         )
       }
     )
+
+    // Claude CLI retries failed API requests silently (can take minutes).
+    // Surface each attempt; the toast expires after the retry delay.
+    const unlistenApiRetry = listen<ApiRetryEvent>('chat:api-retry', event => {
+      const { session_id, attempt, max_retries, retry_delay_ms } = event.payload
+      const viaProxy =
+        useChatStore.getState().selectedProviders[session_id] === 'CLIProxyAPI'
+      toast.warning(
+        `Connection problem, retrying (${attempt}/${max_retries})…`,
+        {
+          id: `api-retry-${session_id}`,
+          description: viaProxy
+            ? 'CLIProxyAPI may not be running. Install or start it in Preferences → Opinionated.'
+            : undefined,
+          duration: retry_delay_ms + 3000,
+        }
+      )
+    })
 
     const unlistenCompacted = listen<CompactedEvent>(
       'chat:compacted',
@@ -2457,6 +2515,7 @@ export default function useStreamingEvents({
       unlistenCancelled.then(f => f())
       unlistenUserTurn.then(f => f())
       unlistenCompacting.then(f => f())
+      unlistenApiRetry.then(f => f())
       unlistenCompacted.then(f => f())
       unlistenBackendRetry.then(f => f())
       unlistenWakeupScheduled.then(f => f())

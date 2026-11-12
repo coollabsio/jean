@@ -41,7 +41,7 @@ pub(crate) use commands::purge_session;
 pub use commands::*;
 pub use mcp_auth::*;
 pub use native_history::*;
-pub use storage::{preserve_base_sessions, restore_base_sessions};
+pub use storage::restore_base_sessions;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -61,27 +61,40 @@ Format:
 
 Tested against local dev env: Yes/No
 
-[`### Possible regressions` — only when the rules below say to.]
-
 [`### How to test` — only when the rules below say to.]
 
 Rules:
 - Heading is the literal `## Recap` on its own line, and it is the LAST block of the message.
 - Brief wording, complete content: cut words, never items: do not drop items to make the recap shorter. No \"see above\" or \"I looked it up\" — restate the result.
 - Findings, issues, risks, ideas, or fixes go in one Markdown table (for example: | # | Finding | Location | Impact | Fix / status |), not prose. The table must include EVERY item from the turn, one row per item, across all groups and priorities. Keep the numbers or letters used earlier. Do not merge rows or hide items in a bullet like \"smaller ideas\". Shorten cells instead.
-- Keep links: write every issue, PR, commit, advisory, Linear/Sentry issue, or URL with a known link as a Markdown link (for example `[#123](https://github.com/owner/repo/pull/123)`). Do not invent URLs.
+- Keep links: in the whole message, write every issue, PR, commit, advisory, Linear/Sentry issue, or URL with a known link as a Markdown link (for example `[#123](https://github.com/owner/repo/pull/123)`). Do not invent URLs.
 - `Tested against local dev env: Yes` or `Tested against local dev env: No`: include it only when the turn changed code, config, or behavior; Yes only if you verified it in a running local dev env.
 - `### How to test`: only when the turn made changes the user can verify. Max 5 numbered steps, each one plain action with the exact URL or command and the expected result — a manual smoke test of the main behavior if it makes sense. Omit it on read-only turns; never write placeholders like \"N/A\".
-- `### Possible regressions`: only when the turn changed functional behavior (logic, data flow, state, persistence, APIs, commands, parsing, shared code). Omit it for visual-only, docs, comments, prompt text, tests-only, and read-only turns. Table, riskiest first: | # | What the user would see | Cause in this change | Proof it still works | Check it yourself |.
-  - `What the user would see`: an action and its wrong result (for example `Delete server with \"remove SSH key\" → key stays`), not the code change.
-  - `Proof it still works` starts with one label: `Old test:` <name>, `New test:` <name> (weak proof), `Ran in dev env:` <what>, `Callers read:` <which>, or `Not verified`.
-  - `Check it yourself`: one short manual step; `—` only for `Old test:` or `Ran in dev env:`.
-  - Check callers, shared types, persistence, other backends, web access, and mobile. Only real failure paths. If none, write `No possible regressions found` and the reason.
 - If the turn ends with a question for the user, put the question at the end of the recap: one line with the question, then `Reply with a number:`, then 2-8 numbered short options. Jean shows them as buttons. Ask the question exactly once: never before the `## Recap` heading, not even in an earlier message of the same turn or when a skill says so.
 - Screenshots or images the user should see: list them in a fenced code block with the language `screenshots`, one absolute path or URL per line, in viewing order. Do not also link them.
 - Plan mode: still call the native plan tool (Claude ExitPlanMode, Codex `<proposed_plan>`, Cursor/OpenCode equivalent). The recap never replaces it.
 - Skip the recap for a single one-line answer with no tool calls.
 - Never paste tool inputs, diffs, or raw command output. Summarize.";
+
+/// Paths of the embedded Claude and Codex CLIs, as one prompt part.
+pub(crate) fn push_embedded_cli_paths(parts: &mut Vec<String>, app: &tauri::AppHandle) {
+    let lines: Vec<String> = [
+        ("claude", crate::claude_cli::get_cli_binary_path(app)),
+        ("codex", crate::codex_cli::get_cli_binary_path(app)),
+    ]
+    .into_iter()
+    .filter_map(|(name, path)| {
+        let path = path.ok().filter(|path| path.exists())?;
+        Some(format!("- `{name}`: {}", path.display()))
+    })
+    .collect();
+    if !lines.is_empty() {
+        parts.push(format!(
+            "Run these CLIs only with the full path of the embedded binary, never the bare name:\n{}",
+            lines.join("\n")
+        ));
+    }
+}
 
 /// Injected when the parallel-execution magic prompt is cleared. Omitting the
 /// fan-out prompt is not enough: the model still spawns Task sub-agents unless
@@ -152,17 +165,6 @@ mod tests {
     fn recap_requests_local_dev_env_tested_line() {
         assert!(RECAP_INSTRUCTION.contains("Tested against local dev env: Yes"));
         assert!(RECAP_INSTRUCTION.contains("Tested against local dev env: No"));
-    }
-
-    #[test]
-    fn recap_requests_possible_regressions_table() {
-        assert!(RECAP_INSTRUCTION.contains("### Possible regressions"));
-        assert!(
-            RECAP_INSTRUCTION.contains("| # | What the user would see | Cause in this change |")
-        );
-        assert!(RECAP_INSTRUCTION.contains("`New test:`"));
-        assert!(RECAP_INSTRUCTION.contains("Check it yourself"));
-        assert!(RECAP_INSTRUCTION.contains("No possible regressions found"));
     }
 
     #[test]

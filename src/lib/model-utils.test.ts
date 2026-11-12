@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  resolveSendReasoning,
+  targetUsesEffort,
+  providerSupportsAdaptiveThinking,
   getModelImpliedBackend,
+  getOlderModelValues,
   isGeminiModel,
   resolveBackend,
   supportsAdaptiveThinking,
@@ -75,5 +79,161 @@ describe('supportsAdaptiveThinking', () => {
     expect(supportsAdaptiveThinking('claude-sonnet-4-6[1m]', '2.1.32')).toBe(
       false
     )
+  })
+})
+
+describe('providerSupportsAdaptiveThinking', () => {
+  const profile = (name: string, env: Record<string, string>) => ({
+    name,
+    settings_json: JSON.stringify({ env }),
+  })
+  const profiles = [
+    profile('CLIProxyAPI', { ANTHROPIC_DEFAULT_OPUS_MODEL: 'claude-opus-5-5' }),
+    profile('Zai', { ANTHROPIC_DEFAULT_OPUS_MODEL: 'glm-4.7' }),
+    profile('Empty', {}),
+  ]
+
+  it('uses effort when a provider maps the alias to an effort Claude model', () => {
+    expect(
+      providerSupportsAdaptiveThinking('opus', 'CLIProxyAPI', profiles, '2.2.0')
+    ).toBe(true)
+  })
+
+  it('uses thinking when the alias maps to a non-Claude model', () => {
+    expect(
+      providerSupportsAdaptiveThinking('opus', 'Zai', profiles, '2.2.0')
+    ).toBe(false)
+  })
+
+  it('uses thinking when the provider does not map the alias', () => {
+    expect(
+      providerSupportsAdaptiveThinking('opus', 'Empty', profiles, '2.2.0')
+    ).toBe(false)
+  })
+
+  it('checks the model itself without a custom provider', () => {
+    for (const provider of [null, '__anthropic__', '__default__']) {
+      expect(
+        providerSupportsAdaptiveThinking(
+          'claude-opus-5-5',
+          provider,
+          profiles,
+          '2.2.0'
+        )
+      ).toBe(true)
+    }
+    expect(
+      providerSupportsAdaptiveThinking('opus', null, profiles, '2.2.0')
+    ).toBe(false)
+  })
+})
+
+describe('targetUsesEffort', () => {
+  const cliVersion = '2.5.0'
+
+  it('decides from the target model, not the session model', () => {
+    expect(
+      targetUsesEffort({
+        backend: 'claude',
+        model: 'claude-opus-5-5',
+        cliVersion,
+      })
+    ).toBe(true)
+    expect(
+      targetUsesEffort({
+        backend: 'claude',
+        model: 'claude-sonnet-4-6',
+        cliVersion,
+      })
+    ).toBe(false)
+  })
+
+  it('treats effort backends as effort targets', () => {
+    expect(targetUsesEffort({ backend: 'codex', model: 'gpt-5.5' })).toBe(true)
+    expect(targetUsesEffort({ backend: 'cursor', model: 'cursor/auto' })).toBe(
+      false
+    )
+  })
+
+  it('follows the catalog when it knows the model', () => {
+    expect(
+      targetUsesEffort({
+        backend: 'claude',
+        model: 'claude-sonnet-4-6',
+        cliVersion,
+        catalogUsesEffort: true,
+      })
+    ).toBe(true)
+  })
+})
+
+describe('resolveSendReasoning', () => {
+  it('sends exactly one level', () => {
+    expect(resolveSendReasoning(true, 'ultrathink', 'medium')).toEqual({
+      effortLevel: 'medium',
+    })
+    expect(resolveSendReasoning(false, 'ultrathink', 'medium')).toEqual({
+      thinkingLevel: 'ultrathink',
+    })
+  })
+})
+
+describe('getOlderModelValues', () => {
+  it('keeps only the newest Claude model of each family', () => {
+    const older = getOlderModelValues([
+      'claude-fable-5-1',
+      'claude-fable-5',
+      'claude-opus-5-5',
+      'claude-opus-5',
+      'claude-sonnet-5-5',
+      'claude-haiku-5-5',
+      'claude-sonnet-5',
+      'claude-opus-4-8[1m]',
+      'claude-opus-4-8',
+      'claude-opus-4-5-20251101',
+      'claude-sonnet-4-6[1m]',
+      'haiku',
+    ])
+    expect([...older].sort()).toEqual([
+      'claude-fable-5',
+      'claude-opus-4-5-20251101',
+      'claude-opus-4-8',
+      'claude-opus-4-8[1m]',
+      'claude-opus-5',
+      'claude-sonnet-4-6[1m]',
+      'claude-sonnet-5',
+    ])
+  })
+
+  it('hides Codex models from an older major version line', () => {
+    const older = getOlderModelValues([
+      'gpt-6.1-sol',
+      'gpt-6.1-terra',
+      'gpt-6-astra',
+      'gpt-6-sol',
+      'gpt-6-luna',
+      'gpt-5.6-sol',
+      'gpt-5.6-luna',
+      'gpt-5.5',
+      'gpt-5.3-codex-spark',
+    ])
+    expect([...older].sort()).toEqual([
+      'gpt-5.3-codex-spark',
+      'gpt-5.5',
+      'gpt-5.6-luna',
+      'gpt-5.6-sol',
+      'gpt-6-sol',
+    ])
+  })
+
+  it('compares families separately across providers', () => {
+    const older = getOlderModelValues([
+      'anthropic/claude-opus-4-5',
+      'anthropic/claude-opus-4-1',
+      'openai/gpt-5.4',
+      'google/gemini-3-pro',
+      'cursor/auto',
+    ])
+    expect([...older]).toEqual(['anthropic/claude-opus-4-1'])
   })
 })

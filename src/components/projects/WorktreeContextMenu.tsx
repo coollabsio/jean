@@ -4,7 +4,6 @@ import {
   Play,
   Terminal,
   Trash2,
-  X,
 } from '@/components/icons/reicon'
 import {
   ContextMenu,
@@ -51,7 +50,6 @@ export function WorktreeContextMenu({
     handleOpenInFinder,
     handleOpenInTerminal,
     handleOpenInEditor,
-    handleClose,
     handleDelete,
   } = actions
 
@@ -110,18 +108,14 @@ export function WorktreeContextMenu({
           </ContextMenuItem>
         )}
 
-        <ContextMenuSeparator />
-
-        {isBase ? (
-          <ContextMenuItem onClick={handleClose}>
-            <X className="mr-2 h-4 w-4" />
-            Close Base Session
-          </ContextMenuItem>
-        ) : (
-          <ContextMenuItem onClick={() => setShowDeleteConfirm(true)}>
-            <Trash2 className="mr-2 h-4 w-4 text-destructive" />
-            Delete Worktree
-          </ContextMenuItem>
+        {!isBase && (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem onClick={() => setShowDeleteConfirm(true)}>
+              <Trash2 className="mr-2 h-4 w-4 text-destructive" />
+              Delete Worktree
+            </ContextMenuItem>
+          </>
         )}
       </ContextMenuContent>
 

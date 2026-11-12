@@ -8,7 +8,7 @@ use once_cell::sync::Lazy;
 use tauri::AppHandle;
 use uuid::Uuid;
 
-use super::types::ProjectsData;
+use super::types::{ProjectsData, SessionType};
 
 /// Global mutex to prevent concurrent read-modify-write races on projects.json.
 /// Multiple threads (e.g., fetch_worktrees_status) can call save_projects_data simultaneously,
@@ -453,16 +453,36 @@ fn load_projects_data_internal(app: &AppHandle) -> Result<ProjectsData, String> 
         .collect();
 
     let removed_count = original_count - valid_worktrees.len();
+    let archived_bases = valid_worktrees
+        .iter()
+        .filter(|w| w.session_type == SessionType::Base && w.archived_at.is_some())
+        .count();
 
-    let data = ProjectsData {
+    let mut data = ProjectsData {
         projects: data.projects,
         worktrees: valid_worktrees,
     };
 
-    // Save cleaned data if any orphans were removed
-    if removed_count > 0 {
-        log::trace!("Cleaned up {removed_count} orphaned worktree(s)");
+    // The base session is permanent: recreate it for any project without one.
+    let added_bases = data.ensure_base_sessions(
+        |path| Path::new(path).exists(),
+        || Uuid::new_v4().to_string(),
+        now_ts,
+    );
+
+    if removed_count > 0 || archived_bases > 0 || !added_bases.is_empty() {
+        log::trace!(
+            "Cleaned up {removed_count} orphaned worktree(s), added {} base session(s)",
+            added_bases.len()
+        );
         save_projects_data_internal(app, &data)?;
+    }
+
+    // Bring back sessions preserved when an older Jean closed the base session.
+    for (project_id, worktree_id) in &added_bases {
+        if let Err(e) = crate::chat::restore_base_sessions(app, project_id, worktree_id) {
+            log::warn!("Failed to restore preserved base sessions for {project_id}: {e}");
+        }
     }
 
     log::trace!(

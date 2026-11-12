@@ -256,14 +256,7 @@ pub async fn remove_server_project(app: AppHandle, project_id: String) -> Result
         }
         Some(_) => {}
     }
-    let worktree_ids: Vec<String> = data
-        .worktrees_for_project(&project_id)
-        .into_iter()
-        .map(|w| w.id.clone())
-        .collect();
-    for worktree_id in worktree_ids {
-        super::close_base_session_clean(app.clone(), worktree_id).await?;
-    }
+    // remove_project drops the base session with the project.
     super::remove_project(app.clone(), project_id.clone()).await?;
     // Delete only Jean's own scratch folder, never any other path.
     if let Ok(scratch) = server_scratch_path(&app, &project_id) {

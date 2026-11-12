@@ -337,8 +337,8 @@ export type SessionCloseDecision =
 
 /**
  * What closing `target` should do. With no open session left the request
- * closes the worktree, except on a server, whose one base session never
- * closes. `onLastSession` is the surface policy for the last open session:
+ * closes the worktree, except when `keepWorktree` is set: a base session
+ * (and so a server) never closes. `onLastSession` is the surface policy for the last open session:
  * tabs close it (the backend then creates an empty one), Recent rows ask to
  * delete the worktree. Otherwise empty sessions close at once and the rest
  * confirm first. A lead with finished sub-sessions always confirms, so the
@@ -349,7 +349,7 @@ export function decideSessionClose({
   sessions,
   inputDrafts,
   onLastSession,
-  isServer = false,
+  keepWorktree = false,
   finishedSubSessionCount = 0,
 }: {
   target: {
@@ -360,15 +360,15 @@ export function decideSessionClose({
   sessions: readonly { id: string; archived_at?: number | null }[]
   inputDrafts: Record<string, string>
   onLastSession: 'close-session' | 'confirm-worktree'
-  isServer?: boolean
+  keepWorktree?: boolean
   finishedSubSessionCount?: number
 }): SessionCloseDecision {
   if (target?.archived_at) return 'noop'
   const open = openSessions(sessions)
-  if (open.length === 0) return isServer ? 'noop' : 'confirm-worktree'
+  if (open.length === 0) return keepWorktree ? 'noop' : 'confirm-worktree'
   if (!target) return 'noop'
   const isLast = open.every(session => session.id === target.id)
-  if (isLast && onLastSession === 'confirm-worktree' && !isServer) {
+  if (isLast && onLastSession === 'confirm-worktree' && !keepWorktree) {
     return 'confirm-worktree'
   }
   return isSessionEmpty(target, inputDrafts) && finishedSubSessionCount === 0

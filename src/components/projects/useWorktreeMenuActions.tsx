@@ -1,7 +1,6 @@
 import { useState, useCallback } from 'react'
 import { isBaseSession, type Worktree } from '@/types/projects'
 import {
-  useCloseBaseSession,
   useDeleteWorktree,
   useOpenWorktreeInFinder,
   useOpenWorktreeInTerminal,
@@ -23,7 +22,6 @@ export function useWorktreeMenuActions({
   projectId,
 }: UseWorktreeMenuActionsProps) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
-  const closeBaseSession = useCloseBaseSession()
   const deleteWorktree = useDeleteWorktree()
   const openInFinder = useOpenWorktreeInFinder()
   const openInTerminal = useOpenWorktreeInTerminal()
@@ -77,13 +75,11 @@ export function useWorktreeMenuActions({
     })
   }, [openInEditor, worktree.path, preferences?.editor])
 
+  // The base session is permanent: it never closes.
   const handleClose = useCallback(() => {
-    if (isBase) {
-      closeBaseSession.mutate({ worktreeId: worktree.id, projectId })
-    } else {
-      deleteWorktree.mutate({ worktreeId: worktree.id, projectId })
-    }
-  }, [isBase, closeBaseSession, deleteWorktree, worktree.id, projectId])
+    if (isBase) return
+    deleteWorktree.mutate({ worktreeId: worktree.id, projectId })
+  }, [isBase, deleteWorktree, worktree.id, projectId])
 
   const handleDelete = useCallback(
     (skipTeardown = false) => {

@@ -1,8 +1,8 @@
 import { useMemo } from 'react'
-import type {
-  ClaudeModel,
-  CliBackend,
-  CustomCliProfile,
+import type { CliBackend, CustomCliProfile } from '@/types/preferences'
+import {
+  formatClaudeModelIdLabel,
+  getProviderAliasModelOptions,
 } from '@/types/preferences'
 import {
   CURSOR_MODEL_OPTIONS,
@@ -233,30 +233,7 @@ export function useToolbarDerivedState({
     }
 
     const profile = customCliProfiles.find(p => p.name === selectedProvider)
-    let opusModel: string | undefined
-    let sonnetModel: string | undefined
-    let haikuModel: string | undefined
-    if (profile?.settings_json) {
-      try {
-        const settings = JSON.parse(profile.settings_json)
-        const env = settings?.env
-        if (env) {
-          opusModel = env.ANTHROPIC_DEFAULT_OPUS_MODEL || env.ANTHROPIC_MODEL
-          sonnetModel =
-            env.ANTHROPIC_DEFAULT_SONNET_MODEL || env.ANTHROPIC_MODEL
-          haikuModel = env.ANTHROPIC_DEFAULT_HAIKU_MODEL || env.ANTHROPIC_MODEL
-        }
-      } catch {
-        // ignore parse errors
-      }
-    }
-
-    const suffix = (model?: string) => (model ? ` (${model})` : '')
-    return [
-      { value: 'opus' as ClaudeModel, label: `Opus${suffix(opusModel)}` },
-      { value: 'sonnet' as ClaudeModel, label: `Sonnet${suffix(sonnetModel)}` },
-      { value: 'haiku' as ClaudeModel, label: `Haiku${suffix(haikuModel)}` },
-    ]
+    return getProviderAliasModelOptions(profile?.settings_json)
   }, [selectedProvider, customCliProfiles, modelCatalog])
 
   const codexModelOptions = sortModelOptionsByRawModel(
@@ -382,9 +359,15 @@ export function useToolbarDerivedState({
     ? fastInfo.baseModel
     : effectiveSelectedModel
 
-  const matchedModelLabel = filteredModelOptions.find(
-    option => option.value === labelLookupKey
-  )?.label
+  // A custom provider lists only the opus/sonnet/haiku aliases, but the
+  // session can hold a full Claude id (the default `claude-opus-5-5`).
+  // Show its short name instead of the raw id.
+  const matchedModelLabel =
+    filteredModelOptions.find(option => option.value === labelLookupKey)
+      ?.label ??
+    (selectedBackend === 'claude'
+      ? formatClaudeModelIdLabel(labelLookupKey)
+      : undefined)
   const grokShortLabel = formatGrokPromptModelLabel(labelLookupKey)
   const selectedModelLabel = !isGrok
     ? (matchedModelLabel ?? labelLookupKey)

@@ -67,6 +67,11 @@ const SCROLL_EPSILON_PX = 2
 const MAX_PENDING_RESTORE_ATTEMPTS = 20
 /** Re-check a still-pending restore when ResizeObserver goes quiet (history trim, etc.). */
 const PENDING_RESTORE_RETRY_MS = 50
+/**
+ * After a run ends, WebKit can report a stale, clamped scroll position some
+ * frames after the tail was pinned. Treat scroll-ups in this window as layout.
+ */
+const RUN_END_SETTLE_MS = 500
 
 function hasScrollableOverflow(viewport: HTMLDivElement) {
   return viewport.scrollHeight - viewport.clientHeight > SCROLL_EPSILON_PX
@@ -141,7 +146,17 @@ export function useScrollManagement({
   // Cooldown: when user scrolls up, block handleScroll from re-setting isAtBottom for a short period
   const userScrollUpUntilRef = useRef(0)
   const lastScrollTopRef = useRef(0)
+  // scrollHeight at the last scroll event. A scrollTop drop that comes with a
+  // height change is layout (clamp on shrink, reflow), not the user.
+  const lastScrollHeightRef = useRef(0)
+  // Until this time, a scroll away from the tail that the user did not start
+  // re-pins the tail (see RUN_END_SETTLE_MS).
+  const runEndSettleUntilRef = useRef(0)
   const touchStartYRef = useRef<number | null>(null)
+  // True while a pointer is down on the viewport (scrollbar drag, text
+  // selection). Only then can a scroll-up without wheel, touch, or key events
+  // come from the user.
+  const isPointerDownRef = useRef(false)
   // Last known good scroll snapshot for the displayed session. Updated on every
   // real scroll; used when leaving a session so Loading placeholders cannot
   // overwrite a real position with scrollTop=0.
@@ -393,6 +408,47 @@ export function useScrollManagement({
     }
   }, [stopFollowingTail])
 
+  // Scrollbar drags and keyboard scrolls of the focused viewport emit no wheel
+  // or touch events. Track the pointer so handleScroll can tell a drag from a
+  // layout scroll, and stop following the tail on upward scroll keys.
+  useEffect(() => {
+    const viewport = scrollViewportRef.current
+    if (!viewport) return
+
+    const handlePointerDown = () => {
+      isPointerDownRef.current = true
+    }
+    const handlePointerUp = () => {
+      isPointerDownRef.current = false
+    }
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target
+      if (
+        target instanceof HTMLElement &&
+        target.closest('input, textarea, select, [contenteditable="true"]')
+      ) {
+        return
+      }
+      const scrollsUp =
+        e.key === 'ArrowUp' ||
+        e.key === 'PageUp' ||
+        e.key === 'Home' ||
+        (e.key === ' ' && e.shiftKey)
+      if (scrollsUp && hasScrollableOverflow(viewport)) stopFollowingTail()
+    }
+
+    viewport.addEventListener('pointerdown', handlePointerDown)
+    viewport.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('pointerup', handlePointerUp)
+    window.addEventListener('pointercancel', handlePointerUp)
+    return () => {
+      viewport.removeEventListener('pointerdown', handlePointerDown)
+      viewport.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('pointerup', handlePointerUp)
+      window.removeEventListener('pointercancel', handlePointerUp)
+    }
+  }, [stopFollowingTail])
+
   // Apply a saved scroll snapshot (or default to bottom) for the given session.
   // Defined before size-sync / session effects so those closures can capture it
   // directly (no render-time ref smuggling — issue #594 review).
@@ -410,6 +466,7 @@ export function useScrollManagement({
         setIsAtBottom(true)
         scrollToTail(viewport)
         lastScrollTopRef.current = viewport.scrollTop
+        lastScrollHeightRef.current = viewport.scrollHeight
         if (sessionId) {
           lastKnownScrollRef.current = {
             sessionId,
@@ -437,6 +494,7 @@ export function useScrollManagement({
       const targetTop = Math.min(Math.max(0, saved.scrollTop), maxScroll)
       viewport.scrollTop = targetTop
       lastScrollTopRef.current = targetTop
+      lastScrollHeightRef.current = viewport.scrollHeight
       lastKnownScrollRef.current = {
         sessionId: sessionId ?? '',
         scrollTop: targetTop,
@@ -632,8 +690,11 @@ export function useScrollManagement({
     })
 
     // observe() delivers an initial callback, which pins the tail when
-    // streaming starts.
+    // streaming starts. Observe the viewport too: it changes height during a
+    // run (mobile browser bars, keyboard), and the size-sync observer does not
+    // pin while sending, so the chat would stay off the bottom.
     observer.observe(viewport.firstElementChild)
+    observer.observe(viewport)
     return () => observer.disconnect()
   }, [isSending, isMobile])
 
@@ -646,6 +707,7 @@ export function useScrollManagement({
   useEffect(() => {
     // Streaming just ended — pin to actual bottom
     if (wasSendingRef.current && !isSending && isFollowingTailRef.current) {
+      runEndSettleUntilRef.current = Date.now() + RUN_END_SETTLE_MS
       let cancelled = false
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
@@ -746,10 +808,42 @@ export function useScrollManagement({
       }
 
       const target = e.target as HTMLDivElement
-      const previousScrollTop = lastScrollTopRef.current
-      lastScrollTopRef.current = target.scrollTop
 
+      // When a run ends, the message list swaps the streaming reply for the
+      // saved one. WebKit clamps scrollTop while the content is briefly
+      // shorter, then fires a late scroll event to that stale position, after
+      // the tail was already pinned. Without this, the drop below reads as a
+      // scrollbar drag and the new prompt slides down from the top. Wheel,
+      // touch, and keyboard input stop following the tail first, so the user
+      // can still scroll away.
+      const now = Date.now()
       if (
+        now < runEndSettleUntilRef.current &&
+        now >= userScrollUpUntilRef.current &&
+        isFollowingTailRef.current &&
+        !isViewportAtBottom(target)
+      ) {
+        scrollToTail(target)
+        lastScrollTopRef.current = target.scrollTop
+        lastScrollHeightRef.current = target.scrollHeight
+        return
+      }
+
+      const previousScrollTop = lastScrollTopRef.current
+      const contentHeightChanged =
+        target.scrollHeight !== lastScrollHeightRef.current
+      lastScrollTopRef.current = target.scrollTop
+      lastScrollHeightRef.current = target.scrollHeight
+
+      // Wheel, touch, and keyboard report user scroll-up directly. This check
+      // only catches scrollbar drags, which need a pointer down and do not
+      // resize the content. Any other scroll-up is layout: the browser clamps
+      // scrollTop when content shrinks, and WebKit can report a stale position
+      // after the tail was pinned. Neither may stop following the tail, or the
+      // stream stops scrolling.
+      if (
+        isPointerDownRef.current &&
+        !contentHeightChanged &&
         hasScrollableOverflow(target) &&
         target.scrollTop < previousScrollTop - SCROLL_EPSILON_PX
       ) {
@@ -920,6 +1014,7 @@ export function useScrollManagement({
   // Scroll to findings helper
   // First scroll to the message containing findings using virtualizer, then to the element.
   const scrollToFindings = useCallback(() => {
+    stopFollowingTail()
     // First try to find the element directly (if already rendered)
     const findingsEl = scrollViewportRef.current?.querySelector(
       '[data-review-findings="unfixed"]'
@@ -951,7 +1046,7 @@ export function useScrollManagement({
         }
       }, 100)
     }
-  }, [messages, virtualizedListRef])
+  }, [messages, virtualizedListRef, stopFollowingTail])
 
   return {
     scrollViewportRef,

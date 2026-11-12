@@ -418,7 +418,7 @@ interface UseActiveTodosAndAgentsParams {
   isSending: boolean
   currentToolCalls: ToolCall[]
   lastAssistantMessage: ChatMessage | undefined
-  /** Full session transcript. Earlier turns stay visible with settled status. */
+  /** Full session transcript. Only agents after the last user message show. */
   messages?: ChatMessage[]
 }
 
@@ -499,15 +499,21 @@ export function useActiveTodosAndAgents({
     activeSessionId ? state.dismissedAgentWidgetIds[activeSessionId] : undefined
   )
 
-  // Finished turns settle here. A new prompt must not replay their persisted
-  // "running" state as a spinner, and cancel must not leave them loading.
+  // Finished turns settle here. Cancel must not leave their agents loading.
   const settledAgents = useMemo(() => {
     if (!activeSessionId) {
       return { agents: [] as SubAgent[], toolIds: new Set<string>() }
     }
 
+    // Only the latest turn: a new prompt clears subagents of earlier turns.
+    let turnStart = messages?.length ?? 0
+    while (turnStart > 0 && messages?.[turnStart - 1]?.role !== 'user') {
+      turnStart--
+    }
     const history = messages
-      ? messages.filter(message => message.role === 'assistant')
+      ? messages
+          .slice(turnStart)
+          .filter(message => message.role === 'assistant')
       : lastAssistantMessage
         ? [lastAssistantMessage]
         : []

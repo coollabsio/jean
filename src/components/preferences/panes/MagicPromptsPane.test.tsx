@@ -537,6 +537,34 @@ describe('MagicPromptsPane', () => {
     expect(screen.queryByRole('option', { name: 'Think' })).toBeNull()
   })
 
+  it('shows the provider alias label for a first-party model under a custom provider', () => {
+    preferencesMock = {
+      ...defaultPreferences,
+      custom_cli_profiles: [
+        {
+          name: 'CLIProxyAPI',
+          settings_json: JSON.stringify({
+            env: { ANTHROPIC_DEFAULT_OPUS_MODEL: 'claude-opus-5-5' },
+          }),
+        },
+      ],
+      magic_prompt_providers: {
+        ...defaultPreferences.magic_prompt_providers,
+        investigate_issue_provider: 'CLIProxyAPI',
+      },
+      magic_prompt_models: {
+        ...defaultPreferences.magic_prompt_models,
+        investigate_issue_model: 'claude-opus-5-5',
+      },
+    }
+
+    render(<MagicPromptsPane />)
+
+    const model = screen.getByRole('combobox', { name: 'Model' })
+    expect(model).toHaveTextContent('Opus 5.5')
+    expect(model).not.toHaveTextContent('claude-opus-5-5')
+  })
+
   it('leaves a saved thinking value untouched when the picker offers effort', () => {
     preferencesMock = {
       ...defaultPreferences,
@@ -665,6 +693,43 @@ describe('MagicPromptsPane', () => {
       )
     }
   )
+
+  it('applies a custom Claude provider to every magic prompt', async () => {
+    preferencesMock = {
+      ...defaultPreferences,
+      custom_cli_profiles: [
+        {
+          name: 'CLIProxyAPI',
+          settings_json: '{}',
+          supports_thinking: false,
+        },
+      ],
+    }
+    const user = userEvent.setup()
+    render(<MagicPromptsPane />)
+    await user.click(
+      screen.getByRole('combobox', { name: 'Model for all prompts' })
+    )
+    await user.click(screen.getByRole('tab', { name: 'Claude' }))
+    await user.click(
+      screen.getByRole('combobox', { name: 'Investigation provider' })
+    )
+    await user.click(screen.getByRole('option', { name: 'CLIProxyAPI' }))
+    await user.click(
+      screen.getByRole('button', { name: 'Apply to all prompts' })
+    )
+
+    const patch = mutateMock.mock.calls[0]?.[0]
+    expect(new Set(Object.values(patch.magic_prompt_providers))).toEqual(
+      new Set(['CLIProxyAPI'])
+    )
+    expect(new Set(Object.values(patch.magic_prompt_backends))).toEqual(
+      new Set(['claude'])
+    )
+    expect(new Set(Object.values(patch.magic_prompt_models))).toEqual(
+      new Set(['sonnet'])
+    )
+  })
 
   it('applies the fast variant and yolo mode to every magic prompt', async () => {
     const user = userEvent.setup()

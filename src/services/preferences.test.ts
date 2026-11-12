@@ -131,6 +131,7 @@ describe('model option helpers', () => {
       'claude-opus-5-5',
       'claude-sonnet-5-5',
       'claude-haiku-5-5',
+      'claude-fable-5-2',
       'claude-fable-5-1',
       'claude-fable-5',
       'claude-opus-5',
@@ -294,10 +295,7 @@ describe('model option helpers', () => {
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
       'Always implement the simplest maintainable solution'
     )
-    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain('Clickable References')
-    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
-      'include clickable links when available'
-    )
+    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).not.toContain('Clickable References')
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
       "At the start of a new task, replace '.ai/todo.md' instead of appending to it"
     )

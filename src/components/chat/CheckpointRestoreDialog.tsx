@@ -335,7 +335,7 @@ export function CheckpointRestoreDialog({
           // Mobile: bottom sheet-style panel that stays on-screen and scrolls
           'flex w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden p-0',
           'max-h-[min(92dvh,100%)]',
-          'max-sm:top-auto max-sm:bottom-[max(0.75rem,env(safe-area-inset-bottom))] max-sm:left-1/2 max-sm:translate-x-[-50%] max-sm:translate-y-0 max-sm:rounded-xl',
+          'max-sm:top-auto max-sm:bottom-[max(0.75rem,env(safe-area-inset-bottom))] max-sm:rounded-xl',
           // Desktop centered dialog
           'sm:max-w-lg sm:gap-0',
           // Override default padding from AlertDialogContent base

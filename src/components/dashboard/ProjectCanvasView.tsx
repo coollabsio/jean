@@ -19,13 +19,13 @@ import {
   useMemo,
   useRef,
   useState,
-  lazy,
   Suspense,
 } from 'react'
 import { useQueries, useQueryClient } from '@tanstack/react-query'
 import { invoke } from '@/lib/transport'
 import { requestImportExistingWorktree } from '@/lib/import-existing-worktree'
 import { cn } from '@/lib/utils'
+import { lazyWithPreload, preloadWhenIdle } from '@/lib/lazy-preload'
 import { MODAL_TERMINAL_PRIMARY_ROW_CLASS } from '@/components/chat/modal-terminal-layout'
 import {
   canOpenInEditor,
@@ -181,10 +181,7 @@ import { useClearContextApproval } from '@/components/chat/hooks/useClearContext
 import { useWorktreeApproval } from '@/components/chat/hooks/useWorktreeApproval'
 import { useCanvasKeyboardNav } from '@/components/chat/hooks/useCanvasKeyboardNav'
 import { useCanvasShortcutEvents } from '@/components/chat/hooks/useCanvasShortcutEvents'
-import {
-  useDeleteWorktree,
-  useCloseBaseSessionClean,
-} from '@/services/projects'
+import { useDeleteWorktree } from '@/services/projects'
 import { usePreferences } from '@/services/preferences'
 import { DEFAULT_KEYBINDINGS, formatShortcutDisplay } from '@/types/keybindings'
 import type { CheckStatus, PrDisplayStatus } from '@/types/pr-status'
@@ -225,12 +222,12 @@ import {
   sortByCanvasRowState,
   type CanvasRowState,
 } from './canvas-row-state'
-const GitDiffModal = lazy(() =>
+const GitDiffModal = lazyWithPreload(() =>
   import('@/components/chat/GitDiffModal').then(mod => ({
     default: mod.GitDiffModal,
   }))
 )
-const LinkedProjectsModal = lazy(() =>
+const LinkedProjectsModal = lazyWithPreload(() =>
   import('@/components/magic/LinkedProjectsModal').then(mod => ({
     default: mod.LinkedProjectsModal,
   }))
@@ -721,7 +718,7 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
 
   const compactContent = compact && (
     <div className="flex min-w-0 items-start gap-2.5">
-      <span className="flex h-5 w-3.5 shrink-0 items-center justify-center">
+      <span className="flex h-lh w-3.5 shrink-0 items-center justify-center">
         {waitingCount > 0 ? (
           <span
             role="img"
@@ -1114,6 +1111,10 @@ export function ProjectCanvasView({
   projectId,
   project,
 }: ProjectCanvasViewProps) {
+  useEffect(
+    () => preloadWhenIdle([GitDiffModal.preload, LinkedProjectsModal.preload]),
+    []
+  )
   const { data: preferences } = usePreferences(project.serverId)
   const worktreeSortMode = useProjectsStore(
     state =>
@@ -1216,6 +1217,10 @@ export function ProjectCanvasView({
   // Load worktrees and session lists only for the selected project canvas.
   const { data: worktrees = [], isLoading: worktreesLoading } =
     useProjectBootstrap(projectId)
+  // The permanent base session does not block project removal
+  const removableWorktreeCount = worktrees.filter(
+    wt => !isBaseSession(wt)
+  ).length
 
   // Filter worktrees: include ready, pending, and error (exclude deleting)
   const visibleWorktrees = useMemo(() => {
@@ -1968,23 +1973,16 @@ export function ProjectCanvasView({
     })
 
   const deleteWorktree = useDeleteWorktree()
-  const closeBaseSessionClean = useCloseBaseSessionClean()
 
   const closeWorktreeDirectly = useCallback(
     (worktreeId: string) => {
       if (!project) return
       const wt = visibleWorktrees.find(w => w.id === worktreeId)
-      if (!wt) return
-      if (isBaseSession(wt)) {
-        closeBaseSessionClean.mutate({
-          worktreeId: wt.id,
-          projectId: project.id,
-        })
-      } else {
-        deleteWorktree.mutate({ worktreeId: wt.id, projectId: project.id })
-      }
+      // The base session is permanent: it never closes.
+      if (!wt || isBaseSession(wt)) return
+      deleteWorktree.mutate({ worktreeId: wt.id, projectId: project.id })
     },
-    [project, visibleWorktrees, deleteWorktree, closeBaseSessionClean]
+    [project, visibleWorktrees, deleteWorktree]
   )
 
   // Stable callbacks for the memoized SessionChatModal. The latest modal
@@ -3087,6 +3085,7 @@ export function ProjectCanvasView({
         const section = worktreeSections.find(
           s => s.worktree.id === item.worktreeId
         )
+        if (section && isBaseSession(section.worktree)) return
         setCloseWorktreeTarget({
           worktreeId: item.worktreeId,
           branchName: section?.worktree.branch,
@@ -3304,9 +3303,7 @@ export function ProjectCanvasView({
                       onSelect={() => createBaseSession.mutate(projectId)}
                     >
                       <Home className="h-4 w-4" />
-                      {worktrees.find(isBaseSession)
-                        ? 'Open Base Session'
-                        : 'New Base Session'}
+                      Open Base Session
                     </DropdownMenuItem>
 
                     <DropdownMenuItem
@@ -3506,14 +3503,14 @@ export function ProjectCanvasView({
                     <DropdownMenuItem
                       variant="destructive"
                       onSelect={() => removeProject.mutate(projectId)}
-                      disabled={worktrees.length > 0}
+                      disabled={removableWorktreeCount > 0}
                       className="whitespace-nowrap"
                     >
                       <Trash2 className="h-4 w-4 shrink-0" />
                       Remove Project
-                      {worktrees.length > 0 && (
+                      {removableWorktreeCount > 0 && (
                         <span className="ml-auto text-xs opacity-60 shrink-0">
-                          ({worktrees.length} worktrees)
+                          ({removableWorktreeCount} worktrees)
                         </span>
                       )}
                     </DropdownMenuItem>

@@ -38,6 +38,7 @@ playwright/.cache
 docs/superpowers/
 
 # Rust build artifacts for standalone server wrapper
+/target/
 src-server/target/
 jean-core/target/
 jean-core/Cargo.lock

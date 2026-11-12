@@ -1543,6 +1543,28 @@ describe('useStreamingEvents cancellation sanitization', () => {
     expect(state.errors['session-1']).toBe('boom')
   })
 
+  it('returns a steer to the composer with its withdrawn prompt', async () => {
+    const queryClient = createQueryClient()
+    seedSendInFlight(queryClient)
+    await renderListeners(queryClient)
+
+    registeredListeners.get('chat:steered')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        text: 'also check tests',
+      },
+    })
+    cancelled()
+    userTurn('withdrawn')
+
+    const state = useChatStore.getState()
+    expect(state.inputDrafts['session-1']).toBe(
+      'cancel this\n\nalso check tests'
+    )
+    expect(messageIds(queryClient)).toEqual(['old-user', 'old-assistant'])
+  })
+
   it('keeps newer typing when a withdrawn prompt would be restored', async () => {
     const queryClient = createQueryClient()
     seedSendInFlight(queryClient, 'newer draft')

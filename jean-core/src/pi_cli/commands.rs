@@ -484,9 +484,10 @@ pub async fn delete_pi_provider(name: String) -> Result<(), String> {
     }
     let mut root = read_pi_models_json()?;
     if let Some(providers) = root.get_mut("providers").and_then(|v| v.as_object_mut()) {
-        providers.remove(name);
-        write_pi_models_json(&root)?;
-        log::info!("Deleted PI provider '{name}' from models.json");
+        if providers.remove(name).is_some() {
+            write_pi_models_json(&root)?;
+            log::info!("Deleted PI provider '{name}' from models.json");
+        }
     }
     Ok(())
 }

@@ -421,7 +421,7 @@ Images pasted or dropped into chat are processed before saving (`process_image()
 
 Three files need updating when adding a new model option:
 
-1. **`src/types/preferences.ts`** — Add to `ClaudeModel` type union and `modelOptions` array (full labels like "Claude Fable 5.1" or "Claude Sonnet 4.6"). Current first-party Claude Code model IDs use API-style names such as `claude-fable-5-1`, `claude-opus-4-8[1m]`, and `claude-sonnet-4-6[1m]`; legacy/provider aliases may still use `opus`, `sonnet`, or `haiku`.
+1. **`src/types/preferences.ts`** — Add to `ClaudeModel` type union and `modelOptions` array (full labels like "Claude Fable 5.2" or "Claude Sonnet 4.6"). Current first-party Claude Code model IDs use API-style names such as `claude-fable-5-2`, `claude-opus-4-8[1m]`, and `claude-sonnet-4-6[1m]`; legacy/provider aliases may still use `opus`, `sonnet`, or `haiku`.
 2. **`src/store/chat-store.ts`** — Add to duplicated `ClaudeModel` type union (line ~27)
 3. **`src/components/chat/ChatToolbar.tsx`** — Add to `MODEL_OPTIONS` array (short labels like "Sonnet 4.6")
 
@@ -495,6 +495,7 @@ When adding a backend like Claude, Codex, OpenCode, Cursor, Pi, Command Code, or
 - [ ] For non-JSON-capable backends, wrap prompts with strict JSON instructions and implement tolerant extraction/failure messages
 - [ ] Update Magic Prompts UI backend/model/default presets and per-prompt backend/provider/model/effort resolution
 - [ ] Add provider/profile support if backend supports custom routing; respect project/global/per-prompt provider precedence
+- [ ] If backend supports custom providers, add a CLIProxyAPI provider in `jean-core/src/opinionated/cliproxyapi.rs` (`upsert_provider_profiles` or model sync in `apply_cliproxyapi_models`, plus `detach_provider_profiles`); startup sync then adds it for existing installs
 - [ ] Add MCP discovery/health/toggle support if backend supports MCP, including settings-pane grouping, chat status dots, and backend-specific auth hints
 - [ ] Update frontend chat/settings/onboarding/usage UI and backend-specific pending request components
 - [ ] Add backend to favorite models and fast-mode model handling if relevant

@@ -118,7 +118,6 @@ export function WorktreeDropdownMenu({
     handleOpenInFinder,
     handleOpenInTerminal,
     handleOpenInEditor,
-    handleClose,
     handleDelete,
   } = useWorktreeMenuActions({ worktree, projectId })
   const isMobile = useIsMobile()
@@ -523,7 +522,7 @@ export function WorktreeDropdownMenu({
             </DropdownMenuItem>
           )}
 
-          <DropdownMenuSeparator />
+          {(onCloseSession || !isBase) && <DropdownMenuSeparator />}
 
           {onCloseSession && (
             <DropdownMenuItem onClick={onCloseSession}>
@@ -532,12 +531,7 @@ export function WorktreeDropdownMenu({
             </DropdownMenuItem>
           )}
 
-          {isBase ? (
-            <DropdownMenuItem onClick={handleClose}>
-              <X className="mr-2 h-4 w-4" />
-              Close Base Session
-            </DropdownMenuItem>
-          ) : (
+          {!isBase && (
             <DropdownMenuItem onClick={() => setShowDeleteConfirm(true)}>
               <Trash2 className="mr-2 h-4 w-4 text-destructive" />
               Delete Worktree

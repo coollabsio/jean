@@ -56,11 +56,7 @@ import {
   useCloseSessions,
 } from '@/services/chat'
 import { useHoverIntent } from '@/hooks/useHoverIntent'
-import {
-  fetchRecentWorktrees,
-  useCloseBaseSessionClean,
-  useDeleteWorktree,
-} from '@/services/projects'
+import { fetchRecentWorktrees, useDeleteWorktree } from '@/services/projects'
 import { invoke } from '@/lib/transport'
 import { SwipeActionRow } from '@/components/ui/swipe-action-row'
 import { CloseWorktreeDialog } from '@/components/chat/CloseWorktreeDialog'
@@ -335,7 +331,6 @@ export function RecentWorktreesList({
   const { mutate: closeSession } = useCloseSession()
   const closeSessions = useCloseSessions()
   const deleteWorktree = useDeleteWorktree()
-  const closeBaseSessionClean = useCloseBaseSessionClean()
   const [closeTarget, setCloseTarget] = useState<{
     row: RecentWorktreeItem
     mode: 'session' | 'worktree'
@@ -372,21 +367,14 @@ export function RecentWorktreesList({
         )
         return
       }
-      const close = isBaseSession(row.worktree)
-        ? closeBaseSessionClean
-        : deleteWorktree
-      close.mutate(
+      // The base session is permanent: it never closes.
+      if (isBaseSession(row.worktree)) return
+      deleteWorktree.mutate(
         { worktreeId: row.worktree.id, projectId: row.projectId },
         { onSuccess: refreshRecent }
       )
     },
-    [
-      closeSession,
-      closeSessions,
-      closeBaseSessionClean,
-      deleteWorktree,
-      refreshRecent,
-    ]
+    [closeSession, closeSessions, deleteWorktree, refreshRecent]
   )
   const requestCloseRow = useCallback(
     async (row: RecentWorktreeItem) => {
@@ -417,6 +405,7 @@ export function RecentWorktreesList({
         sessions,
         inputDrafts: chat.inputDrafts,
         onLastSession: 'confirm-worktree',
+        keepWorktree: isBaseSession(row.worktree),
         finishedSubSessionCount: subSessionIds.length,
       })
       if (decision === 'noop') return
