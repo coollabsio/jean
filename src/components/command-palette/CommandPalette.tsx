@@ -28,6 +28,7 @@ import { projectAvatarUrl } from '@/lib/project-avatar'
 import { getAllCommands, executeCommand } from '@/lib/commands'
 import { formatShortcutDisplay } from '@/types/keybindings'
 import { isNativeApp } from '@/lib/environment'
+import { useIsMobile } from '@/hooks/use-mobile'
 import {
   getActiveConnectionId,
   useRemoteConnections,
@@ -82,6 +83,7 @@ const MESSAGE_SEARCH_DEBOUNCE_MS = 150
 
 export function CommandPalette() {
   const native = isNativeApp()
+  const isMobile = useIsMobile()
   useRemoteConnections()
   const { commandPaletteOpen, setCommandPaletteOpen } = useUIStore()
   const { data: preferences } = usePreferences()
@@ -481,7 +483,12 @@ export function CommandPalette() {
       disablePointerSelection
     >
       <CommandInput
-        placeholder="Search sessions, messages, settings and commands…"
+        placeholder={
+          isMobile
+            ? 'Search…'
+            : 'Search sessions, messages, settings and commands…'
+        }
+        className="pr-6"
         value={search}
         onValueChange={setSearch}
       />
