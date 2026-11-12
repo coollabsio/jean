@@ -1523,6 +1523,133 @@ export interface PiProviderProfile {
   models: { id: string; name?: string }[]
 }
 
+/**
+ * QwenCloud has two billing modes, and they are NOT interchangeable:
+ *
+ * - **Pay-as-you-go**: `sk-ws-` keys, scoped to the region they were created
+ *   in, using `{region}.maas.qwencloudapi.com`.
+ * - **Token Plan**: `sk-sp-` subscription keys, Singapore-only, using
+ *   `token-plan.maas.qwencloudapi.com`, with a smaller model catalogue.
+ *
+ * Each mode gets its own key environment variable so both can be configured
+ * in Jean at the same time. See docs/developer/qwencloud.md.
+ */
+export type QwenCloudBillingMode = 'pay-as-you-go' | 'token-plan'
+
+export interface QwenCloudEndpoint {
+  id: string
+  label: string
+  domain: string
+  mode: QwenCloudBillingMode
+}
+
+export const QWENCLOUD_API_KEY_ENV: Record<QwenCloudBillingMode, string> = {
+  'pay-as-you-go': 'DASHSCOPE_API_KEY',
+  'token-plan': 'QWENCLOUD_TOKEN_PLAN_API_KEY',
+}
+
+export const QWENCLOUD_BILLING_MODE_LABELS: Record<
+  QwenCloudBillingMode,
+  string
+> = {
+  'pay-as-you-go': 'Pay-as-you-go (sk-ws-, regional keys)',
+  'token-plan': 'Token Plan (sk-sp-, Singapore only)',
+}
+
+const QWENCLOUD_DEFAULT_ENDPOINT: QwenCloudEndpoint = {
+  id: 'ap-southeast-1',
+  label: 'Singapore',
+  domain: 'ap-southeast-1.maas.qwencloudapi.com',
+  mode: 'pay-as-you-go',
+}
+
+export const QWENCLOUD_ENDPOINTS: QwenCloudEndpoint[] = [
+  QWENCLOUD_DEFAULT_ENDPOINT,
+  {
+    id: 'cn-beijing',
+    label: 'China North 2 (Beijing)',
+    domain: 'cn-beijing.maas.qwencloudapi.com',
+    mode: 'pay-as-you-go',
+  },
+  {
+    id: 'eu-central-1',
+    label: 'Germany (Frankfurt)',
+    domain: 'eu-central-1.maas.qwencloudapi.com',
+    mode: 'pay-as-you-go',
+  },
+  {
+    id: 'cn-hongkong',
+    label: 'China (Hong Kong)',
+    domain: 'cn-hongkong.maas.qwencloudapi.com',
+    mode: 'pay-as-you-go',
+  },
+  {
+    id: 'ap-northeast-1',
+    label: 'Japan (Tokyo)',
+    domain: 'ap-northeast-1.maas.qwencloudapi.com',
+    mode: 'pay-as-you-go',
+  },
+  {
+    id: 'us-east-1',
+    label: 'US (Virginia)',
+    domain: 'us-east-1.maas.qwencloudapi.com',
+    mode: 'pay-as-you-go',
+  },
+  {
+    id: 'token-plan',
+    label: 'Singapore (Token Plan)',
+    domain: 'token-plan.maas.qwencloudapi.com',
+    mode: 'token-plan',
+  },
+]
+
+export const QWENCLOUD_DEFAULT_REGION_ID = QWENCLOUD_DEFAULT_ENDPOINT.id
+
+export function qwenCloudEndpointById(endpointId: string): QwenCloudEndpoint {
+  return (
+    QWENCLOUD_ENDPOINTS.find(endpoint => endpoint.id === endpointId) ??
+    QWENCLOUD_DEFAULT_ENDPOINT
+  )
+}
+
+/** Environment variable holding the API key for an endpoint's billing mode. */
+export function qwenCloudApiKeyEnv(endpointId: string): string {
+  return QWENCLOUD_API_KEY_ENV[qwenCloudEndpointById(endpointId).mode]
+}
+
+export function qwenCloudOpenAiBaseUrl(
+  endpointId: string = QWENCLOUD_DEFAULT_REGION_ID
+): string {
+  return `https://${qwenCloudEndpointById(endpointId).domain}/compatible-mode/v1`
+}
+
+export function qwenCloudAnthropicBaseUrl(
+  endpointId: string = QWENCLOUD_DEFAULT_REGION_ID
+): string {
+  return `https://${qwenCloudEndpointById(endpointId).domain}/apps/anthropic`
+}
+
+/**
+ * Find the QwenCloud endpoint used by a base URL or a Claude CLI settings JSON
+ * blob. `maas.qwencloudapi.com` (no prefix) is the Singapore alias.
+ */
+export function qwenCloudRegionFromValue(value: string): string | null {
+  const match = /([a-z0-9-]+\.)?maas\.qwencloudapi\.com/i.exec(value)
+  if (!match) return null
+  const domain = match[0].toLowerCase()
+  if (domain === 'maas.qwencloudapi.com') return QWENCLOUD_DEFAULT_REGION_ID
+  return (
+    QWENCLOUD_ENDPOINTS.find(endpoint => endpoint.domain === domain)?.id ??
+    QWENCLOUD_DEFAULT_REGION_ID
+  )
+}
+
+/** Rewrite every QwenCloud domain in a URL or settings JSON to `endpointId`. */
+export function withQwenCloudRegion(value: string, endpointId: string): string {
+  const domain = qwenCloudEndpointById(endpointId).domain
+  return value.replace(/([a-z0-9-]+\.)?maas\.qwencloudapi\.com/gi, domain)
+}
+
 export const PREDEFINED_CODEX_PROVIDERS: CodexProviderProfile[] = [
   {
     name: 'OpenRouter',
@@ -1536,6 +1663,15 @@ export const PREDEFINED_CODEX_PROVIDERS: CodexProviderProfile[] = [
     provider_id: 'cliproxyapi',
     base_url: 'http://127.0.0.1:8317/v1',
     env_key: 'CLIPROXYAPI_API_KEY',
+    wire_api: 'responses',
+  },
+  {
+    name: 'QwenCloud',
+    provider_id: 'qwencloud',
+    base_url: qwenCloudOpenAiBaseUrl(),
+    env_key: QWENCLOUD_API_KEY_ENV['pay-as-you-go'],
+    // QwenCloud supports both OpenAI wire formats and recommends Responses for
+    // new integrations, which is also what Codex app-server speaks.
     wire_api: 'responses',
   },
 ]
@@ -1556,6 +1692,17 @@ export const PREDEFINED_PI_PROVIDERS: PiProviderProfile[] = [
     base_url: 'http://localhost:11434/v1',
     api: 'openai-completions',
     models: [{ id: 'llama3.2', name: 'Llama 3.2' }],
+  },
+  {
+    name: 'qwencloud',
+    base_url: qwenCloudOpenAiBaseUrl(),
+    api: 'openai-completions',
+    api_key_env: QWENCLOUD_API_KEY_ENV['pay-as-you-go'],
+    models: [
+      { id: 'qwen3.8-max', name: 'Qwen 3.8 Max' },
+      { id: 'qwen3.7-plus', name: 'Qwen 3.7 Plus' },
+      { id: 'qwen3.8-flash', name: 'Qwen 3.8 Flash' },
+    ],
   },
 ]
 
@@ -1643,6 +1790,33 @@ export const PREDEFINED_CLI_PROFILES: CustomCliProfile[] = [
           ANTHROPIC_DEFAULT_OPUS_MODEL: 'kimi-k2.5',
           ANTHROPIC_DEFAULT_SONNET_MODEL: 'kimi-k2.5',
           ANTHROPIC_DEFAULT_HAIKU_MODEL: 'kimi-k2.5',
+        },
+      },
+      null,
+      2
+    ),
+  },
+  {
+    name: 'QwenCloud',
+    // QwenCloud's Messages API supports thinking, but `thinking.budget_tokens`
+    // is deprecated and model-dependent. Claude CLI sends that parameter when
+    // thinking is enabled, so hide Jean's thinking control like other
+    // Anthropic-compatible third-party profiles.
+    supports_thinking: false,
+    settings_json: JSON.stringify(
+      {
+        env: {
+          ANTHROPIC_BASE_URL: qwenCloudAnthropicBaseUrl(),
+          ANTHROPIC_API_KEY: '',
+          ANTHROPIC_AUTH_TOKEN: '<your-qwencloud-api-key>',
+          API_TIMEOUT_MS: '600000',
+          // The Anthropic-compatible endpoint has no /v1/models listing, so
+          // model discovery must stay off and aliases must be explicit.
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+          ANTHROPIC_MODEL: 'qwen3.8-max',
+          ANTHROPIC_DEFAULT_OPUS_MODEL: 'qwen3.8-max',
+          ANTHROPIC_DEFAULT_SONNET_MODEL: 'qwen3.7-plus',
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: 'qwen3.8-flash',
         },
       },
       null,

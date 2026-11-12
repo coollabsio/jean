@@ -70,6 +70,7 @@ mod pi_cli;
 mod platform;
 mod prerequisites;
 mod projects;
+mod qwencloud;
 mod server_update;
 mod terminal;
 mod ui_client_state;
