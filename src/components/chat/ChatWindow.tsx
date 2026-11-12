@@ -2438,11 +2438,14 @@ const ChatWindowContent = memo(function ChatWindowContent({
 
       if (pendingRequest) {
         handleCodexUserInputAnswer(pendingRequest, answers)
-        return
+      } else {
+        handleQuestionAnswer(toolCallId, answers, questions)
       }
-      handleQuestionAnswer(toolCallId, answers, questions)
+      // Answering acts like sending a prompt: jump to the tail once the
+      // question form has collapsed.
+      requestAnimationFrame(() => scrollToBottom(true))
     },
-    [handleCodexUserInputAnswer, handleQuestionAnswer]
+    [handleCodexUserInputAnswer, handleQuestionAnswer, scrollToBottom]
   )
 
   const handleResolvedQuestionSkip = useCallback(
