@@ -381,6 +381,7 @@ export function MobileSettingsMenu({
     reasoningSheetOpen && !hideReasoningControl && usesEffortControl
   const thinkingSheetOpen =
     reasoningSheetOpen && !hideReasoningControl && !usesEffortControl
+  const [providerSheetOpen, setProviderSheetOpen] = useState(false)
   const [mcpSheetOpen, setMcpSheetOpen] = useState(false)
   const [scriptsSheetOpen, setScriptsSheetOpen] = useState(false)
   const [contextsSheetOpen, setContextsSheetOpen] = useState(false)
@@ -400,6 +401,13 @@ export function MobileSettingsMenu({
   const showCodexProviders =
     customCodexProviders.length > 0 && selectedBackend === 'codex'
   const showProviderMenu = showClaudeProviders || showCodexProviders
+  const defaultProviderOption = showClaudeProviders
+    ? { value: '__anthropic__', label: 'Anthropic' }
+    : { value: '__default__', label: 'OpenAI' }
+  const selectedProviderValue = selectedProvider ?? defaultProviderOption.value
+  const customProviderNames = (
+    showClaudeProviders ? customCliProfiles : customCodexProviders
+  ).map(profile => profile.name)
   const { data: worktree } = useWorktree(worktreeId ?? null)
   const { data: gitProviderInfo } = useProjectGitProvider(worktree?.path)
   const gitProvider = gitProviderInfo?.provider ?? 'github'
@@ -440,6 +448,11 @@ export function MobileSettingsMenu({
   const openReasoningPicker = () => {
     setMenuOpen(false)
     requestAnimationFrame(() => setReasoningSheetOpen(true))
+  }
+
+  const openProviderPicker = () => {
+    setMenuOpen(false)
+    requestAnimationFrame(() => setProviderSheetOpen(true))
   }
 
   const openMcpPicker = () => {
@@ -701,70 +714,52 @@ export function MobileSettingsMenu({
           align={isMobile ? 'end' : 'start'}
           className="w-72"
         >
-          {showProviderMenu && (
+          {showProviderMenu && isMobile ? (
+            <DropdownMenuItem onSelect={openProviderPicker}>
+              <Sparkles className="h-4 w-4 text-muted-foreground" />
+              <span>Provider</span>
+              <span className="ml-auto min-w-0 truncate text-right text-xs text-muted-foreground">
+                {providerDisplayName}
+              </span>
+              <ChevronRight className="ml-2 h-4 w-4 shrink-0 text-foreground" />
+            </DropdownMenuItem>
+          ) : showProviderMenu ? (
             <DropdownMenuSub>
-              <DropdownMenuSubTrigger>
+              <DropdownMenuSubTrigger className="[&>svg:last-child]:!ml-2">
                 <Sparkles className="mr-2 h-4 w-4 text-muted-foreground" />
                 <span>Provider</span>
-                <span className="ml-auto text-xs text-muted-foreground">
+                <span className="ml-auto min-w-0 truncate text-right text-xs text-muted-foreground">
                   {providerDisplayName}
                 </span>
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent>
-                {showClaudeProviders ? (
-                  <DropdownMenuRadioGroup
-                    value={selectedProvider ?? '__anthropic__'}
-                    onValueChange={handleProviderChange}
+                <DropdownMenuRadioGroup
+                  value={selectedProviderValue}
+                  onValueChange={handleProviderChange}
+                >
+                  <DropdownMenuRadioItem
+                    value={defaultProviderOption.value}
+                    onSelect={keepMenuOpenOnSelect}
                   >
+                    {defaultProviderOption.label}
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel className="text-xs text-muted-foreground">
+                    Custom Providers
+                  </DropdownMenuLabel>
+                  {customProviderNames.map(name => (
                     <DropdownMenuRadioItem
-                      value="__anthropic__"
+                      key={name}
+                      value={name}
                       onSelect={keepMenuOpenOnSelect}
                     >
-                      Anthropic
+                      {name}
                     </DropdownMenuRadioItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuLabel className="text-xs text-muted-foreground">
-                      Custom Providers
-                    </DropdownMenuLabel>
-                    {customCliProfiles.map(profile => (
-                      <DropdownMenuRadioItem
-                        key={profile.name}
-                        value={profile.name}
-                        onSelect={keepMenuOpenOnSelect}
-                      >
-                        {profile.name}
-                      </DropdownMenuRadioItem>
-                    ))}
-                  </DropdownMenuRadioGroup>
-                ) : (
-                  <DropdownMenuRadioGroup
-                    value={selectedProvider ?? '__default__'}
-                    onValueChange={handleProviderChange}
-                  >
-                    <DropdownMenuRadioItem
-                      value="__default__"
-                      onSelect={keepMenuOpenOnSelect}
-                    >
-                      OpenAI
-                    </DropdownMenuRadioItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuLabel className="text-xs text-muted-foreground">
-                      Custom Providers
-                    </DropdownMenuLabel>
-                    {customCodexProviders.map(profile => (
-                      <DropdownMenuRadioItem
-                        key={profile.name}
-                        value={profile.name}
-                        onSelect={keepMenuOpenOnSelect}
-                      >
-                        {profile.name}
-                      </DropdownMenuRadioItem>
-                    ))}
-                  </DropdownMenuRadioGroup>
-                )}
+                  ))}
+                </DropdownMenuRadioGroup>
               </DropdownMenuSubContent>
             </DropdownMenuSub>
-          )}
+          ) : null}
 
           {!hideModelPicker && (
             <DropdownMenuItem onSelect={openBackendModelPicker}>
@@ -1125,6 +1120,51 @@ export function MobileSettingsMenu({
           )}
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <Sheet
+        open={providerSheetOpen && showProviderMenu}
+        onOpenChange={setProviderSheetOpen}
+      >
+        <SheetContent
+          side="bottom"
+          className="max-h-[75svh] overflow-hidden rounded-t-xl p-0"
+          showCloseButton={false}
+        >
+          <SheetHeader className="shrink-0 border-b px-4 py-3 text-left">
+            <SheetTitle>Select provider</SheetTitle>
+            <SheetDescription>
+              Choose which provider runs this session.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="overflow-y-auto px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)]">
+            {[defaultProviderOption.value, ...customProviderNames].map(
+              (value, index) => {
+                const selected = value === selectedProviderValue
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    className={cn(
+                      'flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-left active:bg-accent',
+                      selected && 'bg-accent'
+                    )}
+                    aria-pressed={selected}
+                    onClick={() => {
+                      handleProviderChange(value)
+                      setProviderSheetOpen(false)
+                    }}
+                  >
+                    <span className="flex-1 font-medium">
+                      {index === 0 ? defaultProviderOption.label : value}
+                    </span>
+                    {selected && <Check className="h-4 w-4 shrink-0" />}
+                  </button>
+                )
+              }
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
 
       <Sheet open={effortSheetOpen} onOpenChange={setReasoningSheetOpen}>
         <SheetContent
