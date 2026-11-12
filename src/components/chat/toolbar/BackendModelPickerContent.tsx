@@ -282,6 +282,7 @@ export function BackendModelPickerContent({
       museModelOptions,
       devinModelOptions,
       customCliProfiles,
+      customClaudeModels: prefs?.custom_claude_models,
       installedBackends,
     })
 

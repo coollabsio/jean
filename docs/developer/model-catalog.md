@@ -4,10 +4,34 @@ Jean loads model metadata from the coolLabs CDN and falls back to metadata
 bundled in `src/services/model-catalog.ts` when the network or cache is
 unavailable.
 
-Remote entries are keyed by backend and model ID. A remote model replaces the
-bundled model list for Claude and Codex; other backends merge CDN entries ahead
-of models discovered from their CLI. Fast variants inherit their base model's
-reasoning capability.
+Remote entries are keyed by backend and model ID. For Codex a remote catalog
+replaces the bundled model list. For Claude the two lists are **merged**: CDN
+entries come first and bundled entries missing from the CDN are appended, so a
+model shipped in this build stays visible while the CDN file is behind. The CDN
+can still remove a bundled model by marking it `hidden: true`. Other backends
+merge CDN entries ahead of models discovered from their CLI. Fast variants
+inherit their base model's reasoning capability.
+
+## Claude models newer than this build
+
+The CDN file is maintained by hand, so it can lag a release by days or weeks.
+Claude also offers no way to discover models from the installed CLI: there is
+no `claude model list` command, and Claude Code's OAuth token is rejected by
+`GET /v1/models` ("OAuth authentication is currently not supported"). Jean
+therefore cannot autofetch a subscription's model list.
+
+Two mechanisms keep the picker usable in the meantime:
+
+- The Claude merge described above, so a model bundled in the release appears
+  even when the CDN is stale.
+- Settings → Providers → Claude → **Custom model IDs**, stored in the
+  `custom_claude_models` preference. Any plausible `claude-*` id can be added;
+  it is shown at the top of the Claude picker with a `(custom)` suffix and is
+  passed straight to `claude --model`. `normalizeClaudeModel` already accepts
+  unknown `claude-*` ids, so no extra plumbing is needed.
+
+When the CDN catches up, remove the custom entry — the catalog entry replaces
+it automatically because the picker de-duplicates by id.
 
 ## Inherited Codex defaults
 

@@ -70,6 +70,7 @@ mod pi_cli;
 mod platform;
 mod prerequisites;
 mod projects;
+mod qwencloud;
 mod server_update;
 mod terminal;
 mod ui_client_state;
@@ -308,6 +309,8 @@ pub struct AppPreferences {
     pub sync_zoom_levels: bool, // Keep desktop and mobile zoom levels in sync
     #[serde(default)]
     pub custom_cli_profiles: Vec<CustomCliProfile>, // Custom CLI settings profiles (e.g., OpenRouter, MiniMax)
+    #[serde(default)]
+    pub custom_claude_models: Vec<String>, // Extra Claude model ids shown in the picker (newer than this build)
     #[serde(default)]
     pub default_provider: Option<String>, // Default Claude provider profile name (None = Anthropic direct)
     #[serde(default)]
@@ -1733,6 +1736,7 @@ mod tests {
         let prefs: AppPreferences = serde_json::from_value(prefs_json).unwrap();
         assert!(prefs.jean_mcp_enabled);
         assert!(prefs.custom_cli_profiles.is_empty());
+        assert!(prefs.custom_claude_models.is_empty());
         assert!(prefs.custom_codex_providers.is_empty());
         assert!(prefs.custom_pi_providers.is_empty());
 
@@ -3566,6 +3570,7 @@ impl Default for AppPreferences {
             mobile_zoom_level: default_zoom_level(),
             sync_zoom_levels: default_sync_zoom_levels(),
             custom_cli_profiles: Vec::new(),
+            custom_claude_models: Vec::new(),
             default_provider: None,
             custom_codex_providers: Vec::new(),
             default_codex_provider: None,
