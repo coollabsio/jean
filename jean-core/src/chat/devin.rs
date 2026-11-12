@@ -759,11 +759,15 @@ fn execute_devin_child(
     }
     let mut prompt = devin_protocol::prompt_blocks(&message, &image_paths, &init)?;
     devin_protocol::embed_text_files(&mut prompt, &text_paths, &init)?;
+    // Calling `authenticate` starts a browser login even with valid credentials,
+    // so only do it when the CLI reports it is not logged in.
+    let already_authenticated = crate::devin_cli::is_cli_authenticated(options.app);
     if let Some(auth_method) = init
         .pointer("/result/authMethods")
         .and_then(Value::as_array)
         .and_then(|methods| methods.first())
         .and_then(|method| method["id"].as_str())
+        .filter(|_| !already_authenticated)
     {
         send_request(
             &mut stdin,
