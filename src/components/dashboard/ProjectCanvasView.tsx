@@ -19,13 +19,13 @@ import {
   useMemo,
   useRef,
   useState,
-  lazy,
   Suspense,
 } from 'react'
 import { useQueries, useQueryClient } from '@tanstack/react-query'
 import { invoke } from '@/lib/transport'
 import { requestImportExistingWorktree } from '@/lib/import-existing-worktree'
 import { cn } from '@/lib/utils'
+import { lazyWithPreload, preloadWhenIdle } from '@/lib/lazy-preload'
 import { MODAL_TERMINAL_PRIMARY_ROW_CLASS } from '@/components/chat/modal-terminal-layout'
 import {
   canOpenInEditor,
@@ -222,12 +222,12 @@ import {
   sortByCanvasRowState,
   type CanvasRowState,
 } from './canvas-row-state'
-const GitDiffModal = lazy(() =>
+const GitDiffModal = lazyWithPreload(() =>
   import('@/components/chat/GitDiffModal').then(mod => ({
     default: mod.GitDiffModal,
   }))
 )
-const LinkedProjectsModal = lazy(() =>
+const LinkedProjectsModal = lazyWithPreload(() =>
   import('@/components/magic/LinkedProjectsModal').then(mod => ({
     default: mod.LinkedProjectsModal,
   }))
@@ -1111,6 +1111,10 @@ export function ProjectCanvasView({
   projectId,
   project,
 }: ProjectCanvasViewProps) {
+  useEffect(
+    () => preloadWhenIdle([GitDiffModal.preload, LinkedProjectsModal.preload]),
+    []
+  )
   const { data: preferences } = usePreferences(project.serverId)
   const worktreeSortMode = useProjectsStore(
     state =>

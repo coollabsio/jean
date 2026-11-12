@@ -7,7 +7,6 @@ import {
   useMemo,
   useRef,
   useState,
-  lazy,
   memo,
   Suspense,
 } from 'react'
@@ -138,6 +137,7 @@ import {
 import { getFilename, normalizePath } from '@/lib/path-utils'
 import { registerChatComposer } from '@/lib/chat-composer-metrics'
 import { cn } from '@/lib/utils'
+import { lazyWithPreload, preloadWhenIdle } from '@/lib/lazy-preload'
 import { PermissionApproval } from './PermissionApproval'
 import { AskUserQuestion } from './AskUserQuestion'
 import { CodexCommandApprovalRequestCard } from './CodexCommandApprovalRequest'
@@ -260,15 +260,15 @@ interface ForkSessionToWorktreeResponse {
 }
 
 // Lazy-loaded heavy modals (code splitting)
-const GitDiffModal = lazy(() =>
+const GitDiffModal = lazyWithPreload(() =>
   import('./GitDiffModal').then(mod => ({ default: mod.GitDiffModal }))
 )
-const LoadContextModal = lazy(() =>
+const LoadContextModal = lazyWithPreload(() =>
   import('../magic/LoadContextModal').then(mod => ({
     default: mod.LoadContextModal,
   }))
 )
-const LinkedProjectsModal = lazy(() =>
+const LinkedProjectsModal = lazyWithPreload(() =>
   import('../magic/LinkedProjectsModal').then(mod => ({
     default: mod.LinkedProjectsModal,
   }))
@@ -387,6 +387,15 @@ interface ChatWindowProps {
 export const ChatWindow = memo(function ChatWindow(
   props: ChatWindowProps = {}
 ) {
+  useEffect(
+    () =>
+      preloadWhenIdle([
+        GitDiffModal.preload,
+        LoadContextModal.preload,
+        LinkedProjectsModal.preload,
+      ]),
+    []
+  )
   const storeWorktreeId = useChatStore(state => state.activeWorktreeId)
   const worktreeId = props.worktreeId ?? storeWorktreeId
   const serverId = worktreeId

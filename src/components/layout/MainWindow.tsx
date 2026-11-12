@@ -10,7 +10,7 @@ import {
   type CSSProperties,
 } from 'react'
 import { cn } from '@/lib/utils'
-import { scheduleIdleWork } from '@/lib/idle'
+import { lazyWithPreload, preloadWhenIdle } from '@/lib/lazy-preload'
 import { TitleBar } from '@/components/titlebar/TitleBar'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useIsTouchDevice } from '@/hooks/use-touch-device'
@@ -41,138 +41,165 @@ const MobileFileBrowser = lazy(() =>
     default: mod.MobileFileBrowser,
   }))
 )
-const FileContentModal = lazy(() =>
+const FileContentModal = lazyWithPreload(() =>
   import('@/components/chat/FileContentModal').then(mod => ({
     default: mod.FileContentModal,
   }))
 )
-const PreferencesDialog = lazy(() =>
+const PreferencesDialog = lazyWithPreload(() =>
   import('@/components/preferences/PreferencesDialog').then(mod => ({
     default: mod.PreferencesDialog,
   }))
 )
-const ProjectSettingsDialog = lazy(() =>
+const ProjectSettingsDialog = lazyWithPreload(() =>
   import('@/components/projects/ProjectSettingsDialog').then(mod => ({
     default: mod.ProjectSettingsDialog,
   }))
 )
-const CommitModal = lazy(() =>
+const CommitModal = lazyWithPreload(() =>
   import('@/components/commit/CommitModal').then(mod => ({
     default: mod.CommitModal,
   }))
 )
-const OnboardingDialog = lazy(() =>
+const OnboardingDialog = lazyWithPreload(() =>
   import('@/components/onboarding/OnboardingDialog').then(mod => ({
     default: mod.OnboardingDialog,
   }))
 )
-const FeatureTourDialog = lazy(() =>
+const FeatureTourDialog = lazyWithPreload(() =>
   import('@/components/onboarding/FeatureTourDialog').then(mod => ({
     default: mod.FeatureTourDialog,
   }))
 )
-const JeanConfigWizard = lazy(() =>
+const JeanConfigWizard = lazyWithPreload(() =>
   import('@/components/onboarding/JeanConfigWizard').then(mod => ({
     default: mod.JeanConfigWizard,
   }))
 )
-const CliUpdateModal = lazy(() =>
+const CliUpdateModal = lazyWithPreload(() =>
   import('@/components/layout/CliUpdateModal').then(mod => ({
     default: mod.CliUpdateModal,
   }))
 )
-const UpdateAvailableModal = lazy(() =>
+const UpdateAvailableModal = lazyWithPreload(() =>
   import('@/components/layout/UpdateAvailableModal').then(mod => ({
     default: mod.UpdateAvailableModal,
   }))
 )
-const CliLoginModal = lazy(() =>
+const CliLoginModal = lazyWithPreload(() =>
   import('@/components/preferences/CliLoginModal').then(mod => ({
     default: mod.CliLoginModal,
   }))
 )
-const McpServersModal = lazy(() =>
+const McpServersModal = lazyWithPreload(() =>
   import('@/components/mcp/McpServersModal').then(mod => ({
     default: mod.McpServersModal,
   }))
 )
-const OpenInModal = lazy(() =>
+const OpenInModal = lazyWithPreload(() =>
   import('@/components/open-in/OpenInModal').then(mod => ({
     default: mod.OpenInModal,
   }))
 )
-const RemotePickerModal = lazy(() =>
+const RemotePickerModal = lazyWithPreload(() =>
   import('@/components/magic/RemotePickerModal').then(mod => ({
     default: mod.RemotePickerModal,
   }))
 )
-const UpdatePrDialog = lazy(() =>
+const UpdatePrDialog = lazyWithPreload(() =>
   import('@/components/magic/UpdatePrDialog').then(mod => ({
     default: mod.UpdatePrDialog,
   }))
 )
-const ReviewCommentsDialog = lazy(() =>
+const ReviewCommentsDialog = lazyWithPreload(() =>
   import('@/components/magic/ReviewCommentsDialog').then(mod => ({
     default: mod.ReviewCommentsDialog,
   }))
 )
-const NewWorktreeModal = lazy(() =>
+const NewWorktreeModal = lazyWithPreload(() =>
   import('@/components/worktree/NewWorktreeModal').then(mod => ({
     default: mod.NewWorktreeModal,
   }))
 )
-const AddProjectDialog = lazy(() =>
+const AddProjectDialog = lazyWithPreload(() =>
   import('@/components/projects/AddProjectDialog').then(mod => ({
     default: mod.AddProjectDialog,
   }))
 )
-const GlobalServerDialog = lazy(() =>
+const GlobalServerDialog = lazyWithPreload(() =>
   import('@/components/projects/servers/ServerDialog').then(mod => ({
     default: mod.GlobalServerDialog,
   }))
 )
-const GitInitModal = lazy(() =>
+const GitInitModal = lazyWithPreload(() =>
   import('@/components/projects/GitInitModal').then(mod => ({
     default: mod.GitInitModal,
   }))
 )
-const CloneProjectModal = lazy(() =>
+const CloneProjectModal = lazyWithPreload(() =>
   import('@/components/projects/CloneProjectModal').then(mod => ({
     default: mod.CloneProjectModal,
   }))
 )
-const ReleaseNotesDialog = lazy(() =>
+const ReleaseNotesDialog = lazyWithPreload(() =>
   import('@/components/magic/ReleaseNotesDialog').then(mod => ({
     default: mod.ReleaseNotesDialog,
   }))
 )
-const WorkflowRunsModal = lazy(() =>
+const WorkflowRunsModal = lazyWithPreload(() =>
   import('@/components/shared/WorkflowRunsModal').then(mod => ({
     default: mod.WorkflowRunsModal,
   }))
 )
-const MagicModal = lazy(() =>
+const MagicModal = lazyWithPreload(() =>
   import('@/components/magic/MagicModal').then(mod => ({
     default: mod.MagicModal,
   }))
 )
-const ResolveConflictsDialog = lazy(() =>
+const ResolveConflictsDialog = lazyWithPreload(() =>
   import('@/components/magic/ResolveConflictsDialog').then(mod => ({
     default: mod.ResolveConflictsDialog,
   }))
 )
-const loadNewSessionModeModal = () =>
-  import('@/components/chat/NewSessionModeModal')
-const NewSessionModeModal = lazy(() =>
-  loadNewSessionModeModal().then(mod => ({
+const NewSessionModeModal = lazyWithPreload(() =>
+  import('@/components/chat/NewSessionModeModal').then(mod => ({
     default: mod.NewSessionModeModal,
   }))
 )
-const CloseWorktreeDialog = lazy(() =>
+const CloseWorktreeDialog = lazyWithPreload(() =>
   import('@/components/chat/CloseWorktreeDialog').then(mod => ({
     default: mod.CloseWorktreeDialog,
   }))
 )
+// Most-used modals first.
+const PRELOADED_MODALS = [
+  NewSessionModeModal,
+  MagicModal,
+  CommitModal,
+  NewWorktreeModal,
+  FileContentModal,
+  PreferencesDialog,
+  ProjectSettingsDialog,
+  OpenInModal,
+  CloseWorktreeDialog,
+  McpServersModal,
+  WorkflowRunsModal,
+  ResolveConflictsDialog,
+  RemotePickerModal,
+  UpdatePrDialog,
+  ReviewCommentsDialog,
+  ReleaseNotesDialog,
+  AddProjectDialog,
+  CloneProjectModal,
+  GitInitModal,
+  GlobalServerDialog,
+  CliLoginModal,
+  CliUpdateModal,
+  UpdateAvailableModal,
+  OnboardingDialog,
+  FeatureTourDialog,
+  JeanConfigWizard,
+]
 import { Toaster } from '@/components/ui/sonner'
 import { PreviewDialogHost } from '@/components/ui/preview-dialog-host'
 import { MobileLeftSidebar } from './MobileLeftSidebar'
@@ -253,11 +280,8 @@ const UIStatePersistence = memo(function UIStatePersistence({
 
 export function MainWindow() {
   useTerminalThemeSync()
-  // Opening a new session is a hot path: fetch its lazy chunk before first use.
-  useEffect(
-    () => scheduleIdleWork(() => void loadNewSessionModeModal(), 3000),
-    []
-  )
+  // Fetch modal chunks in idle time so the first open has no load delay.
+  useEffect(() => preloadWhenIdle(PRELOADED_MODALS.map(m => m.preload)), [])
   const isMaximized = useWindowMaximized()
   const { offset: toasterOffset, mobileOffset: toasterMobileOffset } =
     useToasterOffset()
