@@ -10,8 +10,8 @@ import { useEffect, useRef, type RefObject } from 'react'
  * `data-message-anchor-id`). With one prompt or fewer there is no history
  * above, so the spacer stays empty.
  *
- * Only prompts that arrive while the session is displayed get the space. When
- * a session opens, its last reply ends at the composer, as a normal chat does.
+ * When a session opens, its last prompt also gets the space, so the session
+ * shows the last prompt at the top with its reply below it, not the history.
  *
  * `bottomInset` is the wrapper's bottom padding as a CSS length. CSS subtracts
  * it from the height, so when the composer grows or shrinks (queued prompts,
@@ -36,8 +36,6 @@ export function PromptTopSpacer({
     const wrapper = spacer?.parentElement
     if (!spacer || !viewport || !content || !wrapper) return
 
-    // Last prompt shown when this session opened. It never gets the space.
-    let openedPromptId: string | null | undefined
     // Last height set. Browsers may normalize style.height, so do not compare it.
     let current = ''
 
@@ -45,10 +43,7 @@ export function PromptTopSpacer({
       const prompts =
         content.querySelectorAll<HTMLElement>('[data-user-prompt]')
       const last = prompts[prompts.length - 1]
-      const lastId = last?.dataset.messageAnchorId ?? null
-      if (openedPromptId === undefined && last) openedPromptId = lastId
-      const prompt =
-        prompts.length > 1 && lastId !== openedPromptId ? last : null
+      const prompt = prompts.length > 1 ? last : null
       let next = '0px'
       if (prompt) {
         const available =

@@ -105,11 +105,17 @@ describe('PromptTopSpacer', () => {
     vi.unstubAllGlobals()
   })
 
-  it('adds no space when a session opens, so its last reply ends at the bottom', () => {
+  it('puts the last prompt at the top when a session opens', () => {
     const { viewport, spacer } = setup(CONTENT_HEIGHT - CLIENT_HEIGHT)
 
+    expect(spacerHeight(spacer)).toBe(400)
+    expect(viewport.scrollTop).toBe(viewport.scrollHeight)
+  })
+
+  it('adds no space when the session has only one prompt', () => {
+    const { spacer } = setup(CONTENT_HEIGHT - CLIENT_HEIGHT, ['p1'])
+
     expect(spacerHeight(spacer)).toBe(0)
-    expect(viewport.scrollHeight).toBe(CONTENT_HEIGHT)
   })
 
   it('keeps a bottom-pinned chat at the bottom when a new prompt grows the spacer', () => {
@@ -132,12 +138,12 @@ describe('PromptTopSpacer', () => {
     expect(viewport.scrollTop).toBe(300)
   })
 
-  it('removes the space when another session opens', () => {
+  it('removes the space when another session opens with only one prompt', () => {
     const { spacer, sendPrompt, rerender } = setup(300)
     sendPrompt('p3')
     expect(spacerHeight(spacer)).toBe(400)
 
-    rerender(<Harness promptIds={['q1', 'q2']} sessionId="s2" />)
+    rerender(<Harness promptIds={['q1']} sessionId="s2" />)
     resize()
 
     expect(spacerHeight(spacer)).toBe(0)
