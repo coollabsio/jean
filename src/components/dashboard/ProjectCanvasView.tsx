@@ -94,6 +94,13 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
 import { Spinner } from '@/components/ui/spinner'
 import { GitStatusBadges } from '@/components/ui/git-status-badges'
 import {
@@ -265,6 +272,12 @@ interface ProjectCanvasViewProps {
 
 const EMPTY_PINNED_LABELS: LabelData[] = []
 const EMPTY_LABELS: LabelData[] = []
+
+const WORKTREE_SORT_OPTIONS: { value: WorktreeSortMode; label: string }[] = [
+  { value: 'created', label: 'Creation date' },
+  { value: 'last_activity', label: 'Last activity' },
+  { value: 'manual', label: 'Manual' },
+]
 
 interface WorktreeSection {
   worktree: Worktree
@@ -1148,6 +1161,7 @@ export function ProjectCanvasView({
   const canOpenEditor = canOpenInEditor()
   const canOpenTerminal = canOpenInTerminal()
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false)
+  const [isSortSheetOpen, setIsSortSheetOpen] = useState(false)
   const showWorktreeLabelContextMenu = shouldShowWorktreeLabelContextMenu({
     isMobile,
     isNative: isTauri(),
@@ -3468,35 +3482,43 @@ export function ProjectCanvasView({
                       Open on {forgeLabels.name}
                     </DropdownMenuItem>
 
-                    <DropdownMenuSub>
-                      <DropdownMenuSubTrigger className="gap-2">
+                    {isMobile ? (
+                      <DropdownMenuItem
+                        onSelect={() => setIsSortSheetOpen(true)}
+                      >
                         <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
                         Sort worktrees
-                      </DropdownMenuSubTrigger>
-                      <DropdownMenuSubContent className="w-44">
-                        <DropdownMenuRadioGroup
-                          value={worktreeSortMode}
-                          onValueChange={value =>
-                            useProjectsStore
-                              .getState()
-                              .setProjectCanvasWorktreeSortMode(
-                                projectId,
-                                value as WorktreeSortMode
-                              )
-                          }
-                        >
-                          <DropdownMenuRadioItem value="created">
-                            Creation date
-                          </DropdownMenuRadioItem>
-                          <DropdownMenuRadioItem value="last_activity">
-                            Last activity
-                          </DropdownMenuRadioItem>
-                          <DropdownMenuRadioItem value="manual">
-                            Manual
-                          </DropdownMenuRadioItem>
-                        </DropdownMenuRadioGroup>
-                      </DropdownMenuSubContent>
-                    </DropdownMenuSub>
+                      </DropdownMenuItem>
+                    ) : (
+                      <DropdownMenuSub>
+                        <DropdownMenuSubTrigger className="gap-2">
+                          <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
+                          Sort worktrees
+                        </DropdownMenuSubTrigger>
+                        <DropdownMenuSubContent className="w-44">
+                          <DropdownMenuRadioGroup
+                            value={worktreeSortMode}
+                            onValueChange={value =>
+                              useProjectsStore
+                                .getState()
+                                .setProjectCanvasWorktreeSortMode(
+                                  projectId,
+                                  value as WorktreeSortMode
+                                )
+                            }
+                          >
+                            {WORKTREE_SORT_OPTIONS.map(option => (
+                              <DropdownMenuRadioItem
+                                key={option.value}
+                                value={option.value}
+                              >
+                                {option.label}
+                              </DropdownMenuRadioItem>
+                            ))}
+                          </DropdownMenuRadioGroup>
+                        </DropdownMenuSubContent>
+                      </DropdownMenuSub>
+                    )}
 
                     <DropdownMenuSeparator />
 
@@ -3516,6 +3538,57 @@ export function ProjectCanvasView({
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
+                {isMobile && (
+                  <Sheet
+                    open={isSortSheetOpen}
+                    onOpenChange={setIsSortSheetOpen}
+                  >
+                    <SheetContent
+                      side="bottom"
+                      className="max-h-[75svh] overflow-hidden rounded-t-xl p-0"
+                      showCloseButton={false}
+                    >
+                      <SheetHeader className="shrink-0 border-b px-4 py-3 text-left">
+                        <SheetTitle>Sort worktrees</SheetTitle>
+                        <SheetDescription className="sr-only">
+                          Choose how worktrees are ordered in this project.
+                        </SheetDescription>
+                      </SheetHeader>
+                      <div className="overflow-y-auto px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)]">
+                        {WORKTREE_SORT_OPTIONS.map(option => {
+                          const selected = option.value === worktreeSortMode
+                          return (
+                            <button
+                              key={option.value}
+                              type="button"
+                              className={cn(
+                                'flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-left active:bg-accent',
+                                selected && 'bg-accent'
+                              )}
+                              aria-pressed={selected}
+                              onClick={() => {
+                                useProjectsStore
+                                  .getState()
+                                  .setProjectCanvasWorktreeSortMode(
+                                    projectId,
+                                    option.value
+                                  )
+                                setIsSortSheetOpen(false)
+                              }}
+                            >
+                              <span className="flex-1 font-medium">
+                                {option.label}
+                              </span>
+                              {selected && (
+                                <Check className="h-4 w-4 shrink-0" />
+                              )}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </SheetContent>
+                  </Sheet>
+                )}
                 {/* Mobile: magnifier icon inline with badges */}
                 {isMobile &&
                   (worktreeSections.length > 0 || searchQuery) &&
