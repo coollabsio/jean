@@ -2850,7 +2850,10 @@ const ChatWindowContent = memo(function ChatWindowContent({
                             </span>
                           </div>
                         )}
-                        <ChatSearchBar scrollContainerRef={scrollViewportRef} />
+                        <ChatSearchBar
+                          scrollContainerRef={scrollViewportRef}
+                          onBeforeScroll={stopFollowingTail}
+                        />
                         {/* Bottom fade gradient so messages don't hard-cut at the input area */}
                         <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-10 h-8 bg-gradient-to-b from-transparent to-background" />
                         <ScrollArea

@@ -153,6 +153,10 @@ export function useScrollManagement({
   // re-pins the tail (see RUN_END_SETTLE_MS).
   const runEndSettleUntilRef = useRef(0)
   const touchStartYRef = useRef<number | null>(null)
+  // True while a pointer is down on the viewport (scrollbar drag, text
+  // selection). Only then can a scroll-up without wheel, touch, or key events
+  // come from the user.
+  const isPointerDownRef = useRef(false)
   // Last known good scroll snapshot for the displayed session. Updated on every
   // real scroll; used when leaving a session so Loading placeholders cannot
   // overwrite a real position with scrollTop=0.
@@ -401,6 +405,47 @@ export function useScrollManagement({
       viewport.removeEventListener('touchmove', handleTouchMove)
       viewport.removeEventListener('touchend', handleTouchEnd)
       viewport.removeEventListener('touchcancel', handleTouchEnd)
+    }
+  }, [stopFollowingTail])
+
+  // Scrollbar drags and keyboard scrolls of the focused viewport emit no wheel
+  // or touch events. Track the pointer so handleScroll can tell a drag from a
+  // layout scroll, and stop following the tail on upward scroll keys.
+  useEffect(() => {
+    const viewport = scrollViewportRef.current
+    if (!viewport) return
+
+    const handlePointerDown = () => {
+      isPointerDownRef.current = true
+    }
+    const handlePointerUp = () => {
+      isPointerDownRef.current = false
+    }
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target
+      if (
+        target instanceof HTMLElement &&
+        target.closest('input, textarea, select, [contenteditable="true"]')
+      ) {
+        return
+      }
+      const scrollsUp =
+        e.key === 'ArrowUp' ||
+        e.key === 'PageUp' ||
+        e.key === 'Home' ||
+        (e.key === ' ' && e.shiftKey)
+      if (scrollsUp && hasScrollableOverflow(viewport)) stopFollowingTail()
+    }
+
+    viewport.addEventListener('pointerdown', handlePointerDown)
+    viewport.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('pointerup', handlePointerUp)
+    window.addEventListener('pointercancel', handlePointerUp)
+    return () => {
+      viewport.removeEventListener('pointerdown', handlePointerDown)
+      viewport.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('pointerup', handlePointerUp)
+      window.removeEventListener('pointercancel', handlePointerUp)
     }
   }, [stopFollowingTail])
 
@@ -791,10 +836,13 @@ export function useScrollManagement({
       lastScrollHeightRef.current = target.scrollHeight
 
       // Wheel, touch, and keyboard report user scroll-up directly. This check
-      // only catches scrollbar drags, which do not resize the content. When a
-      // run ends, the content shrinks and grows again: the browser clamps
-      // scrollTop down, and that must not stop following the tail.
+      // only catches scrollbar drags, which need a pointer down and do not
+      // resize the content. Any other scroll-up is layout: the browser clamps
+      // scrollTop when content shrinks, and WebKit can report a stale position
+      // after the tail was pinned. Neither may stop following the tail, or the
+      // stream stops scrolling.
       if (
+        isPointerDownRef.current &&
         !contentHeightChanged &&
         hasScrollableOverflow(target) &&
         target.scrollTop < previousScrollTop - SCROLL_EPSILON_PX
@@ -966,6 +1014,7 @@ export function useScrollManagement({
   // Scroll to findings helper
   // First scroll to the message containing findings using virtualizer, then to the element.
   const scrollToFindings = useCallback(() => {
+    stopFollowingTail()
     // First try to find the element directly (if already rendered)
     const findingsEl = scrollViewportRef.current?.querySelector(
       '[data-review-findings="unfixed"]'
@@ -997,7 +1046,7 @@ export function useScrollManagement({
         }
       }, 100)
     }
-  }, [messages, virtualizedListRef])
+  }, [messages, virtualizedListRef, stopFollowingTail])
 
   return {
     scrollViewportRef,
