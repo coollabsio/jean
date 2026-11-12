@@ -53,11 +53,12 @@ describe('default backend choices', () => {
       ['claude', 'codex'],
       preferences
     )
-    expect(patchForDefaultBackendChoice(claudeProxy!)).toEqual({
+    if (!claudeProxy || !codex) throw new Error('missing backend choices')
+    expect(patchForDefaultBackendChoice(claudeProxy)).toEqual({
       default_backend: 'claude',
       default_provider: 'CLIProxyAPI',
     })
-    expect(patchForDefaultBackendChoice(codex!)).toEqual({
+    expect(patchForDefaultBackendChoice(codex)).toEqual({
       default_backend: 'codex',
       default_codex_provider: null,
     })
