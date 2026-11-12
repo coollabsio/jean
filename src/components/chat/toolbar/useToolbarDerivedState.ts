@@ -1,5 +1,9 @@
 import { useMemo } from 'react'
-import type { CliBackend, CustomCliProfile } from '@/types/preferences'
+import type {
+  CliBackend,
+  ClaudeModel,
+  CustomCliProfile,
+} from '@/types/preferences'
 import {
   formatClaudeModelIdLabel,
   getProviderAliasModelOptions,
@@ -42,6 +46,8 @@ interface UseToolbarDerivedStateArgs {
   museModelOptions?: { value: string; label: string }[]
   devinModelOptions?: { value: string; label: string }[]
   customCliProfiles: CustomCliProfile[]
+  /** Extra Claude model ids from preferences (models newer than this build) */
+  customClaudeModels?: string[]
   installedBackends?: CliBackend[]
   availableMcpServers?: { name: string; backend?: string; disabled?: boolean }[]
   enabledMcpServers?: string[]
@@ -54,6 +60,7 @@ const EMPTY_MCP_SERVERS: {
   disabled?: boolean
 }[] = []
 const EMPTY_ENABLED_MCP_SERVERS: string[] = []
+const EMPTY_CUSTOM_CLAUDE_MODELS: string[] = []
 const DEFAULT_INSTALLED_BACKENDS: CliBackend[] = [
   'claude',
   'codex',
@@ -194,6 +201,7 @@ export function useToolbarDerivedState({
   piModelOptions,
   commandcodeModelOptions,
   customCliProfiles,
+  customClaudeModels = EMPTY_CUSTOM_CLAUDE_MODELS,
   grokModelOptions,
   kimiModelOptions,
   museModelOptions,
@@ -226,15 +234,27 @@ export function useToolbarDerivedState({
 
   const claudeModelOptions = useMemo(() => {
     if (!selectedProvider || selectedProvider === '__anthropic__') {
-      return getCatalogModelOptions(modelCatalog, 'claude').map(option => ({
-        ...option,
-        label: option.label.replace(/^Claude\s+/, ''),
-      }))
+      const catalogOptions = getCatalogModelOptions(modelCatalog, 'claude').map(
+        option => ({
+          ...option,
+          label: option.label.replace(/^Claude\s+/, ''),
+        })
+      )
+      // Custom ids come first so a just-released model is easy to find, and
+      // are skipped when the catalog already knows them.
+      const known = new Set(catalogOptions.map(option => option.value))
+      const customOptions = customClaudeModels
+        .filter(model => !known.has(model))
+        .map(model => ({
+          value: model as ClaudeModel,
+          label: `${model} (custom)`,
+        }))
+      return [...customOptions, ...catalogOptions]
     }
 
     const profile = customCliProfiles.find(p => p.name === selectedProvider)
     return getProviderAliasModelOptions(profile?.settings_json)
-  }, [selectedProvider, customCliProfiles, modelCatalog])
+  }, [selectedProvider, customCliProfiles, modelCatalog, customClaudeModels])
 
   const codexModelOptions = sortModelOptionsByRawModel(
     getCatalogModelOptions(modelCatalog, 'codex')

@@ -69,9 +69,10 @@ describe('model catalog', () => {
 
     const catalog = await fetchModelCatalog({ fetchImpl, storage })
 
-    expect(getCatalogModelOptions(catalog, 'claude')).toEqual([
-      { value: 'claude-fable-5', label: 'Claude Fable 5' },
-    ])
+    expect(getCatalogModelOptions(catalog, 'claude')).toContainEqual({
+      value: 'claude-fable-5',
+      label: 'Claude Fable 5',
+    })
     expect(getCatalogDefaultModelOptions(catalog, 'codex')).toEqual([
       { value: 'gpt-5.5', label: 'GPT 5.5' },
       { value: 'gpt-5.5-fast', label: 'GPT 5.5 Fast' },
@@ -123,9 +124,10 @@ describe('model catalog', () => {
       cacheBust: true,
     })
 
-    expect(getCatalogModelOptions(catalog, 'claude')).toEqual([
-      { value: 'claude-fresh', label: 'Claude Fresh' },
-    ])
+    expect(getCatalogModelOptions(catalog, 'claude')).toContainEqual({
+      value: 'claude-fresh',
+      label: 'Claude Fresh',
+    })
   })
 
   it('returns the previously fetched catalog when the network fetch fails', async () => {
@@ -158,7 +160,7 @@ describe('model catalog', () => {
       }),
     })
 
-    expect(getCatalogModelOptions(catalog, 'claude')[0]).toEqual({
+    expect(getCatalogModelOptions(catalog, 'claude')).toContainEqual({
       value: 'claude-fable-5',
       label: 'Claude Fable 5',
     })
@@ -183,16 +185,59 @@ describe('model catalog', () => {
       },
     }
 
-    expect(
-      getCatalogModelOptions(catalog, 'claude').map(option => option.value)
-    ).toEqual([
+    const values = getCatalogModelOptions(catalog, 'claude').map(
+      option => option.value
+    )
+    const expectedOrder = [
       'claude-opus-5-5',
       'claude-sonnet-5-5',
       'claude-fable-5-1',
       'claude-fable-5',
       'claude-opus-4-8',
       'haiku',
-    ])
+    ]
+    const positions = expectedOrder.map(model => values.indexOf(model))
+    expect(positions.every(position => position >= 0)).toBe(true)
+    expect(positions).toEqual([...positions].sort((a, b) => a - b))
+  })
+
+  it('keeps bundled Claude models that a stale CDN catalog omits', () => {
+    // Regression: the CDN file is hand-maintained and can lag a release. A
+    // Claude model shipped in this build must still reach the picker.
+    const catalog: ModelCatalog = {
+      version: 1,
+      updated_at: '2026-10-27T00:00:00Z',
+      defaults: {},
+      backends: {
+        claude: {
+          models: [{ id: 'claude-fable-5-1', label: 'Claude Fable 5.1' }],
+        },
+      },
+    }
+
+    expect(getCatalogModelOptions(catalog, 'claude')).toContainEqual({
+      value: 'claude-fable-5-2',
+      label: 'Claude Fable 5.2',
+    })
+  })
+
+  it('lets the CDN hide a bundled Claude model explicitly', () => {
+    const catalog: ModelCatalog = {
+      version: 1,
+      updated_at: '2026-10-27T00:00:00Z',
+      defaults: {},
+      backends: {
+        claude: {
+          models: [
+            { id: 'claude-fable-5-2', label: 'Claude Fable 5.2', hidden: true },
+          ],
+        },
+      },
+    }
+
+    expect(
+      getCatalogModelOptions(catalog, 'claude').map(option => option.value)
+    ).not.toContain('claude-fable-5-2')
   })
 
   it('falls back to bundled models when neither fetch nor cache is available', async () => {

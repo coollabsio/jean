@@ -417,16 +417,44 @@ export function useRefreshModelCatalog() {
   })
 }
 
+/**
+ * The CDN catalog is maintained by hand and can lag a model release by weeks.
+ * Claude's bundled list must therefore be MERGED into the CDN list instead of
+ * replaced by it: otherwise a model shipped in this build disappears again as
+ * soon as a stale CDN catalog loads. CDN entries win on labels/metadata, and
+ * `hidden: true` in the CDN still suppresses a bundled model.
+ */
+function resolveCatalogModels(
+  catalog: ModelCatalog | null | undefined,
+  backend: CatalogBackend
+): ModelCatalogModel[] | undefined {
+  const source = catalog ?? fallbackModelCatalog
+  const models = source.backends[backend]?.models
+  if (!models?.length) return undefined
+  if (backend !== 'claude' || source === fallbackModelCatalog) return models
+
+  const hiddenIds = new Set(
+    models.filter(model => model.hidden).map(model => model.id)
+  )
+  const knownIds = new Set(models.map(model => model.id))
+  const bundled = fallbackModelCatalog.backends.claude?.models ?? []
+  return [
+    ...models,
+    ...bundled.filter(
+      model => !knownIds.has(model.id) && !hiddenIds.has(model.id)
+    ),
+  ]
+}
+
 export function getCatalogModelOptions(
   catalog: ModelCatalog | null | undefined,
   backend: CatalogBackend
 ): { value: string; label: string }[] {
-  const source = catalog ?? fallbackModelCatalog
-  const models = source.backends[backend]?.models
-  if (!models?.length) {
-    return source === fallbackModelCatalog
-      ? []
-      : getCatalogModelOptions(fallbackModelCatalog, backend)
+  const models = resolveCatalogModels(catalog, backend)
+  if (!models) {
+    // The catalog has no entry for this backend: try the bundled list once,
+    // then give up (passing null avoids recursing on the same catalog).
+    return catalog ? getCatalogModelOptions(null, backend) : []
   }
   const options = models.flatMap(model =>
     model.hidden ? [] : [{ value: model.id, label: model.label }]
@@ -439,12 +467,9 @@ export function getCatalogDefaultModelOptions(
   backend: CatalogBackend
 ): { value: string; label: string }[] {
   const options: { value: string; label: string }[] = []
-  const source = catalog ?? fallbackModelCatalog
-  const models = source.backends[backend]?.models
-  if (!models?.length) {
-    return source === fallbackModelCatalog
-      ? []
-      : getCatalogDefaultModelOptions(fallbackModelCatalog, backend)
+  const models = resolveCatalogModels(catalog, backend)
+  if (!models) {
+    return catalog ? getCatalogDefaultModelOptions(null, backend) : []
   }
 
   for (const model of models) {
