@@ -118,7 +118,7 @@ describe('NewWorktreeModal investigation selector', () => {
       expect(within(list).queryByText(/Sonnet/)).toBeNull()
       await user.click(screen.getByRole('tab', { name: 'Claude' }))
       expect(within(list).queryByText(/GPT/)).toBeNull()
-      await user.click(within(list).getByText('Sonnet 4.6'))
+      await user.click(within(list).getByText('Sonnet 5.5'))
       await user.click(
         screen.getByRole('button', { name: 'Choose backend and model' })
       )
@@ -144,7 +144,7 @@ describe('NewWorktreeModal investigation selector', () => {
     )
     await user.click(screen.getByRole('tab', { name: 'Claude' }))
     await user.click(
-      within(screen.getByRole('listbox')).getByText('Sonnet 4.6')
+      within(screen.getByRole('listbox')).getByText('Sonnet 5.5')
     )
     mocks.preferences = { ...mocks.preferences }
     rerender(<NewWorktreeModal />)

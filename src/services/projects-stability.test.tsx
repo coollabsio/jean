@@ -34,7 +34,8 @@ vi.mock('@/lib/environment', () => ({
   hasBackendTransport: () => true,
   isNativeApp: () => true,
 }))
-vi.mock('@/lib/remote-connections', () => ({
+vi.mock('@/lib/remote-connections', async importOriginal => ({
+  ...(await importOriginal()),
   useLocalDashboardEnabled: () => true,
 }))
 vi.mock('./multi-server-projects', () => ({

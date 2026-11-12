@@ -1,11 +1,4 @@
-import {
-  useState,
-  useEffect,
-  useCallback,
-  useMemo,
-  lazy,
-  Suspense,
-} from 'react'
+import { useState, useEffect, useCallback, useMemo, Suspense } from 'react'
 import {
   FileText,
   ImageIcon,
@@ -34,12 +27,13 @@ import { useTheme } from '@/hooks/use-theme'
 import { canOpenInEditor } from '@/lib/environment'
 import { usePreferences } from '@/services/preferences'
 import { cn } from '@/lib/utils'
+import { lazyWithPreload, preloadWhenIdle } from '@/lib/lazy-preload'
 import type { SyntaxTheme } from '@/types/preferences'
 import { toast } from 'sonner'
 import { FilePathCopyRow } from './FilePathCopyRow'
 
 // Lazy load CodeEditor (Pierre File + edit mode) so the main bundle stays lean
-const CodeEditor = lazy(() => import('@/components/ui/code-editor'))
+const CodeEditor = lazyWithPreload(() => import('@/components/ui/code-editor'))
 
 // Match the dialog close (X) button: same height, grey icon, square on mobile
 const HEADER_ICON_BUTTON_CLASS =
@@ -127,6 +121,8 @@ export function FileContentModal({
   serverId,
   onClose,
 }: FileContentModalProps) {
+  // This modal is always mounted: fetch the editor before the first file opens.
+  useEffect(() => preloadWhenIdle([CodeEditor.preload]), [])
   const [content, setContent] = useState<string | null>(null)
   const [editedContent, setEditedContent] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -334,7 +330,7 @@ export function FileContentModal({
         }}
         // Sit above mobile sheets (z-80) so the viewer is interactive
         overlayClassName="z-[90]"
-        className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-auto sm:max-h-[85vh] sm:!top-[7.5vh] sm:!translate-y-0 sm:!rounded-lg sm:p-4 bg-background/95 z-[90]"
+        className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-fit sm:max-h-[85vh] sm:!top-[7.5vh] sm:!translate-y-0 sm:!rounded-lg sm:p-4 bg-background/95 z-[90]"
       >
         <div className="flex min-w-0 flex-col gap-1 px-4 pt-4 pr-14 sm:px-0 sm:pt-0 sm:pr-8">
           <DialogTitle>

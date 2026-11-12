@@ -42,6 +42,7 @@ import { toast } from 'sonner'
 import {
   gitPush,
   triggerImmediateGitPoll,
+  triggerImmediateRemotePoll,
   fetchWorktreesStatus,
   performGitPull,
   performGitSync,
@@ -62,6 +63,7 @@ import {
   PREDEFINED_CLI_PROFILES,
   resolveMagicPromptBackend,
   resolveMagicPromptProvider,
+  getProviderAliasModelOptions,
 } from '@/types/preferences'
 import { useRemotePicker } from '@/hooks/useRemotePicker'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -462,32 +464,8 @@ export function MagicModal() {
         ...PREDEFINED_CLI_PROFILES,
         ...(preferences?.custom_cli_profiles ?? []),
       ].find(item => item.name === provider)
-      let opusModel: string | undefined
-      let sonnetModel: string | undefined
-      let haikuModel: string | undefined
-      if (profile?.settings_json) {
-        try {
-          const settings = JSON.parse(profile.settings_json)
-          const env = settings?.env
-          if (env) {
-            opusModel = env.ANTHROPIC_DEFAULT_OPUS_MODEL || env.ANTHROPIC_MODEL
-            sonnetModel =
-              env.ANTHROPIC_DEFAULT_SONNET_MODEL || env.ANTHROPIC_MODEL
-            haikuModel =
-              env.ANTHROPIC_DEFAULT_HAIKU_MODEL || env.ANTHROPIC_MODEL
-          }
-        } catch {
-          // ignore invalid custom profile json
-        }
-      }
-
-      const suffix = (model?: string) => (model ? ` (${model})` : '')
       return provider
-        ? [
-            { value: 'opus', label: `Opus${suffix(opusModel)}` },
-            { value: 'sonnet', label: `Sonnet${suffix(sonnetModel)}` },
-            { value: 'haiku', label: `Haiku${suffix(haikuModel)}` },
-          ]
+        ? getProviderAliasModelOptions(profile?.settings_json)
         : claudeModelOptions
     },
     [claudeModelOptions, preferences?.custom_cli_profiles]
@@ -799,6 +777,7 @@ export function MagicModal() {
                 worktree.id
               )
               triggerImmediateGitPoll()
+              triggerImmediateRemotePoll()
               if (worktree.project_id) fetchWorktreesStatus(worktree.project_id)
               if (result.permissionDenied) {
                 opToast.error(
@@ -972,6 +951,13 @@ export function MagicModal() {
               if (!prResult.has_conflicts) {
                 toast.success('No conflicts — base branch merged cleanly', {
                   id: toastId,
+                  description:
+                    'Push the merge commit to clear the conflict on the PR.',
+                  duration: 10000,
+                  action: {
+                    label: toastActionLabel('Push'),
+                    onClick: () => executeGitDirectly('push'),
+                  },
                 })
                 triggerImmediateGitPoll()
                 return
@@ -2096,7 +2082,7 @@ ${resolveInstructions}`
         <DialogContent
           ref={contentRef}
           tabIndex={-1}
-          className="max-h-[calc(100dvh-5.5rem-env(safe-area-inset-bottom))] overflow-hidden p-0 outline-none max-md:top-auto max-md:bottom-[calc(4.5rem+env(safe-area-inset-bottom))] max-md:w-[calc(100%-1rem)] max-md:max-w-none max-md:translate-y-0 max-md:rounded-xl sm:max-h-[min(90vh,760px)] sm:max-w-lg"
+          className="max-h-[calc(100dvh-5.5rem-env(safe-area-inset-bottom))] overflow-hidden p-0 outline-none max-md:top-auto max-md:bottom-[calc(4.5rem+env(safe-area-inset-bottom))] max-md:w-[calc(100%-1rem)] max-md:max-w-none max-md:rounded-xl sm:max-h-[min(90vh,760px)] sm:max-w-lg"
           onOpenAutoFocus={e => {
             e.preventDefault()
             contentRef.current?.focus()

@@ -174,7 +174,7 @@ describe('useToolbarHandlers', () => {
       sessionId: 'session-1',
       worktreeId: 'worktree-1',
       worktreePath: '/tmp/worktree',
-      provider: null,
+      provider: '__anthropic__',
     })
     expect(
       queryClient.getQueryData<Session>(chatQueryKeys.session('session-1'))

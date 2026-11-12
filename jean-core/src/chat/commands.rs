@@ -161,6 +161,12 @@ fn now_ms() -> u64 {
 const CODEX_DEFAULT_NOT_PLAN_MODE_PROMPT: &str = "\
 ## Not Plan Mode
 
+- When multiple independent operations are needed, batch them into parallel tool calls.";
+/// Codex build-mode block before its rules that repeat the global prompt
+/// were removed. Kept so a stored copy still counts as a default.
+const LEGACY_CODEX_DEFAULT_NOT_PLAN_MODE_PROMPT: &str = "\
+## Not Plan Mode
+
 - **VERY IMPORTANT: Keep Code Simple**: Do not over-engineer. Always implement the simplest maintainable solution. Avoid extra abstractions, frameworks, configuration, or future-proofing unless clearly required.
 - **Clickable References**: When output mentions issues, PRs, security advisories/alerts, Linear issues, or other external resources, include clickable links when available so users can open them directly.
 - **Tables for Findings**: When you report found issues, gaps, risks, or recommended fixes, present them in a Markdown table (for example: | # | Finding | Location | Impact | Recommended fix |) instead of long prose lists.
@@ -293,6 +299,7 @@ fn is_codex_default_global_system_prompt(prompt: &str) -> bool {
         || crate::is_legacy_default_global_system_prompt(trimmed)
         || trimmed == CODEX_DEFAULT_PLAN_MODE_PROMPT.trim()
         || trimmed == CODEX_DEFAULT_NOT_PLAN_MODE_PROMPT.trim()
+        || trimmed == LEGACY_CODEX_DEFAULT_NOT_PLAN_MODE_PROMPT.trim()
         || (trimmed.contains("### 1. Plan Mode Default")
             && trimmed.contains("Every Codex plan-mode response")
             && trimmed.contains("Jean Worktree Policy"))
@@ -564,6 +571,40 @@ fn normalize_optional_string(value: Option<String>) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// Provider for a send: the explicit value, else the session choice, else the
+/// backend default. The sentinels `__anthropic__` / `__default__` mean the user
+/// picked the built-in provider, so they resolve to no custom profile.
+fn resolve_send_provider(
+    explicit: Option<String>,
+    session: Option<String>,
+    backend_default: impl FnOnce() -> Option<String>,
+) -> Option<String> {
+    normalize_optional_string(explicit)
+        .or_else(|| normalize_optional_string(session))
+        .or_else(|| normalize_optional_string(backend_default()))
+        .filter(|provider| provider != "__anthropic__" && provider != "__default__")
+}
+
+/// Default provider for a backend: project then global for Claude, global for Codex.
+fn default_provider_for_backend(
+    app: &AppHandle,
+    worktree_id: &str,
+    backend: &Backend,
+    prefs: Option<&crate::AppPreferences>,
+) -> Option<String> {
+    match backend {
+        Backend::Claude => load_projects_data(app)
+            .ok()
+            .and_then(|data| {
+                let project_id = data.find_worktree(worktree_id)?.project_id.clone();
+                data.find_project(&project_id)?.default_provider.clone()
+            })
+            .or_else(|| prefs.and_then(|p| p.default_provider.clone())),
+        Backend::Codex => prefs.and_then(|p| p.default_codex_provider.clone()),
+        _ => None,
+    }
+}
+
 fn resolve_global_system_prompt(preferences_prompt: Option<&str>) -> String {
     crate::effective_global_system_prompt(preferences_prompt)
 }
@@ -644,6 +685,29 @@ fn resolve_send_model(
     normalize_optional_string(explicit_model)
         .or_else(|| normalize_optional_string(session_selected_model))
         .or_else(|| normalize_optional_string(backend_default_model))
+}
+
+/// Resolve the reasoning levels used for a send.
+///
+/// Claude uses the effort level when one is present and ignores the thinking
+/// level. A Claude send that carries only a thinking level (a thinking model
+/// such as Sonnet) must not take the session's saved effort level, or the CLI
+/// gets `--effort` and no thinking. So Claude falls back to the session levels
+/// only when the send carries neither. Other backends fall back per field.
+fn resolve_send_reasoning(
+    backend: &Backend,
+    thinking_level: Option<ThinkingLevel>,
+    effort_level: Option<EffortLevel>,
+    session_thinking_level: Option<ThinkingLevel>,
+    session_effort_level: Option<EffortLevel>,
+) -> (Option<ThinkingLevel>, Option<EffortLevel>) {
+    if *backend == Backend::Claude && (thinking_level.is_some() || effort_level.is_some()) {
+        return (thinking_level, effort_level);
+    }
+    (
+        thinking_level.or(session_thinking_level),
+        effort_level.or(session_effort_level),
+    )
 }
 
 fn validate_execution_policy(mode: &str, backend: &Backend) -> Result<(), String> {
@@ -3142,14 +3206,6 @@ async fn send_chat_message_inner(
             prefs.as_ref().map(|p| p.default_execution_mode.clone()),
         ),
     );
-    let thinking_level = thinking_level.or(session_selected_thinking_level);
-    let effort_level = effort_level.or(session_selected_effort_level);
-    // selected_provider may be a sentinel (__anthropic__/__default__) rather than
-    // a real custom profile name — only use it when it looks like a profile id.
-    let custom_profile_name = normalize_optional_string(custom_profile_name).or_else(|| {
-        normalize_optional_string(session_selected_provider)
-            .filter(|provider| provider != "__anthropic__" && provider != "__default__")
-    });
 
     // Determine backend from session (or explicit param, or default to claude)
     let effective_backend = match backend.as_deref() {
@@ -3173,9 +3229,22 @@ async fn send_chat_message_inner(
         effective_backend
     };
 
+    let (thinking_level, effort_level) = resolve_send_reasoning(
+        &effective_backend,
+        thinking_level,
+        effort_level,
+        session_selected_thinking_level,
+        session_selected_effort_level,
+    );
+
     if let Some(mode) = execution_mode.as_deref() {
         validate_execution_policy(mode, &effective_backend)?;
     }
+
+    let custom_profile_name =
+        resolve_send_provider(custom_profile_name, session_selected_provider, || {
+            default_provider_for_backend(&app, &worktree_id, &effective_backend, prefs.as_ref())
+        });
 
     // Final model fallback: preferences default for the resolved backend.
     // Covers sessions created before selected_model was persisted, or when
@@ -4121,24 +4190,7 @@ async fn send_chat_message_inner(
                         &mut system_prompt_parts,
                         &thread_app,
                     );
-                    if let Ok(claude_binary) = crate::claude_cli::get_cli_binary_path(&thread_app) {
-                        if claude_binary.exists() {
-                            system_prompt_parts.push(format!(
-                                "When running Claude CLI commands, use the full path to the embedded binary: {}\n\
-                                 Do NOT use bare `claude` — always use the full path above.",
-                                claude_binary.display()
-                            ));
-                        }
-                    }
-                    if let Ok(codex_binary) = crate::codex_cli::get_cli_binary_path(&thread_app) {
-                        if codex_binary.exists() {
-                            system_prompt_parts.push(format!(
-                                "When running Codex CLI commands, use the full path to the embedded binary: {}\n\
-                                 Do NOT use bare `codex` — always use the full path above.",
-                                codex_binary.display()
-                            ));
-                        }
-                    }
+                    super::push_embedded_cli_paths(&mut system_prompt_parts, &thread_app);
 
                     // End-of-turn recap instruction (compact view surfaces this block)
                     if thread_include_recap {
@@ -4515,24 +4567,7 @@ async fn send_chat_message_inner(
                         &mut system_prompt_parts,
                         &thread_app,
                     );
-                    if let Ok(claude_binary) = crate::claude_cli::get_cli_binary_path(&thread_app) {
-                        if claude_binary.exists() {
-                            system_prompt_parts.push(format!(
-                                "When running Claude CLI commands, use the full path to the embedded binary: {}\n\
-                                 Do NOT use bare `claude` — always use the full path above.",
-                                claude_binary.display()
-                            ));
-                        }
-                    }
-                    if let Ok(codex_binary) = crate::codex_cli::get_cli_binary_path(&thread_app) {
-                        if codex_binary.exists() {
-                            system_prompt_parts.push(format!(
-                                "When running Codex CLI commands, use the full path to the embedded binary: {}\n\
-                                 Do NOT use bare `codex` — always use the full path above.",
-                                codex_binary.display()
-                            ));
-                        }
-                    }
+                    super::push_embedded_cli_paths(&mut system_prompt_parts, &thread_app);
 
                     // End-of-turn recap instruction (compact view surfaces this block)
                     if thread_include_recap {
@@ -4845,24 +4880,7 @@ async fn send_chat_message_inner(
                     }
 
                     crate::gh_cli::config::append_gh_cli_system_prompt(&mut parts, &thread_app);
-                    if let Ok(claude_binary) = crate::claude_cli::get_cli_binary_path(&thread_app) {
-                        if claude_binary.exists() {
-                            parts.push(format!(
-                                "When running Claude CLI commands, use the full path to the embedded binary: {}\n\
-                                 Do NOT use bare `claude` — always use the full path above.",
-                                claude_binary.display()
-                            ));
-                        }
-                    }
-                    if let Ok(codex_binary) = crate::codex_cli::get_cli_binary_path(&thread_app) {
-                        if codex_binary.exists() {
-                            parts.push(format!(
-                                "When running Codex CLI commands, use the full path to the embedded binary: {}\n\
-                                 Do NOT use bare `codex` — always use the full path above.",
-                                codex_binary.display()
-                            ));
-                        }
-                    }
+                    super::push_embedded_cli_paths(&mut parts, &thread_app);
 
                     // End-of-turn recap instruction (compact view surfaces this block)
                     if thread_include_recap {
@@ -5015,24 +5033,7 @@ async fn send_chat_message_inner(
                     }
 
                     crate::gh_cli::config::append_gh_cli_system_prompt(&mut parts, &thread_app);
-                    if let Ok(claude_binary) = crate::claude_cli::get_cli_binary_path(&thread_app) {
-                        if claude_binary.exists() {
-                            parts.push(format!(
-                                "When running Claude CLI commands, use the full path to the embedded binary: {}\n\
-                                 Do NOT use bare `claude` — always use the full path above.",
-                                claude_binary.display()
-                            ));
-                        }
-                    }
-                    if let Ok(codex_binary) = crate::codex_cli::get_cli_binary_path(&thread_app) {
-                        if codex_binary.exists() {
-                            parts.push(format!(
-                                "When running Codex CLI commands, use the full path to the embedded binary: {}\n\
-                                 Do NOT use bare `codex` — always use the full path above.",
-                                codex_binary.display()
-                            ));
-                        }
-                    }
+                    super::push_embedded_cli_paths(&mut parts, &thread_app);
 
                     if thread_include_recap {
                         parts.push(super::RECAP_INSTRUCTION.to_string());
@@ -5139,24 +5140,7 @@ async fn send_chat_message_inner(
                     }
 
                     crate::gh_cli::config::append_gh_cli_system_prompt(&mut parts, &thread_app);
-                    if let Ok(claude_binary) = crate::claude_cli::get_cli_binary_path(&thread_app) {
-                        if claude_binary.exists() {
-                            parts.push(format!(
-                                "When running Claude CLI commands, use the full path to the embedded binary: {}\n\
-                                 Do NOT use bare `claude` — always use the full path above.",
-                                claude_binary.display()
-                            ));
-                        }
-                    }
-                    if let Ok(codex_binary) = crate::codex_cli::get_cli_binary_path(&thread_app) {
-                        if codex_binary.exists() {
-                            parts.push(format!(
-                                "When running Codex CLI commands, use the full path to the embedded binary: {}\n\
-                                 Do NOT use bare `codex` — always use the full path above.",
-                                codex_binary.display()
-                            ));
-                        }
-                    }
+                    super::push_embedded_cli_paths(&mut parts, &thread_app);
 
                     if thread_include_recap {
                         parts.push(super::RECAP_INSTRUCTION.to_string());
@@ -12416,6 +12400,82 @@ mod tests {
     }
 
     #[test]
+    fn resolve_send_provider_uses_default_only_when_nothing_was_chosen() {
+        let some = |s: &str| Some(s.to_string());
+        let default = || some("CLIProxyAPI");
+        // New session: no explicit or saved choice, so the default applies.
+        assert_eq!(
+            resolve_send_provider(None, None, default),
+            some("CLIProxyAPI")
+        );
+        assert_eq!(
+            resolve_send_provider(None, some("  "), default),
+            some("CLIProxyAPI")
+        );
+        // Saved built-in choice blocks the default.
+        assert_eq!(
+            resolve_send_provider(None, some("__anthropic__"), default),
+            None
+        );
+        assert_eq!(
+            resolve_send_provider(some("__default__"), None, default),
+            None
+        );
+        // Explicit value wins over the saved choice.
+        assert_eq!(
+            resolve_send_provider(some("MiniMax"), some("__anthropic__"), default),
+            some("MiniMax")
+        );
+        assert_eq!(
+            resolve_send_provider(None, some("MiniMax"), default),
+            some("MiniMax")
+        );
+        // Default set to the built-in provider.
+        assert_eq!(
+            resolve_send_provider(None, None, || some("__anthropic__")),
+            None
+        );
+    }
+
+    #[test]
+    fn resolve_send_reasoning_claude_thinking_send_ignores_saved_effort() {
+        assert_eq!(
+            resolve_send_reasoning(
+                &Backend::Claude,
+                Some(ThinkingLevel::Ultrathink),
+                None,
+                None,
+                Some(EffortLevel::Medium),
+            ),
+            (Some(ThinkingLevel::Ultrathink), None)
+        );
+    }
+
+    #[test]
+    fn resolve_send_reasoning_falls_back_when_send_has_no_levels() {
+        assert_eq!(
+            resolve_send_reasoning(
+                &Backend::Claude,
+                None,
+                None,
+                Some(ThinkingLevel::Think),
+                Some(EffortLevel::High),
+            ),
+            (Some(ThinkingLevel::Think), Some(EffortLevel::High))
+        );
+        assert_eq!(
+            resolve_send_reasoning(
+                &Backend::Codex,
+                Some(ThinkingLevel::Off),
+                None,
+                None,
+                Some(EffortLevel::High),
+            ),
+            (Some(ThinkingLevel::Off), Some(EffortLevel::High))
+        );
+    }
+
+    #[test]
     fn resolve_send_model_prefers_explicit_over_session_and_prefs() {
         assert_eq!(
             resolve_send_model(
@@ -12503,21 +12563,17 @@ mod tests {
         assert!(!build_prompt.contains("<proposed_plan>"));
         assert!(!build_prompt.contains("CodexPlan"));
         assert!(build_prompt.contains("## Not Plan Mode"));
-        assert!(build_prompt.contains("Jean Worktree Policy"));
-        assert!(build_prompt.contains("Do NOT create git worktrees manually"));
-        assert!(build_prompt.contains("Jean MCP/tools"));
-        assert!(build_prompt.contains("VERY IMPORTANT: Keep Code Simple"));
-        assert!(build_prompt.contains("Always implement the simplest maintainable solution"));
-        assert!(build_prompt.contains("Clickable References"));
-        assert!(build_prompt.contains("include clickable links when available"));
+        // Shared rules come once, from the global default prompt.
+        let resolved = resolve_codex_global_system_prompt(None, Some("build"));
+        assert!(resolved.contains("## Not Plan Mode"));
+        assert_eq!(resolved.matches("Jean Worktree Policy").count(), 1);
+        assert_eq!(resolved.matches("Keep Code Simple").count(), 1);
 
         let yolo_prompt = codex_default_global_system_prompt(Some("yolo"));
         assert!(!yolo_prompt.contains("## Plan Mode"));
         assert!(!yolo_prompt.contains("<proposed_plan>"));
         assert!(!yolo_prompt.contains("CodexPlan"));
         assert!(yolo_prompt.contains("## Not Plan Mode"));
-        assert!(yolo_prompt.contains("VERY IMPORTANT: Keep Code Simple"));
-        assert!(yolo_prompt.contains("Clickable References"));
     }
 
     #[test]

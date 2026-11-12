@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import userEvent from '@testing-library/user-event'
-import { within } from '@testing-library/react'
+import { fireEvent, within } from '@testing-library/react'
 import { render, screen } from '@/test/test-utils'
 import { BackendModelPickerContent } from './BackendModelPickerContent'
 import type * as ModelCatalogService from '@/services/model-catalog'
@@ -113,6 +113,10 @@ beforeEach(() => {
   vi.stubGlobal('cancelAnimationFrame', vi.fn())
 })
 
+function showOlderModels() {
+  fireEvent.click(screen.getByRole('button', { name: /show \d+ older model/i }))
+}
+
 describe('BackendModelPickerContent', () => {
   it('shows a manual refresh button for CDN-backed Claude and Codex model lists', () => {
     render(
@@ -194,8 +198,10 @@ describe('BackendModelPickerContent', () => {
       />
     )
 
-    expect(screen.getByText('Fable 5')).toBeInTheDocument()
     expect(screen.getByText('Opus 4.8 (1M)')).toBeInTheDocument()
+    expect(screen.queryByText('Opus 4.7 (1M)')).toBeNull()
+    showOlderModels()
+    expect(screen.getByText('Fable 5')).toBeInTheDocument()
     expect(screen.getByText('Opus 4.7 (1M)')).toBeInTheDocument()
     expect(screen.getByText('Opus 4.6 (1M)')).toBeInTheDocument()
     expect(screen.getByText('Sonnet 4.6 (1M)')).toBeInTheDocument()
@@ -229,6 +235,9 @@ describe('BackendModelPickerContent', () => {
     expect(screen.getByRole('tab', { name: 'OpenCode' })).toBeInTheDocument()
 
     await user.click(screen.getByRole('tab', { name: 'Codex' }))
+    await user.click(
+      screen.getByRole('button', { name: /show \d+ older model/i })
+    )
     await user.click(screen.getByText('GPT 5.4'))
 
     expect(onBackendModelChange).toHaveBeenCalledWith('codex', 'gpt-5.4')
@@ -447,6 +456,10 @@ describe('BackendModelPickerContent', () => {
 
     expect(
       screen.getAllByRole('option').map(option => option.textContent)
+    ).toEqual(['Defaultmuse/default', 'Muse Spark 2muse/muse-spark-2'])
+    showOlderModels()
+    expect(
+      screen.getAllByRole('option').map(option => option.textContent)
     ).toEqual([
       'Defaultmuse/default',
       'Muse Spark 1.2muse/muse-spark-1.2',
@@ -545,6 +558,7 @@ describe('BackendModelPickerContent', () => {
       />
     )
 
+    showOlderModels()
     expect(
       screen.getByRole('switch', { name: /enable fast mode for gpt 5\.5/i })
     ).toBeInTheDocument()
@@ -577,6 +591,7 @@ describe('BackendModelPickerContent', () => {
       />
     )
 
+    showOlderModels()
     const fastRowActions = screen.getByTestId('model-actions-codex-gpt-5.5')
     const fastToggle = screen.getByRole('switch', {
       name: /enable fast mode for gpt 5\.5/i,
@@ -775,6 +790,7 @@ describe('BackendModelPickerContent', () => {
       />
     )
 
+    showOlderModels()
     // Toggle fast on GPT 5.5 row → expect fast_mode_models patch + model swap
     const fastBtn = screen.getByRole('switch', {
       name: /enable fast mode for gpt 5\.5/i,

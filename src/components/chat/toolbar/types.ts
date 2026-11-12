@@ -11,11 +11,7 @@ import type {
   Backend,
 } from '@/types/chat'
 import type { McpServerInfo } from '@/types/chat'
-import type {
-  PrDisplayStatus,
-  CheckStatus,
-  MergeableStatus,
-} from '@/types/pr-status'
+import type { PrDisplayStatus, CheckStatus } from '@/types/pr-status'
 import type { DiffRequest } from '@/types/git-diff'
 import type { PackageScript } from '@/services/projects'
 import type {
@@ -80,7 +76,6 @@ export interface ChatToolbarProps {
   prNumber: number | undefined
   displayStatus: PrDisplayStatus | undefined
   checkStatus: CheckStatus | undefined
-  mergeableStatus: MergeableStatus | undefined
 
   activeWorktreePath: string | undefined
   worktreeId: string | null
@@ -108,7 +103,6 @@ export interface ChatToolbarProps {
   onReview: () => void
   onMerge: () => void
   onMergePr: () => void
-  onResolvePrConflicts: () => void
   onResolveConflicts: () => void
   hasOpenPr: boolean
   onSetDiffRequest: (request: DiffRequest) => void

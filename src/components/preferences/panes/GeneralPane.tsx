@@ -1,5 +1,6 @@
 import { useInstalledBackends } from '@/hooks/useInstalledBackends'
 import { useSettingsTargetServerId } from '@/lib/settings-target'
+import { CliproxyBackendAccountAction } from '../CliproxyAccountLogin'
 import React, {
   useState,
   useCallback,
@@ -24,6 +25,11 @@ import { Switch } from '@/components/ui/switch'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Button } from '@/components/ui/button'
 import { BackendLabel } from '@/components/ui/backend-label'
+import {
+  currentDefaultBackendChoice,
+  defaultBackendChoices,
+  patchForDefaultBackendChoice,
+} from './default-backend-choice'
 import { BetaBadge } from '@/components/ui/badge'
 import {
   Command,
@@ -1030,12 +1036,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     }
   }
 
-  const handleBackendChange = (value: CliBackend) => {
-    if (preferences) {
-      patchPreferences.mutate({ default_backend: value })
-    }
-  }
-
   // Default backend: show all installed CLIs (issue #627/#649). Auth is enforced
   // at send time / backend settings — hiding unauthenticated backends made Claude
   // (and others) disappear from Defaults when auth probes were false-negative.
@@ -1049,6 +1049,20 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   const effectiveBackend = installedBackends.includes(stored)
     ? stored
     : (installedBackendOptions[0]?.value ?? stored)
+  const backendChoices = useMemo(
+    () =>
+      defaultBackendChoices(
+        installedBackendOptions.map(option => option.value),
+        preferences
+      ),
+    [installedBackendOptions, preferences]
+  )
+  const handleBackendChange = (value: string) => {
+    const choice = backendChoices.find(option => option.value === value)
+    if (preferences && choice) {
+      patchPreferences.mutate(patchForDefaultBackendChoice(choice))
+    }
+  }
 
   const handleCodexModelChange = (value: CodexModel) => {
     if (preferences) {
@@ -1849,6 +1863,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               authenticated={!!claudeAuth?.authenticated}
               onSignIn={handleClaudeLogin}
               onSignInAgain={handleClaudeRelogin}
+              extra={<CliproxyBackendAccountAction provider="claude" />}
             />
           }
         >
@@ -2109,6 +2124,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               authenticated={!!codexAuth?.authenticated}
               onSignIn={handleCodexLogin}
               onSignInAgain={handleCodexRelogin}
+              extra={<CliproxyBackendAccountAction provider="codex" />}
             />
           }
         >
@@ -3076,22 +3092,32 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
           <div className="space-y-4">
             <InlineField
               label="Default backend"
-              description="CLI to use for new sessions"
+              description="CLI and provider to use for new sessions"
             >
               <Select
-                value={effectiveBackend}
+                value={currentDefaultBackendChoice(
+                  effectiveBackend,
+                  preferences
+                )}
                 onValueChange={handleBackendChange}
               >
                 <SelectTrigger
                   className="w-full sm:w-80"
-                  hideIcon={installedBackendOptions.length <= 1}
+                  hideIcon={backendChoices.length <= 1}
                 >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {installedBackendOptions.map(option => (
-                    <SelectItem key={option.value} value={option.value}>
-                      <BackendLabel backend={option.value} />
+                  {backendChoices.map(choice => (
+                    <SelectItem key={choice.value} value={choice.value}>
+                      <span className="inline-flex items-center gap-1.5">
+                        <BackendLabel backend={choice.backend} />
+                        {choice.provider && (
+                          <span className="text-muted-foreground">
+                            · {choice.provider}
+                          </span>
+                        )}
+                      </span>
                     </SelectItem>
                   ))}
                 </SelectContent>

@@ -7,7 +7,12 @@ import { useProjectsStore } from '@/store/projects-store'
 import { chatQueryKeys } from '@/services/chat'
 import { projectsQueryKeys } from '@/services/projects'
 import { buildMcpConfigJson } from '@/services/mcp'
-import { resolveBackend, supportsAdaptiveThinking } from '@/lib/model-utils'
+import {
+  providerSupportsAdaptiveThinking,
+  resolveBackend,
+  resolveSendReasoning,
+  targetUsesEffort,
+} from '@/lib/model-utils'
 import { applyYoloInvestigationFixDirective } from '@/lib/investigation-prompt'
 import { routeCurrentSessionMagicPrompt } from '@/lib/magic-prompt-pty'
 import {
@@ -470,12 +475,12 @@ export function useInvestigateHandlers({
         provider: investigateProvider,
       })
 
-      const investigateIsCustom = Boolean(
-        investigateProvider && investigateProvider !== '__anthropic__'
+      const investigateUseAdaptive = providerSupportsAdaptiveThinking(
+        investigateModel,
+        investigateProvider,
+        preferences?.custom_cli_profiles,
+        cliVersion
       )
-      const investigateUseAdaptive =
-        !investigateIsCustom &&
-        supportsAdaptiveThinking(investigateModel, cliVersion)
 
       const investigateBackend =
         override?.backend ??
@@ -495,15 +500,13 @@ export function useInvestigateHandlers({
           | null
           | undefined) ??
         (investigateUseAdaptive ? selectedEffortLevelRef.current : undefined)
-      const usesEffortBackend =
-        investigateBackend === 'codex' ||
-        investigateBackend === 'opencode' ||
-        investigateBackend === 'pi' ||
-        investigateBackend === 'grok' ||
-        investigateBackend === 'kimi' ||
-        investigateBackend === 'antigravity' ||
-        investigateBackend === 'muse' ||
-        investigateUseAdaptive
+      const usesEffortBackend = targetUsesEffort({
+        backend: investigateBackend,
+        model: investigateModel,
+        provider: investigateProvider,
+        customCliProfiles: preferences?.custom_cli_profiles,
+        cliVersion,
+      })
       const investigateThinkingLevel = usesEffortBackend
         ? undefined
         : selectedThinkingLevelRef.current
@@ -725,12 +728,12 @@ export function useInvestigateHandlers({
         p => p.path === detail.projectPath
       )
 
-      const investigateIsCustom = Boolean(
-        investigateProvider && investigateProvider !== '__anthropic__'
+      const investigateUseAdaptive = providerSupportsAdaptiveThinking(
+        investigateModel,
+        investigateProvider,
+        preferences?.custom_cli_profiles,
+        cliVersion
       )
-      const investigateUseAdaptive =
-        !investigateIsCustom &&
-        supportsAdaptiveThinking(investigateModel, cliVersion)
 
       const investigateBackend =
         resolveMagicPromptBackend(
@@ -747,15 +750,13 @@ export function useInvestigateHandlers({
           | null
           | undefined) ??
         (investigateUseAdaptive ? selectedEffortLevelRef.current : undefined)
-      const usesEffortBackend =
-        investigateBackend === 'codex' ||
-        investigateBackend === 'opencode' ||
-        investigateBackend === 'pi' ||
-        investigateBackend === 'grok' ||
-        investigateBackend === 'kimi' ||
-        investigateBackend === 'antigravity' ||
-        investigateBackend === 'muse' ||
-        investigateUseAdaptive
+      const usesEffortBackend = targetUsesEffort({
+        backend: investigateBackend,
+        model: investigateModel,
+        provider: investigateProvider,
+        customCliProfiles: preferences?.custom_cli_profiles,
+        cliVersion,
+      })
       const investigateThinkingLevel = usesEffortBackend
         ? undefined
         : selectedThinkingLevelRef.current
@@ -944,11 +945,6 @@ export function useInvestigateHandlers({
         reviewCommentsProvider
       )
 
-      const isCustom = Boolean(
-        reviewCommentsProvider && reviewCommentsProvider !== '__anthropic__'
-      )
-      const useAdaptive =
-        !isCustom && supportsAdaptiveThinking(reviewCommentsModel, cliVersion)
       const reviewCommentsBackend =
         override?.backend ??
         resolveMagicPromptBackend(
@@ -1042,10 +1038,17 @@ export function useInvestigateHandlers({
             message: prompt,
             model: reviewCommentsModel,
             executionMode: requestedExecutionMode,
-            thinkingLevel: selectedThinkingLevelRef.current,
-            effortLevel: useAdaptive
-              ? selectedEffortLevelRef.current
-              : undefined,
+            ...resolveSendReasoning(
+              targetUsesEffort({
+                backend: reviewCommentsBackend,
+                model: reviewCommentsModel,
+                provider: reviewCommentsProvider,
+                customCliProfiles: preferences?.custom_cli_profiles,
+                cliVersion,
+              }),
+              selectedThinkingLevelRef.current,
+              selectedEffortLevelRef.current
+            ),
             mcpConfig: buildMcpConfigJson(
               mcpServersDataRef.current ?? [],
               enabledMcpServersRef.current,

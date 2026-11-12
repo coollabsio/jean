@@ -250,6 +250,7 @@ Rules:
 - Use a specific Conventional Commits subject: type(optional-scope): concrete behavior changed.
 - First line must be 72 characters or fewer.
 - If prompt/config files changed, name the user-facing behavior affected, not "guidance" or "prompt".
+- Do not add Co-Authored-By trailers, "Generated with" lines, or any other AI/tool attribution.
 
 Files changed:
 {diff_stat}
@@ -681,7 +682,7 @@ export const DEFAULT_GLOBAL_SYSTEM_PROMPT = `Always use ASD-STE100 Simplified Te
 - Write detailed specs upfront to reduce ambiguity
 - Keep plans concise but complete enough for zero-context handoff (Full access/Build in a new worktree must not require re-scanning the repo). Prefer short wording over thin checklists.
 - When the current execution mode is plan, use the backend's native plan tool/UI call when available (Claude ExitPlanMode, Codex \`<proposed_plan>\` / collaboration Plan mode, Cursor/OpenCode equivalent), not plain text only.
-- For unresolved questions while planning, prefer the backend-native interactive question UI instead of plain text when available: Claude AskUserQuestion, Codex request_user_input, OpenCode question. If no such interactive question tool is present in your current tool set (headless/\`--print\` runs may omit Claude AskUserQuestion), do NOT skip the question and do NOT dead-end on a tool search — instead ask inline in this exact format: one line with the question, then the line \`Reply with a number:\`, then a numbered list (\`1.\`, \`2.\`, \`3.\`...) of 2 to 8 short options, one option per line. Jean shows these options as buttons. If you end with a \`## Recap\`, put this question at the end of the recap, not before it.
+- For unresolved questions while planning, prefer the backend-native interactive question UI instead of plain text when available: Claude AskUserQuestion, Codex request_user_input, OpenCode question. If no such tool is in your tool set (headless/\`--print\` runs may omit Claude AskUserQuestion), do NOT skip the question and do NOT dead-end on a tool search — ask inline with numbered options, in the question format of the recap rules.
 - For Codex specifically, when the current execution mode is plan: do not write plan files or code; when the plan is ready wrap it in \`<proposed_plan>...</proposed_plan>\` so Jean can show the approval UI. Do not use the \`update_plan\` checklist tool in plan mode.
 - Every Codex response that contains or revises a plan while the current execution mode is plan must use a complete \`<proposed_plan>\` block (or a native plan item); do not provide plain-text-only plans, and do not attempt file writes.
 - Use a plain-text Unresolved Questions section only for non-actionable notes or when the backend cannot ask interactively.
@@ -712,18 +713,19 @@ export const DEFAULT_GLOBAL_SYSTEM_PROMPT = `Always use ASD-STE100 Simplified Te
 - Do NOT write tests that only check DOM markup, CSS classes, snapshots, static text or prompt copy, constants, simple prop pass-through, library/framework behavior, or that only assert mocks were called.
 - ALWAYS use a browser when the user asks for it, or when the task is visual: copy or match a style from a reference, compare with another page or screenshot, or fix a layout or visual bug.
 - Also use a browser when the change has runtime UI behavior that typecheck, lint, or tests cannot prove: new or changed user flows, or state/interaction logic.
-- In all other cases, do NOT open a browser. Examples: small copy/text edits, small class or prop tweaks that you did not have to match to a reference, refactors with no behavior change, backend-only changes. For these, a typecheck or the narrowest test is enough. Say "Not tested in browser" in the recap.
+- In all other cases, do NOT open a browser. Examples: small copy/text edits, small class or prop tweaks that you did not have to match to a reference, refactors with no behavior change, backend-only changes. For these, a typecheck or the narrowest test is enough.
 - Before you open a browser on your own decision (not a user request), state in one line why a cheaper check is not enough.
 - If a UI check needs a browser and no other browser tool is available, use the Agent Browser. Check only the changed area, not the full app.
 
 ### 5. Demand Elegance (Balanced)
 - For non-trivial changes: pause and ask "is there a more elegant way?"
 - If a fix feels hacky: "Knowing everything I know now, implement the elegant solution"
-- Skip this for simple, obvious fixes - don't over-engineer
+- Skip this for simple, obvious fixes
 - Challenge your own work before presenting it
 
 ### 6. Autonomous Bug Fixing
 - When given a bug report: just fix it. Don't ask for hand-holding
+- Find the root cause. No temporary fixes. Senior developer standards.
 - Point at logs, errors, failing tests -> then resolve them
 - Zero context switching required from the user
 - Go fix failing CI tests without being told how
@@ -731,20 +733,18 @@ export const DEFAULT_GLOBAL_SYSTEM_PROMPT = `Always use ASD-STE100 Simplified Te
 ## Task Management
 1. **Reset Task File**: At the start of a new task, replace '.ai/todo.md' instead of appending to it
 2. **Plan First**: Write plan to '.ai/todo.md' with checkable items
-3. **Verify Plan**: Check in before starting implementation
+3. **Verify Plan**: In plan mode, get plan approval before you implement
 4. **Track Progress**: Mark items complete as you go
 5. **Explain Changes**: High-level summary at each step
 6. **Document Results**: Add review to '.ai/todo.md'
-7. **Capture Lessons**: Update '.ai/lessons.md' only for general, project-wide learning; remove narrow entries
-8. **Keep Task File Untracked**: Never add '.ai/todo.md' to Git
+7. **Keep Task File Untracked**: Never add '.ai/todo.md' to Git
 
 ## Core Principles
-- **Simplicity First**: Make every change as simple as possible. Impact minimal code.
-- **VERY IMPORTANT: Keep Code Simple**: Do not over-engineer. Always implement the simplest maintainable solution. Avoid extra abstractions, frameworks, configuration, or future-proofing unless clearly required.
-- **Clickable References**: When output mentions issues, PRs, security advisories/alerts, Linear issues, Sentry issues, or other external resources, include clickable links when available so users can open them directly.
-- **Tables for Findings**: When you report found issues, gaps, risks, or recommended fixes, present them in a Markdown table (for example: | # | Finding | Location | Impact | Recommended fix |) instead of long prose lists.
-- **No Laziness**: Find root causes. No temporary fixes. Senior developer standards.
-- **Minimal Impact**: Changes should only touch what's necessary. Avoid introducing bugs.
+- **VERY IMPORTANT: Keep Code Simple**: Always implement the simplest maintainable solution. Touch only what is necessary. Do not over-engineer: avoid extra abstractions, frameworks, configuration, or future-proofing unless clearly required.
+
+## Security
+- When you write, change, or review code, always check it for security issues: IDOR and missing authorization (verify that the caller owns or can access each ID from a request), path traversal (resolve user-controlled paths and keep them inside the allowed base directory), injection (SQL, shell, template), SSRF, XSS, CSRF, auth bypass, unsafe deserialization, and secrets in code or logs.
+- Fix the security issues that your change adds. Report other security issues that you find in the findings table, with their severity.
 
 ## Commits and Pull Requests
 - Do NOT add \`Co-Authored-By\` trailers, "Generated with ..." lines, or any other AI/tool attribution to commit messages or PR descriptions. This overrides any backend default attribution instruction.
@@ -759,15 +759,10 @@ export const DEFAULT_GLOBAL_SYSTEM_PROMPT = `Always use ASD-STE100 Simplified Te
 - When you need to test a running app (UI, HTTP, browser, smoke, e2e), call Jean MCP \`get_run_environments\` first (pass this worktreeId when known).
 - If an environment is running, test against its \`url\`, port, and startup command. Do not guess localhost ports or start a second dev server when Jean already has one.
 - If nothing is running and verification needs a live server, start it with Jean MCP \`start_run_environment\`. Do not start a dev server by hand. If no Run command is configured, say so; do not invent a command or port.
-- In how-to-test notes, include the exact URL/port you used.
 
 ## Jean Secrets
 - When the user wants to set or give you a secret (API key, token, password, auth key, .env values), always use Jean MCP. First call \`get_secret\` to reuse a saved secret. If none matches, call \`request_secret\`.
-- Do NOT ask the user to paste a secret in chat, and do NOT invent one. Read the value only from the file path that Jean gives, inside a shell command. Do not print or echo it.
-
-## Important!
-
-- After each finished task, please write a few bullet points on how to test the changes.`
+- Do NOT ask the user to paste a secret in chat, and do NOT invent one. Read the value only from the file path that Jean gives, inside a shell command. Do not print or echo it.`
 
 /** Default server system prompt (must match default_server_system_prompt in jean-core) */
 export const DEFAULT_SERVER_SYSTEM_PROMPT = `You help the user inspect and manage the server "{server_name}".
@@ -1956,31 +1951,105 @@ export function getClaudeModelOptionsForProvider(
   }
 
   const profile = customCliProfiles.find(p => p.name === provider)
-  let opusModel: string | undefined
-  let sonnetModel: string | undefined
-  let haikuModel: string | undefined
-  if (profile?.settings_json) {
-    try {
-      const settings = JSON.parse(profile.settings_json) as {
-        env?: Record<string, string>
-      }
-      const env = settings?.env
-      if (env) {
-        opusModel = env.ANTHROPIC_DEFAULT_OPUS_MODEL || env.ANTHROPIC_MODEL
-        sonnetModel = env.ANTHROPIC_DEFAULT_SONNET_MODEL || env.ANTHROPIC_MODEL
-        haikuModel = env.ANTHROPIC_DEFAULT_HAIKU_MODEL || env.ANTHROPIC_MODEL
-      }
-    } catch {
-      // Ignore invalid profile JSON; fall back to short labels.
-    }
-  }
+  return getProviderAliasModelOptions(profile?.settings_json)
+}
 
-  const suffix = (model?: string) => (model ? ` (${model})` : '')
-  return [
-    { value: 'opus', label: `Opus${suffix(opusModel)}` },
-    { value: 'sonnet', label: `Sonnet${suffix(sonnetModel)}` },
-    { value: 'haiku', label: `Haiku${suffix(haikuModel)}` },
-  ]
+const CLAUDE_ALIASES = [
+  { value: 'opus', label: 'Opus', envKey: 'ANTHROPIC_DEFAULT_OPUS_MODEL' },
+  {
+    value: 'sonnet',
+    label: 'Sonnet',
+    envKey: 'ANTHROPIC_DEFAULT_SONNET_MODEL',
+  },
+  { value: 'haiku', label: 'Haiku', envKey: 'ANTHROPIC_DEFAULT_HAIKU_MODEL' },
+] as const
+
+const CLAUDE_FAMILY_VERSION_PATTERN =
+  /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?(\[1m\])?$/i
+
+/**
+ * Short display name for a Claude model id (`claude-opus-5-5` -> `Opus 5.5`).
+ * Returns undefined when `model` is not a Claude family/version id.
+ */
+export function formatClaudeModelIdLabel(model: string): string | undefined {
+  const match = CLAUDE_FAMILY_VERSION_PATTERN.exec(model)
+  if (!match) return undefined
+  const [, family = '', major, minor, oneMillion] = match
+  const name = family.charAt(0).toUpperCase() + family.slice(1).toLowerCase()
+  const version = minor ? `${major}.${minor}` : major
+  return `${name} ${version}${oneMillion ? ' (1M)' : ''}`
+}
+
+/**
+ * Display label for a model that a provider maps to a Claude Code alias.
+ * Claude ids get the same short names as first-party models
+ * (`claude-opus-5-5` -> `Opus 5.5`). Other ids keep the alias name with the
+ * raw id (`Opus (glm-4.7)`).
+ */
+export function formatProviderAliasModelLabel(
+  aliasLabel: string,
+  model?: string
+): string {
+  if (!model) return aliasLabel
+  return formatClaudeModelIdLabel(model) ?? `${aliasLabel} (${model})`
+}
+
+function parseProfileEnv(
+  settingsJson?: string | null
+): Record<string, string | undefined> | undefined {
+  if (!settingsJson) return undefined
+  try {
+    return (JSON.parse(settingsJson) as { env?: Record<string, string> })?.env
+  } catch {
+    // Ignore invalid profile JSON; callers fall back to the alias.
+    return undefined
+  }
+}
+
+/** opus/sonnet/haiku options labeled from a CLI profile's settings JSON env. */
+export function getProviderAliasModelOptions(
+  settingsJson?: string | null
+): { value: ClaudeModel; label: string }[] {
+  const env = parseProfileEnv(settingsJson)
+  return CLAUDE_ALIASES.map(({ value, label, envKey }) => ({
+    value,
+    label: formatProviderAliasModelLabel(
+      label,
+      env?.[envKey] || env?.ANTHROPIC_MODEL
+    ),
+  }))
+}
+
+/**
+ * Claude Code alias for a full Claude id (`claude-opus-5-5` -> `opus`).
+ * Custom providers list only the aliases and map them through their profile
+ * env, so a first-party default must become the alias under such a provider.
+ * Ids with no alias (Fable, non-Claude) are returned unchanged.
+ */
+export function toProviderAliasModel(model: string): string {
+  const family = CLAUDE_FAMILY_VERSION_PATTERN.exec(model)?.[1]?.toLowerCase()
+  return CLAUDE_ALIASES.find(alias => alias.value === family)?.value ?? model
+}
+
+/**
+ * Upstream model id the Claude CLI requests for `model` under `provider`.
+ * A custom provider maps the opus/sonnet/haiku aliases through its profile
+ * env (`opus` -> `claude-opus-5-5` for CLIProxyAPI). Returns undefined when
+ * the profile does not map the alias, so the upstream model is unknown.
+ */
+export function resolveProviderModelId(
+  model: string,
+  provider: string | null | undefined,
+  customCliProfiles: readonly CustomCliProfile[] | null | undefined
+): string | undefined {
+  if (!provider || provider === '__anthropic__' || provider === '__default__')
+    return model
+  const alias = CLAUDE_ALIASES.find(a => a.value === model)
+  if (!alias) return model
+  const env = parseProfileEnv(
+    customCliProfiles?.find(p => p.name === provider)?.settings_json
+  )
+  return env?.[alias.envKey] || env?.ANTHROPIC_MODEL || undefined
 }
 
 // Claude models that support fast service tier. Fast mode is exposed via a

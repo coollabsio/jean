@@ -556,7 +556,9 @@ mod tests {
         assert!(prompt.contains("background task"));
         assert!(!prompt.contains("previous chat"));
         assert!(prompt.contains("more memories exist"));
-        assert!(prompt.len() < PROMPT_MEMORY_CHARS + 4000);
+        let without_memories =
+            render_system_prompt(&me, &[], &[], false, "jean-dev", &SessionRole::Task);
+        assert!(prompt.len() <= without_memories.len() + PROMPT_MEMORY_CHARS + 100);
         assert!(!prompt.contains("(empty)"));
     }
 }

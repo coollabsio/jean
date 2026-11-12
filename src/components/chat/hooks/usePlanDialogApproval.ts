@@ -53,8 +53,8 @@ interface UsePlanDialogApprovalParams {
   selectedProviderRef: RefObject<string | null>
   selectedThinkingLevelRef: RefObject<ThinkingLevel>
   selectedEffortLevelRef: RefObject<EffortLevel>
-  useAdaptiveThinkingRef: RefObject<boolean>
-  isCodexBackendRef: RefObject<boolean>
+  /** Whether a turn on this backend and model takes an effort level. */
+  usesEffortFor: (backend: CliBackend, model: string) => boolean
   mcpServersDataRef: RefObject<McpServerInfo[] | undefined>
   enabledMcpServersRef: RefObject<string[]>
   selectedBackendRef: RefObject<CliBackend>
@@ -82,8 +82,7 @@ export function usePlanDialogApproval({
   selectedProviderRef,
   selectedThinkingLevelRef,
   selectedEffortLevelRef,
-  useAdaptiveThinkingRef,
-  isCodexBackendRef,
+  usesEffortFor,
   mcpServersDataRef,
   enabledMcpServersRef,
   selectedBackendRef,
@@ -280,15 +279,14 @@ export function usePlanDialogApproval({
           ? yoloEffortLevelRef.current
           : buildEffortLevelRef.current
         : null
-      const resolvedEffortLevel: EffortLevel | undefined =
-        useAdaptiveThinkingRef.current ||
-        isCodexBackendRef.current ||
-        selectedBackendRef.current === 'pi'
-          ? ((effortOverride as EffortLevel | null) ??
-            selectedEffortLevelRef.current)
-          : undefined
-
       const model = modelOverride ?? selectedModelRef.current
+      const resolvedEffortLevel: EffortLevel | undefined = usesEffortFor(
+        selectedBackendRef.current,
+        model
+      )
+        ? ((effortOverride as EffortLevel | null) ??
+          selectedEffortLevelRef.current)
+        : undefined
       const modeLabel = mode === 'yolo' ? 'Full access' : 'Build'
       const overrideStr =
         modelOverride || backendOverride
@@ -343,8 +341,7 @@ export function usePlanDialogApproval({
       selectedProviderRef,
       selectedThinkingLevelRef,
       selectedEffortLevelRef,
-      useAdaptiveThinkingRef,
-      isCodexBackendRef,
+      usesEffortFor,
       mcpServersDataRef,
       enabledMcpServersRef,
       markAtBottom,

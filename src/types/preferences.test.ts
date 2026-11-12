@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_RELEASE_NOTES_PROMPT,
+  getProviderAliasModelOptions,
   ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_BACKENDS,
   ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_MODELS,
   MUSE_DEFAULT_MAGIC_PROMPT_BACKENDS,
@@ -27,6 +28,7 @@ import {
   PI_DEFAULT_MAGIC_PROMPT_MODELS,
   resolveMagicPromptBackend,
   resolveMagicPromptProvider,
+  toProviderAliasModel,
 } from './preferences'
 
 describe('default release notes prompt', () => {
@@ -292,5 +294,62 @@ describe('magic prompt preference resolvers', () => {
         'OpenRouter'
       )
     ).toBeNull()
+  })
+})
+
+describe('toProviderAliasModel', () => {
+  it('maps full Claude ids to their provider alias', () => {
+    expect(toProviderAliasModel('claude-opus-5-5')).toBe('opus')
+    expect(toProviderAliasModel('claude-sonnet-4-6[1m]')).toBe('sonnet')
+    expect(toProviderAliasModel('claude-haiku-4-5-20251001')).toBe('haiku')
+  })
+
+  it('keeps aliases and ids that have no alias', () => {
+    expect(toProviderAliasModel('opus')).toBe('opus')
+    expect(toProviderAliasModel('claude-fable-5-2')).toBe('claude-fable-5-2')
+    expect(toProviderAliasModel('glm-4.7')).toBe('glm-4.7')
+  })
+})
+
+describe('getProviderAliasModelOptions', () => {
+  const settings = (env: Record<string, string>) => JSON.stringify({ env })
+
+  it('uses first-party short names for Claude model ids', () => {
+    expect(
+      getProviderAliasModelOptions(
+        settings({
+          ANTHROPIC_DEFAULT_OPUS_MODEL: 'claude-opus-5-5',
+          ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-sonnet-4-6[1m]',
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: 'claude-haiku-4-5-20251001',
+        })
+      )
+    ).toEqual([
+      { value: 'opus', label: 'Opus 5.5' },
+      { value: 'sonnet', label: 'Sonnet 4.6 (1M)' },
+      { value: 'haiku', label: 'Haiku 4.5' },
+    ])
+  })
+
+  it('keeps the raw id for non-Claude models and falls back to ANTHROPIC_MODEL', () => {
+    expect(
+      getProviderAliasModelOptions(
+        settings({
+          ANTHROPIC_MODEL: 'glm-4.7',
+          ANTHROPIC_DEFAULT_OPUS_MODEL: 'anthropic/claude-opus-4.8',
+        })
+      ).map(o => o.label)
+    ).toEqual([
+      'Opus (anthropic/claude-opus-4.8)',
+      'Sonnet (glm-4.7)',
+      'Haiku (glm-4.7)',
+    ])
+  })
+
+  it('returns bare alias labels for missing or invalid settings', () => {
+    expect(getProviderAliasModelOptions('not json').map(o => o.label)).toEqual([
+      'Opus',
+      'Sonnet',
+      'Haiku',
+    ])
   })
 })

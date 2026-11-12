@@ -116,7 +116,7 @@ function JeanConfigWizardContent() {
         if (!open) handleSkip()
       }}
     >
-      <DialogContent className="!fixed !inset-0 !h-dvh !w-screen !max-w-none !max-h-none !translate-x-0 !translate-y-0 flex flex-col gap-0 overflow-hidden rounded-none border-0 p-0 shadow-none sm:!inset-auto sm:!top-[50%] sm:!left-[50%] sm:!h-auto sm:!max-h-[90dvh] sm:!w-full sm:!max-w-md sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:rounded-lg sm:border sm:shadow-lg [&>[data-slot=dialog-close]]:top-[calc(env(safe-area-inset-top)+1rem)] sm:[&>[data-slot=dialog-close]]:top-4">
+      <DialogContent className="!fixed !inset-0 !h-dvh !w-screen !max-w-none !max-h-none flex flex-col gap-0 overflow-hidden rounded-none border-0 p-0 shadow-none sm:!h-fit sm:!max-h-[90dvh] sm:!w-full sm:!max-w-md sm:rounded-lg sm:border sm:shadow-lg [&>[data-slot=dialog-close]]:top-[calc(env(safe-area-inset-top)+1rem)] sm:[&>[data-slot=dialog-close]]:top-4">
         <DialogHeader className="shrink-0 border-b px-4 pt-[calc(env(safe-area-inset-top)+1rem)] pr-14 pb-4 text-left sm:border-b-0 sm:px-6 sm:pt-6 sm:pb-0">
           <DialogTitle>Configure Automation</DialogTitle>
           <DialogDescription>

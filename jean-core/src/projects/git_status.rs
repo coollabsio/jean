@@ -122,6 +122,9 @@ fn git_common_dir(repo_path: &str) -> PathBuf {
     };
     // Relative for the main checkout (".git"); `join` keeps absolute paths as is.
     let dir = Path::new(repo_path).join(String::from_utf8_lossy(&output.stdout).trim());
+    // Git prints resolved paths for linked worktrees (macOS `/private/var`,
+    // Windows long names), so canonicalize to give every worktree one key.
+    let dir = std::fs::canonicalize(&dir).unwrap_or(dir);
     if let Ok(mut dirs) = GIT_COMMON_DIRS.lock() {
         dirs.insert(repo_path.to_string(), dir.clone());
     }

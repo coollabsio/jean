@@ -805,9 +805,9 @@ export function CheckpointsTabView({
       >
         <AlertDialogContent
           className={cn(
-            'relative flex w-[calc(100vw-1rem)] max-w-none flex-col gap-3 p-4',
+            'flex w-[calc(100vw-1rem)] max-w-none flex-col gap-3 p-4',
             'max-h-[min(92dvh,100%)]',
-            'max-sm:top-auto max-sm:bottom-[max(0.75rem,env(safe-area-inset-bottom))] max-sm:left-1/2 max-sm:translate-x-[-50%] max-sm:translate-y-0 max-sm:rounded-xl',
+            'max-sm:top-auto max-sm:bottom-[max(0.75rem,env(safe-area-inset-bottom))] max-sm:rounded-xl',
             'sm:max-w-lg sm:p-6'
           )}
         >

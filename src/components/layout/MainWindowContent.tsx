@@ -1,6 +1,5 @@
 import {
   Suspense,
-  lazy,
   memo,
   useCallback,
   useEffect,
@@ -19,6 +18,7 @@ import { WelcomeProjectGrid } from './WelcomeProjectGrid'
 import { isFolder } from '@/types/projects'
 import { useInstalledBackends } from '@/hooks/useInstalledBackends'
 import { scheduleIdleWork } from '@/lib/idle'
+import { lazyWithPreload, preloadWhenIdle } from '@/lib/lazy-preload'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { JeanLoadingScreen } from '@/components/shared/JeanLoadingScreen'
 import { AgentPage } from '@/components/agents/AgentPage'
@@ -26,13 +26,13 @@ import { AgentNotificationsListener } from '@/components/agents/AgentNotificatio
 import { useShowAgents } from '@/components/agents/agents-feature'
 import { ServerOfflineView, useUnreachableServer } from './ServerOfflineView'
 
-const ChatWindow = lazy(() =>
+const ChatWindow = lazyWithPreload(() =>
   import('@/components/chat/ChatWindow').then(mod => ({
     default: mod.ChatWindow,
   }))
 )
 
-const ProjectCanvasView = lazy(() =>
+const ProjectCanvasView = lazyWithPreload(() =>
   import('@/components/dashboard/ProjectCanvasView').then(mod => ({
     default: mod.ProjectCanvasView,
   }))
@@ -75,6 +75,11 @@ export const MainWindowContent = memo(function MainWindowContent({
   )
   const [backendCheckReady, setBackendCheckReady] = useState(false)
   useEffect(() => scheduleIdleWork(() => setBackendCheckReady(true), 1500), [])
+  // Switching between canvas and chat must not wait for the other view's chunk.
+  useEffect(
+    () => preloadWhenIdle([ChatWindow.preload, ProjectCanvasView.preload]),
+    []
+  )
 
   const realProjects = projects.filter(p => !isFolder(p))
 

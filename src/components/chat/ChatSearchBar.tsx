@@ -4,6 +4,8 @@ import { ChevronUp, ChevronDown, X } from '@/components/icons/reicon'
 
 interface ChatSearchBarProps {
   scrollContainerRef: React.RefObject<HTMLElement | null>
+  /** Called before a match scrolls into view, so the chat stops following its tail */
+  onBeforeScroll?: () => void
 }
 
 interface MatchInfo {
@@ -32,7 +34,10 @@ function scrollRangeIntoView(range: Range) {
   el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
 }
 
-export function ChatSearchBar({ scrollContainerRef }: ChatSearchBarProps) {
+export function ChatSearchBar({
+  scrollContainerRef,
+  onBeforeScroll,
+}: ChatSearchBarProps) {
   const chatSearchOpen = useUIStore(s => s.chatSearchOpen)
   const setChatSearchOpen = useUIStore(s => s.setChatSearchOpen)
 
@@ -59,9 +64,10 @@ export function ChatSearchBar({ scrollContainerRef }: ChatSearchBarProps) {
       if (supportsHighlightAPI) {
         CSS.highlights.set('chat-search-active', new Highlight(range))
       }
+      onBeforeScroll?.()
       scrollRangeIntoView(range)
     },
-    [supportsHighlightAPI]
+    [supportsHighlightAPI, onBeforeScroll]
   )
 
   const performSearch = useCallback(

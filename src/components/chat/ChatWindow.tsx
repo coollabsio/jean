@@ -7,7 +7,6 @@ import {
   useMemo,
   useRef,
   useState,
-  lazy,
   memo,
   Suspense,
 } from 'react'
@@ -102,6 +101,8 @@ import {
   PREDEFINED_CLI_PROFILES,
   resolveMagicPromptBackend,
   resolveMagicPromptProvider,
+  resolveProviderModelId,
+  toProviderAliasModel,
   type CliBackend,
   type CodexProviderProfile,
   type CustomCliProfile,
@@ -136,6 +137,8 @@ import {
 import { getFilename, normalizePath } from '@/lib/path-utils'
 import { registerChatComposer } from '@/lib/chat-composer-metrics'
 import { cn } from '@/lib/utils'
+import { MermaidBlock } from '@/components/ui/markdown'
+import { lazyWithPreload, preloadWhenIdle } from '@/lib/lazy-preload'
 import { PermissionApproval } from './PermissionApproval'
 import { AskUserQuestion } from './AskUserQuestion'
 import { CodexCommandApprovalRequestCard } from './CodexCommandApprovalRequest'
@@ -215,12 +218,22 @@ import { useGitStatus } from '@/services/git-status'
 import { useRemotePicker } from '@/hooks/useRemotePicker'
 import {
   getModelImpliedBackend,
-  supportsAdaptiveThinking,
+  providerSupportsAdaptiveThinking,
+  targetUsesEffort,
 } from '@/lib/model-utils'
 import { copyToClipboard, copyHtmlToClipboard } from '@/lib/clipboard'
-import { useClaudeCliStatus, useClaudeUsage } from '@/services/claude-cli'
+import {
+  useClaudeCliAuth,
+  useClaudeCliStatus,
+  useClaudeUsage,
+} from '@/services/claude-cli'
+import { useCliproxyapiUsage } from '@/services/cliproxyapi'
 import { useCodexUsage } from '@/services/codex-cli'
-import { getLimitResetAtMs, isUsageLimitError } from '@/lib/usage-limit'
+import {
+  getLimitResetAtMs,
+  isClaudeTermsError,
+  isUsageLimitError,
+} from '@/lib/usage-limit'
 import {
   getCatalogModelReasoning,
   supportedReasoningLevel,
@@ -248,15 +261,15 @@ interface ForkSessionToWorktreeResponse {
 }
 
 // Lazy-loaded heavy modals (code splitting)
-const GitDiffModal = lazy(() =>
+const GitDiffModal = lazyWithPreload(() =>
   import('./GitDiffModal').then(mod => ({ default: mod.GitDiffModal }))
 )
-const LoadContextModal = lazy(() =>
+const LoadContextModal = lazyWithPreload(() =>
   import('../magic/LoadContextModal').then(mod => ({
     default: mod.LoadContextModal,
   }))
 )
-const LinkedProjectsModal = lazy(() =>
+const LinkedProjectsModal = lazyWithPreload(() =>
   import('../magic/LinkedProjectsModal').then(mod => ({
     default: mod.LinkedProjectsModal,
   }))
@@ -296,6 +309,10 @@ import {
 } from './permission-approval-utils'
 import { navigateToForkedSession } from './fork-session-navigation'
 import { COMPOSER_SURFACE_CLASS, COMPOSER_TAB_CLASS } from './composer-surface'
+
+// Messages pad by the floating composer height so the last line can scroll
+// above it. The prompt spacer subtracts the same inset in CSS.
+const MESSAGES_BOTTOM_INSET = 'calc(var(--chat-composer-height, 0px) + 1.5rem)'
 
 // PERFORMANCE: Stable empty array references to prevent infinite render loops
 // When Zustand selectors return [], a new reference is created each time
@@ -371,6 +388,16 @@ interface ChatWindowProps {
 export const ChatWindow = memo(function ChatWindow(
   props: ChatWindowProps = {}
 ) {
+  useEffect(
+    () =>
+      preloadWhenIdle([
+        GitDiffModal.preload,
+        LoadContextModal.preload,
+        LinkedProjectsModal.preload,
+        MermaidBlock.preload,
+      ]),
+    []
+  )
   const storeWorktreeId = useChatStore(state => state.activeWorktreeId)
   const worktreeId = props.worktreeId ?? storeWorktreeId
   const serverId = worktreeId
@@ -921,8 +948,12 @@ const ChatWindowContent = memo(function ChatWindowContent({
   )
   // Prefer in-memory toolbar selection when present so mid-session provider
   // switches apply immediately (session query can lag until invalidate).
+  // A saved null means "no choice yet", so the backend default applies; an
+  // explicit built-in choice is saved as a sentinel (__anthropic__/__default__).
   const sessionProvider =
-    zustandProvider !== undefined ? zustandProvider : session?.selected_provider
+    zustandProvider !== undefined
+      ? zustandProvider
+      : (session?.selected_provider ?? undefined)
 
   // Installed backends (only these should be selectable)
   const targetServerId = activeWorktreeId
@@ -992,12 +1023,18 @@ const ChatWindowContent = memo(function ChatWindowContent({
   )
 
   // Per-session model selection, falls back to preferences default (backend-aware)
-  const selectedModel = resolveSelectedModelForBackend(
+  const resolvedModel = resolveSelectedModelForBackend(
     selectedBackend,
     session?.selected_model,
     preferences,
     selectedBackend === 'pi' ? availablePiModelOptions : undefined
   )
+  // A custom provider offers only the opus/sonnet/haiku aliases, so the
+  // first-party default (`claude-opus-5-5`) becomes its alias (`opus`).
+  const selectedModel =
+    selectedBackend === 'claude' && isCustomProvider
+      ? toProviderAliasModel(resolvedModel)
+      : resolvedModel
   const buildNewContextLabel = resolveApprovalLabel(
     'build',
     preferences,
@@ -1065,10 +1102,18 @@ const ChatWindowContent = memo(function ChatWindowContent({
   // CLI version for adaptive thinking feature detection
   const { data: cliStatus } = useClaudeCliStatus({ serverId: targetServerId })
   const { data: modelCatalog } = useModelCatalog()
+  // Custom providers map aliases to an upstream id (`opus` -> `claude-opus-5-5`
+  // for CLIProxyAPI); its catalog entry decides effort vs thinking.
   const selectedModelReasoning = getCatalogModelReasoning(
     modelCatalog,
     selectedBackend,
-    selectedModel
+    (selectedBackend === 'claude'
+      ? resolveProviderModelId(
+          selectedModel,
+          selectedProvider,
+          preferences?.custom_cli_profiles
+        )
+      : undefined) ?? selectedModel
   )
   // A saved level the current model does not support falls back to the
   // model's default, without a write back to the session.
@@ -1084,18 +1129,18 @@ const ChatWindowContent = memo(function ChatWindowContent({
     'thinking',
     rawSelectedThinkingLevel
   )
-  // Custom providers don't support Opus 4.6 adaptive thinking — use thinking levels instead
   const useAdaptiveThinkingFlag =
     selectedBackend === 'antigravity' ||
     selectedBackend === 'muse' ||
-    (!isCustomProvider &&
-      supportsAdaptiveThinking(
-        selectedModel,
-        cliStatus?.version ?? null,
-        selectedModelReasoning === undefined
-          ? undefined
-          : selectedModelReasoning?.type === 'effort'
-      ))
+    providerSupportsAdaptiveThinking(
+      selectedModel,
+      selectedProvider,
+      preferences?.custom_cli_profiles,
+      cliStatus?.version ?? null,
+      selectedModelReasoning === undefined
+        ? undefined
+        : selectedModelReasoning?.type === 'effort'
+    )
 
   // Hide thinking level UI entirely for providers that don't support it
   const customCliProfiles = preferences?.custom_cli_profiles ?? []
@@ -1218,6 +1263,31 @@ const ChatWindowContent = memo(function ChatWindowContent({
     supportsAutoResume && limitResetAtMs != null && deferredSessionId != null
   const autoResumeAtMs = useChatStore(state =>
     deferredSessionId ? (state.autoResume[deferredSessionId] ?? null) : null
+  )
+
+  // Claude asks the account owner to accept updated terms on claude.ai. Name
+  // the accounts that can be blocked: the proxy's Claude accounts, or the
+  // local Claude login.
+  const isTermsError = isClaudeTermsError(currentError)
+  const usesCliproxyapi = selectedProvider === 'CLIProxyAPI'
+  const { data: cliproxyAccounts } = useCliproxyapiUsage({
+    enabled: isTermsError && usesCliproxyapi,
+  })
+  const { data: claudeAuth } = useClaudeCliAuth({
+    enabled: isTermsError && !isCustomProvider,
+  })
+  const termsAccountEmails = !isTermsError
+    ? []
+    : usesCliproxyapi
+      ? (cliproxyAccounts ?? [])
+          .filter(account => account.provider === 'claude' && !account.disabled)
+          .map(account => account.email ?? account.label)
+      : !isCustomProvider && claudeAuth?.email
+        ? [claudeAuth.email]
+        : []
+  // Retry reuses the auto-continue resend path, armed for now.
+  const canRetry = useChatStore(state =>
+    deferredSessionId ? Boolean(state.lastSentArgs[deferredSessionId]) : false
   )
 
   // Per-worktree setup script result (stays at worktree level)
@@ -1412,8 +1482,12 @@ const ChatWindowContent = memo(function ChatWindowContent({
   const selectedProviderRef = useRef(selectedProvider)
   const selectedThinkingLevelRef = useRef(selectedThinkingLevel)
   const selectedEffortLevelRef = useRef(selectedEffortLevel)
-  const useAdaptiveThinkingRef = useRef(useAdaptiveThinkingFlag)
-  const isCodexBackendRef = useRef(isCodexBackend)
+  const reasoningContextRef = useRef({
+    modelCatalog,
+    provider: selectedProvider,
+    customCliProfiles: preferences?.custom_cli_profiles,
+    cliVersion: cliStatus?.version ?? null,
+  })
   const executionModeRef = useRef(executionMode)
   const projectIdRef = useRef<string | null>(worktree?.project_id ?? null)
   const enabledMcpServersRef = useRef(enabledMcpServers)
@@ -1443,14 +1517,42 @@ const ChatWindowContent = memo(function ChatWindowContent({
     selectedProviderRef.current = selectedProvider
     selectedThinkingLevelRef.current = selectedThinkingLevel
     selectedEffortLevelRef.current = selectedEffortLevel
-    useAdaptiveThinkingRef.current = useAdaptiveThinkingFlag
-    isCodexBackendRef.current = isCodexBackend
+    reasoningContextRef.current = {
+      modelCatalog,
+      provider: selectedProvider,
+      customCliProfiles: preferences?.custom_cli_profiles,
+      cliVersion: cliStatus?.version ?? null,
+    }
     executionModeRef.current = executionMode
     projectIdRef.current = worktree?.project_id ?? null
     enabledMcpServersRef.current = enabledMcpServers
     mcpServersDataRef.current = availableMcpServers
     selectedBackendRef.current = selectedBackend
   })
+
+  // Stable check: does a turn on `backend`/`model` take an effort level? Uses
+  // the target model, so build/yolo model overrides get the right level.
+  const usesEffortFor = useCallback((backend: CliBackend, model: string) => {
+    const { modelCatalog, provider, customCliProfiles, cliVersion } =
+      reasoningContextRef.current
+    const targetProvider = backend === 'claude' ? provider : null
+    const reasoning = getCatalogModelReasoning(
+      modelCatalog,
+      backend,
+      (targetProvider
+        ? resolveProviderModelId(model, targetProvider, customCliProfiles)
+        : undefined) ?? model
+    )
+    return targetUsesEffort({
+      backend,
+      model,
+      provider: targetProvider,
+      customCliProfiles,
+      cliVersion,
+      catalogUsesEffort:
+        reasoning === undefined ? undefined : reasoning?.type === 'effort',
+    })
+  }, [])
 
   // Stable callback for useMessageHandlers to build MCP config from current refs
   const getMcpConfig = useCallback(
@@ -1792,8 +1894,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
     selectedThinkingLevelRef,
     selectedEffortLevelRef,
     executionModeRef,
-    useAdaptiveThinkingRef,
-    isCodexBackendRef,
+    usesEffortFor,
     mcpServersDataRef,
     enabledMcpServersRef,
     selectedBackendRef,
@@ -1837,7 +1938,10 @@ const ChatWindowContent = memo(function ChatWindowContent({
       provider: selectedProviderRef.current,
       executionMode: executionModeRef.current,
       thinkingLevel: selectedThinkingLevelRef.current,
-      effortLevel: useAdaptiveThinkingRef.current
+      effortLevel: usesEffortFor(
+        selectedBackendRef.current,
+        selectedModelRef.current
+      )
         ? selectedEffortLevelRef.current
         : undefined,
       mcpConfig: getMcpConfig(),
@@ -1868,7 +1972,10 @@ const ChatWindowContent = memo(function ChatWindowContent({
       provider: selectedProviderRef.current,
       executionMode: executionModeRef.current,
       thinkingLevel: selectedThinkingLevelRef.current,
-      effortLevel: useAdaptiveThinkingRef.current
+      effortLevel: usesEffortFor(
+        selectedBackendRef.current,
+        selectedModelRef.current
+      )
         ? selectedEffortLevelRef.current
         : undefined,
       mcpConfig: getMcpConfig(),
@@ -1902,7 +2009,10 @@ const ChatWindowContent = memo(function ChatWindowContent({
       provider: selectedProviderRef.current,
       executionMode: executionModeRef.current,
       thinkingLevel: selectedThinkingLevelRef.current,
-      effortLevel: useAdaptiveThinkingRef.current
+      effortLevel: usesEffortFor(
+        selectedBackendRef.current,
+        selectedModelRef.current
+      )
         ? selectedEffortLevelRef.current
         : undefined,
       mcpConfig: getMcpConfig(),
@@ -1946,7 +2056,10 @@ const ChatWindowContent = memo(function ChatWindowContent({
         provider: selectedProviderRef.current,
         executionMode: executionModeRef.current,
         thinkingLevel: selectedThinkingLevelRef.current,
-        effortLevel: useAdaptiveThinkingRef.current
+        effortLevel: usesEffortFor(
+          selectedBackendRef.current,
+          selectedModelRef.current
+        )
           ? selectedEffortLevelRef.current
           : undefined,
         mcpConfig: getMcpConfig(),
@@ -2013,6 +2126,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
     sendMessage,
     selectedThinkingLevelRef,
     selectedEffortLevelRef,
+    cliVersion: cliStatus?.version ?? null,
     mcpServersDataRef,
     enabledMcpServersRef,
   })
@@ -2293,7 +2407,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
     executionModeRef,
     selectedThinkingLevelRef,
     selectedEffortLevelRef,
-    useAdaptiveThinkingRef,
+    usesEffortFor,
     getMcpConfig,
     sendMessage,
     createSession,
@@ -2516,8 +2630,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
     executionModeRef,
     selectedThinkingLevelRef,
     selectedEffortLevelRef,
-    useAdaptiveThinkingRef,
-    isCodexBackendRef,
+    usesEffortFor,
     mcpServersDataRef,
     enabledMcpServersRef,
     selectedBackendRef,
@@ -2748,7 +2861,10 @@ const ChatWindowContent = memo(function ChatWindowContent({
                             </span>
                           </div>
                         )}
-                        <ChatSearchBar scrollContainerRef={scrollViewportRef} />
+                        <ChatSearchBar
+                          scrollContainerRef={scrollViewportRef}
+                          onBeforeScroll={stopFollowingTail}
+                        />
                         {/* Bottom fade gradient so messages don't hard-cut at the input area */}
                         <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-10 h-8 bg-gradient-to-b from-transparent to-background" />
                         <ScrollArea
@@ -2757,7 +2873,10 @@ const ChatWindowContent = memo(function ChatWindowContent({
                           viewportClassName="will-change-scroll"
                           onScroll={handleScroll}
                         >
-                          <div className="mx-auto max-w-7xl px-4 pt-[calc(var(--chat-top-inset,0px)+1rem)] pb-[calc(var(--chat-composer-height,0px)+1.5rem)] md:px-6 min-w-0 w-full">
+                          <div
+                            className="mx-auto max-w-7xl px-4 pt-[calc(var(--chat-top-inset,0px)+1rem)] md:px-6 min-w-0 w-full"
+                            style={{ paddingBottom: MESSAGES_BOTTOM_INSET }}
+                          >
                             <div
                               className="select-text space-y-4 font-mono text-sm min-w-0 break-words overflow-x-clip"
                               // Suppress browser default menu on empty thread chrome
@@ -3132,6 +3251,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
                             <PromptTopSpacer
                               viewportRef={scrollViewportRef}
                               sessionId={deferredSessionId}
+                              bottomInset={MESSAGES_BOTTOM_INSET}
                             />
                           </div>
                         </ScrollArea>
@@ -3166,6 +3286,16 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                     ? () => disarmAutoResume(deferredSessionId)
                                     : undefined
                                 }
+                                termsAccountEmails={termsAccountEmails}
+                                onRetry={
+                                  isTermsError && canRetry && deferredSessionId
+                                    ? () =>
+                                        armAutoResume(
+                                          deferredSessionId,
+                                          Date.now()
+                                        )
+                                    : undefined
+                                }
                                 isAutoResumeArmed={autoResumeAtMs != null}
                                 limitResetAtMs={
                                   autoResumeAtMs ?? limitResetAtMs
@@ -3193,6 +3323,28 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                     sessionId={activeSessionId}
                                     onClearGoal={handleClearGoal}
                                   />
+                                )}
+                                {mergeableStatus === 'conflicting' && (
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          handleResolvePrConflicts()
+                                        }
+                                        className={cn(
+                                          COMPOSER_TAB_CLASS,
+                                          'text-warning hover:text-warning'
+                                        )}
+                                      >
+                                        <GitMerge className="h-3.5 w-3.5" />
+                                        <span>Conflicts</span>
+                                      </button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                      PR has merge conflicts — click to resolve
+                                    </TooltipContent>
+                                  </Tooltip>
                                 )}
                                 <PinnedTablesButton
                                   sessionId={activeSessionId}
@@ -3603,7 +3755,6 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                         prNumber={worktree?.pr_number}
                                         displayStatus={displayStatus}
                                         checkStatus={checkStatus}
-                                        mergeableStatus={mergeableStatus}
                                         activeWorktreePath={activeWorktreePath}
                                         worktreeId={activeWorktreeId ?? null}
                                         activeSessionId={activeSessionId}
@@ -3654,9 +3805,6 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                         onReview={handleOpenReviewMethodModal}
                                         onMerge={handleMerge}
                                         onMergePr={handleMergePr}
-                                        onResolvePrConflicts={
-                                          handleResolvePrConflicts
-                                        }
                                         onBackendModelChange={
                                           handleToolbarBackendModelChange
                                         }

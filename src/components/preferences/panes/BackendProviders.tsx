@@ -162,7 +162,7 @@ export const CodexProvidersSection: React.FC = () => {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="default">
-                Default (OpenAI / ChatGPT)
+                OpenAI / ChatGPT
               </SelectItem>
               {codexProviders.map(p => (
                 <SelectItem key={p.name} value={p.name}>

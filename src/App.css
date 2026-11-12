@@ -243,6 +243,18 @@
   animation: border-spin 1s linear infinite;
 }
 
+/* Ring-and-arc Loader (reicon.ts): spin only the arc around the viewBox
+   center. Spinning the whole SVG also turns the track ring, which wobbles
+   when the icon box sits on a sub-pixel position. */
+.animate-spin:has(> .reicon-spinner-arc) {
+  animation: none;
+}
+.animate-spin > .reicon-spinner-arc {
+  transform-box: view-box;
+  transform-origin: center;
+  animation: spin 1s linear infinite;
+}
+
 /* Square spinner: rotating conic-gradient border */
 .square-spinner {
   --spinner-color: oklch(0.795 0.184 86.047); /* yellow-500 */
@@ -832,6 +844,7 @@ html[data-primary-mod-held] .send-background-armable::after {
   .animate-icon-glow,
   .animate-dots,
   .animate-spin,
+  .animate-spin > .reicon-spinner-arc,
   .animate-pulse,
   [class*='bell-ring'],
   .square-spinner::before,
@@ -847,6 +860,7 @@ html[data-primary-mod-held] .send-background-armable::after {
 .window-blurred .animate-icon-glow,
 .window-blurred .animate-dots,
 .window-blurred .animate-spin,
+.window-blurred .animate-spin > .reicon-spinner-arc,
 .window-blurred .animate-pulse,
 .window-blurred [class*='bell-ring'],
 .window-blurred .card-border-spin::before,

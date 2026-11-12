@@ -32,6 +32,9 @@ vi.mock('@/lib/transport', async importOriginal => ({
   invoke: vi.fn(async (command: string) =>
     command === 'get_server_platform' ? 'linux' : null
   ),
+  invokeForServer: vi.fn(async (_serverId: string, command: string) =>
+    command === 'get_run_states' ? [] : null
+  ),
   listen: vi.fn(async () => () => undefined),
   // Native remotes use the WS backend. Unblock the App loading gate so the
   // test can assert we still mount the bundled local MainWindow.

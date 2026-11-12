@@ -78,7 +78,8 @@ describe('fetchRecentWorktrees', () => {
 
   it('grows the page to hold every session active after activeSince', async () => {
     const data = response('local', 'project', 30, 4)
-    const base = data.items[0]!
+    const base = data.items[0]
+    if (!base) throw new Error('missing worktree fixture')
     data.items = [30, 20, 10, 5].map(activity => ({
       ...base,
       lastActivityAt: activity,
