@@ -27,8 +27,6 @@ import {
   fetchWorktreesStatus,
   performGitPull,
 } from '@/services/git-status'
-import { prStatusQueryKeys } from '@/services/pr-status'
-import type { PrStatusEvent } from '@/types/pr-status'
 import { isBaseSession } from '@/types/projects'
 import type {
   CreatePrResponse,
@@ -608,6 +606,7 @@ export function useGitOperations({
           activeWorktreeId ?? undefined
         )
         triggerImmediateGitPoll()
+        triggerImmediateRemotePoll()
         if (result.permissionDenied) {
           opToast.error(
             `No permission to push to PR #${worktree?.pr_number}. Create a separate PR instead.`,
@@ -645,6 +644,24 @@ export function useGitOperations({
       worktree?.branch,
       worktree?.pr_number,
     ]
+  )
+
+  // A clean base merge stays local. GitHub keeps the PR "conflicting" until
+  // the merge commit is pushed, so offer the push instead of faking the status.
+  const notifyCleanBaseMerge = useCallback(
+    (toastId: string | number) => {
+      triggerImmediateGitPoll()
+      toast.success('No conflicts — base branch merged cleanly', {
+        id: toastId,
+        description: 'Push the merge commit to clear the conflict on the PR.',
+        duration: 10000,
+        action: {
+          label: toastActionLabel('Push'),
+          onClick: () => void handlePush(),
+        },
+      })
+    },
+    [handlePush]
   )
 
   const handleRevertLastCommit = useCallback(async () => {
@@ -1140,11 +1157,7 @@ export function useGitOperations({
           )
 
           if (!prResult.has_conflicts) {
-            toast.success('No conflicts — base branch merged cleanly', {
-              id: toastId,
-            })
-            triggerImmediateGitPoll()
-            triggerImmediateRemotePoll()
+            notifyCleanBaseMerge(toastId)
             return
           }
 
@@ -1300,6 +1313,7 @@ ${resolveInstructions}`
       cacheCreatedSession,
       resolveConflictSessionSelection,
       sendConflictResolutionPrompt,
+      notifyCleanBaseMerge,
     ]
   )
 
@@ -1319,22 +1333,7 @@ ${resolveInstructions}`
         )
 
         if (!result.has_conflicts) {
-          toast.success('No conflicts — base branch merged cleanly', {
-            id: toastId,
-          })
-          triggerImmediateGitPoll()
-
-          // Optimistically clear "Conflicts" button by updating cached PR status
-          const cached = queryClient.getQueryData<PrStatusEvent>(
-            prStatusQueryKeys.worktree(activeWorktreeId)
-          )
-          if (cached) {
-            queryClient.setQueryData(
-              prStatusQueryKeys.worktree(activeWorktreeId),
-              { ...cached, mergeable: 'mergeable' }
-            )
-          }
-          triggerImmediateRemotePoll()
+          notifyCleanBaseMerge(toastId)
           return
         }
 
@@ -1421,6 +1420,7 @@ ${resolveInstructions}`
       cacheCreatedSession,
       resolveConflictSessionSelection,
       sendConflictResolutionPrompt,
+      notifyCleanBaseMerge,
     ]
   )
 

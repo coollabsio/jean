@@ -42,6 +42,7 @@ import { toast } from 'sonner'
 import {
   gitPush,
   triggerImmediateGitPoll,
+  triggerImmediateRemotePoll,
   fetchWorktreesStatus,
   performGitPull,
   performGitSync,
@@ -776,6 +777,7 @@ export function MagicModal() {
                 worktree.id
               )
               triggerImmediateGitPoll()
+              triggerImmediateRemotePoll()
               if (worktree.project_id) fetchWorktreesStatus(worktree.project_id)
               if (result.permissionDenied) {
                 opToast.error(
@@ -949,6 +951,13 @@ export function MagicModal() {
               if (!prResult.has_conflicts) {
                 toast.success('No conflicts — base branch merged cleanly', {
                   id: toastId,
+                  description:
+                    'Push the merge commit to clear the conflict on the PR.',
+                  duration: 10000,
+                  action: {
+                    label: toastActionLabel('Push'),
+                    onClick: () => executeGitDirectly('push'),
+                  },
                 })
                 triggerImmediateGitPoll()
                 return
