@@ -1466,9 +1466,9 @@ export const SessionChatModal = memo(function SessionChatModal({
                               )
                             }
                             className={cn(
-                              'group/tab flex shrink-0 items-center gap-1.5 border-r border-border/20 px-3 py-1.5 text-xs transition-colors whitespace-nowrap cursor-pointer',
+                              'group/tab relative flex shrink-0 items-center gap-1.5 border-r border-border/20 px-3 py-1.5 text-xs transition-colors whitespace-nowrap cursor-pointer',
                               isActive
-                                ? 'bg-muted text-foreground'
+                                ? 'bg-muted text-foreground after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-primary'
                                 : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
                               !isActive &&
                                 !isActionableWaitingStatus(status) &&
