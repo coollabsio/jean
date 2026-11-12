@@ -23,8 +23,8 @@ interface UsePendingAttachmentsParams {
   executionModeRef: RefObject<ExecutionMode>
   selectedThinkingLevelRef: RefObject<ThinkingLevel>
   selectedEffortLevelRef: RefObject<EffortLevel>
-  useAdaptiveThinkingRef: RefObject<boolean>
-  isCodexBackendRef: RefObject<boolean>
+  /** Whether a turn on this backend and model takes an effort level. */
+  usesEffortFor: (backend: CliBackend, model: string) => boolean
   mcpServersDataRef: RefObject<McpServerInfo[] | undefined>
   enabledMcpServersRef: RefObject<string[]>
   selectedBackendRef: RefObject<CliBackend>
@@ -44,8 +44,7 @@ export function usePendingAttachments({
   executionModeRef,
   selectedThinkingLevelRef,
   selectedEffortLevelRef,
-  useAdaptiveThinkingRef,
-  isCodexBackendRef,
+  usesEffortFor,
   mcpServersDataRef,
   enabledMcpServersRef,
   selectedBackendRef,
@@ -118,12 +117,12 @@ export function usePendingAttachments({
         provider: selectedProviderRef.current,
         executionMode: executionModeRef.current,
         thinkingLevel: selectedThinkingLevelRef.current,
-        effortLevel:
-          useAdaptiveThinkingRef.current ||
-          isCodexBackendRef.current ||
-          selectedBackendRef.current === 'pi'
-            ? selectedEffortLevelRef.current
-            : undefined,
+        effortLevel: usesEffortFor(
+          selectedBackendRef.current,
+          selectedModelRef.current
+        )
+          ? selectedEffortLevelRef.current
+          : undefined,
         mcpConfig: buildMcpConfigJson(
           mcpServersDataRef.current ?? [],
           enabledMcpServersRef.current,
@@ -157,8 +156,7 @@ export function usePendingAttachments({
       selectedProviderRef,
       executionModeRef,
       selectedThinkingLevelRef,
-      useAdaptiveThinkingRef,
-      isCodexBackendRef,
+      usesEffortFor,
       selectedBackendRef,
       selectedEffortLevelRef,
       mcpServersDataRef,

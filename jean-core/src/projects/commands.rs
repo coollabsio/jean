@@ -8850,6 +8850,7 @@ Rules:
 - Use a specific Conventional Commits subject: type(optional-scope): concrete behavior changed.
 - First line must be 72 characters or fewer.
 - If prompt/config files changed, name the user-facing behavior affected, not "guidance" or "prompt".
+- Do not add Co-Authored-By trailers, "Generated with" lines, or any other AI/tool attribution.
 
 Files changed:
 {diff_stat}
@@ -15241,8 +15242,8 @@ mod tests {
     }
 
     #[test]
-    fn ai_review_timeout_is_five_minutes_and_not_an_approval() {
-        assert_eq!(AI_REVIEW_TIMEOUT, Duration::from_secs(300));
+    fn ai_review_timeout_is_ten_minutes_and_not_an_approval() {
+        assert_eq!(AI_REVIEW_TIMEOUT, Duration::from_secs(600));
         let error = review_timeout_error();
         assert!(error.contains("timed out"));
         assert!(!error.contains("approved"));

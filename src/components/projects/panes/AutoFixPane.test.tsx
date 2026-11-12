@@ -429,14 +429,14 @@ describe('AutoFixPane', () => {
       screen.getByRole('button', { name: 'Choose planning backend and model' })
     )
     await user.click(await screen.findByRole('tab', { name: 'Codex' }))
-    await user.click(await screen.findByText('GPT 5.4'))
+    await user.click(await screen.findByText('GPT 5.5'))
 
     expect(
       screen.getByRole('button', { name: 'Choose planning backend and model' })
     ).toHaveTextContent('Codex')
     expect(
       screen.getByRole('button', { name: 'Choose planning backend and model' })
-    ).toHaveTextContent('GPT 5.4')
+    ).toHaveTextContent('GPT 5.5')
   })
 
   it('selects a yolo backend and model from the combined picker', async () => {

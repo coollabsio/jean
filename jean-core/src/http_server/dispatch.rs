@@ -3515,7 +3515,7 @@ pub async fn dispatch_command(
         "add_remote_mcp_server" => {
             let request = from_field(&args, "request")?;
             let result = Box::pin(crate::jean_mcp_config::add_remote_mcp_server(request)).await?;
-            emit_cache_invalidation(&app, &["mcp-servers"]);
+            emit_cache_invalidation(app, &["mcp-servers"]);
             to_value(result)
         }
         "remove_mcp_server" => {
@@ -4207,6 +4207,10 @@ pub async fn dispatch_command(
             let plugin_name: String = from_field(&args, "pluginName")?;
             let result =
                 crate::opinionated::stop_opinionated_plugin(app.clone(), plugin_name).await?;
+            to_value(result)
+        }
+        "get_cliproxyapi_usage" => {
+            let result = crate::opinionated::get_cliproxyapi_usage().await?;
             to_value(result)
         }
         "refresh_cliproxyapi_models" => {

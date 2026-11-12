@@ -90,7 +90,8 @@ const project: Project = {
 
 function renderGitOperations(
   preferenceOverrides = {},
-  worktreeOverrides: Partial<Worktree> = {}
+  worktreeOverrides: Partial<Worktree> = {},
+  thinkingLevel: ThinkingLevel = 'off'
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -123,8 +124,9 @@ function renderGitOperations(
         setSessionBackend: { mutate: vi.fn() },
         setSessionProvider: { mutate: vi.fn() },
         sendMessage,
-        selectedThinkingLevelRef: ref('off' as ThinkingLevel),
+        selectedThinkingLevelRef: ref(thinkingLevel),
         selectedEffortLevelRef: ref('medium' as EffortLevel),
+        cliVersion: '2.5.0',
         mcpServersDataRef: ref([] as McpServerInfo[]),
         enabledMcpServersRef: ref([]),
       }),
@@ -209,6 +211,45 @@ describe('useGitOperations conflict resolution', () => {
       'I have merge conflicts that need to be resolved.'
     )
     expect(sentArgs?.message).toContain('Resolve and finish.')
+  })
+
+  it('sends effort, not the session thinking level, for Claude effort models', async () => {
+    const { result, sendMessage } = renderGitOperations(
+      {
+        magic_prompt_backends: { resolve_conflicts_backend: 'claude' },
+        magic_prompt_models: { resolve_conflicts_model: 'claude-opus-5-5' },
+      },
+      {},
+      'ultrathink'
+    )
+
+    await act(async () => {
+      await result.current.handleResolveConflicts()
+    })
+
+    const sentArgs = sendMessage.mutate.mock.calls[0]?.[0]
+    expect(sentArgs?.model).toBe('claude-opus-5-5')
+    expect(sentArgs?.thinkingLevel).toBeUndefined()
+    expect(sentArgs?.effortLevel).toBe('medium')
+  })
+
+  it('keeps the thinking level for Claude thinking models', async () => {
+    const { result, sendMessage } = renderGitOperations(
+      {
+        magic_prompt_backends: { resolve_conflicts_backend: 'claude' },
+        magic_prompt_models: { resolve_conflicts_model: 'claude-sonnet-4-6' },
+      },
+      {},
+      'ultrathink'
+    )
+
+    await act(async () => {
+      await result.current.handleResolveConflicts()
+    })
+
+    const sentArgs = sendMessage.mutate.mock.calls[0]?.[0]
+    expect(sentArgs?.thinkingLevel).toBe('ultrathink')
+    expect(sentArgs?.effortLevel).toBeUndefined()
   })
 
   it('opens an already-linked PR instead of creating a new one', async () => {
@@ -499,6 +540,7 @@ describe('useGitOperations conflict resolution', () => {
           sendMessage,
           selectedThinkingLevelRef: ref('off' as ThinkingLevel),
           selectedEffortLevelRef: ref('medium' as EffortLevel),
+          cliVersion: '2.5.0',
           mcpServersDataRef: ref([] as McpServerInfo[]),
           enabledMcpServersRef: ref([]),
         }),

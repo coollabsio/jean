@@ -456,17 +456,79 @@ describe('useScrollManagement streaming auto-scroll', () => {
     expect(getByTestId('is-at-bottom')).toHaveTextContent('true')
   })
 
+  it('re-pins the tail when a stale scroll position arrives after a run ends', () => {
+    isMobile = true
+    const { getByTestId, viewport, rerenderSession } = setupHook()
+    viewport.scrollTop = 1600
+    fireEvent.scroll(viewport)
+    rerenderSession({ sending: false })
+
+    // WebKit reports a clamped position after the tail was pinned. No input.
+    viewport.scrollTop = 1513
+    fireEvent.scroll(viewport)
+
+    expect(viewport.scrollTop).toBe(2000)
+    expect(getByTestId('is-at-bottom')).toHaveTextContent('true')
+  })
+
+  it('lets the user scroll up right after a run ends', () => {
+    isMobile = true
+    const { getByTestId, viewport, rerenderSession } = setupHook()
+    viewport.scrollTop = 1600
+    fireEvent.scroll(viewport)
+    rerenderSession({ sending: false })
+
+    act(() => {
+      viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }))
+    })
+    viewport.scrollTop = 1500
+    fireEvent.scroll(viewport)
+
+    expect(viewport.scrollTop).toBe(1500)
+    expect(getByTestId('is-at-bottom')).toHaveTextContent('false')
+  })
+
   it('stops following the tail when a scrollbar drag moves the viewport up', async () => {
     const { viewport, setScrollHeight } = setupHook({ isSending: false })
     viewport.scrollTop = 1600
     fireEvent.scroll(viewport)
 
+    fireEvent.pointerDown(viewport)
     viewport.scrollTop = 1200
     fireEvent.scroll(viewport)
     setScrollHeight(2100)
     await triggerResize()
 
     expect(viewport.scrollTop).toBe(1200)
+  })
+
+  it('keeps following the stream when a scroll-up arrives without user input', async () => {
+    isMobile = true
+    const { viewport, setScrollHeight } = setupHook()
+    await triggerResize()
+    expect(viewport.scrollTop).toBe(2000)
+
+    // WebKit reports a stale position after the tail was pinned. No input.
+    viewport.scrollTop = 1500
+    fireEvent.scroll(viewport)
+    setScrollHeight(2200)
+    await triggerResize()
+
+    expect(viewport.scrollTop).toBe(2200)
+  })
+
+  it('stops following the stream on an upward scroll key', async () => {
+    isMobile = true
+    const { viewport, setScrollHeight } = setupHook()
+    await triggerResize()
+
+    fireEvent.keyDown(viewport, { key: 'PageUp' })
+    viewport.scrollTop = 1300
+    fireEvent.scroll(viewport)
+    setScrollHeight(2200)
+    await triggerResize()
+
+    expect(viewport.scrollTop).toBe(1300)
   })
 
   it('pins the idle tail in the resize callback, before the next frame', () => {
@@ -558,6 +620,7 @@ describe('useScrollManagement session scroll retention (issue #594)', () => {
     // Start from the post-mount tail position, then scroll up so follow mode
     // clears the same way a real wheel-up gesture would.
     expect(viewport.scrollTop).toBe(2000)
+    fireEvent.pointerDown(viewport)
     viewport.scrollTop = 1234
     fireEvent.scroll(viewport)
 
@@ -671,6 +734,7 @@ describe('useScrollManagement session scroll retention (issue #594)', () => {
     expect(viewport.scrollTop).toBe(2000)
 
     // Scroll session-a away from the tail the same way a real gesture would.
+    fireEvent.pointerDown(viewport)
     viewport.scrollTop = 1234
     fireEvent.scroll(viewport)
 

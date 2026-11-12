@@ -59,8 +59,8 @@ interface UseMessageSendingParams {
   selectedThinkingLevelRef: RefObject<ThinkingLevel>
   selectedEffortLevelRef: RefObject<EffortLevel>
   executionModeRef: RefObject<ExecutionMode>
-  useAdaptiveThinkingRef: RefObject<boolean>
-  isCodexBackendRef: RefObject<boolean>
+  /** Whether a turn on this backend and model takes an effort level. */
+  usesEffortFor: (backend: CliBackend, model: string) => boolean
   mcpServersDataRef: RefObject<McpServerInfo[] | undefined>
   enabledMcpServersRef: RefObject<string[]>
   selectedBackendRef: RefObject<CliBackend>
@@ -135,8 +135,7 @@ export function useMessageSending({
   selectedThinkingLevelRef,
   selectedEffortLevelRef,
   executionModeRef,
-  useAdaptiveThinkingRef,
-  isCodexBackendRef,
+  usesEffortFor,
   mcpServersDataRef,
   enabledMcpServersRef,
   selectedBackendRef,
@@ -692,14 +691,10 @@ export function useMessageSending({
       const mode = executionModeRef.current
       const thinkingLvl = selectedThinkingLevelRef.current
       const selectedBackend = selectedBackendRef.current
-      const usesEffortLevel =
-        useAdaptiveThinkingRef.current ||
-        isCodexBackendRef.current ||
-        selectedBackend === 'pi' ||
-        selectedBackend === 'grok' ||
-        selectedBackend === 'kimi' ||
-        selectedBackend === 'antigravity' ||
-        selectedBackend === 'muse'
+      const usesEffortLevel = usesEffortFor(
+        selectedBackend,
+        selectedModelRef.current
+      )
       const queuedMessage: QueuedMessage = {
         id: generateId(),
         message,
@@ -845,8 +840,7 @@ export function useMessageSending({
       selectedProviderRef,
       executionModeRef,
       selectedThinkingLevelRef,
-      useAdaptiveThinkingRef,
-      isCodexBackendRef,
+      usesEffortFor,
       selectedModelRef,
       selectedEffortLevelRef,
       mcpServersDataRef,

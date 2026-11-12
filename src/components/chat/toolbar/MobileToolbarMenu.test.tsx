@@ -537,10 +537,11 @@ describe('MobileToolbarMenu', () => {
     await user.click(screen.getByRole('button', { name: /more actions/i }))
 
     const sheet = screen.getByRole('dialog', { name: 'Magic' })
-    const regions = within(sheet).getAllByRole('region')
-    expect(regions[0]).toHaveAccessibleName('Favorites')
+    const [favorites] = within(sheet).getAllByRole('region')
+    if (!favorites) throw new Error('missing Favorites region')
+    expect(favorites).toHaveAccessibleName('Favorites')
     expect(
-      within(regions[0]!).getByRole('button', { name: 'Sync' })
+      within(favorites).getByRole('button', { name: 'Sync' })
     ).toBeInTheDocument()
     expect(
       within(within(sheet).getByRole('region', { name: 'Sync' })).queryByRole(

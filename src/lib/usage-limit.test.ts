@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { getLimitResetAtMs, isUsageLimitError } from './usage-limit'
+import {
+  getLimitResetAtMs,
+  isClaudeTermsError,
+  isUsageLimitError,
+} from './usage-limit'
 
 describe('isUsageLimitError', () => {
   it('matches Claude session limit messages with a local reset time', () => {
@@ -73,5 +77,29 @@ describe('getLimitResetAtMs', () => {
     expect(
       getLimitResetAtMs({ session: window(100, null), weekly: null })
     ).toBeNull()
+  })
+})
+
+describe('isClaudeTermsError', () => {
+  it('detects the Consumer Terms error from Claude', () => {
+    expect(
+      isClaudeTermsError(
+        "API Error: 400 We've updated our Consumer Terms and Privacy Policy. You'll need to accept them in claude.ai with the email in /status to continue."
+      )
+    ).toBe(true)
+  })
+
+  it('ignores other errors', () => {
+    expect(isClaudeTermsError('API Error: 400 invalid request')).toBe(false)
+    expect(isClaudeTermsError('Usage limit reached')).toBe(false)
+    expect(isClaudeTermsError(null)).toBe(false)
+  })
+
+  it('is not a usage limit error', () => {
+    expect(
+      isUsageLimitError(
+        "API Error: 400 We've updated our Consumer Terms and Privacy Policy."
+      )
+    ).toBe(false)
   })
 })

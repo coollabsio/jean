@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -35,6 +35,7 @@ import {
   PREDEFINED_CLI_PROFILES,
   resolveMagicPromptBackend,
   resolveMagicPromptProvider,
+  getProviderAliasModelOptions,
 } from '@/types/preferences'
 import {
   CODEX_MODEL_OPTIONS,
@@ -129,9 +130,13 @@ export function ResolveConflictsDialog({
 
   const [resolveSelectionMode, setResolveSelectionMode] =
     useState<ResolveSelectionMode>('settings-default')
-  const [customResolveBackend, setCustomResolveBackend] =
-    useState<CliBackend>('claude')
-  const [customResolveModel, setCustomResolveModel] = useState<string>('sonnet')
+  // null until the user picks; the defaults fill in until then. Deriving
+  // (not copying) keeps a refetch of preferences from undoing the choice.
+  const [pickedResolveBackend, setPickedResolveBackend] =
+    useState<CliBackend | null>(null)
+  const [pickedResolveModel, setPickedResolveModel] = useState<string | null>(
+    null
+  )
 
   const opencodeModelOptions = useMemo(() => {
     const models = availableOpencodeModels?.length
@@ -216,32 +221,8 @@ export function ResolveConflictsDialog({
         ...PREDEFINED_CLI_PROFILES,
         ...(preferences?.custom_cli_profiles ?? []),
       ].find(item => item.name === provider)
-      let opusModel: string | undefined
-      let sonnetModel: string | undefined
-      let haikuModel: string | undefined
-      if (profile?.settings_json) {
-        try {
-          const settings = JSON.parse(profile.settings_json)
-          const env = settings?.env
-          if (env) {
-            opusModel = env.ANTHROPIC_DEFAULT_OPUS_MODEL || env.ANTHROPIC_MODEL
-            sonnetModel =
-              env.ANTHROPIC_DEFAULT_SONNET_MODEL || env.ANTHROPIC_MODEL
-            haikuModel =
-              env.ANTHROPIC_DEFAULT_HAIKU_MODEL || env.ANTHROPIC_MODEL
-          }
-        } catch {
-          // ignore invalid custom profile json
-        }
-      }
-
-      const suffix = (model?: string) => (model ? ` (${model})` : '')
       return provider
-        ? [
-            { value: 'opus', label: `Opus${suffix(opusModel)}` },
-            { value: 'sonnet', label: `Sonnet${suffix(sonnetModel)}` },
-            { value: 'haiku', label: `Haiku${suffix(haikuModel)}` },
-          ]
+        ? getProviderAliasModelOptions(profile?.settings_json)
         : claudeModelOptions
     },
     [claudeModelOptions, preferences?.custom_cli_profiles]
@@ -285,6 +266,13 @@ export function ResolveConflictsDialog({
       resolveClaudeModelOptions,
     ]
   )
+
+  const customResolveBackend: CliBackend =
+    pickedResolveBackend ??
+    (installedBackends.includes(resolveDefaults.backend)
+      ? resolveDefaults.backend
+      : (installedBackends[0] ?? 'claude'))
+  const customResolveModel = pickedResolveModel ?? resolveDefaults.model
 
   const customResolveModelOptions = useMemo(
     () => getResolveModelOptions(customResolveBackend),
@@ -344,31 +332,24 @@ export function ResolveConflictsDialog({
   const handleCustomResolveBackendChange = useCallback(
     (backend: string) => {
       const nextBackend = backend as CliBackend
-      setCustomResolveBackend(nextBackend)
+      setPickedResolveBackend(nextBackend)
       const nextOptions = getResolveModelOptions(nextBackend)
-      setCustomResolveModel(nextOptions[0]?.value ?? '')
+      setPickedResolveModel(nextOptions[0]?.value ?? '')
     },
     [getResolveModelOptions]
   )
 
   // Reset when closed (adjusted during render)
-  if (!open && resolveSelectionMode !== 'settings-default') {
+  if (
+    !open &&
+    (resolveSelectionMode !== 'settings-default' ||
+      pickedResolveBackend !== null ||
+      pickedResolveModel !== null)
+  ) {
     setResolveSelectionMode('settings-default')
+    setPickedResolveBackend(null)
+    setPickedResolveModel(null)
   }
-
-  useEffect(() => {
-    const nextBackend = installedBackends.includes(resolveDefaults.backend)
-      ? resolveDefaults.backend
-      : (installedBackends[0] ?? 'claude')
-    const nextOptions = getResolveModelOptions(nextBackend)
-    const nextModel =
-      nextOptions.find(option => option.value === resolveDefaults.model)
-        ?.value ??
-      nextOptions[0]?.value ??
-      resolveDefaults.model
-    setCustomResolveBackend(nextBackend)
-    setCustomResolveModel(nextModel)
-  }, [getResolveModelOptions, installedBackends, resolveDefaults])
 
   // Invalid customResolveModel is handled by effectiveCustomResolveModel
 
@@ -540,7 +521,7 @@ export function ResolveConflictsDialog({
                     value={effectiveCustomResolveModel}
                     onValueChange={value => {
                       setResolveSelectionMode('custom')
-                      setCustomResolveModel(value)
+                      setPickedResolveModel(value)
                     }}
                   >
                     <SelectTrigger

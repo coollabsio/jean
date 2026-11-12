@@ -61,6 +61,7 @@ import {
 } from '@/components/chat/toolbar/toolbar-utils'
 import { useToolbarDerivedState } from '@/components/chat/toolbar/useToolbarDerivedState'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { getOlderModelValues } from '@/lib/model-utils'
 import { getModifierSymbol } from '@/lib/platform'
 
 interface BackendModelPickerContentProps {
@@ -107,6 +108,7 @@ export function BackendModelPickerContent({
   const [activeBackend, setActiveBackend] =
     useState<CliBackend>(selectedBackend)
   const [highlightedValue, setHighlightedValue] = useState('')
+  const [showOlderModels, setShowOlderModels] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const isMobile = useIsMobile()
   const fastModifier = getModifierSymbol()
@@ -353,7 +355,10 @@ export function BackendModelPickerContent({
       // sidebarBackends identity change (that array is rebuilt often and
       // wiping search mid-type left Cmd+F acting on the unfiltered first
       // catalog row).
-      if (justOpened) setSearch('')
+      if (justOpened) {
+        setSearch('')
+        setShowOlderModels(false)
+      }
       // Sync active backend with locked selection / when picker opens.
       // Never leave activeBackend on an uninstalled backend (empty model list).
       if (isLocked) {
@@ -374,14 +379,47 @@ export function BackendModelPickerContent({
     [backendModelSections, activeBackend]
   )
 
+  // Older models stay hidden until the user asks for them or searches.
+  // Favourites and the selected model (or its fast variant) always show.
+  const hiddenOlderValues = useMemo(() => {
+    if (!activeSection || search.trim()) return new Set<string>()
+    const older = getOlderModelValues(
+      activeSection.options.map(option => option.value)
+    )
+    for (const value of older) {
+      const isSelected =
+        selectedBackend === activeBackend &&
+        (selectedModel === value ||
+          getCatalogModelFastInfo(modelCatalog, activeBackend, value)
+            .fastModel === selectedModel)
+      if (isSelected || favoriteSet.has(favKey(activeBackend, value))) {
+        older.delete(value)
+      }
+    }
+    return older
+  }, [
+    activeBackend,
+    activeSection,
+    favKey,
+    favoriteSet,
+    modelCatalog,
+    search,
+    selectedBackend,
+    selectedModel,
+  ])
+
   const filteredOptions = useMemo(() => {
     if (!activeSection) return []
     const query = search.trim().toLowerCase()
-    const filtered = !query
-      ? activeSection.options
-      : activeSection.options.filter(option =>
+    const filtered = query
+      ? activeSection.options.filter(option =>
           `${option.label} ${option.value}`.toLowerCase().includes(query)
         )
+      : showOlderModels
+        ? activeSection.options
+        : activeSection.options.filter(
+            option => !hiddenOlderValues.has(option.value)
+          )
     const favs: typeof filtered = []
     const rest: typeof filtered = []
     for (const opt of filtered) {
@@ -407,7 +445,15 @@ export function BackendModelPickerContent({
       }
     }
     return result
-  }, [activeBackend, activeSection, favKey, favoriteSet, search])
+  }, [
+    activeBackend,
+    activeSection,
+    favKey,
+    favoriteSet,
+    hiddenOlderValues,
+    search,
+    showOlderModels,
+  ])
 
   const getOptionCommandValue = useCallback(
     (backend: CliBackend, model: string) => `${backend}:${model}`,
@@ -498,6 +544,7 @@ export function BackendModelPickerContent({
       if (isLocked && backend !== selectedBackend) return
       setActiveBackend(backend)
       setSearch('')
+      setShowOlderModels(false)
       window.requestAnimationFrame(() => {
         searchInputRef.current?.focus()
       })
@@ -869,6 +916,18 @@ export function BackendModelPickerContent({
                 </CommandItem>
               )
             })}
+            {hiddenOlderValues.size > 0 && (
+              <button
+                type="button"
+                onMouseDown={event => event.preventDefault()}
+                onClick={() => setShowOlderModels(prev => !prev)}
+                className="w-full rounded-sm px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {showOlderModels
+                  ? 'Hide older models'
+                  : `Show ${hiddenOlderValues.size} older ${hiddenOlderValues.size === 1 ? 'model' : 'models'}`}
+              </button>
+            )}
           </CommandList>
         </Command>
       </div>

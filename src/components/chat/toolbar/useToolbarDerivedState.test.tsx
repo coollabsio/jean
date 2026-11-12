@@ -159,6 +159,20 @@ describe('useToolbarDerivedState', () => {
     ).toEqual(['opus', 'sonnet', 'haiku'])
   })
 
+  it('labels a full Claude id that a custom provider does not list', () => {
+    const { result } = renderHook(() =>
+      useToolbarDerivedState({
+        selectedBackend: 'claude',
+        selectedProvider: 'custom',
+        selectedModel: 'claude-opus-5-5',
+        customCliProfiles: [{ name: 'custom', settings_json: '{}' }],
+        installedBackends: ['claude'],
+      })
+    )
+
+    expect(result.current.selectedModelLabel).toBe('Opus 5.5')
+  })
+
   it('exposes Kimi Code as an installed backend with its configured default', () => {
     const { result } = renderHook(() =>
       useToolbarDerivedState({

@@ -11,5 +11,5 @@ export function buildCommitInSessionPrompt(
   const closes = numbers.length
     ? ` Add a footer line for each linked GitHub issue so the commit closes it: ${footers}.`
     : ''
-  return `Commit the current session changes with a concise commit message that matches the recent commit style. The branch could have other changes unrelated to this session, so make sure you commit only the right ones.${closes}`
+  return `Commit the current session changes with a concise commit message that matches the recent commit style. The branch could have other changes unrelated to this session, so make sure you commit only the right ones. Do not add Co-Authored-By trailers, "Generated with" lines, or any other AI/tool attribution.${closes}`
 }

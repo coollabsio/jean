@@ -434,6 +434,39 @@ describe('OpinionatedPane', () => {
     ).toBeInTheDocument()
   })
 
+  it('offers an RTK update only when a newer release exists', async () => {
+    const user = userEvent.setup()
+    let installed = '0.49.0'
+    vi.mocked(invoke).mockImplementation(async (command, args) => {
+      const pluginName = (args as { pluginName?: string })?.pluginName
+      if (command === 'check_opinionated_plugin_status') {
+        return pluginName === 'rtk'
+          ? { installed: true, version: installed, latest_version: '0.50.1' }
+          : { installed: false, version: null, install_supported: true }
+      }
+      if (command === 'install_opinionated_plugin' && pluginName === 'rtk') {
+        installed = '0.50.1'
+        return 'RTK installed'
+      }
+      throw new Error(`Unexpected command ${command}`)
+    })
+
+    render(<OpinionatedPane />)
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Update to v0.50.1' })
+    )
+
+    expect(invoke).toHaveBeenCalledWith('install_opinionated_plugin', {
+      pluginName: 'rtk',
+    })
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: /Update to/ })
+      ).not.toBeInTheDocument()
+    )
+  })
+
   it('describes CLIProxyAPI as an external localhost proxy and can start it', async () => {
     const user = userEvent.setup()
     vi.mocked(invoke).mockImplementation(async (command, args) => {
@@ -490,6 +523,16 @@ describe('OpinionatedPane', () => {
       within(card as HTMLElement).queryByText('Local proxy (localhost)')
     ).not.toBeInTheDocument()
 
+    // Account buttons and count stay visible while the row is collapsed.
+    expect(
+      within(card as HTMLElement).getByRole('button', {
+        name: 'Add Codex account',
+      })
+    ).toBeInTheDocument()
+    expect(
+      within(card as HTMLElement).queryByText(/pools several Claude and Codex/i)
+    ).not.toBeInTheDocument()
+
     await user.click(label)
 
     expect(
@@ -499,8 +542,8 @@ describe('OpinionatedPane', () => {
       within(card as HTMLElement).getByText(/Preferences → Providers/i)
     ).toBeInTheDocument()
     expect(
-      within(card as HTMLElement).getByText(/127\.0\.0\.1:8317/)
-    ).toBeInTheDocument()
+      within(card as HTMLElement).getAllByText(/127\.0\.0\.1:8317/).length
+    ).toBeGreaterThan(0)
     expect(
       within(card as HTMLElement).getByText(/listens on localhost only/i)
     ).toBeInTheDocument()

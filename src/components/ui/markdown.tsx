@@ -1,5 +1,4 @@
 import {
-  lazy,
   Suspense,
   memo,
   useState,
@@ -38,11 +37,12 @@ import { cn } from '@/lib/utils'
 import { useChatStore } from '@/store/chat-store'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { parseServerResourceKey } from '@/lib/server-resource'
+import { lazyWithPreload } from '@/lib/lazy-preload'
 import { tableToMarkdown, setTableRowInPrompt } from '@/lib/table-rows-prompt'
 import { useImageSrc } from './use-image-src'
 import { ScreenshotGallery, parseScreenshotPaths } from './screenshot-gallery'
 
-const MermaidBlock = lazy(() =>
+export const MermaidBlock = lazyWithPreload(() =>
   import('./mermaid-block').then(module => ({ default: module.MermaidBlock }))
 )
 const MarkdownStreamingContext = createContext(false)

@@ -1309,13 +1309,24 @@ pub async fn get_codex_usage(app: AppHandle) -> Result<CodexUsageSnapshot, Strin
         .text()
         .await
         .map_err(|e| format!("Failed to read Codex usage response body: {e}"))?;
-    let usage = serde_json::from_str::<CodexUsageApiResponse>(&response_text).map_err(|e| {
+    let snapshot = codex_usage_snapshot_from_response(&headers, &response_text, now_secs)?;
+
+    save_cached_codex_usage(&snapshot, now_secs);
+    Ok(snapshot)
+}
+
+/// Parse a `wham/usage` response (body plus `x-codex-*` headers) into a snapshot.
+pub(crate) fn codex_usage_snapshot_from_response(
+    headers: &reqwest::header::HeaderMap,
+    response_text: &str,
+    now_secs: u64,
+) -> Result<CodexUsageSnapshot, String> {
+    let usage = serde_json::from_str::<CodexUsageApiResponse>(response_text).map_err(|e| {
         let snippet = response_text.chars().take(200).collect::<String>();
         format!("Failed to parse Codex usage response JSON: {e}. Body starts with: {snippet}")
     })?;
 
-    let session = if let Some(percent) = parse_header_f64(&headers, "x-codex-primary-used-percent")
-    {
+    let session = if let Some(percent) = parse_header_f64(headers, "x-codex-primary-used-percent") {
         Some(CodexUsageWindowSnapshot {
             used_percent: percent,
             resets_at: usage
@@ -1339,7 +1350,7 @@ pub async fn get_codex_usage(app: AppHandle) -> Result<CodexUsageSnapshot, Strin
         )
     };
 
-    let weekly = if let Some(percent) = parse_header_f64(&headers, "x-codex-secondary-used-percent")
+    let weekly = if let Some(percent) = parse_header_f64(headers, "x-codex-secondary-used-percent")
     {
         Some(CodexUsageWindowSnapshot {
             used_percent: percent,
@@ -1374,7 +1385,7 @@ pub async fn get_codex_usage(app: AppHandle) -> Result<CodexUsageSnapshot, Strin
             .and_then(|r| r.primary_window.as_ref()),
     );
 
-    let credits_remaining = parse_header_f64(&headers, "x-codex-credits-balance")
+    let credits_remaining = parse_header_f64(headers, "x-codex-credits-balance")
         .or_else(|| usage.credits.as_ref().and_then(|credits| credits.balance));
 
     let model_limits = usage
@@ -1422,8 +1433,6 @@ pub async fn get_codex_usage(app: AppHandle) -> Result<CodexUsageSnapshot, Strin
         model_limits,
         fetched_at: now_secs,
     };
-
-    save_cached_codex_usage(&snapshot, now_secs);
     Ok(snapshot)
 }
 
