@@ -1431,6 +1431,7 @@ export interface AppPreferences {
   pi_auto_steer_enabled: boolean // Steer prompts into a running PI turn instead of queueing (default: false)
   pi_agent_owns_policy: boolean // Let PI own tools, extensions, and system/project instructions
   claude_auto_steer_enabled: boolean // Steer prompts into a running Claude turn via the detached host (Unix only, default: false)
+  claude_auto_compact_window: string | null // Claude `--autocompact` value ('auto', '200k'..'1M'); null = Claude's own setting
   grok_auto_steer_enabled: boolean // Steer prompts into a running Grok turn instead of queueing (default: false)
   kimi_auto_steer_enabled?: boolean // Reserved for Kimi Code steering support
   devin_auto_steer_enabled?: boolean // Reserved for Devin steering support
@@ -2878,6 +2879,7 @@ export const defaultPreferences: AppPreferences = {
   pi_auto_steer_enabled: false, // Default: queue while PI is running
   pi_agent_owns_policy: false, // Default: Jean maps execution modes and injects its system prompt
   claude_auto_steer_enabled: false, // Default: queue while Claude is running
+  claude_auto_compact_window: null, // Default: use Claude's own auto-compact setting
   grok_auto_steer_enabled: false, // Default: queue while Grok is running
   kimi_auto_steer_enabled: false,
   devin_auto_steer_enabled: false,

@@ -446,6 +446,16 @@ pub fn extract_claude_structured_output(output: &str) -> Option<serde_json::Valu
 }
 
 const SYSTEM_PROMPT_SNAPSHOT_FLAG: &str = "--system-prompt-snapshot";
+const AUTOCOMPACT_FLAG: &str = "--autocompact";
+
+/// `auto`, or a token count with an optional `k`/`M` suffix (CLI accepts 100k–1M).
+fn is_valid_auto_compact_window(value: &str) -> bool {
+    if value == "auto" {
+        return true;
+    }
+    let digits = value.strip_suffix(['k', 'M']).unwrap_or(value);
+    !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit())
+}
 
 fn help_text_mentions_flag(help: &str, flag: &str) -> bool {
     help.split(|c: char| c.is_whitespace() || c == ',')
@@ -1276,6 +1286,19 @@ fn build_claude_args(
     if claude_cli_supports_flag(&cli_path, SYSTEM_PROMPT_SNAPSHOT_FLAG) {
         args.push(SYSTEM_PROMPT_SNAPSHOT_FLAG.to_string());
         args.push("off".to_string());
+    }
+
+    // Auto-compact window. Jean spawns a fresh CLI per turn, so a changed
+    // value applies from the next message of a running session.
+    if let Some(window) = crate::load_preferences_sync(app)
+        .ok()
+        .and_then(|p| p.claude_auto_compact_window)
+        .filter(|w| is_valid_auto_compact_window(w))
+    {
+        if claude_cli_supports_flag(&cli_path, AUTOCOMPACT_FLAG) {
+            args.push(AUTOCOMPACT_FLAG.to_string());
+            args.push(window);
+        }
     }
 
     // Disable background tasks - forces all Task subagents to run in foreground.
@@ -3104,6 +3127,16 @@ fn result_error_text(msg: &serde_json::Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn auto_compact_window_accepts_cli_forms_only() {
+        for ok in ["auto", "200k", "1M", "500000"] {
+            assert!(is_valid_auto_compact_window(ok), "{ok}");
+        }
+        for bad in ["", "k", "--model", "200 k", "1m", "Auto"] {
+            assert!(!is_valid_auto_compact_window(bad), "{bad}");
+        }
+    }
 
     const HOST_TURN_ONE: &str = r#"{"_run_meta":true}
 {"type":"jean_claude_host_start"}

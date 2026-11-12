@@ -286,6 +286,17 @@ function formatOpenCodeModelLabelForSettings(value: string) {
     : formatted
 }
 
+const CLAUDE_AUTO_COMPACT_WINDOW_OPTIONS = [
+  { value: 'default', label: 'Claude settings (default)' },
+  { value: 'auto', label: 'Auto (tuned for model)' },
+  { value: '200k', label: '200K tokens' },
+  { value: '300k', label: '300K tokens' },
+  { value: '400k', label: '400K tokens' },
+  { value: '500k', label: '500K tokens' },
+  { value: '750k', label: '750K tokens' },
+  { value: '1M', label: '1M tokens' },
+]
+
 export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   scope = 'general',
 }) => {
@@ -2467,6 +2478,34 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 checked={preferences?.claude_auto_steer_enabled ?? false}
                 onCheckedChange={handleClaudeAutoSteerToggle}
               />
+            </InlineField>
+            <InlineField
+              label="Auto-compact window"
+              description="Context size that triggers auto-compaction"
+              help="Passed as --autocompact. Applies from the next message, also in running sessions. A CLAUDE_CODE_AUTO_COMPACT_WINDOW env var takes precedence."
+            >
+              <Select
+                value={preferences?.claude_auto_compact_window ?? 'default'}
+                onValueChange={value => {
+                  if (preferences) {
+                    patchPreferences.mutate({
+                      claude_auto_compact_window:
+                        value === 'default' ? null : value,
+                    })
+                  }
+                }}
+              >
+                <SelectTrigger className="w-full sm:w-80">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CLAUDE_AUTO_COMPACT_WINDOW_OPTIONS.map(option => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </InlineField>
           </div>
         </SettingsSection>
