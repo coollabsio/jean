@@ -1,5 +1,9 @@
 import { useMemo } from 'react'
-import type { CliBackend, CustomCliProfile } from '@/types/preferences'
+import type {
+  CliBackend,
+  ClaudeModel,
+  CustomCliProfile,
+} from '@/types/preferences'
 import {
   formatClaudeModelIdLabel,
   getProviderAliasModelOptions,
