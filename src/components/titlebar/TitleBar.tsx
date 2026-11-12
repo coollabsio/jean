@@ -195,16 +195,15 @@ export function TitleBar({
           )}
         </div>
       ) : (
+        // Flex centering, not translate(-50%): a half-pixel transform blurs the title text
         <div
-          className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 max-w-[50%] px-2 pt-1"
-          style={
-            {
-              left: `calc(50% + ${contentInset / 2}px)`,
-              WebkitAppRegion: 'no-drag',
-            } as React.CSSProperties
-          }
+          className="pointer-events-none absolute inset-0 flex items-center justify-center pt-1"
+          style={{ paddingLeft: contentInset }}
         >
-          <div className="flex items-center gap-2">
+          <div
+            className="pointer-events-auto flex max-w-[50%] items-center gap-2 px-2"
+            style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+          >
             {native && (
               <Badge
                 variant="subtle"
