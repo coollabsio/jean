@@ -363,6 +363,21 @@ fn is_model_identifier(value: &str) -> bool {
     parts[..n - 1].iter().all(|s| allowed_segment(s)) && allowed_last_segment(parts[n - 1])
 }
 
+/// `opencode auth list` prints one row per stored credential, ending each row
+/// with its status, e.g. `acme-llm  acme-llm  stored`. The old probe looked for
+/// the word "credential", which that output never contains, so every send was
+/// blocked as unauthenticated (issue #895).
+fn has_stored_credentials(stdout: &str) -> bool {
+    if stdout.to_ascii_lowercase().contains("no credentials") {
+        return false;
+    }
+    stdout.lines().any(|line| {
+        line.split_whitespace()
+            .last()
+            .is_some_and(|status| status.eq_ignore_ascii_case("stored"))
+    })
+}
+
 /// Check if OpenCode CLI has any configured credentials.
 pub async fn check_opencode_cli_auth(app: AppHandle) -> Result<OpenCodeAuthStatus, String> {
     log::trace!("Checking OpenCode CLI authentication status");
@@ -410,8 +425,8 @@ pub async fn check_opencode_cli_auth(app: AppHandle) -> Result<OpenCodeAuthStatu
     }
 
     let stdout_raw = String::from_utf8_lossy(&output.stdout).to_string();
-    let stdout = strip_ansi(&stdout_raw).to_lowercase();
-    let has_credentials = stdout.contains("credential") && !stdout.contains("0 credentials");
+    let stdout = strip_ansi(&stdout_raw);
+    let has_credentials = has_stored_credentials(&stdout);
 
     Ok(OpenCodeAuthStatus {
         authenticated: has_credentials,
@@ -905,7 +920,20 @@ async fn fetch_latest_version(app: &AppHandle) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_model_identifier, opencode_models_args, parse_opencode_models_output};
+    use super::{
+        has_stored_credentials, is_model_identifier, opencode_models_args,
+        parse_opencode_models_output,
+    };
+
+    #[test]
+    fn detects_stored_opencode_credentials() {
+        assert!(has_stored_credentials(
+            "acme-llm  acme-llm                      stored\n"
+        ));
+        assert!(has_stored_credentials("acme-llm  acme-llm  STORED"));
+        assert!(!has_stored_credentials("No credentials configured\n"));
+        assert!(!has_stored_credentials(""));
+    }
 
     #[test]
     fn accepts_valid_model_identifiers() {
