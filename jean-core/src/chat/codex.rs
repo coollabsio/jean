@@ -1159,6 +1159,9 @@ pub fn execute_codex_via_server(
     let is_build_mode = execution_mode.unwrap_or("build") == "build";
     let is_yolo_mode = execution_mode.unwrap_or("build") == "yolo";
     let model_verbosity = resolve_model_verbosity(app);
+    let auto_compact_token_limit = crate::load_preferences_sync(app)
+        .ok()
+        .and_then(|p| p.codex_auto_compact_token_limit);
 
     // Mid-turn Approve (yolo) and pure yolo turns both auto-accept residual
     // command/permission prompts (issue #328).
@@ -1196,6 +1199,7 @@ pub fn execute_codex_via_server(
                 codex_provider,
             );
             apply_agent_browser_session(&mut resume_params, session_id);
+            apply_auto_compact_token_limit(&mut resume_params, auto_compact_token_limit);
             let mut full_params =
                 serde_json::json!({ "threadId": tid, "persistExtendedHistory": true });
             // Copy overridable fields
@@ -1226,6 +1230,7 @@ pub fn execute_codex_via_server(
                         developer_instructions_content,
                         Some(model_verbosity),
                         codex_provider,
+                        auto_compact_token_limit,
                     )
                 }
             }
@@ -1239,6 +1244,7 @@ pub fn execute_codex_via_server(
                 developer_instructions_content,
                 Some(model_verbosity),
                 codex_provider,
+                auto_compact_token_limit,
             )
         }
     })() {
@@ -1940,6 +1946,18 @@ fn apply_agent_browser_session(params: &mut serde_json::Value, session_id: &str)
     }
 }
 
+/// Token count that triggers Codex auto-compaction (`model_auto_compact_token_limit`).
+/// `None` keeps Codex's own setting from `config.toml`.
+fn apply_auto_compact_token_limit(params: &mut serde_json::Value, limit: Option<u64>) {
+    let Some(limit) = limit.filter(|limit| *limit > 0) else {
+        return;
+    };
+    if !params["config"].is_object() {
+        params["config"] = serde_json::json!({});
+    }
+    params["config"]["model_auto_compact_token_limit"] = serde_json::json!(limit);
+}
+
 fn start_new_thread(
     session_id: &str,
     working_dir: &std::path::Path,
@@ -1949,6 +1967,7 @@ fn start_new_thread(
     developer_instructions_content: Option<&str>,
     model_verbosity: Option<&str>,
     codex_provider: Option<&crate::CodexProviderProfile>,
+    auto_compact_token_limit: Option<u64>,
 ) -> Result<String, String> {
     use super::codex_server;
 
@@ -1962,6 +1981,7 @@ fn start_new_thread(
         codex_provider,
     );
     apply_agent_browser_session(&mut params, session_id);
+    apply_auto_compact_token_limit(&mut params, auto_compact_token_limit);
 
     let result = codex_server::send_request("thread/start", params)?;
     let thread_id = result
@@ -6404,6 +6424,20 @@ mod tests {
             Some(&schema_file.as_os_str().to_os_string()),
             "schema path must immediately follow --output-schema"
         );
+    }
+
+    #[test]
+    fn codex_auto_compact_limit_overrides_config_only_when_set() {
+        let mut params = serde_json::json!({ "config": { "model_verbosity": "medium" } });
+        apply_auto_compact_token_limit(&mut params, None);
+        apply_auto_compact_token_limit(&mut params, Some(0));
+        assert!(params["config"]
+            .get("model_auto_compact_token_limit")
+            .is_none());
+
+        apply_auto_compact_token_limit(&mut params, Some(200_000));
+        assert_eq!(params["config"]["model_auto_compact_token_limit"], 200_000);
+        assert_eq!(params["config"]["model_verbosity"], "medium");
     }
 
     #[test]

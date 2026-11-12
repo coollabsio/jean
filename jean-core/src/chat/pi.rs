@@ -605,6 +605,20 @@ pub(crate) fn serialize_pi_rpc_command(
     format!("{}\n", Value::Object(value))
 }
 
+/// RPC line that sets PI auto-compaction before the prompt. It goes in the
+/// same host write as the prompt so PI reads it first. PI saves the value in
+/// its global settings. `None` keeps PI's own setting.
+fn auto_compaction_rpc_line(enabled: Option<bool>) -> String {
+    enabled
+        .map(|enabled| {
+            format!(
+                "{}\n",
+                serde_json::json!({ "type": "set_auto_compaction", "enabled": enabled })
+            )
+        })
+        .unwrap_or_default()
+}
+
 fn pi_line_is_completion_result(line: &str) -> bool {
     serde_json::from_str::<Value>(line)
         .ok()
@@ -1370,9 +1384,13 @@ pub fn execute_pi(
             });
         }
 
+        let auto_compact = crate::load_preferences_sync(app)
+            .ok()
+            .and_then(|p| p.pi_auto_compact);
         let prompt_line =
             serialize_pi_rpc_command("prompt", Some(message), Some(&format!("prompt-{run_id}")));
-        if let Err(e) = send_pi_rpc_host_command(&socket_path, &prompt_line) {
+        let turn_input = format!("{}{prompt_line}", auto_compaction_rpc_line(auto_compact));
+        if let Err(e) = send_pi_rpc_host_command(&socket_path, &turn_input) {
             super::registry::unregister_process(session_id);
             let _ = crate::platform::kill_process_tree(pid);
             let _ = crate::platform::kill_process(pid);
@@ -1572,6 +1590,18 @@ pub fn execute_one_shot_pi(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn auto_compaction_rpc_line_only_when_set() {
+        assert_eq!(auto_compaction_rpc_line(None), "");
+        let line = auto_compaction_rpc_line(Some(false));
+        assert!(line.ends_with('\n'));
+        let value: Value = serde_json::from_str(line.trim_end()).unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({ "type": "set_auto_compaction", "enabled": false })
+        );
+    }
 
     #[test]
     fn parses_pi_json_mode_message_update_deltas() {

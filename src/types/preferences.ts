@@ -1432,6 +1432,9 @@ export interface AppPreferences {
   pi_agent_owns_policy: boolean // Let PI own tools, extensions, and system/project instructions
   claude_auto_steer_enabled: boolean // Steer prompts into a running Claude turn via the detached host (Unix only, default: false)
   claude_auto_compact_window: string | null // Claude `--autocompact` value ('auto', '200k'..'1M'); null = Claude's own setting
+  codex_auto_compact_token_limit: number | null // Codex `model_auto_compact_token_limit`; null = Codex's own setting
+  opencode_auto_compact: boolean | null // OpenCode `compaction.auto`; null = OpenCode's own setting
+  pi_auto_compact: boolean | null // PI `set_auto_compaction` (PI saves it); null = PI's own setting
   grok_auto_steer_enabled: boolean // Steer prompts into a running Grok turn instead of queueing (default: false)
   kimi_auto_steer_enabled?: boolean // Reserved for Kimi Code steering support
   devin_auto_steer_enabled?: boolean // Reserved for Devin steering support
@@ -2880,6 +2883,9 @@ export const defaultPreferences: AppPreferences = {
   pi_agent_owns_policy: false, // Default: Jean maps execution modes and injects its system prompt
   claude_auto_steer_enabled: false, // Default: queue while Claude is running
   claude_auto_compact_window: null, // Default: use Claude's own auto-compact setting
+  codex_auto_compact_token_limit: null, // Default: use Codex's own auto-compact setting
+  opencode_auto_compact: null, // Default: use OpenCode's own auto-compact setting
+  pi_auto_compact: null, // Default: use PI's own auto-compact setting
   grok_auto_steer_enabled: false, // Default: queue while Grok is running
   kimi_auto_steer_enabled: false,
   devin_auto_steer_enabled: false,

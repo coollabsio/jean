@@ -296,6 +296,23 @@ pub fn cleanup_orphaned_server(app: &AppHandle) {
     let _ = fs::remove_file(&path);
 }
 
+const CONFIG_CONTENT_ENV: &str = "OPENCODE_CONFIG_CONTENT";
+
+/// Inline OpenCode config that sets `compaction.auto`, merged into an
+/// inherited `OPENCODE_CONFIG_CONTENT` object. `None` when nothing changes.
+fn config_content_with_auto_compact(inherited: Option<&str>, auto: Option<bool>) -> Option<String> {
+    let auto = auto?;
+    let mut config = inherited
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+        .filter(serde_json::Value::is_object)
+        .unwrap_or_else(|| serde_json::json!({}));
+    if !config["compaction"].is_object() {
+        config["compaction"] = serde_json::json!({});
+    }
+    config["compaction"]["auto"] = serde_json::json!(auto);
+    Some(config.to_string())
+}
+
 pub fn ensure_running(app: &AppHandle) -> Result<String, String> {
     // Cache the AppHandle for stop/release paths that don't have it.
     let _ = APP_HANDLE.set(app.clone());
@@ -345,6 +362,18 @@ pub fn ensure_running(app: &AppHandle) -> Result<String, String> {
         // instead of discarding it to null.
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+
+    // The server is shared and stops when idle, so a changed value applies
+    // from the next server start.
+    let auto_compact = crate::load_preferences_sync(app)
+        .ok()
+        .and_then(|p| p.opencode_auto_compact);
+    if let Some(content) = config_content_with_auto_compact(
+        std::env::var(CONFIG_CONTENT_ENV).ok().as_deref(),
+        auto_compact,
+    ) {
+        cmd.env(CONFIG_CONTENT_ENV, content);
+    }
 
     #[cfg(unix)]
     {
@@ -538,6 +567,31 @@ pub async fn stop_opencode_server() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn auto_compact_merges_into_inherited_config() {
+        assert_eq!(config_content_with_auto_compact(Some("{}"), None), None);
+
+        let fresh: serde_json::Value =
+            serde_json::from_str(&config_content_with_auto_compact(None, Some(false)).unwrap())
+                .unwrap();
+        assert_eq!(
+            fresh,
+            serde_json::json!({ "compaction": { "auto": false } })
+        );
+
+        let merged: serde_json::Value = serde_json::from_str(
+            &config_content_with_auto_compact(
+                Some(r#"{"model":"x/y","compaction":{"buffer":"15%"}}"#),
+                Some(true),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(merged["model"], "x/y");
+        assert_eq!(merged["compaction"]["buffer"], "15%");
+        assert_eq!(merged["compaction"]["auto"], true);
+    }
 
     /// Serialize tests that mutate the process-global diagnostics ring/generation.
     static DIAGNOSTICS_TEST_GUARD: Mutex<()> = Mutex::new(());

@@ -373,6 +373,12 @@ pub struct AppPreferences {
     pub claude_auto_steer_enabled: bool, // Steer prompts into a running Claude turn (detached host, Unix only) instead of queueing (default: false)
     #[serde(default)]
     pub claude_auto_compact_window: Option<String>, // Claude `--autocompact` value ("auto", "200k".."1M"); None = Claude's own setting
+    #[serde(default)]
+    pub codex_auto_compact_token_limit: Option<u64>, // Codex `model_auto_compact_token_limit`; None = Codex's own setting
+    #[serde(default)]
+    pub opencode_auto_compact: Option<bool>, // OpenCode `compaction.auto`; None = OpenCode's own setting
+    #[serde(default)]
+    pub pi_auto_compact: Option<bool>, // PI `set_auto_compaction` (PI saves it); None = PI's own setting
     #[serde(default = "default_pi_auto_steer")]
     pub pi_auto_steer_enabled: bool, // Steer prompts into a running PI turn instead of queueing (default: false)
     #[serde(default)]
@@ -3604,6 +3610,9 @@ impl Default for AppPreferences {
             opencode_auto_steer_enabled: default_opencode_auto_steer(),
             claude_auto_steer_enabled: default_claude_auto_steer(),
             claude_auto_compact_window: None,
+            codex_auto_compact_token_limit: None,
+            opencode_auto_compact: None,
+            pi_auto_compact: None,
             pi_auto_steer_enabled: default_pi_auto_steer(),
             pi_agent_owns_policy: false,
             grok_auto_steer_enabled: default_grok_auto_steer(),

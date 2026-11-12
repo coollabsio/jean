@@ -297,6 +297,52 @@ const CLAUDE_AUTO_COMPACT_WINDOW_OPTIONS = [
   { value: '1M', label: '1M tokens' },
 ]
 
+const CODEX_AUTO_COMPACT_TOKEN_LIMIT_OPTIONS = [
+  { value: 'default', label: 'Codex settings (default)' },
+  { value: '100000', label: '100K tokens' },
+  { value: '150000', label: '150K tokens' },
+  { value: '200000', label: '200K tokens' },
+  { value: '250000', label: '250K tokens' },
+  { value: '300000', label: '300K tokens' },
+]
+
+const autoCompactToggleOptions = (backend: string) => [
+  { value: 'default', label: `${backend} settings (default)` },
+  { value: 'on', label: 'On' },
+  { value: 'off', label: 'Off' },
+]
+
+const toAutoCompactToggleValue = (value: boolean | null | undefined) =>
+  value == null ? 'default' : value ? 'on' : 'off'
+
+const fromAutoCompactToggleValue = (value: string) =>
+  value === 'default' ? null : value === 'on'
+
+function AutoCompactSelect({
+  value,
+  options,
+  onValueChange,
+}: {
+  value: string
+  options: { value: string; label: string }[]
+  onValueChange: (value: string) => void
+}) {
+  return (
+    <Select value={value} onValueChange={onValueChange}>
+      <SelectTrigger className="w-full sm:w-80">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map(option => (
+          <SelectItem key={option.value} value={option.value}>
+            {option.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
+
 export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   scope = 'general',
 }) => {
@@ -2484,8 +2530,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               description="Context size that triggers auto-compaction"
               help="Passed as --autocompact. Applies from the next message, also in running sessions. A CLAUDE_CODE_AUTO_COMPACT_WINDOW env var takes precedence."
             >
-              <Select
+              <AutoCompactSelect
                 value={preferences?.claude_auto_compact_window ?? 'default'}
+                options={CLAUDE_AUTO_COMPACT_WINDOW_OPTIONS}
                 onValueChange={value => {
                   if (preferences) {
                     patchPreferences.mutate({
@@ -2494,18 +2541,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                     })
                   }
                 }}
-              >
-                <SelectTrigger className="w-full sm:w-80">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {CLAUDE_AUTO_COMPACT_WINDOW_OPTIONS.map(option => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              />
             </InlineField>
           </div>
         </SettingsSection>
@@ -2603,6 +2639,27 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 onCheckedChange={handleCodexAutoSteerToggle}
               />
             </InlineField>
+            <InlineField
+              label="Auto-compact limit"
+              description="Context size that triggers auto-compaction"
+              help="Sets model_auto_compact_token_limit for Jean's Codex threads. Applies from the next message. A value above the model's context window has no effect."
+            >
+              <AutoCompactSelect
+                value={
+                  preferences?.codex_auto_compact_token_limit?.toString() ??
+                  'default'
+                }
+                options={CODEX_AUTO_COMPACT_TOKEN_LIMIT_OPTIONS}
+                onValueChange={value => {
+                  if (preferences) {
+                    patchPreferences.mutate({
+                      codex_auto_compact_token_limit:
+                        value === 'default' ? null : Number(value),
+                    })
+                  }
+                }}
+              />
+            </InlineField>
           </div>
         </SettingsSection>
       )}
@@ -2678,6 +2735,25 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               <Switch
                 checked={preferences?.opencode_auto_steer_enabled ?? false}
                 onCheckedChange={handleOpenCodeAutoSteerToggle}
+              />
+            </InlineField>
+            <InlineField
+              label="Auto-compact"
+              description="Compact the session when the context is full"
+              help="Sets compaction.auto through OPENCODE_CONFIG_CONTENT. Applies when Jean next starts the OpenCode server (after all OpenCode sessions are idle). Has no effect on an OpenCode server that Jean did not start."
+            >
+              <AutoCompactSelect
+                value={toAutoCompactToggleValue(
+                  preferences?.opencode_auto_compact
+                )}
+                options={autoCompactToggleOptions('OpenCode')}
+                onValueChange={value => {
+                  if (preferences) {
+                    patchPreferences.mutate({
+                      opencode_auto_compact: fromAutoCompactToggleValue(value),
+                    })
+                  }
+                }}
               />
             </InlineField>
           </div>
@@ -2828,6 +2904,23 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               <Switch
                 checked={preferences?.pi_auto_steer_enabled ?? false}
                 onCheckedChange={handlePiAutoSteerToggle}
+              />
+            </InlineField>
+            <InlineField
+              label="Auto-compact"
+              description="Compact the session when the context is nearly full"
+              help="Sent as set_auto_compaction before each message. PI saves the value in its global settings, so it also applies outside Jean. macOS and Linux only."
+            >
+              <AutoCompactSelect
+                value={toAutoCompactToggleValue(preferences?.pi_auto_compact)}
+                options={autoCompactToggleOptions('PI')}
+                onValueChange={value => {
+                  if (preferences) {
+                    patchPreferences.mutate({
+                      pi_auto_compact: fromAutoCompactToggleValue(value),
+                    })
+                  }
+                }}
               />
             </InlineField>
             <InlineField
