@@ -1,11 +1,4 @@
-import {
-  useState,
-  useEffect,
-  useCallback,
-  useMemo,
-  lazy,
-  Suspense,
-} from 'react'
+import { useState, useEffect, useCallback, useMemo, Suspense } from 'react'
 import {
   FileText,
   ImageIcon,
@@ -34,12 +27,13 @@ import { useTheme } from '@/hooks/use-theme'
 import { canOpenInEditor } from '@/lib/environment'
 import { usePreferences } from '@/services/preferences'
 import { cn } from '@/lib/utils'
+import { lazyWithPreload, preloadWhenIdle } from '@/lib/lazy-preload'
 import type { SyntaxTheme } from '@/types/preferences'
 import { toast } from 'sonner'
 import { FilePathCopyRow } from './FilePathCopyRow'
 
 // Lazy load CodeEditor (Pierre File + edit mode) so the main bundle stays lean
-const CodeEditor = lazy(() => import('@/components/ui/code-editor'))
+const CodeEditor = lazyWithPreload(() => import('@/components/ui/code-editor'))
 
 // Match the dialog close (X) button: same height, grey icon, square on mobile
 const HEADER_ICON_BUTTON_CLASS =
@@ -127,6 +121,8 @@ export function FileContentModal({
   serverId,
   onClose,
 }: FileContentModalProps) {
+  // This modal is always mounted: fetch the editor before the first file opens.
+  useEffect(() => preloadWhenIdle([CodeEditor.preload]), [])
   const [content, setContent] = useState<string | null>(null)
   const [editedContent, setEditedContent] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)

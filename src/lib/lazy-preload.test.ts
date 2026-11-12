@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { preloadWhenIdle } from './lazy-preload'
+import { lazyWithPreload, preloadWhenIdle } from './lazy-preload'
 
 describe('preloadWhenIdle', () => {
   beforeEach(() => {
@@ -40,5 +40,21 @@ describe('preloadWhenIdle', () => {
     cancel()
     await vi.advanceTimersByTimeAsync(1000)
     expect(calls).toEqual(['a'])
+  })
+})
+
+describe('lazyWithPreload', () => {
+  it('shares one load between calls and retries after a failure', async () => {
+    const load = vi
+      .fn<() => Promise<{ default: () => null }>>()
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValue({ default: () => null })
+    const Component = lazyWithPreload(load)
+
+    await expect(Component.preload()).rejects.toThrow('offline')
+    const first = Component.preload()
+    expect(Component.preload()).toBe(first)
+    await first
+    expect(load).toHaveBeenCalledTimes(2)
   })
 })

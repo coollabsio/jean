@@ -137,6 +137,7 @@ import {
 import { getFilename, normalizePath } from '@/lib/path-utils'
 import { registerChatComposer } from '@/lib/chat-composer-metrics'
 import { cn } from '@/lib/utils'
+import { MermaidBlock } from '@/components/ui/markdown'
 import { lazyWithPreload, preloadWhenIdle } from '@/lib/lazy-preload'
 import { PermissionApproval } from './PermissionApproval'
 import { AskUserQuestion } from './AskUserQuestion'
@@ -393,6 +394,7 @@ export const ChatWindow = memo(function ChatWindow(
         GitDiffModal.preload,
         LoadContextModal.preload,
         LinkedProjectsModal.preload,
+        MermaidBlock.preload,
       ]),
     []
   )

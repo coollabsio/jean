@@ -5,13 +5,19 @@ type Loader = () => Promise<unknown>
 
 /**
  * React.lazy with a `preload()` that fetches the chunk before first render.
- * The browser caches the module, so a later render does not wait for it.
+ * Preload and render share one import promise; a failed load is retried.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function lazyWithPreload<T extends ComponentType<any>>(
   load: () => Promise<{ default: T }>
 ) {
-  return Object.assign(lazy(load), { preload: load })
+  let pending: Promise<{ default: T }> | undefined
+  const preload = () =>
+    (pending ??= load().catch((error: unknown) => {
+      pending = undefined
+      throw error
+    }))
+  return Object.assign(lazy(preload), { preload })
 }
 
 /**

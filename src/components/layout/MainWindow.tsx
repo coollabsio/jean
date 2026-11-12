@@ -5,7 +5,6 @@ import {
   useRef,
   useEffect,
   useState,
-  lazy,
   Suspense,
   type CSSProperties,
 } from 'react'
@@ -26,17 +25,17 @@ import { TeardownOutputDialog } from '@/components/worktree/TeardownOutputDialog
 import { WindowResizeHandles } from './WindowResizeHandles'
 
 // Lazy-loaded heavy modals (code splitting)
-const LeftSideBar = lazy(() =>
+const LeftSideBar = lazyWithPreload(() =>
   import('./LeftSideBar').then(mod => ({
     default: mod.LeftSideBar,
   }))
 )
-const FileBrowserSidebar = lazy(() =>
+const FileBrowserSidebar = lazyWithPreload(() =>
   import('@/components/file-browser').then(mod => ({
     default: mod.FileBrowserSidebar,
   }))
 )
-const MobileFileBrowser = lazy(() =>
+const MobileFileBrowser = lazyWithPreload(() =>
   import('@/components/file-browser').then(mod => ({
     default: mod.MobileFileBrowser,
   }))
@@ -171,8 +170,10 @@ const CloseWorktreeDialog = lazyWithPreload(() =>
     default: mod.CloseWorktreeDialog,
   }))
 )
-// Most-used modals first.
-const PRELOADED_MODALS = [
+// Most-used chunks first. Shared modules (e.g. the file browser, the left
+// sidebar) also cover their mobile and agent copies.
+const IDLE_PRELOADS = [
+  LeftSideBar,
   NewSessionModeModal,
   MagicModal,
   CommitModal,
@@ -199,6 +200,8 @@ const PRELOADED_MODALS = [
   OnboardingDialog,
   FeatureTourDialog,
   JeanConfigWizard,
+  FileBrowserSidebar,
+  MobileFileBrowser,
 ]
 import { Toaster } from '@/components/ui/sonner'
 import { PreviewDialogHost } from '@/components/ui/preview-dialog-host'
@@ -280,8 +283,8 @@ const UIStatePersistence = memo(function UIStatePersistence({
 
 export function MainWindow() {
   useTerminalThemeSync()
-  // Fetch modal chunks in idle time so the first open has no load delay.
-  useEffect(() => preloadWhenIdle(PRELOADED_MODALS.map(m => m.preload)), [])
+  // Fetch lazy chunks in idle time so the first open has no load delay.
+  useEffect(() => preloadWhenIdle(IDLE_PRELOADS.map(c => c.preload)), [])
   const isMaximized = useWindowMaximized()
   const { offset: toasterOffset, mobileOffset: toasterMobileOffset } =
     useToasterOffset()
