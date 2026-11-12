@@ -161,17 +161,23 @@ fn get_github_pr_status(
         Some((host, repo)) => ((host != "github.com").then_some(host), repo),
         None => (None, "{owner}/{repo}".to_string()),
     };
-    let get = |path: String| -> Result<String, String> {
-        crate::gh_cli::quota::background_rest_get(gh_binary, repo_path, hostname, &path).map_err(
-            |e| match e.status {
+    let get_with = |path: String, revalidate: bool| -> Result<String, String> {
+        crate::gh_cli::quota::background_rest_get(gh_binary, repo_path, hostname, &path, revalidate)
+            .map_err(|e| match e.status {
                 Some(404) => "PR not found - may have been deleted".to_string(),
                 Some(401) => "GitHub CLI not authenticated".to_string(),
                 _ => e.message,
-            },
-        )
+            })
     };
+    let get = |path: String| get_with(path, true);
     let base = format!("repos/{repo}");
-    let pull: RestPull = parse_json("pull request", &get(format!("{base}/pulls/{pr_number}"))?)?;
+    // No ETag for the PR itself: GitHub computes `mergeable` after a push
+    // without changing the ETag, so a 304 can keep a stale "conflicting"
+    // after the conflict is gone.
+    let pull: RestPull = parse_json(
+        "pull request",
+        &get_with(format!("{base}/pulls/{pr_number}"), false)?,
+    )?;
     let reviews: Vec<RestReview> = parse_json(
         "reviews",
         &get(format!("{base}/pulls/{pr_number}/reviews?per_page=100"))?,

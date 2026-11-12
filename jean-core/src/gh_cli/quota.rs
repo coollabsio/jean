@@ -243,13 +243,14 @@ fn parse_raw_response(raw: &str) -> RawResponse<'_> {
 }
 
 /// Background REST GET through `gh api`. Stops in the reserve, records the
-/// quota from the response headers, and revalidates with the cached ETag: a
-/// `304 Not Modified` answer spends no quota.
+/// quota from the response headers, and, when `revalidate` is set, revalidates
+/// with the cached ETag: a `304 Not Modified` answer spends no quota.
 pub fn background_rest_get(
     gh: &Path,
     cwd: &str,
     hostname: Option<&str>,
     path: &str,
+    revalidate: bool,
 ) -> Result<String, RestError> {
     if let Some(until) = background_wait(GhResource::Core) {
         return Err(RestError {
@@ -259,11 +260,15 @@ pub fn background_rest_get(
     }
 
     let cache_key = format!("{}/{path}", hostname.unwrap_or("github.com"));
-    let cached = ETAGS
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .get(&cache_key)
-        .cloned();
+    let cached = if revalidate {
+        ETAGS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&cache_key)
+            .cloned()
+    } else {
+        None
+    };
 
     let mut command = crate::platform::resolved_cli_command(gh, Some(Path::new(cwd)));
     command.args(["api", "-i"]);
