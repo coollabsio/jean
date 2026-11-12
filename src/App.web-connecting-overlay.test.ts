@@ -34,10 +34,13 @@ describe('web connecting overlay', () => {
     )
     expect(source).toContain('connectTransport()')
     expect(source).toContain('blockOnWs')
-    expect(source).toContain('webBackend && wsCheckingConnection &&')
+    expect(source).toContain('wsCheckingConnection && (')
     expect(source).toContain('Checking connection to Jean...')
     expect(source).not.toContain('Jean is loading...')
-    expect(source).not.toContain('Reconnecting to Jean...')
+    // A dropped WebSocket waits for the server before it reloads.
+    expect(source).toContain(
+      'webReconnecting ? (\n          <JeanLoadingScreen message="Reconnecting to Jean..." onTop />'
+    )
     expect(loadingScreenSource).not.toContain('animate-spin')
     expect(loadingScreenSource).not.toContain('size-[32px]')
     expect(loadingScreenSource).toMatch(/<p\s+role="status"/)

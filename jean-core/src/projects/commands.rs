@@ -15242,8 +15242,8 @@ mod tests {
     }
 
     #[test]
-    fn ai_review_timeout_is_five_minutes_and_not_an_approval() {
-        assert_eq!(AI_REVIEW_TIMEOUT, Duration::from_secs(300));
+    fn ai_review_timeout_is_ten_minutes_and_not_an_approval() {
+        assert_eq!(AI_REVIEW_TIMEOUT, Duration::from_secs(600));
         let error = review_timeout_error();
         assert!(error.contains("timed out"));
         assert!(!error.contains("approved"));
