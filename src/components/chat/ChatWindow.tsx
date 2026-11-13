@@ -1242,6 +1242,11 @@ const ChatWindowContent = memo(function ChatWindowContent({
   const currentError = useChatStore(state =>
     deferredSessionId ? (state.errors[deferredSessionId] ?? null) : null
   )
+  // The backend holds the queue after a provider rejection (limit/auth/API)
+  // instead of sending the remaining prompts into the same failure.
+  const isQueueHeld = useChatStore(state =>
+    deferredSessionId ? (state.queueHeld[deferredSessionId] ?? false) : false
+  )
 
   // Auto-continue: offer only for usage/rate-limit errors on backends that
   // expose a reset time (Claude, Codex). Reset time comes from the usage cache.
@@ -3459,6 +3464,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                     isSessionBusy={
                                       isSending || isWaitingForInput
                                     }
+                                    isPaused={isQueueHeld}
                                     onRemove={handleRemoveQueuedMessage}
                                     onSendNow={handleSendQueuedNow}
                                     onEdit={handleEditQueuedMessage}

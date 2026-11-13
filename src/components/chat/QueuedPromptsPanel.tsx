@@ -21,6 +21,8 @@ interface QueuedPromptsPanelProps {
   messages: QueuedMessage[]
   /** True while the session is sending or waiting for input */
   isSessionBusy: boolean
+  /** Queue paused after a provider rejection (usage limit, auth, API error) */
+  isPaused?: boolean
   onRemove: (sessionId: string, messageId: string) => void
   onSendNow: (sessionId: string, messageId: string) => void
   /** Load the prompt (text + attachments) into the chat input to edit it */
@@ -61,6 +63,7 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
   sessionId,
   messages,
   isSessionBusy,
+  isPaused = false,
   onRemove,
   onSendNow,
   onEdit,
@@ -164,6 +167,20 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
             <span className="rounded bg-muted/50 px-1.5 py-0.5 text-xs">
               {messages.length}
             </span>
+            {isPaused && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-2xs text-amber-600 dark:text-amber-400">
+                    Paused
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  The last request failed (usage limit, sign-in, or provider
+                  error). These prompts stay queued and send after your next
+                  successful message.
+                </TooltipContent>
+              </Tooltip>
+            )}
           </CollapsibleTrigger>
         </div>
         <CollapsibleContent>

@@ -1554,6 +1554,16 @@ export function useMainWindowEventListeners() {
           }
         ),
 
+        // A provider rejection (usage limit, auth, API error) pauses the
+        // queue instead of draining it into the same failure. Cleared as soon
+        // as a turn produces output.
+        listen<{ sessionId: string; reason: string }>('queue:held', event => {
+          useChatStore.getState().setQueueHeld(event.payload.sessionId, true)
+        }),
+        listen<{ sessionId: string }>('queue:released', event => {
+          useChatStore.getState().setQueueHeld(event.payload.sessionId, false)
+        }),
+
         // Real-time cache sync between native + web clients.
         // Debounce: collect keys over a 250ms window, then flush once.
         // This coalesces rapid-fire events (e.g. bulk mutations) into a
