@@ -43,16 +43,26 @@ pub fn run_stdio_server() -> Result<(), String> {
         }
         let response = handle_message(&line);
         if let Some(response) = response {
-            let encoded = serde_json::to_string(&response)
-                .map_err(|e| format!("Failed to encode MCP response: {e}"))?;
-            writeln!(stdout, "{encoded}").map_err(|e| format!("Failed to write stdout: {e}"))?;
-            stdout
-                .flush()
-                .map_err(|e| format!("Failed to flush stdout: {e}"))?;
+            // The client may close its pipes at any time (timeout, abandon,
+            // disconnect). That is a normal end of the session, not a failure:
+            // stop quietly instead of unwinding an error through a process
+            // built with `panic = "abort"` (issue #894).
+            if write_response(&mut stdout, &response).is_err() {
+                return Ok(());
+            }
         }
     }
 
     Ok(())
+}
+
+/// Serialize and write one JSON-RPC response. Kept separate so the
+/// closed-pipe path is unit-testable.
+fn write_response<W: Write>(stdout: &mut W, response: &Value) -> std::io::Result<()> {
+    let encoded = serde_json::to_string(response)
+        .map_err(|error| std::io::Error::other(error.to_string()))?;
+    writeln!(stdout, "{encoded}")?;
+    stdout.flush()
 }
 
 fn handle_message(line: &str) -> Option<Value> {
@@ -197,8 +207,9 @@ fn parent_error_message(response: &Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use std::io::{self, Write};
 
-    use super::parent_error_message;
+    use super::{parent_error_message, write_response};
 
     #[test]
     fn parent_error_message_handles_plain_error_string() {
@@ -218,5 +229,31 @@ mod tests {
             })),
             Some("No Jean session context present".to_string())
         );
+    }
+
+    struct ClosedPipe;
+
+    impl Write for ClosedPipe {
+        fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+            Err(io::Error::from(io::ErrorKind::BrokenPipe))
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn closed_stdout_is_a_clean_disconnect() {
+        assert!(write_response(&mut ClosedPipe, &json!({"jsonrpc": "2.0"})).is_err());
+    }
+
+    #[test]
+    fn writes_one_json_line() {
+        let mut out = Vec::new();
+        write_response(&mut out, &json!({"jsonrpc": "2.0", "id": 1})).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.ends_with('\n'));
+        assert!(text.contains("\"jsonrpc\":\"2.0\""));
     }
 }
