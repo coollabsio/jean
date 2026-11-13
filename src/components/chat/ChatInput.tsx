@@ -54,6 +54,7 @@ import {
 import type { ContextMentionItem } from './hooks/useContextMentionData'
 import { processAttachmentFile } from './attachment-processing'
 import { MAX_TEXT_SIZE } from './image-constants'
+import { continueListOnNewline } from './list-continuation'
 import {
   listControlChars,
   sanitizeTextInputValue,
@@ -690,6 +691,39 @@ export const ChatInput = memo(function ChatInput({
         e.stopPropagation()
         onCancel()
         return
+      }
+
+      // Shift+Enter (or Enter on mobile) on a list item starts the next item,
+      // matching Claude's composer. Plain lines keep the default newline.
+      if (
+        e.key === 'Enter' &&
+        (e.shiftKey || isMobile) &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        !e.nativeEvent.isComposing
+      ) {
+        const textarea = inputRef.current
+        if (textarea && textarea.selectionStart === textarea.selectionEnd) {
+          const continued = continueListOnNewline(
+            textarea.value,
+            textarea.selectionStart
+          )
+          if (continued) {
+            e.preventDefault()
+            textarea.value = continued.text
+            textarea.setSelectionRange(continued.caret, continued.caret)
+            valueRef.current = continued.text
+            if (activeSessionId) {
+              useChatStore
+                .getState()
+                .setInputDraft(activeSessionId, continued.text)
+            }
+            setShowHint(false)
+            resizeTextarea()
+            return
+          }
+        }
       }
 
       // Enter without shift sends the message (on mobile, Enter adds a newline instead)
