@@ -362,7 +362,8 @@ Duplicate pairs are rejected while running. Job progress emits
 Claude and Codex sessions use the CLI's own config home (`~/.claude` and
 `~/.codex`). Jean does not store named subscription logins, does not switch
 `CLAUDE_CONFIG_DIR` or `CODEX_HOME`, and does not auto-switch accounts.
-Multi-account pooling belongs in an external CLIProxy sidecar.
+Jean does not pool accounts or route subscription OAuth through a
+third-party proxy, because that risks account bans.
 
 Settings → Providers still holds API routing profiles: custom Claude CLI
 profiles (`custom_cli_profiles`), custom Codex model providers

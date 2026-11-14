@@ -83,7 +83,7 @@ export function supportsAdaptiveThinking(
 
 /**
  * Effort support for `model` sent through `provider`, decided by the
- * upstream model id: CLIProxyAPI maps `opus` to `claude-opus-5-5`, which
+ * upstream model id: a gateway that maps `opus` to `claude-opus-5-5`
  * supports effort; a profile that maps `opus` to `glm-4.7` does not.
  */
 export function providerSupportsAdaptiveThinking(

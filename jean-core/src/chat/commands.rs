@@ -12402,15 +12402,15 @@ mod tests {
     #[test]
     fn resolve_send_provider_uses_default_only_when_nothing_was_chosen() {
         let some = |s: &str| Some(s.to_string());
-        let default = || some("CLIProxyAPI");
+        let default = || some("OpenRouter");
         // New session: no explicit or saved choice, so the default applies.
         assert_eq!(
             resolve_send_provider(None, None, default),
-            some("CLIProxyAPI")
+            some("OpenRouter")
         );
         assert_eq!(
             resolve_send_provider(None, some("  "), default),
-            some("CLIProxyAPI")
+            some("OpenRouter")
         );
         // Saved built-in choice blocks the default.
         assert_eq!(

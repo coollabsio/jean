@@ -25,10 +25,8 @@ import {
   useGrokCliStatus,
   useGrokUsage,
 } from '@/services/grok-cli'
-import { useCliproxyapiUsage } from '@/services/cliproxyapi'
 import type { ClaudeUsageSnapshot } from '@/types/claude-cli'
 import type { CodexUsageSnapshot } from '@/types/codex-cli'
-import type { CliproxyAccountUsage } from '@/types/cliproxyapi'
 import { useNow } from '@/hooks/useNow'
 import {
   formatCompactDuration,
@@ -42,7 +40,6 @@ import {
   type UsageWindowSpec,
 } from '@/components/usage/usage-windows'
 import { cn } from '@/lib/utils'
-import { proxyAccountIcon } from '@/components/usage/usage-entries'
 
 /** One section per backend: icon, name, plan badge, then usage windows. */
 function UsageCard({
@@ -264,47 +261,6 @@ function CodexUsageBody({
   )
 }
 
-/** One card per CLIProxyAPI account, with the same charts as the backends. */
-function ProxyAccountCard({
-  account,
-  nowMs,
-}: {
-  account: CliproxyAccountUsage
-  nowMs: number
-}) {
-  const body = () => {
-    if (account.disabled) {
-      return <InlineStatus>Disabled in CLIProxyAPI.</InlineStatus>
-    }
-    if (account.error) {
-      return <InlineStatus tone="error">{account.error}</InlineStatus>
-    }
-    if (account.claude) {
-      return <ClaudeUsageBody data={account.claude} nowMs={nowMs} />
-    }
-    if (account.codex) {
-      return <CodexUsageBody data={account.codex} nowMs={nowMs} />
-    }
-    return (
-      <InlineStatus>
-        Usage is not available for {account.provider} accounts
-        {account.status ? ` (status: ${account.status})` : ''}.
-      </InlineStatus>
-    )
-  }
-
-  return (
-    <UsageCard
-      title={account.label}
-      Icon={proxyAccountIcon(account.provider)}
-      plan={formatPlanName(account.codex?.planType)}
-      anchorId={`pref-usage-section-cliproxyapi-${account.authIndex}`}
-    >
-      {body()}
-    </UsageCard>
-  )
-}
-
 export const UsagePane: React.FC = () => {
   const claudeStatus = useClaudeCliStatus()
   const claudeAuth = useClaudeCliAuth({
@@ -326,13 +282,6 @@ export const UsagePane: React.FC = () => {
     enabled: !!grokStatus.data?.installed && !!grokAuth.data?.authenticated,
   })
 
-  const proxyUsage = useCliproxyapiUsage()
-  const proxyAccounts = proxyUsage.data ?? []
-  const proxyErrorMessage = getQueryErrorMessage(
-    proxyUsage.error,
-    'Failed to load CLIProxyAPI usage.'
-  )
-
   const claudeErrorMessage = getQueryErrorMessage(
     claudeUsage.error,
     'Failed to load Claude usage.'
@@ -351,8 +300,7 @@ export const UsagePane: React.FC = () => {
     codexUsage.isFetching ||
     codexAuth.isFetching ||
     grokUsage.isFetching ||
-    grokAuth.isFetching ||
-    proxyUsage.isFetching
+    grokAuth.isFetching
 
   const handleRefresh = useCallback(() => {
     void Promise.all([
@@ -365,7 +313,6 @@ export const UsagePane: React.FC = () => {
       grokStatus.refetch(),
       grokAuth.refetch(),
       grokUsage.refetch(),
-      proxyUsage.refetch(),
     ])
   }, [
     claudeAuth,
@@ -377,16 +324,12 @@ export const UsagePane: React.FC = () => {
     grokAuth,
     grokStatus,
     grokUsage,
-    proxyUsage,
   ])
 
   const latestFetchedAt = Math.max(
     claudeUsage.data?.fetchedAt ?? 0,
     codexUsage.data?.fetchedAt ?? 0,
-    grokUsage.data?.fetchedAt ?? 0,
-    ...proxyAccounts.map(
-      account => account.claude?.fetchedAt ?? account.codex?.fetchedAt ?? 0
-    )
+    grokUsage.data?.fetchedAt ?? 0
   )
 
   // Only surface backends that are installed and logged in.
@@ -405,8 +348,7 @@ export const UsagePane: React.FC = () => {
   const showClaude = claudeReady || claudePendingAuth
   const showCodex = codexReady || codexPendingAuth
   const showGrok = grokReady || grokPendingAuth
-  const showProxy = proxyAccounts.length > 0 || proxyUsage.isError
-  const hasAnyBackend = showClaude || showCodex || showGrok || showProxy
+  const hasAnyBackend = showClaude || showCodex || showGrok
 
   const statusLoading =
     claudeStatus.isLoading || codexStatus.isLoading || grokStatus.isLoading
@@ -626,31 +568,6 @@ export const UsagePane: React.FC = () => {
         >
           {renderGrok()}
         </UsageCard>
-      ) : null}
-
-      {showProxy ? (
-        <section
-          id="pref-usage-section-cliproxyapi"
-          className="space-y-3 border-t pt-3"
-        >
-          <h3 className="text-xs font-medium text-muted-foreground">
-            CLIProxyAPI accounts
-          </h3>
-          {proxyUsage.isError && proxyAccounts.length === 0 ? (
-            <ErrorLine
-              message={proxyErrorMessage}
-              onRetry={() => proxyUsage.refetch()}
-            />
-          ) : (
-            proxyAccounts.map(account => (
-              <ProxyAccountCard
-                key={account.authIndex}
-                account={account}
-                nowMs={nowMs}
-              />
-            ))
-          )}
-        </section>
       ) : null}
     </div>
   )

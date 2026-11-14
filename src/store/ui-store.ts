@@ -91,7 +91,6 @@ export interface PendingServerUpdate {
 
 export type CliLoginModalType =
   | 'claude'
-  | 'cliproxyapi'
   | 'gh'
   | 'glab'
   | 'codex'

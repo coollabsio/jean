@@ -2267,15 +2267,10 @@ export default function useStreamingEvents({
     // Surface each attempt; the toast expires after the retry delay.
     const unlistenApiRetry = listen<ApiRetryEvent>('chat:api-retry', event => {
       const { session_id, attempt, max_retries, retry_delay_ms } = event.payload
-      const viaProxy =
-        useChatStore.getState().selectedProviders[session_id] === 'CLIProxyAPI'
       toast.warning(
         `Connection problem, retrying (${attempt}/${max_retries})…`,
         {
           id: `api-retry-${session_id}`,
-          description: viaProxy
-            ? 'CLIProxyAPI may not be running. Install or start it in Preferences → Opinionated.'
-            : undefined,
           duration: retry_delay_ms + 3000,
         }
       )

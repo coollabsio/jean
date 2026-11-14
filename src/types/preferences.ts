@@ -1663,13 +1663,6 @@ export const PREDEFINED_CODEX_PROVIDERS: CodexProviderProfile[] = [
     wire_api: 'responses',
   },
   {
-    name: 'CLIProxyAPI',
-    provider_id: 'cliproxyapi',
-    base_url: 'http://127.0.0.1:8317/v1',
-    env_key: 'CLIPROXYAPI_API_KEY',
-    wire_api: 'responses',
-  },
-  {
     name: 'QwenCloud',
     provider_id: 'qwencloud',
     base_url: qwenCloudOpenAiBaseUrl(),
@@ -1711,24 +1704,6 @@ export const PREDEFINED_PI_PROVIDERS: PiProviderProfile[] = [
 ]
 
 export const PREDEFINED_CLI_PROFILES: CustomCliProfile[] = [
-  {
-    name: 'CLIProxyAPI',
-    settings_json: JSON.stringify(
-      {
-        env: {
-          ANTHROPIC_BASE_URL: 'http://127.0.0.1:8317',
-          ANTHROPIC_AUTH_TOKEN:
-            '<filled when Opinionated CLIProxyAPI is installed>',
-          ANTHROPIC_API_KEY:
-            '<filled when Opinionated CLIProxyAPI is installed>',
-          CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1',
-          API_TIMEOUT_MS: '600000',
-        },
-      },
-      null,
-      2
-    ),
-  },
   {
     name: 'OpenRouter',
     settings_json: JSON.stringify(
@@ -2049,7 +2024,7 @@ export function toProviderAliasModel(model: string): string {
 /**
  * Upstream model id the Claude CLI requests for `model` under `provider`.
  * A custom provider maps the opus/sonnet/haiku aliases through its profile
- * env (`opus` -> `claude-opus-5-5` for CLIProxyAPI). Returns undefined when
+ * env (`ANTHROPIC_DEFAULT_OPUS_MODEL` for `opus`). Returns undefined when
  * the profile does not map the alias, so the upstream model is unknown.
  */
 export function resolveProviderModelId(
