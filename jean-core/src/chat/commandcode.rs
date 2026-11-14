@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tauri::AppHandle;
 
-const DEFAULT_MAX_TURNS: &str = "30";
+pub(crate) const DEFAULT_MAX_TURNS: u32 = 30;
 const JEAN_PLAN_OPEN: &str = "<jean-plan>";
 const JEAN_PLAN_CLOSE: &str = "</jean-plan>";
 const COMMANDCODE_PLAN_CONTRACT: &str = r#"<commandcode_plan_contract>
@@ -380,6 +380,7 @@ pub fn execute_commandcode_headless(
     message: &str,
     system_context: Option<&str>,
     resume_session_id: Option<&str>,
+    max_turns: u32,
     pid_callback: Option<Box<dyn FnOnce(u32) + Send>>,
 ) -> Result<(u32, CommandCodeResponse), String> {
     let binary_path = crate::commandcode_cli::resolve_cli_binary(app);
@@ -418,7 +419,7 @@ pub fn execute_commandcode_headless(
         .arg("--trust")
         .arg("--skip-onboarding")
         .arg("--max-turns")
-        .arg(DEFAULT_MAX_TURNS);
+        .arg(max_turns.to_string());
     // Resume the exact prior Command Code conversation by its native session id.
     if let Some(resume_id) = resume_session_id {
         command.arg("--resume").arg(resume_id);
@@ -435,7 +436,7 @@ pub fn execute_commandcode_headless(
             "Command Code run session={} using --model {} max_turns={}",
             jean_session_id,
             cli_model,
-            DEFAULT_MAX_TURNS
+            max_turns
         );
     }
     match mode {
@@ -654,6 +655,7 @@ pub fn execute_one_shot_commandcode(
     working_dir: Option<&str>,
     execution_mode: Option<&str>,
     model: Option<&str>,
+    max_turns: u32,
 ) -> Result<String, String> {
     let binary_path = crate::commandcode_cli::resolve_cli_binary(app);
     if !binary_path.exists() {
@@ -681,7 +683,7 @@ pub fn execute_one_shot_commandcode(
         .arg("--trust")
         .arg("--skip-onboarding")
         .arg("--max-turns")
-        .arg(DEFAULT_MAX_TURNS);
+        .arg(max_turns.to_string());
     let cli_model = normalize_model_for_cli(model);
     if let Some(cli_model) = &cli_model {
         command.arg("--model").arg(cli_model);

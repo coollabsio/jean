@@ -21,6 +21,7 @@ import {
   Play,
 } from '@/components/icons/reicon'
 import { Label } from '@/components/ui/label'
+import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Button } from '@/components/ui/button'
@@ -2420,6 +2421,40 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 {commandCodeAuthMessage}
               </p>
             )}
+        </SettingsSection>
+      )}
+
+      {hasBackend() && scope === 'commandcode' && (
+        <SettingsSection title="Runs" anchorId="pref-commandcode-section-runs">
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-0.5">
+              <p className="text-sm font-medium">Max agent turns</p>
+              <p className="text-xs text-muted-foreground">
+                Command Code stops a run after this many turns. Raise it for
+                long tasks; the CLI default is 30.
+              </p>
+            </div>
+            <Input
+              type="number"
+              min={1}
+              max={200}
+              defaultValue={preferences?.commandcode_max_turns ?? 30}
+              aria-label="Command Code max agent turns"
+              className="h-8 w-24"
+              onBlur={event => {
+                const parsed = Number.parseInt(event.target.value, 10)
+                if (!Number.isFinite(parsed)) return
+                const next = Math.min(Math.max(parsed, 1), 200)
+                event.target.value = String(next)
+                if (next !== preferences?.commandcode_max_turns) {
+                  patchPreferences.mutate({ commandcode_max_turns: next })
+                }
+              }}
+              onKeyDown={event => {
+                if (event.key === 'Enter') event.currentTarget.blur()
+              }}
+            />
+          </div>
         </SettingsSection>
       )}
 

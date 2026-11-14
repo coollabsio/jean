@@ -622,6 +622,7 @@ describe('preferences service', () => {
         jean_mcp_enabled: false,
         jean_mcp_max_depth: 3,
         jean_mcp_rate_limit_per_minute: 20,
+    commandcode_max_turns: 30,
         agent_browser_enabled: false,
       }
       vi.mocked(invoke).mockResolvedValueOnce(mockPreferences)
@@ -780,6 +781,7 @@ describe('preferences service', () => {
         jean_mcp_enabled: false,
         jean_mcp_max_depth: 3,
         jean_mcp_rate_limit_per_minute: 20,
+    commandcode_max_turns: 30,
         agent_browser_enabled: false,
       }
       vi.mocked(invoke).mockResolvedValueOnce(prefsWithOldBinding)
@@ -960,6 +962,7 @@ describe('preferences service', () => {
         jean_mcp_enabled: false,
         jean_mcp_max_depth: 3,
         jean_mcp_rate_limit_per_minute: 20,
+    commandcode_max_turns: 30,
         agent_browser_enabled: false,
       }
       vi.mocked(invoke).mockResolvedValueOnce(prefsWithDeprecatedFastModel)
@@ -1087,6 +1090,7 @@ describe('preferences service', () => {
         jean_mcp_enabled: false,
         jean_mcp_max_depth: 3,
         jean_mcp_rate_limit_per_minute: 20,
+    commandcode_max_turns: 30,
         agent_browser_enabled: false,
       }
 
@@ -1216,6 +1220,7 @@ describe('preferences service', () => {
         jean_mcp_enabled: false,
         jean_mcp_max_depth: 3,
         jean_mcp_rate_limit_per_minute: 20,
+    commandcode_max_turns: 30,
         agent_browser_enabled: false,
       }
 
@@ -1387,6 +1392,7 @@ describe('preferences service', () => {
         jean_mcp_enabled: false,
         jean_mcp_max_depth: 3,
         jean_mcp_rate_limit_per_minute: 20,
+    commandcode_max_turns: 30,
         agent_browser_enabled: false,
       }
 
@@ -1514,6 +1520,7 @@ describe('preferences service', () => {
         jean_mcp_enabled: false,
         jean_mcp_max_depth: 3,
         jean_mcp_rate_limit_per_minute: 20,
+    commandcode_max_turns: 30,
         agent_browser_enabled: false,
       }
 
