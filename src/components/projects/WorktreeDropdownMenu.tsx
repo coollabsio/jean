@@ -7,6 +7,7 @@ import {
   GitBranch,
   GitPullRequestArrow,
   Globe,
+  ListChecks,
   Maximize,
   MoreHorizontal,
   Play,
@@ -300,14 +301,20 @@ export function WorktreeDropdownMenu({
           {!isMobile && runScripts.length === 1 && (
             <DropdownMenuItem onClick={handleRun}>
               <Play className="mr-2 h-4 w-4" />
-              Run
+              <span className="flex-1">Run</span>
+              <span className="ml-3 text-2xs text-muted-foreground">
+                jean.json
+              </span>
             </DropdownMenuItem>
           )}
           {!isMobile && runScripts.length > 1 && (
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>
-                <Play className="mr-4 h-4 w-4" />
-                Run
+                <Play className="mr-2 h-4 w-4" />
+                <span className="flex-1">Run</span>
+                <span className="ml-3 text-2xs text-muted-foreground">
+                  jean.json
+                </span>
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent>
                 {runScripts.map(cmd => (
@@ -344,8 +351,11 @@ export function WorktreeDropdownMenu({
             onRunPackageScript && (
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger>
-                  <Play className="mr-4 h-4 w-4" />
-                  Scripts
+                  <ListChecks className="mr-2 h-4 w-4" />
+                  <span className="flex-1">Scripts</span>
+                  <span className="ml-3 text-2xs text-muted-foreground">
+                    package.json
+                  </span>
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent className="max-h-72 min-w-48 overflow-y-auto">
                   {sortedPackageScripts.map(script => (
