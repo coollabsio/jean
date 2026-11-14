@@ -215,10 +215,7 @@ fn plan_input_is_thin(input: &serde_json::Value) -> bool {
         .and_then(|v| v.as_str())
         .map(str::trim)
         .unwrap_or("");
-    if !plan.is_empty() && !is_status_only_plan_explanation(plan) && plan.len() >= 80 {
-        return false;
-    }
-    true
+    plan.len() < 80 || is_status_only_plan_explanation(plan)
 }
 
 /// Collapse multiple CodexPlan tools (split turn/item ids) into one richest tool.
