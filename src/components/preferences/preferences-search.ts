@@ -767,6 +767,8 @@ const sectionEntries: PreferenceSearchEntry[] = [
     sectionTitle: 'Appearance',
     keywords: [
       'color theme',
+      'custom theme',
+      'import theme',
       'syntax theme (dark)',
       'syntax theme (light)',
       'window transparency',

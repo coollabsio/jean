@@ -3,6 +3,7 @@ import {
   type ClientPreferences,
 } from '@/types/client-preferences'
 import { defaultPreferences, type AppPreferences } from '@/types/preferences'
+import { normalizeCustomThemes } from './custom-themes'
 
 export const CLIENT_PREFERENCES_STORAGE_KEY = 'jean-client-preferences-v1'
 export const CLIENT_PREFERENCES_CHANGED_EVENT =
@@ -56,6 +57,10 @@ function normalize(
         (id): id is string => typeof id === 'string'
       )
     : []
+  next.custom_themes = normalizeCustomThemes(next.custom_themes)
+  if (!next.custom_themes.some(theme => theme.id === next.custom_theme)) {
+    next.custom_theme = null
+  }
   return next
 }
 

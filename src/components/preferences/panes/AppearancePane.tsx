@@ -35,6 +35,10 @@ import { invoke } from '@/lib/transport'
 import { toast } from 'sonner'
 import { Input } from '@/components/ui/input'
 import { isValidHex } from '@/lib/terminal-theme'
+import { Button } from '@/components/ui/button'
+import { parseCustomTheme } from '@/lib/custom-themes'
+import { readClientPreferences } from '@/lib/client-preferences'
+import { useClientPreferences } from '@/hooks/useClientPreferences'
 import { useClientZoom } from '@/lib/client-zoom'
 import { SettingsSection } from '../SettingsSection'
 import { InlineField } from '../InlineField'
@@ -60,6 +64,7 @@ function getErrorMessage(error: unknown): string {
 }
 
 const modKey = getModifierSymbol()
+const NO_CUSTOM_THEME = 'none'
 
 export const AppearancePane: React.FC = () => {
   const { theme, setTheme } = useTheme()
@@ -106,6 +111,42 @@ export const AppearancePane: React.FC = () => {
     },
     [setTheme, patchPreferences]
   )
+
+  const { preferences: clientPreferences, update: updateClientPreferences } =
+    useClientPreferences()
+  const themeFileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleCustomThemeImport = useCallback(
+    async (file: File) => {
+      try {
+        const imported = parseCustomTheme(JSON.parse(await file.text()))
+        const { custom_themes } = readClientPreferences()
+        // Re-importing a theme with the same name updates it in place.
+        const existing = custom_themes.find(t => t.name === imported.name)
+        const theme = existing ? { ...imported, id: existing.id } : imported
+        updateClientPreferences({
+          custom_themes: existing
+            ? custom_themes.map(t => (t.id === existing.id ? theme : t))
+            : [...custom_themes, theme],
+          custom_theme: theme.id,
+        })
+        toast.success(`Imported theme "${theme.name}"`)
+      } catch (error) {
+        toast.error('Could not import theme', {
+          description: getErrorMessage(error),
+        })
+      }
+    },
+    [updateClientPreferences]
+  )
+
+  const handleCustomThemeRemove = useCallback(() => {
+    const { custom_themes, custom_theme } = readClientPreferences()
+    updateClientPreferences({
+      custom_themes: custom_themes.filter(t => t.id !== custom_theme),
+      custom_theme: null,
+    })
+  }, [updateClientPreferences])
 
   const handleFontSizeChange = useCallback(
     (field: 'ui_font_size' | 'chat_font_size', value: number) => {
@@ -303,6 +344,61 @@ export const AppearancePane: React.FC = () => {
                 <SelectItem value="system">System</SelectItem>
               </SelectContent>
             </Select>
+          </InlineField>
+
+          <InlineField
+            label="Custom theme"
+            description="Imported JSON theme that recolours light and dark mode"
+          >
+            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+              <Select
+                value={clientPreferences.custom_theme ?? NO_CUSTOM_THEME}
+                onValueChange={value =>
+                  updateClientPreferences({
+                    custom_theme: value === NO_CUSTOM_THEME ? null : value,
+                  })
+                }
+              >
+                <SelectTrigger className="w-full sm:w-80">
+                  <SelectValue placeholder="None" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_CUSTOM_THEME}>None</SelectItem>
+                  {clientPreferences.custom_themes.map(custom => (
+                    <SelectItem key={custom.id} value={custom.id}>
+                      {custom.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <input
+                ref={themeFileInputRef}
+                type="file"
+                accept="application/json,.json"
+                className="hidden"
+                onChange={e => {
+                  const file = e.target.files?.[0]
+                  e.target.value = ''
+                  if (file) void handleCustomThemeImport(file)
+                }}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => themeFileInputRef.current?.click()}
+              >
+                Import
+              </Button>
+              {clientPreferences.custom_theme && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCustomThemeRemove}
+                >
+                  Remove
+                </Button>
+              )}
+            </div>
           </InlineField>
 
           <InlineField
