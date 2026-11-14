@@ -628,6 +628,29 @@ describe('useScrollManagement session scroll retention (issue #594)', () => {
     expect(getSessionScrollState('session-a')?.isFollowingTail).toBe(false)
   })
 
+  it('keeps the visible messages in place when older history is prepended', () => {
+    const all = makeMessages(10)
+    const { viewport, setScrollHeight, rerenderSession } = setupHook({
+      isSending: false,
+      activeSessionId: 'session-a',
+      messages: all.slice(8),
+      scrollHeight: 2000,
+    })
+
+    // User scrolls up right after the cold open (latest run only).
+    fireEvent.wheel(viewport, { deltaY: -100 })
+    viewport.scrollTop = 1500
+    fireEvent.scroll(viewport)
+
+    // Background load prepends older runs: content grows by 3000px above.
+    setScrollHeight(5000)
+    act(() => {
+      rerenderSession({ msgs: all })
+    })
+
+    expect(viewport.scrollTop).toBe(4500)
+  })
+
   it('does not overwrite a snapshot while content is not ready', () => {
     saveSessionScrollState('session-a', {
       scrollTop: 800,

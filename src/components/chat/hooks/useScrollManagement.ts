@@ -175,6 +175,15 @@ export function useScrollManagement({
   const pendingRestoreRetryTimerRef = useRef<ReturnType<
     typeof setTimeout
   > | null>(null)
+  // Viewport geometry from the last scroll event or resize callback. A commit
+  // that prepends older history reads it to keep the visible messages in place.
+  const lastLayoutRef = useRef({ scrollTop: 0, scrollHeight: 0 })
+  const recordLayout = useCallback((viewport: HTMLDivElement) => {
+    lastLayoutRef.current = {
+      scrollTop: viewport.scrollTop,
+      scrollHeight: viewport.scrollHeight,
+    }
+  }, [])
 
   const clearPendingRestoreRetry = useCallback(() => {
     if (pendingRestoreRetryTimerRef.current != null) {
@@ -637,6 +646,7 @@ export function useScrollManagement({
     const observer = new ResizeObserver(() => {
       cancelAnimationFrame(rafId)
       onViewportSizeChange()
+      recordLayout(viewport)
     })
     observer.observe(viewport)
     if (viewport.firstElementChild) {
@@ -650,7 +660,7 @@ export function useScrollManagement({
     }
     // onViewportSizeChange is an Effect Event — intentionally omitted from deps
     // (identity changes every render; React docs require not listing it).
-  }, [clearPendingRestoreRetry])
+  }, [clearPendingRestoreRetry, recordLayout])
 
   // [Tier 2 + 5] Auto-scroll during streaming using ResizeObserver.
   // Pins inside the observer callback (after layout, before paint) so a frame
@@ -792,9 +802,35 @@ export function useScrollManagement({
     }
   }, [contentReady, messages?.length, activeSessionId, applySessionScrollState])
 
+  // A cold session open renders only the latest run, then prepends older
+  // history in the background. Without a correction the viewport keeps its
+  // scrollTop while content grows above it, so a user who already scrolled
+  // up jumps toward the oldest messages. Keep the distance from the bottom.
+  // The target is absolute, so it is also correct when the browser's own
+  // scroll anchoring already moved the viewport.
+  const prevFirstMessageIdRef = useRef(messages?.[0]?.id)
+  useLayoutEffect(() => {
+    const prevFirstId = prevFirstMessageIdRef.current
+    const firstId = messages?.[0]?.id
+    prevFirstMessageIdRef.current = firstId
+    if (!prevFirstId || !firstId || prevFirstId === firstId) return
+    if (!messages?.some(message => message.id === prevFirstId)) return
+
+    const viewport = scrollViewportRef.current
+    if (!viewport) return
+    const { scrollTop, scrollHeight } = lastLayoutRef.current
+    const grownBy = viewport.scrollHeight - scrollHeight
+    if (grownBy <= 0) return
+    viewport.scrollTop = scrollTop + grownBy
+    recordLayout(viewport)
+    lastScrollTopRef.current = viewport.scrollTop
+    lastScrollHeightRef.current = viewport.scrollHeight
+  }, [messages, recordLayout])
+
   // [Tier 1] Handle scroll events — findings visibility removed (handled by IntersectionObserver)
   const handleScroll = useCallback(
     (e: React.UIEvent<HTMLDivElement>) => {
+      recordLayout(e.target as HTMLDivElement)
       // Skip updating isAtBottom during auto-scroll to avoid race conditions
       // This prevents the smooth scroll animation from incorrectly marking us as "not at bottom"
       if (isAutoScrollingRef.current) {
@@ -869,7 +905,7 @@ export function useScrollManagement({
       setIsAtBottom(prev => (prev === atBottom ? prev : atBottom))
       rememberScroll(target.scrollTop, isFollowingTailRef.current)
     },
-    [contentReady, rememberScroll]
+    [contentReady, recordLayout, rememberScroll]
   )
 
   // Handle scroll-to-bottom completion from the message list
