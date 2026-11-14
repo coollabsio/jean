@@ -7,6 +7,8 @@ import {
   useRef,
 } from 'react'
 import { ThemeProviderContext, type Theme } from '@/lib/theme-context'
+import { applyThemeColours } from '@/lib/custom-themes'
+import { useClientPreferences } from '@/hooks/useClientPreferences'
 import { usePreferences } from '@/services/preferences'
 
 interface ThemeProviderProps {
@@ -40,12 +42,18 @@ export function ThemeProvider({
     }
   }, [preferences?.theme])
 
+  const { preferences: clientPreferences } = useClientPreferences()
+  const customTheme = clientPreferences.custom_themes.find(
+    custom => custom.id === clientPreferences.custom_theme
+  )
+
   useEffect(() => {
     const root = window.document.documentElement
 
     const applyTheme = (resolvedTheme: 'light' | 'dark') => {
       root.classList.remove('light', 'dark')
       root.classList.add(resolvedTheme)
+      applyThemeColours(root.style, customTheme?.[resolvedTheme])
     }
 
     if (theme === 'system') {
@@ -60,7 +68,7 @@ export function ThemeProvider({
     }
 
     applyTheme(theme)
-  }, [theme])
+  }, [theme, customTheme])
 
   const stableSetTheme = useCallback(
     (newTheme: Theme) => {

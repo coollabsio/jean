@@ -1,6 +1,7 @@
 import type { ThinkingLevel, EffortLevel, ExecutionMode } from './chat'
 import { DEFAULT_KEYBINDINGS, type KeybindingsMap } from './keybindings'
 import { getServerPlatform, isServerWindows } from '../lib/platform'
+import type { CustomTheme } from '../lib/custom-themes'
 
 export type CodexGoalExecutionMode = Extract<ExecutionMode, 'build' | 'yolo'>
 
@@ -1472,6 +1473,8 @@ export interface AppPreferences {
   finished_session_animation_enabled?: boolean
   terminal_background: TerminalBackgroundMode // Override the terminal background independently of the app theme
   terminal_background_custom: string | null // Hex color used when terminal_background === 'custom'
+  custom_themes: CustomTheme[] // Imported colour themes (client-local)
+  custom_theme: string | null // Id of the active custom theme, null for the built-in colours
   auto_update_ai_backends: boolean // Auto-install CLI updates in background when a new version is detected
   jean_mcp_enabled: boolean // Expose Jean MCP server to spawned CLIs through explicit CLI config entries
   jean_mcp_max_depth: number // Max recursive spawn depth via Jean MCP (default 3)
@@ -2922,6 +2925,8 @@ export const defaultPreferences: AppPreferences = {
   finished_session_animation_enabled: true, // Default: bell ring on finished-sessions badge
   terminal_background: 'auto',
   terminal_background_custom: null,
+  custom_themes: [],
+  custom_theme: null,
   auto_update_ai_backends: true, // Default: auto-update AI backends in the background
   jean_mcp_enabled: true, // Default: enabled
   jean_mcp_max_depth: 3,
