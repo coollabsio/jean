@@ -54,6 +54,7 @@ export interface CustomTheme {
 }
 
 const TOKENS = new Set<string>(THEME_COLOUR_TOKENS)
+const MAX_NAME_LENGTH = 100
 
 // Hex or one un-nested colour function: rules out url(), var() and anything
 // that could end the declaration early.
@@ -94,6 +95,9 @@ export function parseCustomTheme(
   const record = input as Record<string, unknown>
   const name = typeof record.name === 'string' ? record.name.trim() : ''
   if (!name) throw new Error('A theme needs a "name"')
+  if (name.length > MAX_NAME_LENGTH) {
+    throw new Error(`A theme name can be at most ${MAX_NAME_LENGTH} characters`)
+  }
 
   const light = parseColours(record.light, 'light')
   const dark = parseColours(record.dark, 'dark')

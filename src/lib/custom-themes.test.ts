@@ -26,6 +26,10 @@ describe('custom-themes', () => {
   it.each([
     [[], 'A theme must be a JSON object'],
     [{ dark: { background: '#000' } }, 'A theme needs a "name"'],
+    [
+      { name: 'x'.repeat(101), dark: { background: '#000' } },
+      'at most 100 characters',
+    ],
     [{ name: 'x' }, 'A theme needs "light" or "dark" colours'],
     [{ name: 'x', dark: [] }, '"dark" must be an object of colour tokens'],
     [{ name: 'x', dark: { radius: '#000' } }, 'Unknown colour token "radius"'],
