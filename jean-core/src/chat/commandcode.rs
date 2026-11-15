@@ -655,7 +655,6 @@ pub fn execute_one_shot_commandcode(
     working_dir: Option<&str>,
     execution_mode: Option<&str>,
     model: Option<&str>,
-    max_turns: u32,
 ) -> Result<String, String> {
     let binary_path = crate::commandcode_cli::resolve_cli_binary(app);
     if !binary_path.exists() {
@@ -683,7 +682,7 @@ pub fn execute_one_shot_commandcode(
         .arg("--trust")
         .arg("--skip-onboarding")
         .arg("--max-turns")
-        .arg(max_turns.to_string());
+        .arg(DEFAULT_MAX_TURNS.to_string());
     let cli_model = normalize_model_for_cli(model);
     if let Some(cli_model) = &cli_model {
         command.arg("--model").arg(cli_model);

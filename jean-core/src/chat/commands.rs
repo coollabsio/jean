@@ -4939,7 +4939,9 @@ async fn send_chat_message_inner(
                 let max_turns = crate::load_preferences_sync(&thread_app)
                     .ok()
                     .map(|prefs| prefs.commandcode_max_turns)
-                    .unwrap_or(super::commandcode::DEFAULT_MAX_TURNS);
+                    .unwrap_or(super::commandcode::DEFAULT_MAX_TURNS)
+                    // Same bounds as the Settings input; prefs can also be patched via web access.
+                    .clamp(1, 200);
                 match super::commandcode::execute_commandcode_headless(
                     &thread_app,
                     &thread_session_id,

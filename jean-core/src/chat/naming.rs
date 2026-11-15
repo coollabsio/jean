@@ -641,7 +641,6 @@ fn generate_names_commandcode(
         Some(worktree_path.as_ref()),
         Some("plan"),
         Some(model),
-        3,
     )?;
     parse_commandcode_naming_output(&text)
 }

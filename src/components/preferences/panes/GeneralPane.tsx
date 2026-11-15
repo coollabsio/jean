@@ -2431,10 +2431,12 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               <p className="text-sm font-medium">Max agent turns</p>
               <p className="text-xs text-muted-foreground">
                 Command Code stops a run after this many turns. Raise it for
-                long tasks; the CLI default is 30.
+                long tasks. Default: 30.
               </p>
             </div>
             <Input
+              // Remount when the saved value changes (late load, other clients).
+              key={preferences?.commandcode_max_turns ?? 30}
               type="number"
               min={1}
               max={200}
