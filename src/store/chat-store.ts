@@ -3242,9 +3242,11 @@ export const useChatStore = create<ChatUIState>()(
 
       setQueueHeld: (sessionId, held) =>
         set(
-          state => ({
-            queueHeld: { ...state.queueHeld, [sessionId]: held },
-          }),
+          state => {
+            // queue:released fires on every drain start; skip no-op updates.
+            if ((state.queueHeld[sessionId] ?? false) === held) return state
+            return { queueHeld: { ...state.queueHeld, [sessionId]: held } }
+          },
           undefined,
           'setQueueHeld'
         ),

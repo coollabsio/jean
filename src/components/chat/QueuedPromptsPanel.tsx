@@ -177,7 +177,7 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
                 <TooltipContent>
                   The last request failed (usage limit, sign-in, or provider
                   error). These prompts stay queued and send after your next
-                  successful message.
+                  successful message, or use Send now to retry one.
                 </TooltipContent>
               </Tooltip>
             )}

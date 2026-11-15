@@ -1493,7 +1493,20 @@ fn trigger_backend_queue_drain(
     worktree_path: String,
     session_id: String,
 ) {
-    if queue_held_by_provider_rejection(&app, &session_id) {
+    start_backend_queue_drain(app, worktree_id, worktree_path, session_id, false);
+}
+
+/// `release_hold`: an explicit user action ("Send now") retries the queue head
+/// even after a provider rejection. If that send is rejected too, the drain
+/// holds the queue again.
+fn start_backend_queue_drain(
+    app: AppHandle,
+    worktree_id: String,
+    worktree_path: String,
+    session_id: String,
+    release_hold: bool,
+) {
+    if !release_hold && queue_held_by_provider_rejection(&app, &session_id) {
         log::info!("[QueueDrain] holding queue after provider rejection session={session_id}");
         emit_queue_held(&app, &session_id, &worktree_id);
         return;
@@ -1513,7 +1526,14 @@ fn trigger_backend_queue_drain(
     .ok();
 
     tauri::async_runtime::spawn(async move {
-        drain_backend_queue(app, worktree_id, worktree_path, session_id.clone()).await;
+        drain_backend_queue(
+            app,
+            worktree_id,
+            worktree_path,
+            session_id.clone(),
+            release_hold,
+        )
+        .await;
         BACKEND_QUEUE_DRAINING.lock().unwrap().remove(&session_id);
     });
 }
@@ -1523,11 +1543,13 @@ async fn drain_backend_queue(
     worktree_id: String,
     worktree_path: String,
     session_id: String,
+    mut release_hold: bool,
 ) {
     loop {
         // A queued prompt that just failed with a provider rejection (limit,
         // auth, API error) leaves the rest of the queue untouched.
-        if queue_held_by_provider_rejection(&app, &session_id) {
+        if !std::mem::take(&mut release_hold) && queue_held_by_provider_rejection(&app, &session_id)
+        {
             log::info!("[QueueDrain] holding queue mid-drain session={session_id}");
             emit_queue_held(&app, &session_id, &worktree_id);
             return;
@@ -10414,8 +10436,10 @@ pub async fn move_queued_message_front(
         )
         .ok();
 
-        // A session that went idle mid-click should still pick up the promoted message.
-        trigger_backend_queue_drain(app.clone(), worktree_id, worktree_path, session_id);
+        // A session that went idle mid-click should still pick up the promoted
+        // message. "Send now" is an explicit retry, so it releases a queue held
+        // after a provider rejection.
+        start_backend_queue_drain(app.clone(), worktree_id, worktree_path, session_id, true);
     }
 
     Ok(moved)
@@ -11436,13 +11460,9 @@ mod tests {
         super::super::storage::save_metadata(app, &metadata).unwrap();
     }
 
-    #[test]
-    fn provider_rejection_holds_the_queued_prompts() {
-        let _registry = super::super::registry::TEST_LOCK.lock().unwrap();
-        let temp = tempfile::tempdir().unwrap();
-        let app = AppHandle::new(temp.path().to_path_buf(), temp.path().to_path_buf()).unwrap();
-        run_state_session(&app, "held", RunStatus::Cancelled, None);
-        with_existing_metadata_mut(&app, "held", |metadata| {
+    fn held_queue_session(app: &AppHandle, session_id: &str) {
+        run_state_session(app, session_id, RunStatus::Cancelled, None);
+        with_existing_metadata_mut(app, session_id, |metadata| {
             if let Some(run) = metadata.runs.last_mut() {
                 run.provider_rejected = true;
             }
@@ -11451,23 +11471,83 @@ mod tests {
                 .push(serde_json::json!({ "id": "q1", "message": "queued prompt" }));
         })
         .unwrap();
+    }
 
-        trigger_backend_queue_drain(
-            app.clone(),
-            "wt".to_string(),
-            temp.path().to_string_lossy().to_string(),
-            "held".to_string(),
-        );
-
-        let queue_len = super::super::storage::load_metadata(&app, "held")
+    fn queue_len(app: &AppHandle, session_id: &str) -> usize {
+        load_metadata(app, session_id)
             .unwrap()
             .unwrap()
             .queued_messages
-            .len();
+            .len()
+    }
+
+    #[test]
+    fn provider_rejection_holds_the_queued_prompts() {
+        let _registry = super::super::registry::TEST_LOCK.lock().unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let app = AppHandle::new(temp.path().to_path_buf(), temp.path().to_path_buf()).unwrap();
+        held_queue_session(&app, "held");
+        let path = temp.path().to_string_lossy().to_string();
+
+        // Awaiting the drain directly: without the hold it would dequeue q1.
+        runtime.block_on(drain_backend_queue(
+            app.clone(),
+            "wt".to_string(),
+            path.clone(),
+            "held".to_string(),
+            false,
+        ));
         assert_eq!(
-            queue_len, 1,
+            queue_len(&app, "held"),
+            1,
             "a provider rejection must leave the queued prompts untouched"
         );
+
+        trigger_backend_queue_drain(app.clone(), "wt".to_string(), path, "held".to_string());
+        assert!(
+            !BACKEND_QUEUE_DRAINING.lock().unwrap().contains("held"),
+            "a held queue must not start a drain"
+        );
+        assert_eq!(queue_len(&app, "held"), 1);
+    }
+
+    #[test]
+    fn send_now_releases_a_held_queue() {
+        let _registry = super::super::registry::TEST_LOCK.lock().unwrap();
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let temp = tempfile::tempdir().unwrap();
+            let app = AppHandle::new(temp.path().to_path_buf(), temp.path().to_path_buf()).unwrap();
+            held_queue_session(&app, "held-send-now");
+
+            let moved = move_queued_message_front(
+                app.clone(),
+                "wt-missing".to_string(),
+                temp.path().to_string_lossy().to_string(),
+                "held-send-now".to_string(),
+                "q1".to_string(),
+            )
+            .await
+            .unwrap();
+            assert!(moved);
+
+            let mut len = usize::MAX;
+            for _ in 0..100 {
+                len = queue_len(&app, "held-send-now");
+                if len == 0 {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+            assert_eq!(len, 0, "Send now must retry the head of a held queue");
+        });
     }
 
     #[test]
