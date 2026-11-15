@@ -5005,6 +5005,12 @@ async fn send_chat_message_inner(
                         &thread_worktree_id,
                         thread_include_recap,
                     );
+                let max_turns = crate::load_preferences_sync(&thread_app)
+                    .ok()
+                    .map(|prefs| prefs.commandcode_max_turns)
+                    .unwrap_or(super::commandcode::DEFAULT_MAX_TURNS)
+                    // Same bounds as the Settings input; prefs can also be patched via web access.
+                    .clamp(1, 200);
                 match super::commandcode::execute_commandcode_headless(
                     &thread_app,
                     &thread_session_id,
@@ -5016,6 +5022,7 @@ async fn send_chat_message_inner(
                     &thread_message,
                     Some(&system_context),
                     thread_commandcode_resume_id.as_deref(),
+                    max_turns,
                     Some(make_pid_callback()),
                 ) {
                     Ok((_pid, response)) => Ok((

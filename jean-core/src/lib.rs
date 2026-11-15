@@ -457,6 +457,8 @@ pub struct AppPreferences {
     pub jean_mcp_max_depth: u32, // Max recursive spawn depth via Jean MCP (default 3)
     #[serde(default = "default_jean_mcp_rate_limit")]
     pub jean_mcp_rate_limit_per_minute: u32, // Per-source rate limit for session-spawning tools (default 20)
+    #[serde(default = "default_commandcode_max_turns")]
+    pub commandcode_max_turns: u32, // Max agent turns per Command Code run (default 30)
     #[serde(default = "default_agent_browser_enabled")]
     pub agent_browser_enabled: bool, // Install agent-browser and add its MCP server to CLI configs (default true)
     /// Hostname for new browser tabs and port open buttons when a jean.json
@@ -484,6 +486,10 @@ fn default_jean_mcp_max_depth() -> u32 {
 
 fn default_jean_mcp_rate_limit() -> u32 {
     20
+}
+
+fn default_commandcode_max_turns() -> u32 {
+    30
 }
 
 fn default_true() -> Option<bool> {
@@ -3652,6 +3658,7 @@ impl Default for AppPreferences {
             jean_mcp_enabled: default_jean_mcp_enabled(),
             jean_mcp_max_depth: default_jean_mcp_max_depth(),
             jean_mcp_rate_limit_per_minute: default_jean_mcp_rate_limit(),
+            commandcode_max_turns: default_commandcode_max_turns(),
             agent_browser_enabled: default_agent_browser_enabled(),
             browser_default_host: None,
         }
