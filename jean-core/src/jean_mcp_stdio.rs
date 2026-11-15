@@ -33,36 +33,33 @@ fn response_timeout(tool_name: &str) -> Duration {
 }
 
 pub fn run_stdio_server() -> Result<(), String> {
-    let stdin = std::io::stdin();
-    let mut stdout = std::io::stdout();
+    serve(std::io::stdin().lock(), std::io::stdout())
+}
 
-    for line in stdin.lock().lines() {
+fn serve(input: impl BufRead, mut output: impl Write) -> Result<(), String> {
+    for line in input.lines() {
         let line = line.map_err(|e| format!("Failed to read stdin: {e}"))?;
         if line.trim().is_empty() {
             continue;
         }
-        let response = handle_message(&line);
-        if let Some(response) = response {
-            // The client may close its pipes at any time (timeout, abandon,
-            // disconnect). That is a normal end of the session, not a failure:
-            // stop quietly instead of unwinding an error through a process
-            // built with `panic = "abort"` (issue #894).
-            if write_response(&mut stdout, &response).is_err() {
-                return Ok(());
-            }
+        let Some(response) = handle_message(&line) else {
+            continue;
+        };
+        // A client that closes its end (timeout, abandoned request) ends the
+        // session; that is not a failure (issue #894).
+        match write_response(&mut output, &response) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => return Ok(()),
+            Err(e) => return Err(format!("Failed to write stdout: {e}")),
         }
     }
 
     Ok(())
 }
 
-/// Serialize and write one JSON-RPC response. Kept separate so the
-/// closed-pipe path is unit-testable.
-fn write_response<W: Write>(stdout: &mut W, response: &Value) -> std::io::Result<()> {
-    let encoded = serde_json::to_string(response)
-        .map_err(|error| std::io::Error::other(error.to_string()))?;
-    writeln!(stdout, "{encoded}")?;
-    stdout.flush()
+fn write_response(output: &mut impl Write, response: &Value) -> std::io::Result<()> {
+    writeln!(output, "{response}")?;
+    output.flush()
 }
 
 fn handle_message(line: &str) -> Option<Value> {
@@ -209,7 +206,7 @@ mod tests {
     use serde_json::json;
     use std::io::{self, Write};
 
-    use super::{parent_error_message, write_response};
+    use super::{parent_error_message, serve};
 
     #[test]
     fn parent_error_message_handles_plain_error_string() {
@@ -243,17 +240,20 @@ mod tests {
         }
     }
 
+    const PING: &[u8] = b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}\n";
+
     #[test]
-    fn closed_stdout_is_a_clean_disconnect() {
-        assert!(write_response(&mut ClosedPipe, &json!({"jsonrpc": "2.0"})).is_err());
+    fn closed_stdout_ends_session_cleanly() {
+        assert_eq!(serve(PING, ClosedPipe), Ok(()));
     }
 
     #[test]
-    fn writes_one_json_line() {
+    fn writes_one_json_line_per_response() {
         let mut out = Vec::new();
-        write_response(&mut out, &json!({"jsonrpc": "2.0", "id": 1})).unwrap();
+        serve(PING, &mut out).unwrap();
         let text = String::from_utf8(out).unwrap();
-        assert!(text.ends_with('\n'));
-        assert!(text.contains("\"jsonrpc\":\"2.0\""));
+        assert_eq!(text.lines().count(), 1);
+        let response: serde_json::Value = serde_json::from_str(text.trim_end()).unwrap();
+        assert_eq!(response["id"], 1);
     }
 }
