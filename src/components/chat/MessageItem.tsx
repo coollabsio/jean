@@ -1,7 +1,6 @@
 import { memo, useCallback, useMemo, useState } from 'react'
 import { AgentMessageFromRow } from '@/components/agents/AgentMessageLink'
 import { parseAgentSentMessage } from '@/components/agents/agent-messages'
-import { Copy } from '@/components/icons/reicon'
 import { toast } from 'sonner'
 import {
   ReplyBubble,
@@ -21,6 +20,12 @@ import { normalizePath } from '@/lib/path-utils'
 import { copyToClipboard } from '@/lib/clipboard'
 import { Markdown } from '@/components/ui/markdown'
 import { MessageThreadContextMenu } from './message-thread-context-menu'
+import {
+  CopyIconButton,
+  findTurnPrompt,
+  USER_HOVER_REVEAL,
+  USER_TAP_HIDDEN,
+} from './user-prompt-chrome'
 import type {
   ChatMessage,
   Question,
@@ -45,17 +50,11 @@ import { FileMentionBadge } from './FileMentionBadge'
 import { SkillBadge } from './SkillBadge'
 import { ToolCallsDisplay } from './ToolCallsDisplay'
 import { ExitPlanModeButton } from './ExitPlanModeButton'
-import { Button } from '@/components/ui/button'
 import {
   CheckpointTurnRestoreButton,
   isUserTurnFinished,
   turnHasFileEdits,
 } from './CheckpointTurnRestoreButton'
-import {
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-} from '@/components/ui/tooltip'
 import { ThinkingBlock } from './ThinkingBlock'
 import { SteeredPromptGroup } from './SteeredPromptGroup'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
@@ -88,39 +87,8 @@ import { useUIStore } from '@/store/ui-store'
 
 const EMPTY_PATHS: string[] = []
 
-// Per-message chrome (settings, copy, restore, duration) appears on hover or
-// keyboard focus. Touch devices have no hover, so it stays visible there.
-const USER_HOVER_REVEAL =
-  'transition-opacity [@media(pointer:fine)]:opacity-0 [@media(pointer:fine)]:group-hover:opacity-100 [@media(pointer:fine)]:group-focus-within:opacity-100'
-// Touch devices have no hover: details stay hidden until the prompt is tapped
-const USER_TAP_HIDDEN = '[@media(pointer:coarse)]:hidden'
 const ASSISTANT_HOVER_REVEAL =
   'transition-opacity [@media(pointer:fine)]:opacity-0 [@media(pointer:fine)]:group-hover/message:opacity-100 [@media(pointer:fine)]:group-focus-within/message:opacity-100'
-
-function CopyIconButton({
-  label,
-  onClick,
-}: {
-  label: string
-  onClick: () => void
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label={label}
-          onClick={onClick}
-          className="text-muted-foreground/40 hover:text-muted-foreground"
-        >
-          <Copy className="size-3.5" />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
-  )
-}
 
 interface MessageItemProps {
   /** The message to render */
@@ -399,6 +367,17 @@ export const MessageItem = memo(function MessageItem({
     if ((e.target as HTMLElement).closest('a, button')) return
     setShowUserDetails(prev => !prev)
   }, [])
+
+  // Steered prompts inside this reply show the settings of the turn's prompt
+  const turnPrompt = useMemo(
+    () =>
+      message.role === 'assistant' &&
+      getMessages &&
+      message.content_blocks?.some(block => block.type === 'user_input')
+        ? findTurnPrompt(getMessages(), messageIndex)
+        : undefined,
+    [message.role, message.content_blocks, getMessages, messageIndex]
+  )
 
   const userTurnHasFileEdits = useMemo(() => {
     if (message.role !== 'user' || !getMessages) return false
@@ -759,6 +738,7 @@ export const MessageItem = memo(function MessageItem({
                               <SteeredPromptGroup
                                 texts={item.texts}
                                 bubble={hideSettingsBadges}
+                                settings={turnPrompt}
                                 worktreePath={worktreePath}
                                 serverId={
                                   messageServerId === 'local'

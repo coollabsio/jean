@@ -11,6 +11,11 @@ vi.mock('@/lib/transport', async importOriginal => ({
   ...(await importOriginal<typeof transport>()),
   invoke: vi.fn(),
 }))
+vi.mock('@/lib/clipboard', () => ({
+  copyHtmlToClipboard: vi.fn(async () => undefined),
+  copyToClipboard: vi.fn(async () => undefined),
+}))
+import { copyHtmlToClipboard } from '@/lib/clipboard'
 import type {
   ChatMessage,
   Question,
@@ -653,6 +658,34 @@ describe('CompactMessageList', () => {
     expect(screen.getByText('check this')).toBeVisible()
     expect(screen.getByAltText('Attached image 1')).toBeVisible()
     expect(screen.queryByText(/Image attached:/)).not.toBeInTheDocument()
+  })
+
+  it('gives steered prompts the copy button and turn settings of normal prompts', async () => {
+    renderCompact([
+      message('user-1', 'user', 100, 'do the work', {
+        model: 'codex/gpt-5.6',
+        execution_mode: 'yolo',
+      }),
+      message('assistant-1', 'assistant', 104, 'Done', {
+        content_blocks: [
+          { type: 'user_input', text: 'first' },
+          { type: 'user_input', text: 'second' },
+          { type: 'text', text: 'Done' },
+        ],
+      }),
+    ])
+
+    const group = screen.getByText('first').closest('.group') as HTMLElement
+    expect(within(group).getByText(/Full access/)).toBeInTheDocument()
+
+    fireEvent.click(within(group).getByRole('button', { name: 'Copy prompt' }))
+    await waitFor(() =>
+      expect(copyHtmlToClipboard).toHaveBeenCalledWith(
+        expect.stringContaining('data-jean-prompt'),
+        'first\n\nsecond',
+        'first\n\nsecond'
+      )
+    )
   })
 
   it('keeps steered prompts in chronological order around activity', () => {

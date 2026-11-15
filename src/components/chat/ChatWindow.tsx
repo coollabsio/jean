@@ -134,7 +134,6 @@ import {
   isPlanToolCall,
   normalizeCodexQuestions,
 } from '@/types/chat'
-import { getFilename, normalizePath } from '@/lib/path-utils'
 import { registerChatComposer } from '@/lib/chat-composer-metrics'
 import { cn } from '@/lib/utils'
 import { MermaidBlock } from '@/components/ui/markdown'
@@ -201,11 +200,8 @@ import { ErrorBanner } from './ErrorBanner'
 import type { MessageListHandle } from './message-list-handle'
 import { RecentContexts } from './RecentContexts'
 import {
-  buildPromptAttachmentMetadata,
-  encodePromptAttachmentMetadata,
   isAgentUpdateTurn,
   splitAgentUpdateTurns,
-  stripAllMarkers,
 } from './message-content-utils'
 import { useUIStore } from '@/store/ui-store'
 import { buildMcpConfigJson } from '@/services/mcp'
@@ -221,7 +217,7 @@ import {
   providerSupportsAdaptiveThinking,
   targetUsesEffort,
 } from '@/lib/model-utils'
-import { copyToClipboard, copyHtmlToClipboard } from '@/lib/clipboard'
+import { copyPromptToClipboard, findTurnPrompt } from './user-prompt-chrome'
 import {
   useClaudeCliAuth,
   useClaudeCliStatus,
@@ -2470,37 +2466,10 @@ const ChatWindowContent = memo(function ChatWindowContent({
 
   // Copy a sent user message to the clipboard with attachment metadata
   // When pasted back, ChatInput detects the custom format and restores attachments
-  const handleCopyToInput = useCallback(async (message: ChatMessage) => {
-    // Extract clean text (without attachment markers)
-    const cleanText = stripAllMarkers(message.content)
-
-    const metadata = buildPromptAttachmentMetadata(message.content, path => {
-      const parts = normalizePath(path).split('/')
-      const skillsIdx = parts.findIndex(p => p === 'skills')
-      return skillsIdx >= 0 && parts[skillsIdx + 1]
-        ? (parts[skillsIdx + 1] ?? getFilename(path))
-        : getFilename(path)
-    })
-    const encodedMetadata = encodePromptAttachmentMetadata(metadata)
-    // Write to clipboard: plain text + HTML with embedded metadata. If rich
-    // clipboard writes are unavailable, fall back to clean plain text so normal
-    // external paste targets never receive Jean metadata comments.
-    const escapedCleanText = cleanText
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-    const htmlContent = `<span data-jean-prompt="${encodedMetadata}">${escapedCleanText}</span>`
-
-    try {
-      await copyHtmlToClipboard(htmlContent, cleanText, cleanText)
-      toast.success('Prompt copied')
-    } catch {
-      // User-safe fallback: avoid leaking Jean metadata comments into normal
-      // external paste targets when rich clipboard writes are unavailable.
-      await copyToClipboard(cleanText)
-      toast.success('Prompt copied')
-    }
-  }, [])
+  const handleCopyToInput = useCallback(
+    (message: ChatMessage) => copyPromptToClipboard(message.content),
+    []
+  )
 
   // Window event listeners (focus, plan, git-diff, cancel, create-session, plan approval, etc.)
   useChatWindowEvents({
@@ -2660,6 +2629,10 @@ const ChatWindowContent = memo(function ChatWindowContent({
   )
   const isUpdateTurnStreaming =
     isSending && isAgentUpdateTurn(rawSessionMessages)
+  const streamingTurnPrompt = useMemo(
+    () => findTurnPrompt(rawSessionMessages, rawSessionMessages.length),
+    [rawSessionMessages]
+  )
 
   // Pre-calculate last plan message index for approve button logic
   const lastPlanMessageIndex = useMemo(() => {
@@ -3062,6 +3035,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                         areQuestionsSkipped={
                                           areQuestionsSkipped
                                         }
+                                        turnPrompt={streamingTurnPrompt}
                                       />
                                     )}
                                   {quietStreamingParts.length > 0 &&

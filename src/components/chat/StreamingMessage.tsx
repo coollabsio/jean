@@ -4,6 +4,7 @@ import { WorkingWaveform } from '@/components/ui/status-indicator'
 import { toast } from 'sonner'
 import { Markdown } from '@/components/ui/markdown'
 import type {
+  ChatMessage,
   ToolCall,
   ContentBlock,
   Question,
@@ -86,6 +87,8 @@ interface StreamingMessageProps {
   ) => QuestionAnswer[] | undefined
   /** Check if questions are being skipped for this session */
   areQuestionsSkipped: (sessionId: string) => boolean
+  /** Prompt that started this turn; steered prompts show its settings */
+  turnPrompt?: ChatMessage
 }
 
 /**
@@ -104,6 +107,7 @@ export const StreamingMessage = memo(function StreamingMessage({
   isQuestionAnswered,
   getSubmittedAnswers,
   areQuestionsSkipped,
+  turnPrompt,
 }: StreamingMessageProps) {
   const serverId = parseServerResourceKey(sessionId)?.serverId
   const displayBlocks = useMemo(
@@ -303,6 +307,7 @@ export const StreamingMessage = memo(function StreamingMessage({
                                     return (
                                       <SteeredPromptGroup
                                         texts={item.texts}
+                                        settings={turnPrompt}
                                         worktreePath={worktreePath}
                                         serverId={serverId}
                                       />

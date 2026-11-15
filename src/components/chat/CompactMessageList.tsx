@@ -48,6 +48,7 @@ import {
   secretRequest,
 } from './secret-request'
 import { SteeredPromptGroup } from './SteeredPromptGroup'
+import { findTurnPrompt } from './user-prompt-chrome'
 import { parseServerResourceKey } from '@/lib/server-resource'
 import {
   assistantTextParts,
@@ -1171,6 +1172,7 @@ export const CompactMessageList = memo(
                   <SteeredPromptGroup
                     texts={item.texts}
                     bubble={hideToolActivity}
+                    settings={findTurnPrompt(messages, item.globalIndex)}
                     worktreePath={worktreePath}
                     serverId={
                       parseServerResourceKey(worktreeId ?? sessionId)?.serverId

@@ -359,6 +359,7 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
                 key={key}
                 texts={segment.texts}
                 bubble={bubble}
+                settings={props.turnPrompt}
                 worktreePath={worktreePath}
                 serverId={serverId}
               />
@@ -396,6 +397,7 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
         <SteeredPromptGroup
           texts={steeredTexts}
           bubble={bubble}
+          settings={props.turnPrompt}
           worktreePath={worktreePath}
           serverId={serverId}
         />
@@ -421,6 +423,7 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
       <SteeredPromptGroup
         texts={steeredTexts}
         bubble={bubble}
+        settings={props.turnPrompt}
         worktreePath={worktreePath}
         serverId={serverId}
       />
