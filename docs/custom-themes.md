@@ -6,9 +6,12 @@ out keep Jean's built-in values, so a theme can be as small as one colour.
 
 ## Importing a theme
 
-Settings → Appearance → **Custom theme** → **Import**, then pick a `.json`
-file. The theme applies straight away and the dropdown switches between
-imported themes and **None** (the built-in colours). Importing a file with the
+Settings → Appearance → **Custom theme** → **Import**, then pick one or more
+`.json` files: Jean themes (see [Format](#format)) or VS Code colour themes
+(see [VS Code themes](#vs-code-themes)). If some files fail, Jean imports the
+others and shows one error for each failed file. The last imported theme
+applies straight away, and the dropdown switches between imported themes and
+**None** (the built-in colours). Importing a file with the
 same `name` again replaces the earlier copy, which makes it easy to iterate on
 a theme.
 
@@ -55,6 +58,34 @@ own list.
   function: `rgb()`, `rgba()`, `hsl()`, `hsla()`, `hwb()`, `lab()`, `lch()`,
   `oklab()`, `oklch()` or `color()`. `var()`, `url()` and nested functions are
   rejected.
+
+## VS Code themes
+
+A file with a `colors` object is a VS Code colour theme. Jean converts it on
+import:
+
+- **Light or dark.** A `type` that contains `light` (`light`, `hcLight`) gives a
+  light theme; any other `type` gives a dark theme. Without `type`, the
+  luminance of `editor.background` decides.
+- **Colours.** Jean maps workbench colours such as `editor.background`,
+  `sideBar.background`, `button.background` and `focusBorder` to its tokens.
+  The full table is `VSCODE_COLOUR_MAP` in `src/lib/vscode-themes.ts`. Tokens
+  with no match keep Jean's built-in values.
+- **Alpha.** Colours with alpha (`#rrggbbaa`, `#rgba`) are flattened onto
+  `editor.background`, so every converted colour is opaque `#rrggbb`. Values
+  that are not hex colours are skipped.
+- **JSONC.** VS Code files can have comments and trailing commas. Jean
+  accepts them in VS Code files only; Jean theme files must be strict JSON.
+- **Pairs.** Select the light and the dark file of one family together (for
+  example `Solarized (light)` and `Solarized (dark)`) to get one theme with
+  both modes. Jean pairs two files when their names are the same after it
+  removes the words "light" and "dark" and brackets. The paired theme gets
+  that shorter name (`Solarized`).
+- **Not supported:** `tokenColors` and `semanticTokenColors` (code
+  highlighting keeps the **Syntax theme**), and `include` (a theme that
+  extends another file is converted from its own `colors` only).
+
+A file without `name` gets its file name, without `-color-theme.json`.
 
 ## Tokens
 

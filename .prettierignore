@@ -21,3 +21,6 @@ package-lock.json
 
 # Logs
 *.log
+
+# Unmodified third-party theme fixtures
+src/lib/__fixtures__/
