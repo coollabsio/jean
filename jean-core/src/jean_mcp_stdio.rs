@@ -136,47 +136,62 @@ fn proxy_to_parent(
     response_timeout: Duration,
     request: Value,
 ) -> Result<Value, String> {
-    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-    use tokio::net::windows::named_pipe::ClientOptions;
-    use tokio::runtime::Builder;
-    use tokio::time::timeout;
-
     let encoded = serde_json::to_string(&request)
         .map_err(|e| format!("Failed to encode Jean MCP pipe request: {e}"))?;
-    let runtime = Builder::new_current_thread()
-        .enable_io()
-        .enable_time()
-        .build()
-        .map_err(|e| format!("Failed to create Jean MCP pipe runtime: {e}"))?;
 
-    let response = runtime.block_on(async {
-        let mut pipe = ClientOptions::new()
-            .open(socket)
-            .map_err(|e| format!("Failed to connect Jean MCP named pipe {socket}: {e}"))?;
-        timeout(Duration::from_secs(30), async {
-            pipe.write_all(encoded.as_bytes()).await?;
-            pipe.write_all(b"\n").await?;
-            pipe.flush().await
-        })
-        .await
-        .map_err(|_| "Timed out writing Jean MCP pipe request".to_string())?
-        .map_err(|e| format!("Failed to write Jean MCP pipe request: {e}"))?;
-
-        let mut reader = BufReader::new(pipe);
-        let mut line = String::new();
-        timeout(response_timeout, reader.read_line(&mut line))
-            .await
-            .map_err(|_| "Timed out reading Jean MCP pipe response".to_string())?
-            .map_err(|e| format!("Failed to read Jean MCP pipe response: {e}"))?;
-
-        serde_json::from_str::<Value>(&line)
-            .map_err(|e| format!("Failed to parse Jean MCP pipe response: {e}"))
+    // `run_server()` serves stdio inside a Tokio runtime. Starting or dropping
+    // another runtime on that thread panics, so use a separate thread.
+    let response = std::thread::scope(|scope| {
+        scope
+            .spawn(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_io()
+                    .enable_time()
+                    .build()
+                    .map_err(|e| format!("Failed to create Jean MCP pipe runtime: {e}"))?
+                    .block_on(pipe_round_trip(socket, &encoded, response_timeout))
+            })
+            .join()
+            .map_err(|_| "Jean MCP pipe thread panicked".to_string())?
     })?;
 
     if let Some(error) = parent_error_message(&response) {
         return Err(error);
     }
     Ok(response.get("result").cloned().unwrap_or(Value::Null))
+}
+
+#[cfg(windows)]
+async fn pipe_round_trip(
+    socket: &str,
+    encoded: &str,
+    response_timeout: Duration,
+) -> Result<Value, String> {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::windows::named_pipe::ClientOptions;
+    use tokio::time::timeout;
+
+    let mut pipe = ClientOptions::new()
+        .open(socket)
+        .map_err(|e| format!("Failed to connect Jean MCP named pipe {socket}: {e}"))?;
+    timeout(Duration::from_secs(30), async {
+        pipe.write_all(encoded.as_bytes()).await?;
+        pipe.write_all(b"\n").await?;
+        pipe.flush().await
+    })
+    .await
+    .map_err(|_| "Timed out writing Jean MCP pipe request".to_string())?
+    .map_err(|e| format!("Failed to write Jean MCP pipe request: {e}"))?;
+
+    let mut reader = BufReader::new(pipe);
+    let mut line = String::new();
+    timeout(response_timeout, reader.read_line(&mut line))
+        .await
+        .map_err(|_| "Timed out reading Jean MCP pipe response".to_string())?
+        .map_err(|e| format!("Failed to read Jean MCP pipe response: {e}"))?;
+
+    serde_json::from_str::<Value>(&line)
+        .map_err(|e| format!("Failed to parse Jean MCP pipe response: {e}"))
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -255,5 +270,53 @@ mod tests {
         assert_eq!(text.lines().count(), 1);
         let response: serde_json::Value = serde_json::from_str(text.trim_end()).unwrap();
         assert_eq!(response["id"], 1);
+    }
+
+    /// Regression: the Windows pipe proxy must work inside a Tokio runtime.
+    #[cfg(windows)]
+    #[test]
+    fn proxy_to_parent_works_inside_a_tokio_runtime() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        use tokio::net::windows::named_pipe::ServerOptions;
+
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let pipe_name = format!(r"\\.\pipe\jean-mcp-test-{}", std::process::id());
+        let mut server = {
+            let _guard = runtime.enter();
+            ServerOptions::new()
+                .first_pipe_instance(true)
+                .create(&pipe_name)
+                .unwrap()
+        };
+        runtime.spawn(async move {
+            server.connect().await.unwrap();
+            let mut line = String::new();
+            BufReader::new(&mut server)
+                .read_line(&mut line)
+                .await
+                .unwrap();
+            let request: serde_json::Value = serde_json::from_str(&line).unwrap();
+            let response = json!({ "result": { "echo": request["name"] } });
+            server
+                .write_all(format!("{response}\n").as_bytes())
+                .await
+                .unwrap();
+        });
+
+        // Same shape as production: `run_server()` is driven by `block_on`.
+        let result = runtime
+            .block_on(async {
+                super::proxy_to_parent(
+                    &pipe_name,
+                    std::time::Duration::from_secs(10),
+                    json!({ "name": "list_projects" }),
+                )
+            })
+            .unwrap();
+
+        assert_eq!(result, json!({ "echo": "list_projects" }));
     }
 }
