@@ -563,6 +563,10 @@ export default function useStreamingEvents({
           .getState()
           .consumeStreamingReplayText(session_id, content) ?? ''
       if (!replayFilteredContent) return
+      // Output means the provider accepted the turn: the held queue can run.
+      if (currentState.queueHeld[session_id]) {
+        currentState.setQueueHeld(session_id, false)
+      }
       // Ensure session is marked as sending (recovers state after refresh)
       addSendingSession(session_id, undefined, false)
       // Accumulate into buffer

@@ -48,6 +48,7 @@ describe('QueuedPromptsPanel', () => {
     onSendNow?: (sessionId: string, messageId: string) => void
     onEdit?: (sessionId: string, messageId: string) => void
     onCancelEdit?: (sessionId: string) => void
+    isPaused?: boolean
   }) => {
     const onRemove = overrides?.onRemove ?? vi.fn()
     const onSendNow = overrides?.onSendNow ?? vi.fn()
@@ -58,6 +59,7 @@ describe('QueuedPromptsPanel', () => {
         sessionId="session-1"
         messages={overrides?.messages ?? messages}
         isSessionBusy={false}
+        isPaused={overrides?.isPaused}
         onRemove={onRemove}
         onSendNow={onSendNow}
         onEdit={onEdit}
@@ -75,6 +77,21 @@ describe('QueuedPromptsPanel', () => {
     expect(screen.getByText('First prompt')).toBeInTheDocument()
     expect(screen.getByText('Second prompt')).toBeInTheDocument()
     expect(screen.getByText('Third prompt')).toBeInTheDocument()
+  })
+
+  it('marks the queue paused after a provider rejection', () => {
+    renderPanel({ isPaused: true })
+
+    expect(screen.getByText('Paused')).toBeInTheDocument()
+    // The queued prompts stay visible and untouched while paused.
+    expect(screen.getByText('First prompt')).toBeInTheDocument()
+    expect(screen.getByText('Third prompt')).toBeInTheDocument()
+  })
+
+  it('does not show the paused badge while the queue is draining', () => {
+    renderPanel()
+
+    expect(screen.queryByText('Paused')).not.toBeInTheDocument()
   })
 
   it('labels a queued session update by its sender', () => {
