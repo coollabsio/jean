@@ -679,6 +679,33 @@ describe('useScrollManagement session scroll retention (issue #594)', () => {
     expect(viewport.scrollTop).toBe(4500)
   })
 
+  it('follows the tail when a prompt is appended outside the composer', () => {
+    const all = makeMessages(4)
+    const { viewport, getByTestId, setScrollHeight, rerenderSession } =
+      setupHook({
+        isSending: false,
+        activeSessionId: 'session-a',
+        messages: all,
+        scrollHeight: 2000,
+      })
+
+    fireEvent.wheel(viewport, { deltaY: -100 })
+    viewport.scrollTop = 500
+    fireEvent.scroll(viewport)
+    expect(getByTestId('is-at-bottom').textContent).toBe('false')
+
+    // Magic menu prompt: a user message appended without markAtBottom().
+    setScrollHeight(2600)
+    act(() => {
+      rerenderSession({
+        msgs: [...all, { ...all[0]!, id: 'magic', content: 'Commit' }],
+      })
+    })
+
+    expect(viewport.scrollTop).toBe(2600)
+    expect(getByTestId('is-at-bottom').textContent).toBe('true')
+  })
+
   it('does not overwrite a snapshot while content is not ready', () => {
     saveSessionScrollState('session-a', {
       scrollTop: 800,

@@ -9,6 +9,7 @@ import {
 import type { RefObject } from 'react'
 import type { MessageListHandle } from '../message-list-handle'
 import type { ChatMessage } from '@/types/chat'
+import { isAgentUpdateMessage } from '../message-content-utils'
 import { useIsMobile } from '@/hooks/use-mobile'
 import {
   getDefaultVisibleCount,
@@ -1026,6 +1027,26 @@ export function useScrollManagement({
       true
     )
   }, [rememberScroll])
+
+  // Every prompt the user adds appends a user message: composer, Magic menu
+  // commands, approvals, queue drain. Follow the tail for all of them, not
+  // only for composer sends that call markAtBottom first. Child layout effects
+  // run before this one, so pin the viewport here directly.
+  const prevLastMessageIdRef = useRef(messages?.at(-1)?.id)
+  useLayoutEffect(() => {
+    const prevLastId = prevLastMessageIdRef.current
+    const last = messages?.at(-1)
+    prevLastMessageIdRef.current = last?.id
+    if (!last || last.role !== 'user' || last.id === prevLastId) return
+    // Only a real append (previous tail still present), not a session switch
+    // or an optimistic message id swap.
+    if (!prevLastId || !messages?.some(m => m.id === prevLastId)) return
+    // Agent update prompts are hidden from the chat transcript.
+    if (isAgentUpdateMessage(last.content)) return
+    const viewport = scrollViewportRef.current
+    if (viewport) scrollToTail(viewport)
+    markAtBottom()
+  }, [messages, markAtBottom])
 
   // Begin a user-initiated keyboard scroll.
   // Cancels any pending auto-scroll timeout AND keeps isAutoScrollingRef=true
