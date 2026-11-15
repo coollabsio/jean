@@ -36,8 +36,9 @@ import { toast } from 'sonner'
 import { Input } from '@/components/ui/input'
 import { isValidHex } from '@/lib/terminal-theme'
 import { Button } from '@/components/ui/button'
-import { parseCustomTheme, serializeCustomTheme } from '@/lib/custom-themes'
+import { serializeCustomTheme } from '@/lib/custom-themes'
 import { copyToClipboard } from '@/lib/clipboard'
+import { importThemeFiles } from '@/lib/vscode-themes'
 import { readClientPreferences } from '@/lib/client-preferences'
 import { useClientPreferences } from '@/hooks/useClientPreferences'
 import { useClientZoom } from '@/lib/client-zoom'
@@ -118,23 +119,37 @@ export const AppearancePane: React.FC = () => {
   const themeFileInputRef = useRef<HTMLInputElement>(null)
 
   const handleCustomThemeImport = useCallback(
-    async (file: File) => {
-      try {
-        const imported = parseCustomTheme(JSON.parse(await file.text()))
-        const { custom_themes } = readClientPreferences()
-        // Re-importing a theme with the same name updates it in place.
-        const existing = custom_themes.find(t => t.name === imported.name)
-        const theme = existing ? { ...imported, id: existing.id } : imported
-        updateClientPreferences({
-          custom_themes: existing
+    async (files: File[]) => {
+      const { themes, errors } = importThemeFiles(
+        await Promise.all(
+          files.map(async file => ({
+            fileName: file.name,
+            text: await file.text(),
+          }))
+        )
+      )
+      if (themes.length > 0) {
+        let { custom_themes } = readClientPreferences()
+        let selected = ''
+        for (const imported of themes) {
+          // Re-importing a theme with the same name updates it in place.
+          const existing = custom_themes.find(t => t.name === imported.name)
+          const theme = existing ? { ...imported, id: existing.id } : imported
+          custom_themes = existing
             ? custom_themes.map(t => (t.id === existing.id ? theme : t))
-            : [...custom_themes, theme],
-          custom_theme: theme.id,
-        })
-        toast.success(`Imported theme "${theme.name}"`)
-      } catch (error) {
+            : [...custom_themes, theme]
+          selected = theme.id
+        }
+        updateClientPreferences({ custom_themes, custom_theme: selected })
+        toast.success(
+          themes.length === 1
+            ? `Imported theme "${themes[0]?.name}"`
+            : `Imported ${themes.length} themes`
+        )
+      }
+      if (errors.length > 0) {
         toast.error('Could not import theme', {
-          description: getErrorMessage(error),
+          description: errors.join('\n'),
         })
       }
     },
@@ -363,7 +378,7 @@ export const AppearancePane: React.FC = () => {
 
           <InlineField
             label="Custom theme"
-            description="Imported JSON theme that recolours light and dark mode"
+            description="Imported Jean or VS Code theme that recolours light and dark mode"
           >
             <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
               <Select
@@ -389,12 +404,13 @@ export const AppearancePane: React.FC = () => {
               <input
                 ref={themeFileInputRef}
                 type="file"
-                accept="application/json,.json"
+                accept="application/json,.json,.jsonc"
+                multiple
                 className="hidden"
                 onChange={e => {
-                  const file = e.target.files?.[0]
+                  const files = [...(e.target.files ?? [])]
                   e.target.value = ''
-                  if (file) void handleCustomThemeImport(file)
+                  if (files.length > 0) void handleCustomThemeImport(files)
                 }}
               />
               <Button
