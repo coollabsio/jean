@@ -1,6 +1,5 @@
 import { useInstalledBackends } from '@/hooks/useInstalledBackends'
 import { useSettingsTargetServerId } from '@/lib/settings-target'
-import { CliproxyBackendAccountAction } from '../CliproxyAccountLogin'
 import React, {
   useState,
   useCallback,
@@ -21,6 +20,7 @@ import {
   Play,
 } from '@/components/icons/reicon'
 import { Label } from '@/components/ui/label'
+import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Button } from '@/components/ui/button'
@@ -236,7 +236,10 @@ import {
 import { isWindows, openExternal } from '@/lib/platform'
 import { isNewerVersion } from '@/lib/version-utils'
 import { cn } from '@/lib/utils'
-import { getPathUpdateAction } from '@/lib/cli-update'
+import {
+  getPathUpdateAction,
+  resolveCliPathUpdateAction,
+} from '@/lib/cli-update'
 import { SettingsSection } from '../SettingsSection'
 import { InlineField } from '../InlineField'
 import { CliAuthActions } from '../CliAuthActions'
@@ -1920,7 +1923,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               authenticated={!!claudeAuth?.authenticated}
               onSignIn={handleClaudeLogin}
               onSignInAgain={handleClaudeRelogin}
-              extra={<CliproxyBackendAccountAction provider="claude" />}
             />
           }
         >
@@ -2012,11 +2014,11 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   hasUpdate={ghHasUpdate}
                   latestVersion={ghLatestStable?.version}
                   onUpdate={() => {
-                    const action = getPathUpdateAction(
+                    const action = resolveCliPathUpdateAction(
+                      'gh',
                       ghStatus?.path,
                       ghPathDetection?.package_manager,
-                      'gh',
-                      null
+                      ghLatestStable?.version
                     )
                     if (action) {
                       openCliLoginModal('gh', action[0], action[1], 'update')
@@ -2181,7 +2183,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               authenticated={!!codexAuth?.authenticated}
               onSignIn={handleCodexLogin}
               onSignInAgain={handleCodexRelogin}
-              extra={<CliproxyBackendAccountAction provider="codex" />}
             />
           }
         >
@@ -2420,6 +2421,42 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 {commandCodeAuthMessage}
               </p>
             )}
+        </SettingsSection>
+      )}
+
+      {hasBackend() && scope === 'commandcode' && (
+        <SettingsSection title="Runs" anchorId="pref-commandcode-section-runs">
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-0.5">
+              <p className="text-sm font-medium">Max agent turns</p>
+              <p className="text-xs text-muted-foreground">
+                Command Code stops a run after this many turns. Raise it for
+                long tasks. Default: 30.
+              </p>
+            </div>
+            <Input
+              // Remount when the saved value changes (late load, other clients).
+              key={preferences?.commandcode_max_turns ?? 30}
+              type="number"
+              min={1}
+              max={200}
+              defaultValue={preferences?.commandcode_max_turns ?? 30}
+              aria-label="Command Code max agent turns"
+              className="h-8 w-24"
+              onBlur={event => {
+                const parsed = Number.parseInt(event.target.value, 10)
+                if (!Number.isFinite(parsed)) return
+                const next = Math.min(Math.max(parsed, 1), 200)
+                event.target.value = String(next)
+                if (next !== preferences?.commandcode_max_turns) {
+                  patchPreferences.mutate({ commandcode_max_turns: next })
+                }
+              }}
+              onKeyDown={event => {
+                if (event.key === 'Enter') event.currentTarget.blur()
+              }}
+            />
+          </div>
         </SettingsSection>
       )}
 

@@ -1,7 +1,6 @@
 import React, { useCallback, useState } from 'react'
 import { invokeForOptionalServer } from '@/lib/transport'
 import { useOptionalSettingsTargetServerId } from '@/lib/settings-target'
-import { openExternal } from '@/lib/platform'
 import { Button } from '@/components/ui/button'
 import {
   Tooltip,
@@ -10,13 +9,10 @@ import {
 } from '@/components/ui/tooltip'
 import { Badge } from '@/components/ui/badge'
 import {
-  ExternalLink,
   Download,
   Loader2,
   RefreshCw,
   Trash2,
-  Play,
-  Square,
   Copy,
   Check,
 } from '@/components/icons/reicon'
@@ -25,22 +21,11 @@ import { isNewerVersion } from '@/lib/version-utils'
 import { toast } from 'sonner'
 import { SettingsSection } from '../SettingsSection'
 import { ExtensionGroup, ExtensionLink, ExtensionRow } from '../ExtensionRow'
-import {
-  CliproxyAddAccountButton,
-  useCliproxyAccountLogin,
-} from '../CliproxyAccountLogin'
 
 interface UsageStep {
-  /** Starts a new titled group of steps. */
-  section?: string
   label?: string
   command?: string
   note?: string
-}
-
-interface PluginLink {
-  label: string
-  url: string
 }
 
 interface PluginDefinition {
@@ -48,56 +33,12 @@ interface PluginDefinition {
   name: string
   description: string
   githubUrl: string
-  links?: PluginLink[]
   usage: UsageStep[]
-  scope: 'system-wide' | 'ai-backends' | 'claude-cli' | 'local-proxy'
+  scope: 'system-wide' | 'ai-backends' | 'claude-cli'
   backends: string[]
 }
 
 const PLUGINS: PluginDefinition[] = [
-  {
-    id: 'cliproxyapi',
-    name: 'CLIProxyAPI',
-    description:
-      'Local proxy that pools several Claude and Codex subscription accounts. Jean installs it and runs it on 127.0.0.1:8317.',
-    githubUrl: 'https://github.com/router-for-me/CLIProxyAPI',
-    links: [
-      {
-        label: 'MIT license',
-        url: 'https://github.com/router-for-me/CLIProxyAPI/blob/main/LICENSE',
-      },
-      {
-        label: 'CLIProxyAPI docs',
-        url: 'https://help.router-for.me/',
-      },
-    ],
-    scope: 'local-proxy',
-    backends: ['Claude', 'Codex'],
-    usage: [
-      {
-        section: 'Accounts',
-        note: 'Add accounts with the buttons above. The logins stay in CLIProxyAPI, not in Jean.',
-      },
-      {
-        section: 'Use in sessions',
-        note: 'Select the CLIProxyAPI provider for a Claude, Codex, or PI session (Preferences → Providers). Jean adds it to each backend automatically.',
-      },
-      {
-        section: 'Files',
-        note: 'Files are in ~/.jean/opinionated/cliproxyapi. The proxy listens on localhost only.',
-      },
-      {
-        section: 'Management key',
-        note: 'The management page asks for the management key. Jean keeps it in ~/.jean/opinionated/cliproxyapi/management-key. To show it, run on the machine where CLIProxyAPI runs:',
-        command: 'cat ~/.jean/opinionated/cliproxyapi/management-key',
-      },
-      {
-        section: 'Remote server (SSH tunnel)',
-        note: 'When Jean runs on a remote server, forward the proxy port over SSH. Run this on your local machine, then open http://127.0.0.1:8317/management.html:',
-        command: 'ssh -N -L 8317:127.0.0.1:8317 user@remote-host',
-      },
-    ],
-  },
   {
     id: 'rtk',
     name: 'RTK',
@@ -316,12 +257,6 @@ interface PluginStatus {
   install_supported?: boolean
   unsupported_reason?: string
   backends?: BackendPluginStatus[]
-  running?: boolean
-  endpoint?: string | null
-  management_url?: string | null
-  lan_exposed?: boolean
-  auth_file_count?: number | null
-  host?: string | null
   latest_version?: string | null
 }
 
@@ -351,7 +286,6 @@ function PluginCard({
   const [checking, setChecking] = useState(true)
   const [installing, setInstalling] = useState(false)
   const [uninstalling, setUninstalling] = useState(false)
-  const [controlling, setControlling] = useState(false)
   const serverId = useOptionalSettingsTargetServerId()
 
   const checkStatus = useCallback(async () => {
@@ -399,52 +333,14 @@ function PluginCard({
     }
   }, [plugin.id, plugin.name, checkStatus, serverId])
 
-  const handleControl = useCallback(
-    async (action: 'start' | 'stop') => {
-      setControlling(true)
-      const toastId = toast.loading(
-        action === 'start'
-          ? `Starting ${plugin.name}...`
-          : `Stopping ${plugin.name}...`
-      )
-      try {
-        const message = await invokeForOptionalServer<string>(
-          serverId,
-          action === 'start'
-            ? 'start_opinionated_plugin'
-            : 'stop_opinionated_plugin',
-          { pluginName: plugin.id }
-        )
-        toast.success(message, { id: toastId })
-      } catch (error) {
-        toast.error(`Failed to ${action} ${plugin.name}: ${error}`, {
-          id: toastId,
-        })
-      } finally {
-        setControlling(false)
-        await checkStatus()
-      }
-    },
-    [plugin.id, plugin.name, checkStatus, serverId]
-  )
-
-  const { loggingIn, login: handleAccountLogin } =
-    useCliproxyAccountLogin(checkStatus)
   const present = status ? isPluginPresent(status) : false
   const hasMissingBackend =
     plugin.scope === 'ai-backends' &&
     (status?.backends?.some(backend => !backend.installed) ?? false)
-  const supervises = plugin.scope === 'local-proxy'
-  const statusLabel = hasMissingBackend
-    ? 'Partial'
-    : supervises && status?.installed
-      ? status.running
-        ? 'Running'
-        : 'Stopped'
-      : 'Installed'
+  const statusLabel = hasMissingBackend ? 'Partial' : 'Installed'
   const installUnsupported = status?.install_supported === false
-  const canUninstall = plugin.scope === 'ai-backends' || supervises
-  const busy = installing || uninstalling || controlling || loggingIn !== null
+  const canUninstall = plugin.scope === 'ai-backends'
+  const busy = installing || uninstalling
   const versionText =
     present && status?.version
       ? plugin.scope === 'ai-backends'
@@ -458,59 +354,6 @@ function PluginCard({
     isNewerVersion(status.latest_version, status.version)
       ? status.latest_version
       : null
-
-  const handleRefreshModels = useCallback(async () => {
-    const toastId = toast.loading('Reading models...')
-    try {
-      const models = await invokeForOptionalServer<{
-        opus: string | null
-        sonnet: string | null
-        haiku: string | null
-      }>(serverId, 'refresh_cliproxyapi_models')
-      const names = [models.opus, models.sonnet, models.haiku].filter(Boolean)
-      toast.success(`Models from CLIProxyAPI: ${names.join(', ')}`, {
-        id: toastId,
-      })
-    } catch (error) {
-      toast.error(`${error}`, { id: toastId })
-    }
-  }, [serverId])
-
-  const handleOpenManagement = useCallback(async () => {
-    const url = status?.management_url
-    if (!url) return
-    if (status?.running) {
-      openExternal(url)
-      return
-    }
-    setControlling(true)
-    const toastId = toast.loading(`Starting ${plugin.name}...`)
-    try {
-      const message = await invokeForOptionalServer<string>(
-        serverId,
-        'start_opinionated_plugin',
-        {
-          pluginName: plugin.id,
-        }
-      )
-      toast.success(message, { id: toastId })
-      openExternal(url)
-    } catch (error) {
-      toast.error(`Failed to start ${plugin.name}: ${error}`, {
-        id: toastId,
-      })
-    } finally {
-      setControlling(false)
-      await checkStatus()
-    }
-  }, [
-    checkStatus,
-    serverId,
-    plugin.id,
-    plugin.name,
-    status?.management_url,
-    status?.running,
-  ])
 
   const handleUninstall = useCallback(async () => {
     setUninstalling(true)
@@ -587,26 +430,6 @@ function PluginCard({
                 Update to v{updateVersion}
               </Button>
             )}
-            {supervises && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  handleControl(status?.running ? 'stop' : 'start')
-                }
-                disabled={busy}
-                className="flex-1 sm:flex-none"
-              >
-                {controlling ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : status?.running ? (
-                  <Square className="h-4 w-4" />
-                ) : (
-                  <Play className="h-4 w-4" />
-                )}
-                {status?.running ? 'Stop' : 'Start'}
-              </Button>
-            )}
             {plugin.scope === 'ai-backends' && (
               <Button
                 variant={hasMissingBackend ? 'default' : 'outline'}
@@ -674,27 +497,6 @@ function PluginCard({
           </Button>
         )
       }
-      summary={
-        supervises && status?.installed ? (
-          <div className="flex flex-wrap items-center gap-2">
-            {(['claude', 'codex'] as const).map(provider => (
-              <CliproxyAddAccountButton
-                key={provider}
-                provider={provider}
-                loading={loggingIn === provider}
-                disabled={busy}
-                onClick={() => handleAccountLogin(provider)}
-              />
-            ))}
-            {typeof status.auth_file_count === 'number' && (
-              <span className="text-xs text-muted-foreground">
-                {status.auth_file_count} account
-                {status.auth_file_count === 1 ? '' : 's'} added
-              </span>
-            )}
-          </div>
-        ) : undefined
-      }
     >
       <div className="pt-1 space-y-1">
         <div className="text-2xs text-muted-foreground">
@@ -711,50 +513,7 @@ function PluginCard({
         )}
         <div className="flex flex-wrap items-center gap-3">
           <ExtensionLink url={plugin.githubUrl} label="GitHub" />
-          {plugin.links?.map(link => (
-            <ExtensionLink key={link.url} url={link.url} label={link.label} />
-          ))}
         </div>
-        {supervises && status?.installed && (
-          <div className="space-y-2 pt-1">
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={handleRefreshModels}
-                disabled={busy}
-              >
-                <RefreshCw className="h-4 w-4" />
-                Refresh models
-              </Button>
-              {status.management_url && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={handleOpenManagement}
-                  disabled={busy}
-                >
-                  <ExternalLink className="h-4 w-4" />
-                  Open management
-                </Button>
-              )}
-            </div>
-            {status.host && (
-              <p className="text-xs text-muted-foreground">
-                Runs on {status.host}. Chats on this machine connect to it at
-                127.0.0.1.
-              </p>
-            )}
-          </div>
-        )}
-        {status?.lan_exposed && (
-          <p className="text-xs text-destructive">
-            This config is not bound to localhost. Jean will not widen the bind;
-            edit config.yaml only if you intend to expose the proxy.
-          </p>
-        )}
       </div>
 
       {plugin.scope === 'ai-backends' && status?.backends && (
@@ -792,11 +551,6 @@ function PluginCard({
                 key={step.command ?? step.label ?? step.note}
                 className="text-xs text-muted-foreground space-y-1"
               >
-                {step.section && (
-                  <div className="pt-1 font-medium text-foreground/80">
-                    {step.section}
-                  </div>
-                )}
                 {step.note && <div>{step.note}</div>}
                 {step.label && (
                   <div className="text-foreground/70">{step.label}:</div>
@@ -850,7 +604,6 @@ const PLUGIN_SECTIONS: {
   scope: PluginDefinition['scope']
   title: string
 }[] = [
-  { scope: 'local-proxy', title: 'Local proxy' },
   { scope: 'system-wide', title: 'System-wide (shell)' },
   { scope: 'ai-backends', title: 'AI backend skills' },
   { scope: 'claude-cli', title: 'Claude CLI plugin' },

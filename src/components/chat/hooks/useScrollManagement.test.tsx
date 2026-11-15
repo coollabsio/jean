@@ -517,6 +517,34 @@ describe('useScrollManagement streaming auto-scroll', () => {
     expect(viewport.scrollTop).toBe(2200)
   })
 
+  it('re-pins the stream at once when a stale scroll arrives while a tool runs', () => {
+    isMobile = true
+    const { getByTestId, viewport } = setupHook()
+    viewport.scrollTop = 2000
+    fireEvent.scroll(viewport)
+
+    // Tool calls collapse; WebKit reports a stale position. No input, and no
+    // resize follows while the tool runs.
+    viewport.scrollTop = 1500
+    fireEvent.scroll(viewport)
+
+    expect(viewport.scrollTop).toBe(2000)
+    expect(getByTestId('is-at-bottom')).toHaveTextContent('true')
+  })
+
+  it('lets a scrollbar drag move away from the stream', () => {
+    isMobile = true
+    const { viewport } = setupHook()
+    viewport.scrollTop = 2000
+    fireEvent.scroll(viewport)
+
+    fireEvent.pointerDown(viewport)
+    viewport.scrollTop = 1500
+    fireEvent.scroll(viewport)
+
+    expect(viewport.scrollTop).toBe(1500)
+  })
+
   it('stops following the stream on an upward scroll key', async () => {
     isMobile = true
     const { viewport, setScrollHeight } = setupHook()
@@ -626,6 +654,29 @@ describe('useScrollManagement session scroll retention (issue #594)', () => {
 
     expect(getSessionScrollState('session-a')?.scrollTop).toBe(1234)
     expect(getSessionScrollState('session-a')?.isFollowingTail).toBe(false)
+  })
+
+  it('keeps the visible messages in place when older history is prepended', () => {
+    const all = makeMessages(10)
+    const { viewport, setScrollHeight, rerenderSession } = setupHook({
+      isSending: false,
+      activeSessionId: 'session-a',
+      messages: all.slice(8),
+      scrollHeight: 2000,
+    })
+
+    // User scrolls up right after the cold open (latest run only).
+    fireEvent.wheel(viewport, { deltaY: -100 })
+    viewport.scrollTop = 1500
+    fireEvent.scroll(viewport)
+
+    // Background load prepends older runs: content grows by 3000px above.
+    setScrollHeight(5000)
+    act(() => {
+      rerenderSession({ msgs: all })
+    })
+
+    expect(viewport.scrollTop).toBe(4500)
   })
 
   it('does not overwrite a snapshot while content is not ready', () => {

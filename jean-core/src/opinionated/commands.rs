@@ -15,22 +15,6 @@ pub struct PluginStatus {
     pub unsupported_reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub backends: Option<Vec<BackendPluginStatus>>,
-    /// Process is running. Set for supervised sidecars such as CLIProxyAPI.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub running: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub endpoint: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub management_url: Option<String>,
-    /// True when the sidecar config is not bound to localhost.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub lan_exposed: Option<bool>,
-    /// JSON files in the sidecar auth directory. Jean counts names only.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub auth_file_count: Option<u32>,
-    /// Machine that runs the sidecar (the backend host).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub host: Option<String>,
     /// Newest upstream release, when Jean can check it (RTK only).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub latest_version: Option<String>,
@@ -115,7 +99,6 @@ pub async fn check_opinionated_plugin_status(
         "pstack" => check_pstack_status(&app).await,
         "tstack" => check_tstack_status(&app).await,
         "security-audit" => check_security_audit_status(&app).await,
-        "cliproxyapi" => super::cliproxyapi::check_status().await,
         _ => Err(format!("Unknown plugin: {plugin_name}")),
     }
 }
@@ -131,7 +114,6 @@ pub async fn install_opinionated_plugin(
         "pstack" => install_pstack(&app).await,
         "tstack" => install_tstack(&app).await,
         "security-audit" => install_security_audit(&app).await,
-        "cliproxyapi" => install_cliproxyapi(&app).await,
         _ => Err(format!("Unknown plugin: {plugin_name}")),
     }
 }
@@ -149,73 +131,8 @@ pub async fn uninstall_opinionated_plugin(
         "rtk" => {
             Err("RTK is a system-wide CLI; uninstall it with your package manager".to_string())
         }
-        "cliproxyapi" => uninstall_cliproxyapi(&app).await,
         _ => Err(format!("Unknown plugin: {plugin_name}")),
     }
-}
-
-pub async fn start_opinionated_plugin(
-    app: AppHandle,
-    plugin_name: String,
-) -> Result<String, String> {
-    match plugin_name.as_str() {
-        "cliproxyapi" => {
-            let message = super::cliproxyapi::start().await?;
-            if let Err(error) = refresh_cliproxyapi_models(app).await {
-                log::info!("CLIProxyAPI model discovery after start: {error}");
-            }
-            Ok(message)
-        }
-        _ => Err(format!(
-            "{plugin_name} does not run as a supervised sidecar"
-        )),
-    }
-}
-
-pub async fn stop_opinionated_plugin(
-    _app: AppHandle,
-    plugin_name: String,
-) -> Result<String, String> {
-    match plugin_name.as_str() {
-        "cliproxyapi" => super::cliproxyapi::stop().await,
-        _ => Err(format!(
-            "{plugin_name} does not run as a supervised sidecar"
-        )),
-    }
-}
-
-pub async fn prepare_cliproxyapi_account_login(
-    provider: String,
-) -> Result<super::cliproxyapi::AccountLoginLaunch, String> {
-    super::cliproxyapi::prepare_account_login(&provider).await
-}
-
-pub async fn get_cliproxyapi_usage(
-) -> Result<Vec<super::cliproxyapi_usage::CliproxyAccountUsage>, String> {
-    super::cliproxyapi_usage::get_usage().await
-}
-
-pub async fn refresh_cliproxyapi_models(
-    app: AppHandle,
-) -> Result<super::cliproxyapi::DiscoveredClaudeModels, String> {
-    let ids = super::cliproxyapi::list_model_ids().await?;
-    crate::apply_cliproxyapi_models(&app, &ids).await
-}
-
-async fn install_cliproxyapi(app: &AppHandle) -> Result<String, String> {
-    let outcome = super::cliproxyapi::install().await?;
-    crate::upsert_cliproxyapi_provider_profiles(app, &outcome.client_key).await?;
-    if !outcome.running {
-        log::warn!("{}", outcome.message);
-    } else if let Err(error) = refresh_cliproxyapi_models(app.clone()).await {
-        log::info!("CLIProxyAPI model discovery after install: {error}");
-    }
-    Ok(outcome.message)
-}
-
-async fn uninstall_cliproxyapi(app: &AppHandle) -> Result<String, String> {
-    crate::remove_cliproxyapi_provider_profiles(app).await?;
-    super::cliproxyapi::uninstall().await
 }
 
 async fn check_rtk_status(app: &AppHandle) -> Result<PluginStatus, String> {
@@ -264,12 +181,6 @@ async fn check_rtk_status(app: &AppHandle) -> Result<PluginStatus, String> {
                 install_supported,
                 unsupported_reason,
                 backends: None,
-                running: None,
-                endpoint: None,
-                management_url: None,
-                lan_exposed: None,
-                auth_file_count: None,
-                host: None,
                 latest_version,
             })
         }
@@ -279,12 +190,6 @@ async fn check_rtk_status(app: &AppHandle) -> Result<PluginStatus, String> {
             install_supported,
             unsupported_reason,
             backends: None,
-            running: None,
-            endpoint: None,
-            management_url: None,
-            lan_exposed: None,
-            auth_file_count: None,
-            host: None,
             latest_version: None,
         }),
     }
@@ -313,12 +218,6 @@ async fn check_caveman_status(app: &AppHandle) -> Result<PluginStatus, String> {
         install_supported: true,
         unsupported_reason: None,
         backends: Some(statuses),
-        running: None,
-        endpoint: None,
-        management_url: None,
-        lan_exposed: None,
-        auth_file_count: None,
-        host: None,
         latest_version: None,
     })
 }
@@ -951,12 +850,6 @@ async fn check_superpowers_status(app: &AppHandle) -> Result<PluginStatus, Strin
         install_supported: true,
         unsupported_reason: None,
         backends: Some(statuses),
-        running: None,
-        endpoint: None,
-        management_url: None,
-        lan_exposed: None,
-        auth_file_count: None,
-        host: None,
         latest_version: None,
     })
 }
@@ -976,12 +869,6 @@ async fn check_pstack_status(app: &AppHandle) -> Result<PluginStatus, String> {
         install_supported: true,
         unsupported_reason: None,
         backends: Some(statuses),
-        running: None,
-        endpoint: None,
-        management_url: None,
-        lan_exposed: None,
-        auth_file_count: None,
-        host: None,
         latest_version: None,
     })
 }
@@ -1012,12 +899,6 @@ async fn check_copied_skill_pack_status(
         install_supported: true,
         unsupported_reason: None,
         backends: Some(statuses),
-        running: None,
-        endpoint: None,
-        management_url: None,
-        lan_exposed: None,
-        auth_file_count: None,
-        host: None,
         latest_version: None,
     })
 }

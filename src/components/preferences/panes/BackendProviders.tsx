@@ -128,6 +128,20 @@ const QWENCLOUD_MODE_ORDER: QwenCloudBillingMode[] = [
   'token-plan',
 ]
 
+/** Label + optional hint around a form control, so every provider field is
+ *  identifiable without relying on its placeholder. */
+const ProviderField: React.FC<{
+  label: string
+  hint?: string
+  children: React.ReactNode
+}> = ({ label, hint, children }) => (
+  <div className="space-y-1.5">
+    <div className="text-xs font-medium text-foreground">{label}</div>
+    {children}
+    {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+  </div>
+)
+
 /**
  * QwenCloud keys are region-scoped AND billing-mode-specific. Show this picker
  * whenever a provider points at a QwenCloud endpoint: it rewrites the base URL
@@ -138,13 +152,12 @@ const QwenCloudEndpointSelect: React.FC<{
   value: string
   onValueChange: (endpointId: string) => void
 }> = ({ value, onValueChange }) => (
-  <div className="space-y-1">
-    <p className="text-xs text-muted-foreground">
-      QwenCloud region / billing mode. Pay-as-you-go and Token Plan use
-      different keys and are not interchangeable.
-    </p>
+  <ProviderField
+    label="Endpoint"
+    hint="QwenCloud region and billing mode. Pay-as-you-go and Token Plan use different keys and cannot be mixed."
+  >
     <Select value={value} onValueChange={onValueChange}>
-      <SelectTrigger className="w-full sm:w-80">
+      <SelectTrigger aria-label="Endpoint" className="w-full sm:w-80">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
@@ -162,7 +175,7 @@ const QwenCloudEndpointSelect: React.FC<{
         ))}
       </SelectContent>
     </Select>
-  </div>
+  </ProviderField>
 )
 
 export const ClaudeProvidersSection: React.FC = () => {
@@ -646,25 +659,43 @@ const CodexProvidersEditor: React.FC<{
       ))}
 
       {(isAdding || editingIndex !== null) && (
-        <div className="space-y-2">
-          <Input
-            placeholder="Display name (e.g. OpenRouter)"
-            value={editName}
-            onChange={e => setEditName(e.target.value)}
-            className="h-8"
-          />
-          <Input
-            placeholder="Provider ID (e.g. openrouter)"
-            value={editProviderId}
-            onChange={e => setEditProviderId(e.target.value)}
-            className="h-8 font-mono text-sm"
-          />
-          <Input
-            placeholder="Base URL (e.g. https://openrouter.ai/api/v1)"
-            value={editBaseUrl}
-            onChange={e => setEditBaseUrl(e.target.value)}
-            className="h-8 font-mono text-sm"
-          />
+        <div className="space-y-3">
+          <ProviderField
+            label="Display name"
+            hint="Shown in the provider picker."
+          >
+            <Input
+              aria-label="Display name"
+              placeholder="OpenRouter"
+              value={editName}
+              onChange={e => setEditName(e.target.value)}
+              className="h-8"
+            />
+          </ProviderField>
+          <ProviderField
+            label="Provider ID"
+            hint="Used in model IDs as provider/model. Lowercase, no spaces."
+          >
+            <Input
+              aria-label="Provider ID"
+              placeholder="openrouter"
+              value={editProviderId}
+              onChange={e => setEditProviderId(e.target.value)}
+              className="h-8 font-mono text-sm"
+            />
+          </ProviderField>
+          <ProviderField
+            label="Base URL"
+            hint="OpenAI-compatible endpoint. Usually ends with /v1."
+          >
+            <Input
+              aria-label="Base URL"
+              placeholder="https://openrouter.ai/api/v1"
+              value={editBaseUrl}
+              onChange={e => setEditBaseUrl(e.target.value)}
+              className="h-8 font-mono text-sm"
+            />
+          </ProviderField>
           {qwenCloudRegionFromValue(editBaseUrl) && (
             <QwenCloudEndpointSelect
               value={qwenCloudRegionFromValue(editBaseUrl) ?? ''}
@@ -674,27 +705,38 @@ const CodexProvidersEditor: React.FC<{
               }}
             />
           )}
-          <Input
-            placeholder="Env key (e.g. OPENROUTER_API_KEY)"
-            value={editEnvKey}
-            onChange={e => setEditEnvKey(e.target.value)}
-            className="h-8 font-mono text-sm"
-          />
-          <Select
-            value={editWireApi || 'none'}
-            onValueChange={v =>
-              setEditWireApi(v === 'none' ? '' : (v as 'chat' | 'responses'))
-            }
+          <ProviderField
+            label="API key environment variable"
+            hint="Jean reads the key from this variable at runtime; the key itself is not stored."
           >
-            <SelectTrigger className="w-full sm:w-80">
-              <SelectValue placeholder="Wire API (optional)" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">Wire API: default</SelectItem>
-              <SelectItem value="responses">responses</SelectItem>
-              <SelectItem value="chat">chat</SelectItem>
-            </SelectContent>
-          </Select>
+            <Input
+              aria-label="API key environment variable"
+              placeholder="OPENROUTER_API_KEY"
+              value={editEnvKey}
+              onChange={e => setEditEnvKey(e.target.value)}
+              className="h-8 font-mono text-sm"
+            />
+          </ProviderField>
+          <ProviderField
+            label="Wire API"
+            hint="Leave on default unless the provider only speaks one protocol."
+          >
+            <Select
+              value={editWireApi || 'none'}
+              onValueChange={v =>
+                setEditWireApi(v === 'none' ? '' : (v as 'chat' | 'responses'))
+              }
+            >
+              <SelectTrigger aria-label="Wire API" className="w-full sm:w-80">
+                <SelectValue placeholder="Default" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Codex default</SelectItem>
+                <SelectItem value="responses">Responses API</SelectItem>
+                <SelectItem value="chat">Chat Completions</SelectItem>
+              </SelectContent>
+            </Select>
+          </ProviderField>
           {error && <p className="text-xs text-destructive">{error}</p>}
           <div className="flex gap-2">
             <Button size="sm" onClick={validateAndSave}>
@@ -996,19 +1038,31 @@ const PiProvidersEditor: React.FC<{
       ))}
 
       {(isAdding || editingIndex !== null) && (
-        <div className="space-y-2">
-          <Input
-            placeholder="Provider id (e.g. openrouter)"
-            value={editName}
-            onChange={e => setEditName(e.target.value)}
-            className="h-8 font-mono text-sm"
-          />
-          <Input
-            placeholder="Base URL"
-            value={editBaseUrl}
-            onChange={e => setEditBaseUrl(e.target.value)}
-            className="h-8 font-mono text-sm"
-          />
+        <div className="space-y-3">
+          <ProviderField
+            label="Provider ID"
+            hint="Shown in the PI model picker as provider/model. Lowercase, no spaces."
+          >
+            <Input
+              aria-label="Provider ID"
+              placeholder="openrouter"
+              value={editName}
+              onChange={e => setEditName(e.target.value)}
+              className="h-8 font-mono text-sm"
+            />
+          </ProviderField>
+          <ProviderField
+            label="Base URL"
+            hint="Endpoint of the provider's OpenAI-compatible API."
+          >
+            <Input
+              aria-label="Base URL"
+              placeholder="https://openrouter.ai/api/v1"
+              value={editBaseUrl}
+              onChange={e => setEditBaseUrl(e.target.value)}
+              className="h-8 font-mono text-sm"
+            />
+          </ProviderField>
           {qwenCloudRegionFromValue(editBaseUrl) && (
             <QwenCloudEndpointSelect
               value={qwenCloudRegionFromValue(editBaseUrl) ?? ''}
@@ -1022,32 +1076,45 @@ const PiProvidersEditor: React.FC<{
               }}
             />
           )}
-          <Select
-            value={editApi}
-            onValueChange={v => setEditApi(v as PiProviderProfile['api'])}
+          <ProviderField
+            label="API type"
+            hint="Match the protocol the endpoint exposes."
           >
-            <SelectTrigger className="w-full sm:w-80">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="openai-completions">
-                openai-completions
-              </SelectItem>
-              <SelectItem value="openai-responses">openai-responses</SelectItem>
-              <SelectItem value="anthropic-messages">
-                anthropic-messages
-              </SelectItem>
-              <SelectItem value="google-generative-ai">
-                google-generative-ai
-              </SelectItem>
-            </SelectContent>
-          </Select>
-          <Input
-            placeholder="API key env (optional, e.g. OPENROUTER_API_KEY)"
-            value={editApiKeyEnv}
-            onChange={e => setEditApiKeyEnv(e.target.value)}
-            className="h-8 font-mono text-sm"
-          />
+            <Select
+              value={editApi}
+              onValueChange={v => setEditApi(v as PiProviderProfile['api'])}
+            >
+              <SelectTrigger aria-label="API type" className="w-full sm:w-80">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="openai-completions">
+                  OpenAI Chat Completions
+                </SelectItem>
+                <SelectItem value="openai-responses">
+                  OpenAI Responses
+                </SelectItem>
+                <SelectItem value="anthropic-messages">
+                  Anthropic Messages
+                </SelectItem>
+                <SelectItem value="google-generative-ai">
+                  Google Generative AI
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </ProviderField>
+          <ProviderField
+            label="API key environment variable"
+            hint="Optional. Jean reads the key from this variable at runtime."
+          >
+            <Input
+              aria-label="API key environment variable"
+              placeholder="OPENROUTER_API_KEY"
+              value={editApiKeyEnv}
+              onChange={e => setEditApiKeyEnv(e.target.value)}
+              className="h-8 font-mono text-sm"
+            />
+          </ProviderField>
           {qwenCloudRegionFromValue(editBaseUrl) && (
             <div className="space-y-2">
               <div className="flex flex-wrap items-center gap-2">
@@ -1073,21 +1140,28 @@ const PiProvidersEditor: React.FC<{
                     }
                   }}
                 />
-                <p className="text-sm text-muted-foreground">
-                  Only Qwen-branded models (off = all models on this endpoint,
-                  including DeepSeek / Kimi / GLM / MiniMax)
-                </p>
+                <div className="space-y-0.5">
+                  <p className="text-sm">Only Qwen-branded models</p>
+                  <p className="text-xs text-muted-foreground">
+                    Off includes every model on this endpoint (DeepSeek, Kimi,
+                    GLM, MiniMax).
+                  </p>
+                </div>
               </div>
             </div>
           )}
-          <Textarea
-            placeholder={
-              'Models (one per line)\nid or id|Display name\ne.g. anthropic/claude-sonnet-4|Sonnet 4'
-            }
-            value={editModels}
-            onChange={e => setEditModels(e.target.value)}
-            className="min-h-[100px] font-mono text-base md:text-xs"
-          />
+          <ProviderField
+            label="Models"
+            hint="One per line: model id, or id|Display name."
+          >
+            <Textarea
+              aria-label="Models"
+              placeholder="anthropic/claude-sonnet-4|Sonnet 4"
+              value={editModels}
+              onChange={e => setEditModels(e.target.value)}
+              className="min-h-[100px] font-mono text-base md:text-xs"
+            />
+          </ProviderField>
           {error && <p className="text-xs text-destructive">{error}</p>}
           <div className="flex gap-2">
             <Button size="sm" onClick={validateAndSave} disabled={saving}>

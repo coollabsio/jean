@@ -542,7 +542,7 @@ describe('MagicPromptsPane', () => {
       ...defaultPreferences,
       custom_cli_profiles: [
         {
-          name: 'CLIProxyAPI',
+          name: 'Gateway',
           settings_json: JSON.stringify({
             env: { ANTHROPIC_DEFAULT_OPUS_MODEL: 'claude-opus-5-5' },
           }),
@@ -550,7 +550,7 @@ describe('MagicPromptsPane', () => {
       ],
       magic_prompt_providers: {
         ...defaultPreferences.magic_prompt_providers,
-        investigate_issue_provider: 'CLIProxyAPI',
+        investigate_issue_provider: 'Gateway',
       },
       magic_prompt_models: {
         ...defaultPreferences.magic_prompt_models,
@@ -699,7 +699,7 @@ describe('MagicPromptsPane', () => {
       ...defaultPreferences,
       custom_cli_profiles: [
         {
-          name: 'CLIProxyAPI',
+          name: 'Gateway',
           settings_json: '{}',
           supports_thinking: false,
         },
@@ -714,14 +714,14 @@ describe('MagicPromptsPane', () => {
     await user.click(
       screen.getByRole('combobox', { name: 'Investigation provider' })
     )
-    await user.click(screen.getByRole('option', { name: 'CLIProxyAPI' }))
+    await user.click(screen.getByRole('option', { name: 'Gateway' }))
     await user.click(
       screen.getByRole('button', { name: 'Apply to all prompts' })
     )
 
     const patch = mutateMock.mock.calls[0]?.[0]
     expect(new Set(Object.values(patch.magic_prompt_providers))).toEqual(
-      new Set(['CLIProxyAPI'])
+      new Set(['Gateway'])
     )
     expect(new Set(Object.values(patch.magic_prompt_backends))).toEqual(
       new Set(['claude'])

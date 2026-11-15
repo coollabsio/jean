@@ -1,4 +1,5 @@
 use serde_json::Value;
+use std::io::Write as _;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 #[cfg(target_os = "macos")]
@@ -368,7 +369,9 @@ pub fn run() {
         let runtime =
             jean_core::build_tokio_runtime().expect("failed to create Jean server runtime");
         if let Err(error) = runtime.block_on(jean_core::run_server()) {
-            eprintln!("Jean server failed: {error}");
+            // eprintln! panics if stderr is closed, which aborts under
+            // `panic = "abort"` (issue #894). Ignore the write error instead.
+            let _ = writeln!(std::io::stderr(), "Jean server failed: {error}");
             std::process::exit(1);
         }
         return;

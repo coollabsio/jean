@@ -1,4 +1,4 @@
-import { Play, Star } from '@/components/icons/reicon'
+import { ListChecks, Play, Star } from '@/components/icons/reicon'
 import { Button, raisedToolbar } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -109,11 +109,11 @@ export function ScriptsButton(props: ScriptsButtonProps) {
               className={raisedToolbar}
               aria-label="Scripts"
             >
-              <Play className="size-3.5" />
+              <ListChecks className="size-3.5" />
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
-        <TooltipContent>Scripts</TooltipContent>
+        <TooltipContent>Scripts (package.json)</TooltipContent>
       </Tooltip>
       <DropdownMenuContent align="end" className="min-w-48">
         <ScriptMenuItems {...props} />
@@ -130,8 +130,11 @@ export function ScriptsSubmenu(props: ScriptsButtonProps) {
   return (
     <DropdownMenuSub>
       <DropdownMenuSubTrigger className="gap-2">
-        <Play className="h-4 w-4 text-muted-foreground" />
-        Scripts
+        <ListChecks className="h-4 w-4 text-muted-foreground" />
+        <span className="flex-1">Scripts</span>
+        <span className="ml-3 text-2xs text-muted-foreground">
+          package.json
+        </span>
       </DropdownMenuSubTrigger>
       <DropdownMenuSubContent className="min-w-48">
         <ScriptMenuItems {...props} />

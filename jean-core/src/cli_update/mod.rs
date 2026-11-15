@@ -26,6 +26,9 @@ const ALLOWED_COMMANDS: &[&str] = &[
     "brew",
     "npm",
     "bun",
+    "winget",
+    "scoop",
+    "choco",
     "claude",
     "opencode",
     "coderabbit",
@@ -103,6 +106,16 @@ mod tests {
     fn devin_self_updates_are_allowed() {
         assert!(ALLOWED_CLI_TYPES.contains(&"devin"));
         assert!(ALLOWED_COMMANDS.contains(&"devin"));
+    }
+
+    #[test]
+    fn windows_package_manager_updates_are_allowed() {
+        for command in ["winget", "scoop", "choco", "scoop.cmd", "choco.exe"] {
+            assert!(
+                ALLOWED_COMMANDS.contains(&allowlist_key(command)),
+                "{command} should be an allowlisted updater"
+            );
+        }
     }
 
     #[test]

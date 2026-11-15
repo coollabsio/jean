@@ -33,26 +33,33 @@ fn response_timeout(tool_name: &str) -> Duration {
 }
 
 pub fn run_stdio_server() -> Result<(), String> {
-    let stdin = std::io::stdin();
-    let mut stdout = std::io::stdout();
+    serve(std::io::stdin().lock(), std::io::stdout())
+}
 
-    for line in stdin.lock().lines() {
+fn serve(input: impl BufRead, mut output: impl Write) -> Result<(), String> {
+    for line in input.lines() {
         let line = line.map_err(|e| format!("Failed to read stdin: {e}"))?;
         if line.trim().is_empty() {
             continue;
         }
-        let response = handle_message(&line);
-        if let Some(response) = response {
-            let encoded = serde_json::to_string(&response)
-                .map_err(|e| format!("Failed to encode MCP response: {e}"))?;
-            writeln!(stdout, "{encoded}").map_err(|e| format!("Failed to write stdout: {e}"))?;
-            stdout
-                .flush()
-                .map_err(|e| format!("Failed to flush stdout: {e}"))?;
+        let Some(response) = handle_message(&line) else {
+            continue;
+        };
+        // A client that closes its end (timeout, abandoned request) ends the
+        // session; that is not a failure (issue #894).
+        match write_response(&mut output, &response) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => return Ok(()),
+            Err(e) => return Err(format!("Failed to write stdout: {e}")),
         }
     }
 
     Ok(())
+}
+
+fn write_response(output: &mut impl Write, response: &Value) -> std::io::Result<()> {
+    writeln!(output, "{response}")?;
+    output.flush()
 }
 
 fn handle_message(line: &str) -> Option<Value> {
@@ -197,8 +204,9 @@ fn parent_error_message(response: &Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use std::io::{self, Write};
 
-    use super::parent_error_message;
+    use super::{parent_error_message, serve};
 
     #[test]
     fn parent_error_message_handles_plain_error_string() {
@@ -218,5 +226,34 @@ mod tests {
             })),
             Some("No Jean session context present".to_string())
         );
+    }
+
+    struct ClosedPipe;
+
+    impl Write for ClosedPipe {
+        fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+            Err(io::Error::from(io::ErrorKind::BrokenPipe))
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    const PING: &[u8] = b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}\n";
+
+    #[test]
+    fn closed_stdout_ends_session_cleanly() {
+        assert_eq!(serve(PING, ClosedPipe), Ok(()));
+    }
+
+    #[test]
+    fn writes_one_json_line_per_response() {
+        let mut out = Vec::new();
+        serve(PING, &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert_eq!(text.lines().count(), 1);
+        let response: serde_json::Value = serde_json::from_str(text.trim_end()).unwrap();
+        assert_eq!(response["id"], 1);
     }
 }

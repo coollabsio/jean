@@ -175,6 +175,15 @@ export function useScrollManagement({
   const pendingRestoreRetryTimerRef = useRef<ReturnType<
     typeof setTimeout
   > | null>(null)
+  // Viewport geometry from the last scroll event or resize callback. A commit
+  // that prepends older history reads it to keep the visible messages in place.
+  const lastLayoutRef = useRef({ scrollTop: 0, scrollHeight: 0 })
+  const recordLayout = useCallback((viewport: HTMLDivElement) => {
+    lastLayoutRef.current = {
+      scrollTop: viewport.scrollTop,
+      scrollHeight: viewport.scrollHeight,
+    }
+  }, [])
 
   const clearPendingRestoreRetry = useCallback(() => {
     if (pendingRestoreRetryTimerRef.current != null) {
@@ -637,6 +646,7 @@ export function useScrollManagement({
     const observer = new ResizeObserver(() => {
       cancelAnimationFrame(rafId)
       onViewportSizeChange()
+      recordLayout(viewport)
     })
     observer.observe(viewport)
     if (viewport.firstElementChild) {
@@ -650,7 +660,7 @@ export function useScrollManagement({
     }
     // onViewportSizeChange is an Effect Event — intentionally omitted from deps
     // (identity changes every render; React docs require not listing it).
-  }, [clearPendingRestoreRetry])
+  }, [clearPendingRestoreRetry, recordLayout])
 
   // [Tier 2 + 5] Auto-scroll during streaming using ResizeObserver.
   // Pins inside the observer callback (after layout, before paint) so a frame
@@ -792,9 +802,35 @@ export function useScrollManagement({
     }
   }, [contentReady, messages?.length, activeSessionId, applySessionScrollState])
 
+  // A cold session open renders only the latest run, then prepends older
+  // history in the background. Without a correction the viewport keeps its
+  // scrollTop while content grows above it, so a user who already scrolled
+  // up jumps toward the oldest messages. Keep the distance from the bottom.
+  // The target is absolute, so it is also correct when the browser's own
+  // scroll anchoring already moved the viewport.
+  const prevFirstMessageIdRef = useRef(messages?.[0]?.id)
+  useLayoutEffect(() => {
+    const prevFirstId = prevFirstMessageIdRef.current
+    const firstId = messages?.[0]?.id
+    prevFirstMessageIdRef.current = firstId
+    if (!prevFirstId || !firstId || prevFirstId === firstId) return
+    if (!messages?.some(message => message.id === prevFirstId)) return
+
+    const viewport = scrollViewportRef.current
+    if (!viewport) return
+    const { scrollTop, scrollHeight } = lastLayoutRef.current
+    const grownBy = viewport.scrollHeight - scrollHeight
+    if (grownBy <= 0) return
+    viewport.scrollTop = scrollTop + grownBy
+    recordLayout(viewport)
+    lastScrollTopRef.current = viewport.scrollTop
+    lastScrollHeightRef.current = viewport.scrollHeight
+  }, [messages, recordLayout])
+
   // [Tier 1] Handle scroll events — findings visibility removed (handled by IntersectionObserver)
   const handleScroll = useCallback(
     (e: React.UIEvent<HTMLDivElement>) => {
+      recordLayout(e.target as HTMLDivElement)
       // Skip updating isAtBottom during auto-scroll to avoid race conditions
       // This prevents the smooth scroll animation from incorrectly marking us as "not at bottom"
       if (isAutoScrollingRef.current) {
@@ -809,23 +845,30 @@ export function useScrollManagement({
 
       const target = e.target as HTMLDivElement
 
-      // When a run ends, the message list swaps the streaming reply for the
-      // saved one. WebKit clamps scrollTop while the content is briefly
-      // shorter, then fires a late scroll event to that stale position, after
-      // the tail was already pinned. Without this, the drop below reads as a
-      // scrollbar drag and the new prompt slides down from the top. Wheel,
-      // touch, and keyboard input stop following the tail first, so the user
-      // can still scroll away.
+      // During a run, and briefly after it ends, WebKit clamps scrollTop while
+      // the content is briefly shorter (tool calls collapse, the streaming
+      // reply is swapped for the saved one), then fires a late scroll event
+      // to that stale position after the stream was pinned. No resize follows
+      // while a tool runs, so nothing else moves the view back. Re-pin here.
+      // Wheel, touch, and keyboard input stop following the stream first, and
+      // a pointer down means a scrollbar drag, so the user can still scroll
+      // away.
       const now = Date.now()
+      // A desktop plan pinned to the top is not the tail; leave it to the
+      // streaming observer.
       if (
-        now < runEndSettleUntilRef.current &&
+        (isSending || now < runEndSettleUntilRef.current) &&
+        !isPointerDownRef.current &&
         now >= userScrollUpUntilRef.current &&
         isFollowingTailRef.current &&
-        !isViewportAtBottom(target)
+        !isViewportAtBottom(target) &&
+        !(isSending && !isMobile && target.querySelector('[data-plan-display]'))
       ) {
         scrollToTail(target)
         lastScrollTopRef.current = target.scrollTop
         lastScrollHeightRef.current = target.scrollHeight
+        syncIsAtBottom(target)
+        rememberScroll(target.scrollTop, true)
         return
       }
 
@@ -869,7 +912,14 @@ export function useScrollManagement({
       setIsAtBottom(prev => (prev === atBottom ? prev : atBottom))
       rememberScroll(target.scrollTop, isFollowingTailRef.current)
     },
-    [contentReady, rememberScroll]
+    [
+      contentReady,
+      isMobile,
+      isSending,
+      recordLayout,
+      rememberScroll,
+      syncIsAtBottom,
+    ]
   )
 
   // Handle scroll-to-bottom completion from the message list

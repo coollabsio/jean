@@ -697,7 +697,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     model: MagicPromptModel
     label: string
   } | null>(null)
-  // Claude custom provider (e.g. CLIProxyAPI) for "Apply to all prompts".
+  // Claude custom provider (e.g. OpenRouter) for "Apply to all prompts".
   // null = Anthropic / global default provider.
   const [bulkProvider, setBulkProvider] = useState<string | null>(null)
   const [bulkFast, setBulkFast] = useState(false)
