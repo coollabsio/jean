@@ -1067,21 +1067,34 @@ fn humanize_slug(slug: &str) -> String {
         .join(" ")
 }
 
+/// Claude Code truncates encoded project names longer than this and appends
+/// a hash of the full path.
+const CLAUDE_PROJECT_DIR_MAX_LEN: usize = 200;
+
 fn escape_claude_project_dir(path: &str) -> String {
-    // Claude encodes the project path by replacing every separator and the
-    // Windows drive colon with `-`:
-    //   C:\Users\me\repo  -> C--Users-me-repo
-    //   /Users/me/repo    -> -Users-me-repo
-    // Only replacing `/` left Windows paths untouched, so the lookup always
-    // missed and fell back to scanning every project.
+    // Claude encodes the project path by replacing every non-alphanumeric
+    // character (per UTF-16 unit) with `-`:
+    //   C:\Users\me\repo      -> C--Users-me-repo
+    //   /Users/me/coolify.io  -> -Users-me-coolify-io
+    //   /root/.local/my_repo  -> -root--local-my-repo
     path.trim_end_matches(['/', '\\'])
-        .replace(|c: char| matches!(c, '/' | '\\' | ':'), "-")
+        .chars()
+        .flat_map(|c| {
+            let (ch, count) = if c.is_ascii_alphanumeric() {
+                (c, 1)
+            } else {
+                ('-', c.len_utf16())
+            };
+            std::iter::repeat_n(ch, count)
+        })
+        .collect()
 }
 
 /// Locate `~/.claude/projects/<encoded worktree>`.
 ///
-/// Windows drive letters are case-insensitive, so an exact miss is retried
-/// against the directory names ignoring case (`d--…` vs `D--…`).
+/// An exact miss is retried ignoring case (Windows drive letters: `d--…` vs
+/// `D--…`). Encoded names over the length limit carry a hash suffix, so they
+/// match on the truncated prefix.
 fn claude_project_dir(projects_root: &Path, worktree_path: &str) -> Option<PathBuf> {
     let escaped = escape_claude_project_dir(worktree_path);
     let exact = projects_root.join(&escaped);
@@ -1090,12 +1103,20 @@ fn claude_project_dir(projects_root: &Path, worktree_path: &str) -> Option<PathB
     }
 
     let wanted = escaped.to_lowercase();
+    let truncated_prefix = (wanted.len() > CLAUDE_PROJECT_DIR_MAX_LEN)
+        .then(|| format!("{}-", &wanted[..CLAUDE_PROJECT_DIR_MAX_LEN]));
     fs::read_dir(projects_root)
         .ok()?
         .flatten()
         .find(|entry| {
-            entry.file_type().map(|t| t.is_dir()).unwrap_or(false)
-                && entry.file_name().to_string_lossy().to_lowercase() == wanted
+            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                return false;
+            }
+            let name = entry.file_name().to_string_lossy().to_lowercase();
+            match &truncated_prefix {
+                Some(prefix) => name.starts_with(prefix.as_str()),
+                None => name == wanted,
+            }
         })
         .map(|entry| entry.path())
 }
@@ -1305,7 +1326,7 @@ mod tests {
     fn claude_project_dir_escape_matches_native_layout() {
         assert_eq!(
             escape_claude_project_dir("/Users/heyandras/devel/coolify.io"),
-            "-Users-heyandras-devel-coolify.io"
+            "-Users-heyandras-devel-coolify-io"
         );
     }
 
@@ -1699,6 +1720,23 @@ mod tests {
             escape_claude_project_dir(r"C:\Users\me\repo\"),
             "C--Users-me-repo"
         );
+        assert_eq!(
+            escape_claude_project_dir("/root/.local/pr-914-fix_session"),
+            "-root--local-pr-914-fix-session"
+        );
+    }
+
+    #[test]
+    fn finds_truncated_long_project_dir() {
+        let temp = tempfile::tempdir().unwrap();
+        let long_path = format!("/work/{}", "a".repeat(250));
+        let escaped = escape_claude_project_dir(&long_path);
+        let dir_name = format!("{}-1x2y3z", &escaped[..CLAUDE_PROJECT_DIR_MAX_LEN]);
+        fs::create_dir(temp.path().join(&dir_name)).unwrap();
+
+        let found = claude_project_dir(temp.path(), &long_path).unwrap();
+
+        assert_eq!(found.file_name().unwrap().to_str().unwrap(), dir_name);
     }
 
     #[test]
