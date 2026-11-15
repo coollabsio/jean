@@ -121,6 +121,20 @@ describe('client-preferences', () => {
     )
   })
 
+  it('drops invalid custom themes and a dangling active theme', () => {
+    const theme = { id: 'a', name: 'A', dark: { background: '#17191b' } }
+
+    expect(
+      updateClientPreferences({
+        custom_themes: [theme, { id: 'b', name: 'B' }],
+        custom_theme: 'b',
+      })
+    ).toMatchObject({ custom_themes: [theme], custom_theme: null })
+    expect(updateClientPreferences({ custom_theme: 'a' }).custom_theme).toBe(
+      'a'
+    )
+  })
+
   it('separates client-owned fields from instance-wide fields', () => {
     const [client, server] = splitClientPreferencePatch({
       theme: 'dark',

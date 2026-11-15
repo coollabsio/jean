@@ -49,7 +49,7 @@ For more information, take a look at [jean.build](https://jean.build).
 - **Opinionated Plugins** - One-click RTK (cuts tool-output tokens 60-90%) and Caveman (terse Claude replies)
 - **Local + Remote** - Add any number of `jean-server` instances to the desktop app (or install one over SSH); their projects appear next to your local ones and every action runs on the server that owns the project
 - **Web Access** - Every Jean instance (desktop or headless server) can serve the full UI over HTTP/WebSocket with token auth, including on phones
-- **Customization** - Themes (light/dark/system), custom fonts, configurable keybindings, mobile swipe gestures
+- **Customization** - Themes (light/dark/system, plus imported [custom colour themes](docs/custom-themes.md)), custom fonts, configurable keybindings, mobile swipe gestures
 
 ## Installation
 

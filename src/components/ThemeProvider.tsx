@@ -1,12 +1,7 @@
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useState,
-  useRef,
-} from 'react'
+import { useCallback, useLayoutEffect, useMemo, useState, useRef } from 'react'
 import { ThemeProviderContext, type Theme } from '@/lib/theme-context'
+import { applyThemeColours } from '@/lib/custom-themes'
+import { useClientPreferences } from '@/hooks/useClientPreferences'
 import { usePreferences } from '@/services/preferences'
 
 interface ThemeProviderProps {
@@ -40,12 +35,20 @@ export function ThemeProvider({
     }
   }, [preferences?.theme])
 
-  useEffect(() => {
+  const { preferences: clientPreferences } = useClientPreferences()
+  const customTheme = clientPreferences.custom_themes.find(
+    custom => custom.id === clientPreferences.custom_theme
+  )
+
+  // Layout effect so imported theme colours land before the first paint and
+  // the built-in palette doesn't flash on startup.
+  useLayoutEffect(() => {
     const root = window.document.documentElement
 
     const applyTheme = (resolvedTheme: 'light' | 'dark') => {
       root.classList.remove('light', 'dark')
       root.classList.add(resolvedTheme)
+      applyThemeColours(root.style, customTheme?.[resolvedTheme])
     }
 
     if (theme === 'system') {
@@ -60,7 +63,7 @@ export function ThemeProvider({
     }
 
     applyTheme(theme)
-  }, [theme])
+  }, [theme, customTheme])
 
   const stableSetTheme = useCallback(
     (newTheme: Theme) => {

@@ -32,6 +32,8 @@ export const CLIENT_PREFERENCE_KEYS = [
   'finished_session_animation_enabled',
   'terminal_background',
   'terminal_background_custom',
+  'custom_themes',
+  'custom_theme',
 ] as const satisfies readonly (keyof AppPreferences)[]
 
 export type ClientPreferenceKey = (typeof CLIENT_PREFERENCE_KEYS)[number]

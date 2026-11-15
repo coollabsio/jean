@@ -26,6 +26,33 @@
             : savedTheme
         document.documentElement.classList.add(resolvedTheme)
         document.documentElement.style.colorScheme = resolvedTheme
+
+        // Apply the active custom theme before the first paint. Mirrors
+        // applyThemeColours in src/lib/custom-themes.ts; theme-boot.test.ts
+        // keeps the two in sync.
+        try {
+          const tokens =
+            'background foreground card card-foreground popover popover-foreground primary primary-foreground secondary secondary-foreground muted muted-foreground accent accent-foreground destructive warning warning-foreground success success-foreground info info-foreground border input ring chart-1 chart-2 chart-3 chart-4 chart-5 sidebar sidebar-foreground sidebar-primary sidebar-primary-foreground sidebar-accent sidebar-accent-foreground sidebar-border sidebar-ring toast-background toast-border'.split(
+              ' '
+            )
+          const prefs = JSON.parse(
+            localStorage.getItem('jean-client-preferences-v1') || 'null'
+          )
+          const themes = Array.isArray(prefs?.custom_themes)
+            ? prefs.custom_themes
+            : []
+          const colours = themes.find(t => t?.id === prefs.custom_theme)?.[
+            resolvedTheme
+          ]
+          for (const token of tokens) {
+            const colour = colours?.[token]
+            if (typeof colour === 'string' && colour) {
+              document.documentElement.style.setProperty('--' + token, colour)
+            }
+          }
+        } catch {
+          // ThemeProvider applies the theme once React mounts.
+        }
       })()
     </script>
     <title>Jean</title>
