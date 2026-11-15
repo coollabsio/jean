@@ -845,23 +845,30 @@ export function useScrollManagement({
 
       const target = e.target as HTMLDivElement
 
-      // When a run ends, the message list swaps the streaming reply for the
-      // saved one. WebKit clamps scrollTop while the content is briefly
-      // shorter, then fires a late scroll event to that stale position, after
-      // the tail was already pinned. Without this, the drop below reads as a
-      // scrollbar drag and the new prompt slides down from the top. Wheel,
-      // touch, and keyboard input stop following the tail first, so the user
-      // can still scroll away.
+      // During a run, and briefly after it ends, WebKit clamps scrollTop while
+      // the content is briefly shorter (tool calls collapse, the streaming
+      // reply is swapped for the saved one), then fires a late scroll event
+      // to that stale position after the stream was pinned. No resize follows
+      // while a tool runs, so nothing else moves the view back. Re-pin here.
+      // Wheel, touch, and keyboard input stop following the stream first, and
+      // a pointer down means a scrollbar drag, so the user can still scroll
+      // away.
       const now = Date.now()
+      // A desktop plan pinned to the top is not the tail; leave it to the
+      // streaming observer.
       if (
-        now < runEndSettleUntilRef.current &&
+        (isSending || now < runEndSettleUntilRef.current) &&
+        !isPointerDownRef.current &&
         now >= userScrollUpUntilRef.current &&
         isFollowingTailRef.current &&
-        !isViewportAtBottom(target)
+        !isViewportAtBottom(target) &&
+        !(isSending && !isMobile && target.querySelector('[data-plan-display]'))
       ) {
         scrollToTail(target)
         lastScrollTopRef.current = target.scrollTop
         lastScrollHeightRef.current = target.scrollHeight
+        syncIsAtBottom(target)
+        rememberScroll(target.scrollTop, true)
         return
       }
 
@@ -905,7 +912,14 @@ export function useScrollManagement({
       setIsAtBottom(prev => (prev === atBottom ? prev : atBottom))
       rememberScroll(target.scrollTop, isFollowingTailRef.current)
     },
-    [contentReady, recordLayout, rememberScroll]
+    [
+      contentReady,
+      isMobile,
+      isSending,
+      recordLayout,
+      rememberScroll,
+      syncIsAtBottom,
+    ]
   )
 
   // Handle scroll-to-bottom completion from the message list
