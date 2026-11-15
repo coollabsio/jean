@@ -128,6 +128,20 @@ const QWENCLOUD_MODE_ORDER: QwenCloudBillingMode[] = [
   'token-plan',
 ]
 
+/** Label + optional hint around a form control, so every provider field is
+ *  identifiable without relying on its placeholder. */
+const ProviderField: React.FC<{
+  label: string
+  hint?: string
+  children: React.ReactNode
+}> = ({ label, hint, children }) => (
+  <div className="space-y-1.5">
+    <div className="text-xs font-medium text-foreground">{label}</div>
+    {children}
+    {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+  </div>
+)
+
 /**
  * QwenCloud keys are region-scoped AND billing-mode-specific. Show this picker
  * whenever a provider points at a QwenCloud endpoint: it rewrites the base URL
@@ -138,13 +152,12 @@ const QwenCloudEndpointSelect: React.FC<{
   value: string
   onValueChange: (endpointId: string) => void
 }> = ({ value, onValueChange }) => (
-  <div className="space-y-1">
-    <p className="text-xs text-muted-foreground">
-      QwenCloud region / billing mode. Pay-as-you-go and Token Plan use
-      different keys and are not interchangeable.
-    </p>
+  <ProviderField
+    label="Endpoint"
+    hint="QwenCloud region and billing mode. Pay-as-you-go and Token Plan use different keys and cannot be mixed."
+  >
     <Select value={value} onValueChange={onValueChange}>
-      <SelectTrigger className="w-full sm:w-80">
+      <SelectTrigger aria-label="Endpoint" className="w-full sm:w-80">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
@@ -162,7 +175,7 @@ const QwenCloudEndpointSelect: React.FC<{
         ))}
       </SelectContent>
     </Select>
-  </div>
+  </ProviderField>
 )
 
 export const ClaudeProvidersSection: React.FC = () => {
@@ -503,20 +516,6 @@ const CliProfilesEditor: React.FC<{
   )
 }
 
-/** Label + optional hint around a form control, so every provider field is
- *  identifiable without relying on its placeholder. */
-const ProviderField: React.FC<{
-  label: string
-  hint?: string
-  children: React.ReactNode
-}> = ({ label, hint, children }) => (
-  <div className="space-y-1.5">
-    <div className="text-xs font-medium text-foreground">{label}</div>
-    {children}
-    {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-  </div>
-)
-
 const CodexProvidersEditor: React.FC<{
   providers: CodexProviderProfile[]
   onSave: (providers: CodexProviderProfile[]) => void
@@ -698,18 +697,13 @@ const CodexProvidersEditor: React.FC<{
             />
           </ProviderField>
           {qwenCloudRegionFromValue(editBaseUrl) && (
-            <ProviderField
-              label="Endpoint"
-              hint="Pay-as-you-go and Token Plan use different keys and cannot be mixed."
-            >
-              <QwenCloudEndpointSelect
-                value={qwenCloudRegionFromValue(editBaseUrl) ?? ''}
-                onValueChange={endpointId => {
-                  setEditBaseUrl(qwenCloudOpenAiBaseUrl(endpointId))
-                  setEditEnvKey(qwenCloudApiKeyEnv(endpointId))
-                }}
-              />
-            </ProviderField>
+            <QwenCloudEndpointSelect
+              value={qwenCloudRegionFromValue(editBaseUrl) ?? ''}
+              onValueChange={endpointId => {
+                setEditBaseUrl(qwenCloudOpenAiBaseUrl(endpointId))
+                setEditEnvKey(qwenCloudApiKeyEnv(endpointId))
+              }}
+            />
           )}
           <ProviderField
             label="API key environment variable"
@@ -737,7 +731,7 @@ const CodexProvidersEditor: React.FC<{
                 <SelectValue placeholder="Default" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">Default (auto)</SelectItem>
+                <SelectItem value="none">Codex default</SelectItem>
                 <SelectItem value="responses">Responses API</SelectItem>
                 <SelectItem value="chat">Chat Completions</SelectItem>
               </SelectContent>
@@ -1070,22 +1064,17 @@ const PiProvidersEditor: React.FC<{
             />
           </ProviderField>
           {qwenCloudRegionFromValue(editBaseUrl) && (
-            <ProviderField
-              label="Endpoint"
-              hint="Pay-as-you-go and Token Plan use different keys and cannot be mixed."
-            >
-              <QwenCloudEndpointSelect
-                value={qwenCloudRegionFromValue(editBaseUrl) ?? ''}
-                onValueChange={endpointId => {
-                  const baseUrl = qwenCloudOpenAiBaseUrl(endpointId)
-                  const keyEnv = qwenCloudApiKeyEnv(endpointId)
-                  setEditBaseUrl(baseUrl)
-                  setEditApiKeyEnv(keyEnv)
-                  // Models differ by region AND by billing mode - refresh.
-                  void fetchModelsFromQwenCloud(baseUrl, keyEnv, true)
-                }}
-              />
-            </ProviderField>
+            <QwenCloudEndpointSelect
+              value={qwenCloudRegionFromValue(editBaseUrl) ?? ''}
+              onValueChange={endpointId => {
+                const baseUrl = qwenCloudOpenAiBaseUrl(endpointId)
+                const keyEnv = qwenCloudApiKeyEnv(endpointId)
+                setEditBaseUrl(baseUrl)
+                setEditApiKeyEnv(keyEnv)
+                // Models differ by region AND by billing mode - refresh.
+                void fetchModelsFromQwenCloud(baseUrl, keyEnv, true)
+              }}
+            />
           )}
           <ProviderField
             label="API type"
