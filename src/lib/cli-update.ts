@@ -37,6 +37,30 @@ export const NPM_PACKAGE_NAMES: Partial<Record<CliType, string>> = {
   grok: '@xai-official/grok',
 }
 
+/** winget package ids for CLIs installed from the Windows package manager. */
+export const WINGET_PACKAGE_IDS: Partial<Record<CliType, string>> = {
+  gh: 'GitHub.cli',
+}
+
+function wingetUpgrade(id: string): [string, string[]] {
+  return [
+    'winget',
+    [
+      'upgrade',
+      '--id',
+      id,
+      '--silent',
+      '--accept-package-agreements',
+      '--accept-source-agreements',
+    ],
+  ]
+}
+
+/** Windows install path (`C:\…` or `C:/…`), used for the MSI fallback. */
+function isWindowsPath(path: string | null | undefined): boolean {
+  return !!path && /^[a-zA-Z]:[\\/]/.test(path)
+}
+
 /** Built-in self-update subcommand args, or null if the CLI has none. */
 export const CLI_SELF_UPDATE_ARGS: Record<CliType, string[] | null> = {
   claude: ['update'],
@@ -77,13 +101,23 @@ export function getPathUpdateAction(
   brewPkg: string,
   selfUpdateArgs: string[] | null,
   npmPkg?: string,
-  targetVersion?: string
+  targetVersion?: string,
+  wingetId?: string
 ): [string, string[]] | null {
   if (selfUpdateArgs) {
     return [cliPath ?? brewPkg, selfUpdateArgs]
   }
   if (packageManager === 'homebrew') {
     return ['brew', ['upgrade', brewPkg]]
+  }
+  if (packageManager === 'winget' && wingetId) {
+    return wingetUpgrade(wingetId)
+  }
+  if (packageManager === 'scoop') {
+    return ['scoop', ['update', brewPkg]]
+  }
+  if (packageManager === 'choco') {
+    return ['choco', ['upgrade', brewPkg, '-y']]
   }
   if (packageManager === 'bun' && npmPkg && targetVersion) {
     return ['bun', ['install', '-g', `${npmPkg}@${targetVersion}`]]
@@ -107,12 +141,21 @@ export function resolveCliPathUpdateAction(
     return [cliPath ?? CLI_BINARY_NAMES[type], selfUpdateArgs]
   }
 
+  const wingetId = WINGET_PACKAGE_IDS[type]
+  // `gh` has no self-update and ships as an MSI on Windows, so path detection
+  // finds no package manager. winget still owns the install (it lists
+  // `GitHub.cli` and its updates), so use it instead of a dead-end message.
+  if (!packageManager && wingetId && isWindowsPath(cliPath)) {
+    return wingetUpgrade(wingetId)
+  }
+
   return getPathUpdateAction(
     cliPath,
     packageManager,
     CLI_BINARY_NAMES[type],
     selfUpdateArgs,
     NPM_PACKAGE_NAMES[type],
-    targetVersion ?? undefined
+    targetVersion ?? undefined,
+    wingetId
   )
 }
