@@ -4186,47 +4186,13 @@ pub async fn dispatch_command(
         "install_opinionated_plugin" => {
             let plugin_name: String = from_field(&args, "pluginName")?;
             let result =
-                crate::opinionated::install_opinionated_plugin(app.clone(), plugin_name.clone())
-                    .await?;
-            if plugin_name == "cliproxyapi" {
-                emit_cache_invalidation(app, &["preferences"]);
-            }
+                crate::opinionated::install_opinionated_plugin(app.clone(), plugin_name).await?;
             to_value(result)
         }
         "uninstall_opinionated_plugin" => {
             let plugin_name: String = from_field(&args, "pluginName")?;
             let result =
-                crate::opinionated::uninstall_opinionated_plugin(app.clone(), plugin_name.clone())
-                    .await?;
-            if plugin_name == "cliproxyapi" {
-                emit_cache_invalidation(app, &["preferences"]);
-            }
-            to_value(result)
-        }
-        "start_opinionated_plugin" => {
-            let plugin_name: String = from_field(&args, "pluginName")?;
-            let result =
-                crate::opinionated::start_opinionated_plugin(app.clone(), plugin_name).await?;
-            to_value(result)
-        }
-        "stop_opinionated_plugin" => {
-            let plugin_name: String = from_field(&args, "pluginName")?;
-            let result =
-                crate::opinionated::stop_opinionated_plugin(app.clone(), plugin_name).await?;
-            to_value(result)
-        }
-        "get_cliproxyapi_usage" => {
-            let result = crate::opinionated::get_cliproxyapi_usage().await?;
-            to_value(result)
-        }
-        "refresh_cliproxyapi_models" => {
-            let result = crate::opinionated::refresh_cliproxyapi_models(app.clone()).await?;
-            emit_cache_invalidation(app, &["preferences"]);
-            to_value(result)
-        }
-        "prepare_cliproxyapi_account_login" => {
-            let provider: String = from_field(&args, "provider")?;
-            let result = crate::opinionated::prepare_cliproxyapi_account_login(provider).await?;
+                crate::opinionated::uninstall_opinionated_plugin(app.clone(), plugin_name).await?;
             to_value(result)
         }
 

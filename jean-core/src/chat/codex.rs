@@ -215,10 +215,7 @@ fn plan_input_is_thin(input: &serde_json::Value) -> bool {
         .and_then(|v| v.as_str())
         .map(str::trim)
         .unwrap_or("");
-    if !plan.is_empty() && !is_status_only_plan_explanation(plan) && plan.len() >= 80 {
-        return false;
-    }
-    true
+    plan.len() < 80 || is_status_only_plan_explanation(plan)
 }
 
 /// Collapse multiple CodexPlan tools (split turn/item ids) into one richest tool.
@@ -5424,9 +5421,6 @@ pub fn execute_one_shot_codex(
     cmd.stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    for (key, value) in crate::opinionated::cliproxyapi::codex_process_env() {
-        cmd.env(key, value);
-    }
 
     // Run in a new process group so a timeout kill can take down the whole tree.
     // Codex spawns MCP server children (e.g. chrome-devtools-mcp) that survive a

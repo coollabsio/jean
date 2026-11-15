@@ -1,4 +1,3 @@
-import type React from 'react'
 import { Loader2 } from '@/components/icons/reicon'
 import { Button } from '@/components/ui/button'
 
@@ -9,15 +8,12 @@ export function CliAuthActions({
   authenticated,
   onSignIn,
   onSignInAgain,
-  extra,
 }: {
   installed: boolean
   checking: boolean
   authenticated: boolean
   onSignIn: () => void
   onSignInAgain?: () => void
-  /** Extra action shown next to the sign-in state when the CLI is installed. */
-  extra?: React.ReactNode
 }) {
   if (!installed) {
     return <span className="text-sm text-muted-foreground">Not installed</span>
@@ -33,7 +29,6 @@ export function CliAuthActions({
   if (authenticated) {
     return (
       <span className="flex items-center gap-2 text-sm text-muted-foreground">
-        {extra}
         Signed in
         {onSignInAgain && (
           <Button variant="outline" size="sm" onClick={onSignInAgain}>
@@ -44,12 +39,9 @@ export function CliAuthActions({
     )
   }
   return (
-    <span className="flex items-center gap-2">
-      {extra}
-      <Button variant="outline" size="sm" onClick={onSignIn}>
-        Sign in
-      </Button>
-    </span>
+    <Button variant="outline" size="sm" onClick={onSignIn}>
+      Sign in
+    </Button>
   )
 }
 

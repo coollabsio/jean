@@ -88,14 +88,14 @@ describe('providerSupportsAdaptiveThinking', () => {
     settings_json: JSON.stringify({ env }),
   })
   const profiles = [
-    profile('CLIProxyAPI', { ANTHROPIC_DEFAULT_OPUS_MODEL: 'claude-opus-5-5' }),
+    profile('Gateway', { ANTHROPIC_DEFAULT_OPUS_MODEL: 'claude-opus-5-5' }),
     profile('Zai', { ANTHROPIC_DEFAULT_OPUS_MODEL: 'glm-4.7' }),
     profile('Empty', {}),
   ]
 
   it('uses effort when a provider maps the alias to an effort Claude model', () => {
     expect(
-      providerSupportsAdaptiveThinking('opus', 'CLIProxyAPI', profiles, '2.2.0')
+      providerSupportsAdaptiveThinking('opus', 'Gateway', profiles, '2.2.0')
     ).toBe(true)
   })
 

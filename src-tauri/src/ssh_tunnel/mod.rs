@@ -12,6 +12,7 @@
 mod args;
 mod hostkey;
 mod secrets;
+pub use secrets::identity_file_path;
 mod supervisor;
 
 pub use supervisor::{

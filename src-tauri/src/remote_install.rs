@@ -1029,11 +1029,7 @@ pub fn install_remote_jean_server(
             .ok_or_else(|| "Trust the SSH host key before installing over a tunnel.".to_string())?;
         SshClientOptions {
             known_hosts_file: Some(std::path::PathBuf::from(known_hosts)),
-            identity_file: input
-                .identity_file
-                .as_ref()
-                .map(|path| std::path::PathBuf::from(path.trim()))
-                .filter(|path| !path.as_os_str().is_empty()),
+            identity_file: crate::ssh_tunnel::identity_file_path(input.identity_file.as_deref())?,
             strict_host_keys: true,
         }
     } else {

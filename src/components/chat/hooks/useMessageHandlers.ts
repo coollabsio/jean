@@ -459,8 +459,7 @@ export function useMessageHandlers({
       })
 
       // Mark as at-bottom so Tier 4 / Tier 2 auto-scroll kicks in when
-      // streaming starts. Don't physically scroll — let native CSS scroll
-      // anchoring handle the question form collapse smoothly.
+      // streaming starts. ChatWindow scrolls to the tail after the form collapses.
       markAtBottom()
       if (session?.backend === 'opencode') {
         // Format answers for OpenCode: each question gets an array of selected labels/text

@@ -11678,7 +11678,7 @@ pub async fn git_push(
         }
     }
     log::trace!("Pushing changes for worktree: {worktree_path}, pr_number: {pr_number:?}, effective_pr_number: {effective_pr_number:?}, remote: {remote:?}");
-    match effective_pr_number {
+    let response = match effective_pr_number {
         Some(pr) => {
             let result = git::git_push_to_pr(&worktree_path, pr, &resolve_gh_binary(&app))?;
             if let (Some(pushed_remote), Some(pushed_branch)) =
@@ -11690,21 +11690,41 @@ pub async fn git_push(
                     log::warn!("Failed to persist PR push target: {e}");
                 }
             }
-            Ok(GitPushResponse {
+            GitPushResponse {
                 output: result.output,
                 fell_back: result.fell_back,
                 permission_denied: result.permission_denied,
-            })
+            }
         }
         None => {
             let output = git::git_push(&worktree_path, remote.as_deref())?;
-            Ok(GitPushResponse {
+            GitPushResponse {
                 output,
                 fell_back: false,
                 permission_denied: false,
-            })
+            }
+        }
+    };
+
+    // The push can clear or create PR conflicts: refresh the linked PR status
+    // now instead of waiting for the next poll.
+    if !response.fell_back && !response.permission_denied {
+        let linked_pr = data
+            .worktrees
+            .iter()
+            .find(|w| w.path == worktree_path && w.session_type != SessionType::Base)
+            .and_then(|w| Some((w.id.clone(), w.pr_number?, w.pr_url.clone()?)));
+        if let Some((worktree_id, pr_number, pr_url)) = linked_pr {
+            crate::background_tasks::refresh_pr_status_after_push(
+                &app,
+                worktree_id,
+                worktree_path,
+                pr_number,
+                pr_url,
+            );
         }
     }
+    Ok(response)
 }
 
 // =============================================================================
