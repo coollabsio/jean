@@ -36,7 +36,8 @@ import { toast } from 'sonner'
 import { Input } from '@/components/ui/input'
 import { isValidHex } from '@/lib/terminal-theme'
 import { Button } from '@/components/ui/button'
-import { parseCustomTheme } from '@/lib/custom-themes'
+import { parseCustomTheme, serializeCustomTheme } from '@/lib/custom-themes'
+import { copyToClipboard } from '@/lib/clipboard'
 import { readClientPreferences } from '@/lib/client-preferences'
 import { useClientPreferences } from '@/hooks/useClientPreferences'
 import { useClientZoom } from '@/lib/client-zoom'
@@ -139,6 +140,20 @@ export const AppearancePane: React.FC = () => {
     },
     [updateClientPreferences]
   )
+
+  const handleCustomThemeExport = useCallback(async () => {
+    const { custom_themes, custom_theme } = readClientPreferences()
+    const theme = custom_themes.find(t => t.id === custom_theme)
+    if (!theme) return
+    try {
+      await copyToClipboard(serializeCustomTheme(theme))
+      toast.success(`Copied theme "${theme.name}" as JSON`)
+    } catch (error) {
+      toast.error('Could not copy theme', {
+        description: getErrorMessage(error),
+      })
+    }
+  }, [])
 
   const handleCustomThemeRemove = useCallback(() => {
     const { custom_themes, custom_theme } = readClientPreferences()
@@ -390,13 +405,22 @@ export const AppearancePane: React.FC = () => {
                 Import
               </Button>
               {clientPreferences.custom_theme && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleCustomThemeRemove}
-                >
-                  Remove
-                </Button>
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void handleCustomThemeExport()}
+                  >
+                    Export
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleCustomThemeRemove}
+                  >
+                    Remove
+                  </Button>
+                </>
               )}
             </div>
           </InlineField>

@@ -3,6 +3,7 @@ import {
   applyThemeColours,
   normalizeCustomThemes,
   parseCustomTheme,
+  serializeCustomTheme,
 } from './custom-themes'
 
 describe('custom-themes', () => {
@@ -39,6 +40,21 @@ describe('custom-themes', () => {
     [{ name: 'x', dark: { background: 'var(--card)' } }, 'not a colour'],
   ])('rejects %j', (input, message) => {
     expect(() => parseCustomTheme(input)).toThrow(message)
+  })
+
+  it('exports a theme that imports back unchanged, without its id', () => {
+    const theme = parseCustomTheme(
+      {
+        name: 'Ember',
+        light: { primary: '#c2410c' },
+        dark: { card: '#1c1917' },
+      },
+      'id-1'
+    )
+    const exported = JSON.parse(serializeCustomTheme(theme))
+
+    expect(exported).not.toHaveProperty('id')
+    expect(parseCustomTheme(exported, 'id-1')).toEqual(theme)
   })
 
   it('keeps only stored themes that still validate', () => {

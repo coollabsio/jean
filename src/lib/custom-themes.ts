@@ -113,6 +113,15 @@ export function parseCustomTheme(
   }
 }
 
+/** Theme file JSON for a stored theme, in the format `parseCustomTheme` reads. */
+export function serializeCustomTheme({
+  name,
+  light,
+  dark,
+}: CustomTheme): string {
+  return JSON.stringify({ name, light, dark }, null, 2)
+}
+
 /** Keep the stored themes that still validate; drop anything else. */
 export function normalizeCustomThemes(value: unknown): CustomTheme[] {
   if (!Array.isArray(value)) return []

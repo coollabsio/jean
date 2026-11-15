@@ -12,6 +12,10 @@ imported themes and **None** (the built-in colours). Importing a file with the
 same `name` again replaces the earlier copy, which makes it easy to iterate on
 a theme.
 
+**Export** copies the active theme to the clipboard as JSON in the same
+format, so you can save it as a file, share it, or import it in another
+desktop app or Web Access browser.
+
 Themes are client preferences, like fonts and zoom: they are stored in the
 app's local storage, so each desktop app and each Web Access browser keeps its
 own list.
