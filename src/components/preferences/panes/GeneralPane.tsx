@@ -1,6 +1,5 @@
 import { useInstalledBackends } from '@/hooks/useInstalledBackends'
 import { useSettingsTargetServerId } from '@/lib/settings-target'
-import { CliproxyBackendAccountAction } from '../CliproxyAccountLogin'
 import React, {
   useState,
   useCallback,
@@ -237,7 +236,10 @@ import {
 import { isWindows, openExternal } from '@/lib/platform'
 import { isNewerVersion } from '@/lib/version-utils'
 import { cn } from '@/lib/utils'
-import { getPathUpdateAction } from '@/lib/cli-update'
+import {
+  getPathUpdateAction,
+  resolveCliPathUpdateAction,
+} from '@/lib/cli-update'
 import { SettingsSection } from '../SettingsSection'
 import { InlineField } from '../InlineField'
 import { CliAuthActions } from '../CliAuthActions'
@@ -1921,7 +1923,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               authenticated={!!claudeAuth?.authenticated}
               onSignIn={handleClaudeLogin}
               onSignInAgain={handleClaudeRelogin}
-              extra={<CliproxyBackendAccountAction provider="claude" />}
             />
           }
         >
@@ -2013,11 +2014,11 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   hasUpdate={ghHasUpdate}
                   latestVersion={ghLatestStable?.version}
                   onUpdate={() => {
-                    const action = getPathUpdateAction(
+                    const action = resolveCliPathUpdateAction(
+                      'gh',
                       ghStatus?.path,
                       ghPathDetection?.package_manager,
-                      'gh',
-                      null
+                      ghLatestStable?.version
                     )
                     if (action) {
                       openCliLoginModal('gh', action[0], action[1], 'update')
@@ -2182,7 +2183,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               authenticated={!!codexAuth?.authenticated}
               onSignIn={handleCodexLogin}
               onSignInAgain={handleCodexRelogin}
-              extra={<CliproxyBackendAccountAction provider="codex" />}
             />
           }
         >

@@ -117,8 +117,14 @@ pub fn ensure_macos_path() {
 /// `Some("npm")` if it contains `/node_modules/`, `None` otherwise.
 pub fn detect_package_manager(binary_path: &std::path::Path) -> Option<String> {
     let canonical = std::fs::canonicalize(binary_path).ok()?;
-    let canonical_str = canonical.to_string_lossy();
+    package_manager_from_path(&canonical.to_string_lossy())
+}
 
+/// Map an installed CLI path to the package manager that owns it.
+///
+/// Windows matters here: `gh` ships as an MSI, so path detection alone returns
+/// nothing and Jean told users to update manually even when winget can do it.
+fn package_manager_from_path(canonical_str: &str) -> Option<String> {
     if canonical_str.contains("/homebrew/") || canonical_str.contains("/Cellar/") {
         return Some("homebrew".to_string());
     }
@@ -131,6 +137,17 @@ pub fn detect_package_manager(binary_path: &std::path::Path) -> Option<String> {
 
     if canonical_str.contains("/node_modules/") {
         return Some("npm".to_string());
+    }
+
+    let normalized = canonical_str.replace('\\', "/").to_ascii_lowercase();
+    if normalized.contains("/winget/") {
+        return Some("winget".to_string());
+    }
+    if normalized.contains("/scoop/") {
+        return Some("scoop".to_string());
+    }
+    if normalized.contains("/chocolatey/") {
+        return Some("choco".to_string());
     }
 
     None
@@ -1052,6 +1069,53 @@ mod windows_console_flash_audit {
             violations.is_empty(),
             "Windows cmd.exe launches missing CREATE_NO_WINDOW (issue #588):\n{}",
             violations.join("\n")
+        );
+    }
+}
+
+#[cfg(test)]
+mod package_manager_tests {
+    use super::package_manager_from_path;
+
+    #[test]
+    fn maps_windows_package_managers() {
+        assert_eq!(
+            package_manager_from_path(
+                r"C:/Users/me/AppData/Local/Microsoft/WinGet/Packages/GitHub.cli_abc/gh.exe"
+            )
+            .as_deref(),
+            Some("winget")
+        );
+        assert_eq!(
+            package_manager_from_path(r"C:/Users/me/scoop/apps/gh/current/bin/gh.exe").as_deref(),
+            Some("scoop")
+        );
+        assert_eq!(
+            package_manager_from_path(r"C:/ProgramData/chocolatey/bin/gh.exe").as_deref(),
+            Some("choco")
+        );
+        assert_eq!(
+            package_manager_from_path(r"C:/Program Files/GitHub CLI/gh.exe"),
+            None
+        );
+    }
+
+    #[test]
+    fn keeps_unix_package_managers() {
+        assert_eq!(
+            package_manager_from_path("/opt/homebrew/bin/gh").as_deref(),
+            Some("homebrew")
+        );
+        assert_eq!(
+            package_manager_from_path(
+                "/home/me/.bun/install/global/node_modules/@openai/codex/bin/codex.js"
+            )
+            .as_deref(),
+            Some("bun")
+        );
+        assert_eq!(
+            package_manager_from_path("/usr/lib/node_modules/opencode/bin/opencode").as_deref(),
+            Some("npm")
         );
     }
 }

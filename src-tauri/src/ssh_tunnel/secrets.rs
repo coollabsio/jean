@@ -201,7 +201,11 @@ fn keyring_delete(_profile_id: &str) -> Result<(), ()> {
 }
 
 pub fn identity_file_path(raw: Option<&str>) -> Result<Option<PathBuf>, String> {
-    let Some(raw) = raw.map(str::trim).filter(|value| !value.is_empty()) else {
+    // Windows "Copy as path" wraps the path in double quotes.
+    let Some(raw) = raw
+        .map(|value| value.trim().trim_matches('"').trim())
+        .filter(|value| !value.is_empty())
+    else {
         return Ok(None);
     };
     if raw.contains(['\n', '\r', '\0']) {
@@ -217,6 +221,16 @@ pub fn identity_file_path(raw: Option<&str>) -> Result<Option<PathBuf>, String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn identity_file_path_accepts_quoted_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = dir.path().join("id key");
+        std::fs::write(&key, "key").unwrap();
+        let quoted = format!("  \"{}\" ", key.display());
+        assert_eq!(identity_file_path(Some(&quoted)).unwrap(), Some(key));
+        assert_eq!(identity_file_path(Some("\"\"")).unwrap(), None);
+    }
 
     #[test]
     fn file_store_round_trip_does_not_require_os_keyring() {

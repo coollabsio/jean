@@ -3,6 +3,7 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::hash::{Hash, Hasher};
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, UNIX_EPOCH};
@@ -405,19 +406,16 @@ fn list_claude_sessions(
         return Ok(Vec::new());
     }
 
-    let escaped_dir = projects_root.join(escape_claude_project_dir(worktree_path));
-    let search_roots = if escaped_dir.exists() {
-        vec![escaped_dir]
-    } else {
-        vec![projects_root]
+    // Only this project's directory. Falling back to every project parsed
+    // thousands of unrelated transcripts and made the picker hang.
+    let Some(project_dir) = claude_project_dir(&projects_root, worktree_path) else {
+        return Ok(Vec::new());
     };
 
     let mut results = Vec::new();
-    for root in search_roots {
-        for path in collect_jsonl_files(&root, None)? {
-            if let Some(session) = parse_claude_session_file(&path, worktree_path) {
-                push_if_matches(&mut results, session, query);
-            }
+    for path in collect_jsonl_files(&project_dir, None)? {
+        if let Some(session) = parse_claude_session_file(&path, worktree_path) {
+            push_if_matches(&mut results, session, query);
         }
     }
     sort_and_limit(results, limit)
@@ -754,14 +752,21 @@ fn is_codex_context_message(value: &str) -> bool {
 }
 
 fn parse_claude_session_file(path: &Path, worktree_path: &str) -> Option<NativeCliHistorySession> {
-    let contents = fs::read_to_string(path).ok()?;
+    // Read only the head of the transcript. These files can be tens of MB
+    // (tool output is inlined), and every metadata field we need lives in the
+    // first lines — reading whole files made the new-session picker crawl on
+    // projects with many large Claude sessions.
+    let file = fs::File::open(path).ok()?;
+    let reader = BufReader::new(file);
     let mut id = path.file_stem()?.to_str()?.to_string();
     let mut cwd = None;
     let mut title = None;
     let mut slug = None;
 
-    for line in contents.lines().take(200) {
-        let value: Value = serde_json::from_str(line).ok()?;
+    for line in reader.lines().take(200).map_while(Result::ok) {
+        let Ok(value) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
         if let Some(session_id) = value.get("sessionId").and_then(Value::as_str) {
             id = session_id.to_string();
         }
@@ -1062,8 +1067,58 @@ fn humanize_slug(slug: &str) -> String {
         .join(" ")
 }
 
+/// Claude Code truncates encoded project names longer than this and appends
+/// a hash of the full path.
+const CLAUDE_PROJECT_DIR_MAX_LEN: usize = 200;
+
 fn escape_claude_project_dir(path: &str) -> String {
-    path.replace('/', "-")
+    // Claude encodes the project path by replacing every non-alphanumeric
+    // character (per UTF-16 unit) with `-`:
+    //   C:\Users\me\repo      -> C--Users-me-repo
+    //   /Users/me/coolify.io  -> -Users-me-coolify-io
+    //   /root/.local/my_repo  -> -root--local-my-repo
+    path.trim_end_matches(['/', '\\'])
+        .chars()
+        .flat_map(|c| {
+            let (ch, count) = if c.is_ascii_alphanumeric() {
+                (c, 1)
+            } else {
+                ('-', c.len_utf16())
+            };
+            std::iter::repeat_n(ch, count)
+        })
+        .collect()
+}
+
+/// Locate `~/.claude/projects/<encoded worktree>`.
+///
+/// An exact miss is retried ignoring case (Windows drive letters: `d--…` vs
+/// `D--…`). Encoded names over the length limit carry a hash suffix, so they
+/// match on the truncated prefix.
+fn claude_project_dir(projects_root: &Path, worktree_path: &str) -> Option<PathBuf> {
+    let escaped = escape_claude_project_dir(worktree_path);
+    let exact = projects_root.join(&escaped);
+    if exact.is_dir() {
+        return Some(exact);
+    }
+
+    let wanted = escaped.to_lowercase();
+    let truncated_prefix = (wanted.len() > CLAUDE_PROJECT_DIR_MAX_LEN)
+        .then(|| format!("{}-", &wanted[..CLAUDE_PROJECT_DIR_MAX_LEN]));
+    fs::read_dir(projects_root)
+        .ok()?
+        .flatten()
+        .find(|entry| {
+            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                return false;
+            }
+            let name = entry.file_name().to_string_lossy().to_lowercase();
+            match &truncated_prefix {
+                Some(prefix) => name.starts_with(prefix.as_str()),
+                None => name == wanted,
+            }
+        })
+        .map(|entry| entry.path())
 }
 
 fn escape_cursor_project_dir(path: &str) -> String {
@@ -1271,7 +1326,7 @@ mod tests {
     fn claude_project_dir_escape_matches_native_layout() {
         assert_eq!(
             escape_claude_project_dir("/Users/heyandras/devel/coolify.io"),
-            "-Users-heyandras-devel-coolify.io"
+            "-Users-heyandras-devel-coolify-io"
         );
     }
 
@@ -1649,5 +1704,70 @@ mod tests {
         assert_eq!(parsed.resume_args, vec!["--session", "pi-session"]);
         let _ = fs::remove_file(path);
         let _ = fs::remove_dir(dir);
+    }
+
+    #[test]
+    fn escapes_claude_project_paths() {
+        assert_eq!(
+            escape_claude_project_dir(r"C:\Users\me\repo"),
+            "C--Users-me-repo"
+        );
+        assert_eq!(
+            escape_claude_project_dir("/Users/me/repo"),
+            "-Users-me-repo"
+        );
+        assert_eq!(
+            escape_claude_project_dir(r"C:\Users\me\repo\"),
+            "C--Users-me-repo"
+        );
+        assert_eq!(
+            escape_claude_project_dir("/root/.local/pr-914-fix_session"),
+            "-root--local-pr-914-fix-session"
+        );
+    }
+
+    #[test]
+    fn finds_truncated_long_project_dir() {
+        let temp = tempfile::tempdir().unwrap();
+        let long_path = format!("/work/{}", "a".repeat(250));
+        let escaped = escape_claude_project_dir(&long_path);
+        let dir_name = format!("{}-1x2y3z", &escaped[..CLAUDE_PROJECT_DIR_MAX_LEN]);
+        fs::create_dir(temp.path().join(&dir_name)).unwrap();
+
+        let found = claude_project_dir(temp.path(), &long_path).unwrap();
+
+        assert_eq!(found.file_name().unwrap().to_str().unwrap(), dir_name);
+    }
+
+    #[test]
+    fn finds_the_project_dir_ignoring_drive_case() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir(temp.path().join("d--work-repo")).unwrap();
+
+        let found = claude_project_dir(temp.path(), r"D:\work\repo").unwrap();
+
+        assert_eq!(found.file_name().unwrap(), "d--work-repo");
+    }
+
+    #[test]
+    fn parses_metadata_past_invalid_lines() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("session.jsonl");
+        let mut file = fs::File::create(&path).unwrap();
+        writeln!(file, "not json").unwrap();
+        writeln!(
+            file,
+            r#"{{"sessionId":"s1","cwd":"/tmp/worktree","type":"user","message":{{"content":"hello"}}}}"#
+        )
+        .unwrap();
+        for _ in 0..500 {
+            writeln!(file, "not json").unwrap();
+        }
+        drop(file);
+
+        let parsed = parse_claude_session_file(&path, "/tmp/worktree").unwrap();
+
+        assert_eq!(parsed.id, "s1");
+        assert!(!parsed.title.is_empty());
     }
 }

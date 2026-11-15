@@ -133,7 +133,7 @@ describe('PreferencesDialog', () => {
     expect(dialog.className).toContain('w-[96vw]')
     expect(dialog.className).toContain('h-[94dvh]')
     expect(dialog.className).toContain('max-w-[96vw]')
-    expect(dialog.className).not.toContain('inset-0')
+    expect(dialog.className).not.toContain('h-fit')
     expect(dialog.className).not.toContain('max-w-lg')
 
     const overlay = document.querySelector('[data-slot="dialog-overlay"]')
