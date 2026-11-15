@@ -27,6 +27,10 @@ vi.mock('@tanstack/react-query', async importOriginal => ({
   }),
 }))
 
+vi.mock('@/hooks/useContextLinkUsage', () => ({
+  useContextLinkUsage: () => ({ getMatches: () => [] }),
+}))
+
 vi.mock('@/hooks/useGhLogin', () => ({
   useGhLogin: () => ({ triggerLogin: vi.fn(), isGhInstalled: true }),
 }))

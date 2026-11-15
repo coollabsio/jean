@@ -36,6 +36,7 @@ import { LinearItemsTab } from './LinearItemsTab'
 import { SentryItemsTab } from './SentryItemsTab'
 import { ContextsTab } from './ContextsTab'
 import { useLoadContextData } from './hooks/useLoadContextData'
+import { useContextLinkUsage } from '@/hooks/useContextLinkUsage'
 import { useLoadContextHandlers } from './hooks/useLoadContextHandlers'
 import { useLoadContextKeyboard } from './hooks/useLoadContextKeyboard'
 
@@ -118,6 +119,14 @@ export function LoadContextModal({
     activeSessionId,
     searchQuery,
     includeClosed,
+  })
+
+  // Other worktrees/sessions that already use an item (this session excluded)
+  const contextLinks = useContextLinkUsage({
+    enabled: open,
+    projectId,
+    projectPath: worktreePath,
+    currentSessionId: activeSessionId ?? undefined,
   })
 
   // Stable callback for handlers to reset search/selection
@@ -368,6 +377,7 @@ export function LoadContextModal({
         <div className="flex flex-col flex-1 min-h-0">
           {activeTab === 'issues' && (
             <GitHubItemsTab
+              contextLinks={contextLinks}
               config={{
                 kind: 'issues',
                 loadedContexts: data.loadedIssueContexts ?? [],
@@ -404,6 +414,7 @@ export function LoadContextModal({
 
           {activeTab === 'prs' && (
             <GitHubItemsTab
+              contextLinks={contextLinks}
               config={{
                 kind: 'prs',
                 loadedContexts: data.loadedPRContexts ?? [],
@@ -440,6 +451,7 @@ export function LoadContextModal({
 
           {activeTab === 'security' && (
             <SecurityAlertsTab
+              contextLinks={contextLinks}
               loadedContexts={data.loadedSecurityContexts ?? []}
               filteredAlerts={data.filteredSecurityAlerts}
               searchQuery={searchQuery}
@@ -490,6 +502,7 @@ export function LoadContextModal({
 
           {activeTab === 'linear' && (
             <LinearItemsTab
+              contextLinks={contextLinks}
               searchQuery={searchQuery}
               setSearchQuery={setSearchQuery}
               searchInputRef={searchInputRef}

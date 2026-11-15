@@ -17,6 +17,8 @@ export interface LinearIssueItemProps {
   isSelected: boolean
   isCreating: boolean
   contextMatches?: ContextLinkMatch[]
+  /** Matches in this worktree show only the session name */
+  currentWorktreeId?: string
   isChecked?: boolean
   onCheckedChange?: (checked: boolean) => void
   onMouseEnter: () => void
@@ -39,6 +41,7 @@ export function LinearIssueItem({
   isSelected,
   isCreating,
   contextMatches,
+  currentWorktreeId,
   isChecked = false,
   onCheckedChange,
   onMouseEnter,
@@ -127,7 +130,10 @@ export function LinearIssueItem({
           )}
         </div>
       </button>
-      <ContextLinkBadge matches={contextMatches} />
+      <ContextLinkBadge
+        matches={contextMatches}
+        currentWorktreeId={currentWorktreeId}
+      />
       <div className="flex items-center gap-1 flex-shrink-0">
         {onInvestigate && (
           <Tooltip>

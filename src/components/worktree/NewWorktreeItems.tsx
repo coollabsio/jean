@@ -160,6 +160,8 @@ export interface IssueItemProps {
   isSelected: boolean
   isCreating: boolean
   contextMatches?: ContextLinkMatch[]
+  /** Matches in this worktree show only the session name */
+  currentWorktreeId?: string
   isChecked?: boolean
   onCheckedChange?: (checked: boolean) => void
   onMouseEnter: () => void
@@ -176,6 +178,7 @@ export function IssueItem({
   isSelected,
   isCreating,
   contextMatches,
+  currentWorktreeId,
   isChecked = false,
   onCheckedChange,
   onMouseEnter,
@@ -240,7 +243,10 @@ export function IssueItem({
           />
         </div>
       </div>
-      <ContextLinkBadge matches={contextMatches} />
+      <ContextLinkBadge
+        matches={contextMatches}
+        currentWorktreeId={currentWorktreeId}
+      />
       <div
         className="shrink-0 flex items-center gap-1 self-center"
         onClick={e => e.stopPropagation()}
@@ -264,6 +270,8 @@ export interface PRItemProps {
   isSelected: boolean
   isCreating: boolean
   contextMatches?: ContextLinkMatch[]
+  /** Matches in this worktree show only the session name */
+  currentWorktreeId?: string
   isStacking?: boolean
   isChecked?: boolean
   onCheckedChange?: (checked: boolean) => void
@@ -282,6 +290,7 @@ export function PRItem({
   isSelected,
   isCreating,
   contextMatches,
+  currentWorktreeId,
   isStacking = false,
   isChecked = false,
   onCheckedChange,
@@ -353,7 +362,10 @@ export function PRItem({
           />
         </div>
       </div>
-      <ContextLinkBadge matches={contextMatches} />
+      <ContextLinkBadge
+        matches={contextMatches}
+        currentWorktreeId={currentWorktreeId}
+      />
       <div
         className="shrink-0 flex items-center gap-1 self-center"
         onClick={e => e.stopPropagation()}
@@ -577,6 +589,8 @@ export interface SecurityAlertItemProps {
   isSelected: boolean
   isCreating: boolean
   contextMatches?: ContextLinkMatch[]
+  /** Matches in this worktree show only the session name */
+  currentWorktreeId?: string
   isChecked?: boolean
   onCheckedChange?: (checked: boolean) => void
   onMouseEnter: () => void
@@ -591,6 +605,7 @@ export function SecurityAlertItem({
   isSelected,
   isCreating,
   contextMatches,
+  currentWorktreeId,
   isChecked = false,
   onCheckedChange,
   onMouseEnter,
@@ -650,7 +665,10 @@ export function SecurityAlertItem({
           </span>
         </div>
       </button>
-      <ContextLinkBadge matches={contextMatches} />
+      <ContextLinkBadge
+        matches={contextMatches}
+        currentWorktreeId={currentWorktreeId}
+      />
       <div className="shrink-0 flex items-center gap-1 self-center">
         <ItemActions
           label="Alert"
@@ -675,6 +693,8 @@ export interface AdvisoryItemProps {
   isSelected: boolean
   isCreating: boolean
   contextMatches?: ContextLinkMatch[]
+  /** Matches in this worktree show only the session name */
+  currentWorktreeId?: string
   isChecked?: boolean
   onCheckedChange?: (checked: boolean) => void
   onMouseEnter: () => void
@@ -689,6 +709,7 @@ export function AdvisoryItem({
   isSelected,
   isCreating,
   contextMatches,
+  currentWorktreeId,
   isChecked = false,
   onCheckedChange,
   onMouseEnter,
@@ -752,7 +773,10 @@ export function AdvisoryItem({
           </span>
         </div>
       </button>
-      <ContextLinkBadge matches={contextMatches} />
+      <ContextLinkBadge
+        matches={contextMatches}
+        currentWorktreeId={currentWorktreeId}
+      />
       <div className="shrink-0 flex items-center gap-1 self-center">
         <ItemActions
           label="Advisory"

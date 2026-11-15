@@ -27,6 +27,7 @@ import type {
   LoadedPullRequestContext,
 } from '@/types/github'
 import type { GitProvider } from '@/types/provider'
+import type { ContextLinkLookup } from '@/hooks/useContextLinkUsage'
 
 type GitHubItemsTabConfig =
   | {
@@ -77,6 +78,8 @@ interface GitHubItemsTabProps {
    * transient "Sign in to GitHub" flash on GitLab projects.
    */
   providerResolved?: boolean
+  /** Marks items that other worktrees/sessions already use */
+  contextLinks?: ContextLinkLookup
 }
 
 export function GitHubItemsTab({
@@ -101,6 +104,7 @@ export function GitHubItemsTab({
   isCliInstalled,
   provider = 'github',
   providerResolved = true,
+  contextLinks,
 }: GitHubItemsTabProps) {
   const labels = providerLabels(provider)
   const isIssues = config.kind === 'issues'
@@ -293,6 +297,11 @@ export function GitHubItemsTab({
                     index={index}
                     isSelected={index === selectedIndex}
                     isCreating={loadingNumbers.has(issue.number)}
+                    contextMatches={contextLinks?.getMatches({
+                      type: 'issue',
+                      id: issue.number,
+                    })}
+                    currentWorktreeId={contextLinks?.currentWorktreeId}
                     onMouseEnter={() => setSelectedIndex(index)}
                     onClick={() => config.onSelectItem(issue)}
                     onPreview={() => config.onPreviewItem(issue)}
@@ -305,6 +314,11 @@ export function GitHubItemsTab({
                     index={index}
                     isSelected={index === selectedIndex}
                     isCreating={loadingNumbers.has(pr.number)}
+                    contextMatches={contextLinks?.getMatches({
+                      type: 'pr',
+                      id: pr.number,
+                    })}
+                    currentWorktreeId={contextLinks?.currentWorktreeId}
                     onMouseEnter={() => setSelectedIndex(index)}
                     onClick={() => config.onSelectItem(pr)}
                     onPreview={() => config.onPreviewItem(pr)}

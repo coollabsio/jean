@@ -73,6 +73,13 @@ function normalizeId(id: number | string): string {
   return String(id).toLowerCase()
 }
 
+/** Lookup of the existing worktrees/sessions that use an item */
+export interface ContextLinkLookup {
+  getMatches: (ref: ContextLinkRef) => ContextLinkMatch[]
+  /** Worktree of `currentSessionId`; its matches show only the session name */
+  currentWorktreeId?: string
+}
+
 export const contextLinkUsageQueryKey = ['context-link-usage'] as const
 
 /**
@@ -92,7 +99,7 @@ export function useContextLinkUsage({
   projectPath: string | null
   /** Ignore this session and its worktree-level link (the caller's own) */
   currentSessionId?: string
-}) {
+}): ContextLinkLookup {
   const active = enabled && Boolean(projectId || projectPath)
   const { data: usage } = useQuery({
     queryKey: [...contextLinkUsageQueryKey, projectPath, projectId],

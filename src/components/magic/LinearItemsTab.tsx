@@ -19,6 +19,7 @@ import { isLinearAuthError } from '@/services/linear'
 import { LinearAuthError } from '@/components/shared/LinearAuthError'
 import { LinearIssueItem } from '@/components/worktree/LinearIssueItem'
 import type { LinearIssue, LoadedLinearIssueContext } from '@/types/linear'
+import type { ContextLinkLookup } from '@/hooks/useContextLinkUsage'
 
 interface LinearItemsTabProps {
   searchQuery: string
@@ -43,6 +44,8 @@ interface LinearItemsTabProps {
   selectedIndex: number
   setSelectedIndex: (i: number) => void
   onSelectIssue: (issue: LinearIssue) => void
+  /** Marks items that other worktrees/sessions already use */
+  contextLinks?: ContextLinkLookup
 }
 
 export function LinearItemsTab({
@@ -66,6 +69,7 @@ export function LinearItemsTab({
   selectedIndex,
   setSelectedIndex,
   onSelectIssue,
+  contextLinks,
 }: LinearItemsTabProps) {
   const errorMessage =
     error instanceof Error ? error.message : String(error ?? '')
@@ -264,6 +268,11 @@ export function LinearItemsTab({
                 index={index}
                 isSelected={index === selectedIndex}
                 isCreating={loadingLinearIds.has(issue.identifier)}
+                contextMatches={contextLinks?.getMatches({
+                  type: 'linear',
+                  id: issue.identifier,
+                })}
+                currentWorktreeId={contextLinks?.currentWorktreeId}
                 onMouseEnter={() => setSelectedIndex(index)}
                 onClick={() => onSelectIssue(issue)}
               />

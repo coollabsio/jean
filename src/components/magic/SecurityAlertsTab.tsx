@@ -26,6 +26,7 @@ import type {
   LoadedSecurityAlertContext,
   LoadedAdvisoryContext,
 } from '@/types/github'
+import type { ContextLinkLookup } from '@/hooks/useContextLinkUsage'
 
 const ALERT_STATE_LABELS: Record<string, string> = {
   open: 'Open',
@@ -91,6 +92,8 @@ interface SecurityAlertsTabProps {
   onPreviewAdvisory?: (advisory: RepositoryAdvisory) => void
   onRemoveAdvisory?: (ghsaId: string) => void
   onLoadAdvisory?: (ghsaId: string, refresh: boolean) => void
+  /** Marks items that other worktrees/sessions already use */
+  contextLinks?: ContextLinkLookup
 }
 
 export function SecurityAlertsTab({
@@ -132,6 +135,7 @@ export function SecurityAlertsTab({
   onPreviewAdvisory,
   onRemoveAdvisory,
   onLoadAdvisory,
+  contextLinks,
 }: SecurityAlertsTabProps) {
   const advisories = filteredAdvisories ?? []
   const advisoryGhsaLoading = loadingAdvisoryGhsaIds ?? new Set<string>()
@@ -332,6 +336,11 @@ export function SecurityAlertsTab({
                         index={index}
                         isSelected={index === selectedIndex}
                         isCreating={loadingNumbers.has(alert.number)}
+                        contextMatches={contextLinks?.getMatches({
+                          type: 'security',
+                          id: alert.number,
+                        })}
+                        currentWorktreeId={contextLinks?.currentWorktreeId}
                         onMouseEnter={() => setSelectedIndex(index)}
                         onClick={() => onSelectAlert(alert)}
                         onPreview={() => onPreviewAlert(alert)}
@@ -377,6 +386,11 @@ export function SecurityAlertsTab({
                         index={combinedIndex}
                         isSelected={combinedIndex === selectedIndex}
                         isCreating={advisoryGhsaLoading.has(advisory.ghsaId)}
+                        contextMatches={contextLinks?.getMatches({
+                          type: 'advisory',
+                          id: advisory.ghsaId,
+                        })}
+                        currentWorktreeId={contextLinks?.currentWorktreeId}
                         onMouseEnter={() => setSelectedIndex(combinedIndex)}
                         onClick={() => onSelectAdvisory?.(advisory)}
                         onPreview={() => onPreviewAdvisory?.(advisory)}
