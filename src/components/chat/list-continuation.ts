@@ -45,8 +45,11 @@ export function continueListOnNewline(
   const content = match[5] ?? ''
 
   // An empty item ends the list: drop the marker instead of adding another
-  // number, leaving the caret on the now-plain line.
-  if (!content.trim()) {
+  // number, leaving the caret on the now-plain line. Text after the caret
+  // counts, so `2. |foo` splits the item instead of deleting its marker.
+  const lineEnd = text.indexOf('\n', caret)
+  const rest = text.slice(caret, lineEnd === -1 ? undefined : lineEnd)
+  if (!content.trim() && !rest.trim()) {
     return {
       text: text.slice(0, lineStart) + text.slice(caret),
       caret: lineStart,

@@ -719,7 +719,10 @@ export const ChatInput = memo(function ChatInput({
                 .getState()
                 .setInputDraft(activeSessionId, continued.text)
             }
-            setShowHint(false)
+            // Ending a list can empty the composer, so sync the empty state.
+            const isEmpty = !continued.text.trim()
+            setShowHint(isEmpty)
+            onHasValueChangeRef.current?.(!isEmpty)
             resizeTextarea()
             return
           }

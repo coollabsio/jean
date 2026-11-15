@@ -42,6 +42,19 @@ describe('continueListOnNewline', () => {
     })
   })
 
+  it('splits the item when the caret is after the marker but before text', () => {
+    const text = '1. one\n2. two'
+    const caret = '1. one\n2. '.length
+    expect(continueListOnNewline(text, caret)?.text).toBe('1. one\n2. \n3. two')
+  })
+
+  it('ends the list without touching the lines after it', () => {
+    const text = '- a\n- \nnext'
+    expect(continueListOnNewline(text, '- a\n- '.length)?.text).toBe(
+      '- a\n\nnext'
+    )
+  })
+
   it('leaves non-list lines to the default newline', () => {
     expect(continueListOnNewline('plain text', 'plain text'.length)).toBeNull()
     expect(continueListOnNewline('1.5 is not a list', 16)).toBeNull()
