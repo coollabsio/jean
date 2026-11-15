@@ -363,18 +363,23 @@ fn is_model_identifier(value: &str) -> bool {
     parts[..n - 1].iter().all(|s| allowed_segment(s)) && allowed_last_segment(parts[n - 1])
 }
 
-/// `opencode auth list` prints one row per stored credential, ending each row
-/// with its status, e.g. `acme-llm  acme-llm  stored`. The old probe looked for
-/// the word "credential", which that output never contains, so every send was
-/// blocked as unauthenticated (issue #895).
-fn has_stored_credentials(stdout: &str) -> bool {
-    if stdout.to_ascii_lowercase().contains("no credentials") {
-        return false;
-    }
+/// Whether `opencode auth list` output (ANSI already stripped) lists any usable
+/// credential. Two formats exist (issue #895):
+/// - v2.x: one row per connection ending in its type, e.g.
+///   `acme-llm  acme-llm  stored` or `OpenAI  OPENAI_API_KEY  environment`;
+///   the empty state is `No authenticated integrations`.
+/// - v1.x: clack sections closed by a count, e.g. `└  2 credentials` or
+///   `└  1 environment variable`.
+fn has_auth_connections(stdout: &str) -> bool {
+    let positive = |count: &str| count.parse::<u32>().is_ok_and(|n| n > 0);
     stdout.lines().any(|line| {
-        line.split_whitespace()
-            .last()
-            .is_some_and(|status| status.eq_ignore_ascii_case("stored"))
+        let line = line.to_ascii_lowercase();
+        match line.split_whitespace().collect::<Vec<_>>().as_slice() {
+            [.., "stored" | "environment"] => true,
+            [.., count, "credential" | "credentials"] => positive(count),
+            [.., count, "environment", "variable" | "variables"] => positive(count),
+            _ => false,
+        }
     })
 }
 
@@ -426,7 +431,7 @@ pub async fn check_opencode_cli_auth(app: AppHandle) -> Result<OpenCodeAuthStatu
 
     let stdout_raw = String::from_utf8_lossy(&output.stdout).to_string();
     let stdout = strip_ansi(&stdout_raw);
-    let has_credentials = has_stored_credentials(&stdout);
+    let has_credentials = has_auth_connections(&stdout);
 
     Ok(OpenCodeAuthStatus {
         authenticated: has_credentials,
@@ -921,18 +926,31 @@ async fn fetch_latest_version(app: &AppHandle) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        has_stored_credentials, is_model_identifier, opencode_models_args,
+        has_auth_connections, is_model_identifier, opencode_models_args,
         parse_opencode_models_output,
     };
 
     #[test]
-    fn detects_stored_opencode_credentials() {
-        assert!(has_stored_credentials(
+    fn detects_opencode_v2_auth_connections() {
+        assert!(has_auth_connections(
             "acme-llm  acme-llm                      stored\n"
         ));
-        assert!(has_stored_credentials("acme-llm  acme-llm  STORED"));
-        assert!(!has_stored_credentials("No credentials configured\n"));
-        assert!(!has_stored_credentials(""));
+        assert!(has_auth_connections("acme-llm  acme-llm  STORED"));
+        assert!(has_auth_connections(
+            "OpenAI  OPENAI_API_KEY              environment\n"
+        ));
+        assert!(!has_auth_connections("No authenticated integrations\n"));
+        assert!(!has_auth_connections(""));
+    }
+
+    #[test]
+    fn detects_opencode_v1_auth_connections() {
+        let stored = "┌  Credentials ~/.local/share/opencode/auth.json\n│\n●  Anthropic api\n│\n└  1 credentials\n";
+        assert!(has_auth_connections(stored));
+        let env_only = "┌  Credentials ~/.local/share/opencode/auth.json\n│\n└  0 credentials\n\n┌  Environment\n│\n●  OpenAI OPENAI_API_KEY\n│\n└  1 environment variable\n";
+        assert!(has_auth_connections(env_only));
+        let empty = "┌  Credentials ~/.local/share/opencode/auth.json\n│\n└  0 credentials\n";
+        assert!(!has_auth_connections(empty));
     }
 
     #[test]
