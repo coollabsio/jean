@@ -1636,8 +1636,6 @@ mod tests {
     }
 
     #[test]
-    fn app_preferences_default_font_weight_for_new_and_missing_prefs() {
-    #[test]
     fn preferences_file_contents_are_stable_across_insertion_order_and_reloads() {
         let bindings = [
             ("open_git_diff", "mod+g"),
@@ -1669,6 +1667,8 @@ mod tests {
         assert_eq!(preferences_file_contents(&reloaded).unwrap(), saved);
     }
 
+    #[test]
+    fn app_preferences_default_font_weight_for_new_and_missing_prefs() {
         assert_eq!(AppPreferences::default().font_weight, "normal");
 
         let mut prefs_json = serde_json::to_value(AppPreferences::default()).unwrap();
@@ -4243,9 +4243,6 @@ async fn load_preferences(app: AppHandle) -> Result<AppPreferences, String> {
     Ok(preferences)
 }
 
-async fn save_preferences(app: AppHandle, mut preferences: AppPreferences) -> Result<(), String> {
-    // Validate before this command changes any related persisted state.
-    validate_theme(&preferences.theme)?;
 /// Serialize preferences exactly as stored in preferences.json. All writers use
 /// this so unchanged settings always produce identical bytes (issue #917).
 /// CLI profile settings live in standalone files, so their contents and paths
@@ -4268,6 +4265,9 @@ fn write_preferences_file(path: &Path, preferences: &AppPreferences) -> Result<(
         .inspect_err(|error| log::error!("Failed to save preferences file: {error}"))
 }
 
+async fn save_preferences(app: AppHandle, mut preferences: AppPreferences) -> Result<(), String> {
+    // Validate before this command changes any related persisted state.
+    validate_theme(&preferences.theme)?;
     preferences.browser_default_host =
         normalize_browser_default_host(preferences.browser_default_host.take())?;
 
