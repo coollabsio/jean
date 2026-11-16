@@ -158,6 +158,7 @@ describe('resolveMcpConfigForSend', () => {
     invokeMock.mockResolvedValue([jeanServer, otherServer])
 
     const result = await resolveMcpConfigForSend({
+      worktreeId: 'wt-1',
       worktreePath: '/repo/wt',
       backend: 'claude',
       globalEnabled: [],
@@ -166,6 +167,7 @@ describe('resolveMcpConfigForSend', () => {
 
     expect(invokeMock).toHaveBeenCalledWith('get_mcp_servers', {
       backend: 'claude',
+      worktreeId: 'wt-1',
       worktreePath: '/repo/wt',
     })
     expect(result.enabledServers).toEqual(
@@ -179,6 +181,7 @@ describe('resolveMcpConfigForSend', () => {
     invokeMock.mockRejectedValue(new Error('offline'))
 
     const result = await resolveMcpConfigForSend({
+      worktreeId: 'wt-1',
       worktreePath: '/repo/wt',
       backend: 'claude',
     })

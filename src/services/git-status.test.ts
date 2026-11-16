@@ -315,10 +315,11 @@ describe('git-status service', () => {
     it('calls invoke and returns output', async () => {
       mockInvoke.mockResolvedValueOnce('Already up to date.')
 
-      const result = await gitPull('/path/to/repo', 'main')
+      const result = await gitPull('wt-1', '/path/to/repo', 'main')
 
       expect(result).toBe('Already up to date.')
       expect(mockInvoke).toHaveBeenCalledWith('git_pull', {
+        worktreeId: 'wt-1',
         worktreePath: '/path/to/repo',
         baseBranch: 'main',
         remote: null,
@@ -329,7 +330,7 @@ describe('git-status service', () => {
       const { isTauri } = vi.mocked(await import('@/services/projects'))
       isTauri.mockReturnValue(false)
 
-      await expect(gitPull('/path', 'main')).rejects.toThrow(
+      await expect(gitPull('wt-1', '/path', 'main')).rejects.toThrow(
         'Git pull only available in Tauri'
       )
     })
@@ -343,7 +344,10 @@ describe('git-status service', () => {
         { name: 'fork' },
       ])
 
-      const result = await getGitRemotes('/path/to/repo')
+      const result = await getGitRemotes(
+        { projectId: 'proj-1' },
+        '/path/to/repo'
+      )
 
       expect(result).toEqual([
         { name: 'origin' },
@@ -351,6 +355,8 @@ describe('git-status service', () => {
         { name: 'fork' },
       ])
       expect(mockInvoke).toHaveBeenCalledWith('get_git_remotes', {
+        worktreeId: undefined,
+        projectId: 'proj-1',
         repoPath: '/path/to/repo',
       })
     })
@@ -358,7 +364,10 @@ describe('git-status service', () => {
     it('keeps order unchanged when origin is missing', async () => {
       mockInvoke.mockResolvedValueOnce([{ name: 'upstream' }, { name: 'fork' }])
 
-      const result = await getGitRemotes('/path/to/repo')
+      const result = await getGitRemotes(
+        { worktreeId: 'wt-1' },
+        '/path/to/repo'
+      )
 
       expect(result).toEqual([{ name: 'upstream' }, { name: 'fork' }])
     })

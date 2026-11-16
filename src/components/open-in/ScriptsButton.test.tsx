@@ -37,7 +37,12 @@ describe('ScriptsButton', () => {
     const user = userEvent.setup()
     const onRun = vi.fn()
     render(
-      <ScriptsButton projectId="project-1" worktreePath="/repo" onRun={onRun} />
+      <ScriptsButton
+        projectId="project-1"
+        owner={{ worktreeId: 'worktree-1' }}
+        worktreePath="/repo"
+        onRun={onRun}
+      />
     )
 
     await user.click(screen.getByRole('button', { name: 'Scripts' }))
@@ -50,6 +55,7 @@ describe('ScriptsButton', () => {
     render(
       <ScriptsButton
         projectId="project-1"
+        owner={{ worktreeId: 'worktree-1' }}
         worktreePath="/repo"
         onRun={vi.fn()}
       />
@@ -67,6 +73,7 @@ describe('ScriptsButton', () => {
     render(
       <ScriptsButton
         projectId="project-1"
+        owner={{ worktreeId: 'worktree-1' }}
         worktreePath="/repo"
         onRun={vi.fn()}
       />
@@ -79,7 +86,12 @@ describe('ScriptsButton', () => {
     const user = userEvent.setup()
     const onRun = vi.fn()
     render(
-      <ScriptsButton projectId="project-1" worktreePath="/repo" onRun={onRun} />
+      <ScriptsButton
+        projectId="project-1"
+        owner={{ worktreeId: 'worktree-1' }}
+        worktreePath="/repo"
+        onRun={onRun}
+      />
     )
 
     await user.click(screen.getByRole('button', { name: 'Scripts' }))

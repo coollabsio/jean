@@ -410,7 +410,9 @@ export function MobileSettingsMenu({
     showClaudeProviders ? customCliProfiles : customCodexProviders
   ).map(profile => profile.name)
   const { data: worktree } = useWorktree(worktreeId ?? null)
-  const { data: gitProviderInfo } = useProjectGitProvider(worktree?.path)
+  const { data: gitProviderInfo } = useProjectGitProvider(worktree?.path, {
+    worktreeId: worktree?.id,
+  })
   const gitProvider = gitProviderInfo?.provider ?? 'github'
   const forgeLabels = providerLabels(gitProvider)
   const forgeHost =
@@ -420,7 +422,10 @@ export function MobileSettingsMenu({
   const project = worktree
     ? projects?.find(p => p.id === worktree.project_id)
     : null
-  const { data: ports = [] } = usePorts(worktree?.path ?? null)
+  const { data: ports = [] } = usePorts(
+    worktree?.path ?? null,
+    worktree ? { worktreeId: worktree.id } : null
+  )
   const ownerServerId = worktree?.serverId
   const preferenceServerId =
     ownerServerId && ownerServerId !== LOCAL_SERVER_ID
@@ -529,13 +534,17 @@ export function MobileSettingsMenu({
   const handleOpenGitHub = useCallback(() => {
     const branch = worktree?.branch
     const targetPath = worktree?.path
+    const worktreeId = worktree?.id
     if (!branch) {
       if (isNativeApp()) {
         const projectId = useProjectsStore.getState().selectedProjectId
         if (projectId) invoke('open_project_on_github', { projectId })
       } else if (targetPath) {
         const win = preOpenWindow()
-        invoke<string>('get_github_repo_url', { repoPath: targetPath })
+        invoke<string>('get_github_repo_url', {
+          repoPath: targetPath,
+          worktreeId,
+        })
           .then(url => openExternal(url, win))
           .catch(() => {
             win?.close()
@@ -546,7 +555,10 @@ export function MobileSettingsMenu({
     }
     if (!targetPath) return
     const win = preOpenWindow()
-    invoke<GitHubRemote[]>('get_github_remotes', { repoPath: targetPath })
+    invoke<GitHubRemote[]>('get_github_remotes', {
+      repoPath: targetPath,
+      worktreeId,
+    })
       .then(remotes => {
         if (!remotes || remotes.length <= 1) {
           const url = remotes?.[0]?.url
@@ -554,25 +566,42 @@ export function MobileSettingsMenu({
           else win?.close()
         } else {
           win?.close()
-          useUIStore.getState().openRemotePicker(targetPath, remoteName => {
-            const remote = remotes.find(r => r.name === remoteName)
-            if (remote)
-              openExternal(branchWebUrl(remote.url, branch, gitProvider))
-          })
+          const ownerId = worktree?.id
+          if (!ownerId) return
+          useUIStore
+            .getState()
+            .openRemotePicker(
+              targetPath,
+              { worktreeId: ownerId },
+              remoteName => {
+                const remote = remotes.find(r => r.name === remoteName)
+                if (remote)
+                  openExternal(branchWebUrl(remote.url, branch, gitProvider))
+              }
+            )
         }
       })
       .catch(() => {
         win?.close()
         toast.error('Failed to fetch remotes')
       })
-  }, [forgeLabels.name, gitProvider, worktree?.branch, worktree?.path])
+  }, [
+    forgeLabels.name,
+    gitProvider,
+    worktree?.branch,
+    worktree?.id,
+    worktree?.path,
+  ])
 
   const openPrByNumber = useCallback(
     (number: number) => {
       const targetPath = worktree?.path
       if (!targetPath) return
       const win = preOpenWindow()
-      invoke<GitHubRemote[]>('get_github_remotes', { repoPath: targetPath })
+      invoke<GitHubRemote[]>('get_github_remotes', {
+        repoPath: targetPath,
+        worktreeId: worktree?.id,
+      })
         .then(remotes => {
           if (!remotes || remotes.length <= 1) {
             const url = remotes?.[0]?.url
@@ -581,11 +610,21 @@ export function MobileSettingsMenu({
             else win?.close()
           } else {
             win?.close()
-            useUIStore.getState().openRemotePicker(targetPath, remoteName => {
-              const remote = remotes.find(r => r.name === remoteName)
-              if (remote)
-                openExternal(pullRequestWebUrl(remote.url, number, gitProvider))
-            })
+            const ownerId = worktree?.id
+            if (!ownerId) return
+            useUIStore
+              .getState()
+              .openRemotePicker(
+                targetPath,
+                { worktreeId: ownerId },
+                remoteName => {
+                  const remote = remotes.find(r => r.name === remoteName)
+                  if (remote)
+                    openExternal(
+                      pullRequestWebUrl(remote.url, number, gitProvider)
+                    )
+                }
+              )
           }
         })
         .catch(() => {
@@ -593,7 +632,7 @@ export function MobileSettingsMenu({
           toast.error('Failed to fetch remotes')
         })
     },
-    [gitProvider, worktree?.path]
+    [gitProvider, worktree?.id, worktree?.path]
   )
 
   const hasLinkedPr = !!(prUrl && prNumber) || !!stackedOnPR

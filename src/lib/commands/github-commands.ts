@@ -71,7 +71,10 @@ export const githubCommands: AppCommand[] = [
       if (!project) return
 
       const { setWorkflowRunsModalOpen } = useUIStore.getState()
-      setWorkflowRunsModalOpen(true, project.path)
+      setWorkflowRunsModalOpen(true, {
+        projectId: project.id,
+        projectPath: project.path,
+      })
     },
     isAvailable: context => {
       if (!context.hasSelectedProject()) return false
@@ -82,7 +85,7 @@ export const githubCommands: AppCommand[] = [
       const project = projects?.find(p => p.id === selectedProjectId)
       if (!project?.path) return true
       const provider = context.queryClient.getQueryData<GitProviderInfo>(
-        gitProviderQueryKeys.forPath(project.path)
+        gitProviderQueryKeys.forPath(project.path, { projectId: project.id })
       )
       return provider?.provider !== 'gitlab'
     },

@@ -158,6 +158,9 @@ export function WorkflowRunsModal() {
   const setSessionProvider = useSetSessionProvider()
 
   const workflowRunsModalOpen = useUIStore(state => state.workflowRunsModalOpen)
+  const workflowRunsModalProjectId = useUIStore(
+    state => state.workflowRunsModalProjectId
+  )
   const workflowRunsModalProjectPath = useUIStore(
     state => state.workflowRunsModalProjectPath
   )
@@ -166,7 +169,7 @@ export function WorkflowRunsModal() {
   )
   const { data: projects } = useProjects()
   const targetServerId = projects?.find(
-    project => project.path === workflowRunsModalProjectPath
+    project => project.id === workflowRunsModalProjectId
   )?.serverId
   const { data: preferences } = usePreferences(targetServerId)
   const setWorkflowRunsModalOpen = useUIStore(
@@ -182,6 +185,7 @@ export function WorkflowRunsModal() {
     isFetching,
   } = useWorkflowRuns(
     workflowRunsModalOpen ? workflowRunsModalProjectPath : null,
+    workflowRunsModalProjectId,
     workflowRunsModalBranch ?? undefined
   )
 
@@ -330,7 +334,7 @@ export function WorkflowRunsModal() {
 
   const handleInvestigate = useCallback(
     async (run: WorkflowRun) => {
-      const projectPath = workflowRunsModalProjectPath
+      const projectId = workflowRunsModalProjectId
 
       // Close modal immediately
       setWorkflowRunsModalOpen(false)
@@ -388,13 +392,13 @@ export function WorkflowRunsModal() {
       let targetWorktreeId: string | null = null
       let targetWorktreePath: string | null = null
 
-      if (projectPath) {
+      if (projectId) {
         const projects = await queryClient.fetchQuery({
           queryKey: projectsQueryKeys.list(),
           queryFn: () => invoke<Project[]>('list_projects'),
           staleTime: 1000 * 60,
         })
-        const project = projects?.find(p => p.path === projectPath)
+        const project = projects?.find(p => p.id === projectId)
 
         if (project) {
           let worktrees: Worktree[] = []
@@ -615,7 +619,7 @@ export function WorkflowRunsModal() {
       }
     },
     [
-      workflowRunsModalProjectPath,
+      workflowRunsModalProjectId,
       setWorkflowRunsModalOpen,
       queryClient,
       createSession,

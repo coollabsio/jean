@@ -273,15 +273,20 @@ export function useCommandContext(
     )
   }, [])
 
-  // Helper to get target path (worktree or project)
-  const getTargetPath = useCallback(() => {
+  // Helper to get target path (worktree or project) with the id of its owner,
+  // so routing picks the owner's Jean server when two servers share the path
+  const getTarget = useCallback((): {
+    path: string
+    worktreeId?: string
+    projectId?: string
+  } | null => {
     const { selectedWorktreeId, selectedProjectId } =
       useProjectsStore.getState()
 
     // Try worktree path first
     if (selectedWorktreeId) {
       const path = useChatStore.getState().getWorktreePath(selectedWorktreeId)
-      if (path) return path
+      if (path) return { path, worktreeId: selectedWorktreeId }
     }
 
     // Fall back to project path
@@ -290,7 +295,7 @@ export function useCommandContext(
         projectsQueryKeys.list()
       )
       const project = projects?.find(p => p.id === selectedProjectId)
-      if (project) return project.path
+      if (project) return { path: project.path, projectId: project.id }
     }
 
     return null
@@ -298,59 +303,67 @@ export function useCommandContext(
 
   // Open In - Finder
   const openInFinder = useCallback(async () => {
-    const worktreePath = getTargetPath()
-    if (!worktreePath) {
+    const target = getTarget()
+    if (!target) {
       notify('No project or worktree selected', undefined, { type: 'error' })
       return
     }
 
     try {
-      await invoke('open_worktree_in_finder', { worktreePath })
+      await invoke('open_worktree_in_finder', {
+        worktreePath: target.path,
+        worktreeId: target.worktreeId,
+        projectId: target.projectId,
+      })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       notify(message, undefined, { type: 'error' })
     }
-  }, [getTargetPath])
+  }, [getTarget])
 
   // Open In - Terminal
   // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const openInTerminal = useCallback(async () => {
-    const worktreePath = getTargetPath()
-    if (!worktreePath) {
+    const target = getTarget()
+    if (!target) {
       notify('No project or worktree selected', undefined, { type: 'error' })
       return
     }
 
     try {
       await invoke('open_worktree_in_terminal', {
-        worktreePath,
+        worktreePath: target.path,
+        worktreeId: target.worktreeId,
+        projectId: target.projectId,
         terminal: preferences?.terminal,
       })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       notify(message, undefined, { type: 'error' })
     }
-  }, [getTargetPath, preferences?.terminal])
+  }, [getTarget, preferences?.terminal])
 
   // Open In - Editor
   // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const openInEditor = useCallback(async () => {
-    const worktreePath = getTargetPath()
-    if (!worktreePath) {
+    const target = getTarget()
+    if (!target) {
       notify('No project or worktree selected', undefined, { type: 'error' })
       return
     }
 
     try {
       await invoke('open_worktree_in_editor', {
-        worktreePath,
+        worktreePath: target.path,
+        worktreeId: target.worktreeId,
+        projectId: target.projectId,
         editor: preferences?.editor,
       })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       notify(message, undefined, { type: 'error' })
     }
-  }, [getTargetPath, preferences?.editor])
+  }, [getTarget, preferences?.editor])
 
   // Open In - GitHub
   const openOnGitHub = useCallback(async () => {
@@ -547,7 +560,7 @@ export function useCommandContext(
 
   // Git - Pull changes from remote
   const doGitPull = useCallback(async () => {
-    const worktreePath = getTargetPath()
+    const worktreePath = getTarget()?.path
     if (!worktreePath) {
       notify('No project or worktree selected', undefined, { type: 'error' })
       return
@@ -595,7 +608,7 @@ export function useCommandContext(
       baseBranch,
       remote: baseRemote,
     })
-  }, [getTargetPath, queryClient])
+  }, [getTarget, queryClient])
 
   // Git - Refresh git status immediately
   const refreshGitStatus = useCallback(() => {

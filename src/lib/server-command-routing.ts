@@ -64,6 +64,14 @@ export function clearServerResourcePaths(): void {
   pathOwners.clear()
 }
 
+/** A removed or disabled server must not keep making its paths ambiguous. */
+export function forgetServerResourcePaths(serverId: ServerId): void {
+  for (const [path, owners] of pathOwners) {
+    owners.delete(serverId)
+    if (owners.size === 0) pathOwners.delete(path)
+  }
+}
+
 export interface ResolvedServerCommand {
   serverId: ServerId
   args: Record<string, unknown>

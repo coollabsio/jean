@@ -48,6 +48,7 @@ describe('JeanJsonPane', () => {
 
     expect(mutate).toHaveBeenCalledWith({
       projectPath: '/repo',
+      projectId: 'p1',
       config: {
         scripts: { setup: 'bun ci', teardown: null, run: 'bun dev' },
         ports: [{ port: 3000, label: 'Web', host: undefined }],

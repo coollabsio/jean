@@ -18,17 +18,21 @@ import {
 } from '@/services/projects'
 
 export function JeanJsonPane({
+  projectId,
   projectPath,
 }: {
   projectId: string
   projectPath: string
 }) {
-  const { data: jeanConfig, isLoading: isConfigLoading } =
-    useJeanConfig(projectPath)
+  const { data: jeanConfig, isLoading: isConfigLoading } = useJeanConfig(
+    projectPath,
+    projectId
+  )
   // A new config from disk starts a fresh form with its values.
   return (
     <JeanJsonForm
       key={JSON.stringify(jeanConfig ?? null)}
+      projectId={projectId}
       projectPath={projectPath}
       jeanConfig={jeanConfig ?? null}
       isConfigLoading={isConfigLoading}
@@ -37,10 +41,12 @@ export function JeanJsonPane({
 }
 
 function JeanJsonForm({
+  projectId,
   projectPath,
   jeanConfig,
   isConfigLoading,
 }: {
+  projectId: string
   projectPath: string
   jeanConfig: JeanConfig | null
   isConfigLoading: boolean
@@ -129,6 +135,7 @@ function JeanJsonForm({
 
     saveJeanConfig.mutate({
       projectPath,
+      projectId,
       config: {
         // Preserve any fields this pane doesn't manage (e.g. provider binding).
         ...jeanConfig,
@@ -146,6 +153,7 @@ function JeanJsonForm({
     localTeardown,
     localRun,
     localPorts,
+    projectId,
     projectPath,
     saveJeanConfig,
   ])

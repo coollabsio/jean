@@ -46,6 +46,7 @@ import {
   useWorktree,
   usePorts,
 } from '@/services/projects'
+import type { GitRepoOwner } from '@/services/git-status'
 import {
   useLoadedIssueContexts,
   useLoadedPRContexts,
@@ -156,23 +157,40 @@ export function OpenInModal() {
     worktree?.serverId ?? selectedProject?.serverId
   )
 
-  const targetPath = useMemo(() => {
-    if (worktree?.path) return worktree.path
+  // The owner id comes from the same object as the path, so routing picks
+  // that object's Jean server even when two servers share the path.
+  const target = useMemo((): {
+    path: string
+    owner: GitRepoOwner
+  } | null => {
+    if (worktree?.path) {
+      return { path: worktree.path, owner: { worktreeId: worktree.id } }
+    }
     if (selectedWorktreeId) {
       const path = useChatStore.getState().getWorktreePath(selectedWorktreeId)
-      if (path) return path
+      if (path) return { path, owner: { worktreeId: selectedWorktreeId } }
     }
-    if (selectedProject) return selectedProject.path
+    if (selectedProject) {
+      return {
+        path: selectedProject.path,
+        owner: { projectId: selectedProject.id },
+      }
+    }
     return null
-  }, [worktree?.path, selectedWorktreeId, selectedProject])
-  const { data: gitProviderInfo } = useProjectGitProvider(targetPath)
+  }, [worktree?.path, worktree?.id, selectedWorktreeId, selectedProject])
+  const targetPath = target?.path ?? null
+  const targetOwner = target?.owner ?? null
+  const { data: gitProviderInfo } = useProjectGitProvider(
+    targetPath,
+    targetOwner ?? {}
+  )
   const gitProvider = gitProviderInfo?.provider ?? 'github'
   const forgeLabels = providerLabels(gitProvider)
   const forgeHost =
     gitProviderInfo?.host ??
     (gitProvider === 'gitlab' ? 'gitlab.com' : 'github.com')
 
-  const { data: ports } = usePorts(targetPath)
+  const { data: ports } = usePorts(targetPath, targetOwner)
 
   // Base options (Editor, Terminal, Finder, GitHub)
   const baseOptions = useMemo(() => {
@@ -404,7 +422,7 @@ export function OpenInModal() {
         return
       }
 
-      if (!targetPath) {
+      if (!targetPath || !targetOwner) {
         notify('No project or worktree selected', undefined, { type: 'error' })
         setOpenInModalOpen(false)
         return
@@ -414,17 +432,19 @@ export function OpenInModal() {
         case 'editor':
           openInEditor.mutate({
             worktreePath: targetPath,
+            ...targetOwner,
             editor: preferences?.editor,
           })
           break
         case 'terminal':
           openInTerminal.mutate({
             worktreePath: targetPath,
+            ...targetOwner,
             terminal: preferences?.terminal,
           })
           break
         case 'finder':
-          openInFinder.mutate(targetPath)
+          openInFinder.mutate({ worktreePath: targetPath, ...targetOwner })
           break
         case 'open-pr':
           if (worktree?.pr_url) {
@@ -443,6 +463,8 @@ export function OpenInModal() {
           }
           invoke<GitHubRemote[]>('get_github_remotes', {
             repoPath: targetPath,
+            worktreeId: targetOwner.worktreeId,
+            projectId: targetOwner.projectId,
           })
             .then(remotes => {
               if (!remotes || remotes.length <= 1) {
@@ -452,6 +474,8 @@ export function OpenInModal() {
                 } else {
                   invoke<string>('get_github_branch_url', {
                     repoPath: targetPath,
+                    worktreeId: targetOwner.worktreeId,
+                    projectId: targetOwner.projectId,
                     branch,
                   })
                     .then(branchUrl => openExternal(branchUrl))
@@ -461,12 +485,18 @@ export function OpenInModal() {
                       })
                     )
                 }
-              } else {
-                openRemotePicker(targetPath as string, remoteName => {
-                  const remote = remotes.find(r => r.name === remoteName)
-                  if (remote)
-                    openExternal(branchWebUrl(remote.url, branch, gitProvider))
-                })
+              } else if (worktree) {
+                openRemotePicker(
+                  targetPath as string,
+                  { worktreeId: worktree.id },
+                  remoteName => {
+                    const remote = remotes.find(r => r.name === remoteName)
+                    if (remote)
+                      openExternal(
+                        branchWebUrl(remote.url, branch, gitProvider)
+                      )
+                  }
+                )
               }
             })
             .catch(() =>
@@ -482,6 +512,7 @@ export function OpenInModal() {
       portOptions,
       contextOptions,
       targetPath,
+      targetOwner,
       openInEditor,
       openInTerminal,
       openInFinder,

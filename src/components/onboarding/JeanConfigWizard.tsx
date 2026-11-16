@@ -38,7 +38,8 @@ function JeanConfigWizardContent() {
   const patchPreferences = usePatchPreferences()
   const saveConfig = useSaveJeanConfig()
   const { data: existingConfig, isLoading: isConfigLoading } = useJeanConfig(
-    project?.path ?? null
+    project?.path ?? null,
+    project?.id
   )
 
   const [setupScript, setSetupScript] = useState('')
@@ -82,6 +83,7 @@ function JeanConfigWizardContent() {
 
     await saveConfig.mutateAsync({
       projectPath: project.path,
+      projectId: project.id,
       config: {
         // Preserve any pre-existing fields (e.g. provider binding).
         ...existingConfig,

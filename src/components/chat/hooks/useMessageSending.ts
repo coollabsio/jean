@@ -614,11 +614,11 @@ export function useMessageSending({
         const params = textMessage.slice(1 + slashName.length).trim()
         const claudeSkills =
           queryClient.getQueryData<{ name: string }[]>(
-            skillQueryKeys.claudeSkills(activeWorktreePath)
+            skillQueryKeys.claudeSkills(activeWorktreeId, activeWorktreePath)
           ) ?? []
         const codexSkills =
           queryClient.getQueryData<{ name: string }[]>(
-            skillQueryKeys.codexSkills(activeWorktreePath)
+            skillQueryKeys.codexSkills(activeWorktreeId, activeWorktreePath)
           ) ?? []
         const opencodeSkills =
           queryClient.getQueryData<{ name: string }[]>(
@@ -651,7 +651,10 @@ export function useMessageSending({
         if (!isSkill) {
           const claudeCommands =
             queryClient.getQueryData<{ name: string; path: string }[]>(
-              skillQueryKeys.claudeCommands(activeWorktreePath)
+              skillQueryKeys.claudeCommands(
+                activeWorktreeId,
+                activeWorktreePath
+              )
             ) ?? []
           const cmd = claudeCommands.find(c => c.name === slashName)
           if (cmd) {

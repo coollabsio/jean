@@ -59,7 +59,8 @@ export const BrowserView = memo(function BrowserView({
   // the port picker live in the toolbar so later ports are selectable.
   const worktreePath = useChatStore(state => state.worktreePaths[worktreeId])
   const { data: ports, isFetched: portsFetched } = usePorts(
-    worktreePath ?? null
+    worktreePath ?? null,
+    { worktreeId }
   )
   const ownerServerId = parseServerResourceKey(worktreeId)?.serverId
   const preferenceServerId =

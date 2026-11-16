@@ -8,26 +8,29 @@ import { isTauri } from '@/services/projects'
 
 export const skillQueryKeys = {
   all: ['cli-skills'] as const,
-  claudeSkills: (worktreePath?: string | null) =>
+  claudeSkills: (worktreeId?: string | null, worktreePath?: string | null) =>
     [
       ...skillQueryKeys.all,
       'claude',
       'skills',
       worktreePath ?? 'global',
+      worktreeId ?? '',
     ] as const,
-  claudeCommands: (worktreePath?: string | null) =>
+  claudeCommands: (worktreeId?: string | null, worktreePath?: string | null) =>
     [
       ...skillQueryKeys.all,
       'claude',
       'commands',
       worktreePath ?? 'global',
+      worktreeId ?? '',
     ] as const,
-  codexSkills: (worktreePath?: string | null) =>
+  codexSkills: (worktreeId?: string | null, worktreePath?: string | null) =>
     [
       ...skillQueryKeys.all,
       'codex',
       'skills',
       worktreePath ?? 'global',
+      worktreeId ?? '',
     ] as const,
   opencodeSkills: () => [...skillQueryKeys.all, 'opencode', 'skills'] as const,
   cursorSkills: () => [...skillQueryKeys.all, 'cursor', 'skills'] as const,
@@ -38,15 +41,19 @@ export const skillQueryKeys = {
   pluginSkills: () => [...skillQueryKeys.all, 'plugin', 'skills'] as const,
 }
 
-export function useClaudeSkills(worktreePath?: string | null) {
+export function useClaudeSkills(
+  worktreeId: string | null | undefined,
+  worktreePath: string | null | undefined
+) {
   return useQuery({
-    queryKey: skillQueryKeys.claudeSkills(worktreePath),
+    queryKey: skillQueryKeys.claudeSkills(worktreeId, worktreePath),
     queryFn: async (): Promise<ClaudeSkill[]> => {
       if (!isTauri()) return []
 
       try {
         logger.debug('Loading Claude CLI skills')
         const skills = await invoke<ClaudeSkill[]>('list_claude_skills', {
+          worktreeId: worktreeId ?? undefined,
           worktreePath: worktreePath ?? undefined,
         })
         logger.info('Claude CLI skills loaded', { count: skills.length })
@@ -61,15 +68,19 @@ export function useClaudeSkills(worktreePath?: string | null) {
   })
 }
 
-export function useClaudeCommands(worktreePath?: string | null) {
+export function useClaudeCommands(
+  worktreeId: string | null | undefined,
+  worktreePath: string | null | undefined
+) {
   return useQuery({
-    queryKey: skillQueryKeys.claudeCommands(worktreePath),
+    queryKey: skillQueryKeys.claudeCommands(worktreeId, worktreePath),
     queryFn: async (): Promise<ClaudeCommand[]> => {
       if (!isTauri()) return []
 
       try {
         logger.debug('Loading Claude CLI custom commands')
         const commands = await invoke<ClaudeCommand[]>('list_claude_commands', {
+          worktreeId: worktreeId ?? undefined,
           worktreePath: worktreePath ?? undefined,
         })
         logger.info('Claude CLI custom commands loaded', {
@@ -119,13 +130,19 @@ function useBackendSkills(
   })
 }
 
-export function useCodexSkills(worktreePath?: string | null) {
+export function useCodexSkills(
+  worktreeId: string | null | undefined,
+  worktreePath: string | null | undefined
+) {
   return useBackendSkills(
     'codex',
     'list_codex_skills',
-    skillQueryKeys.codexSkills(worktreePath),
+    skillQueryKeys.codexSkills(worktreeId, worktreePath),
     'Codex CLI',
-    { worktreePath: worktreePath ?? undefined }
+    {
+      worktreeId: worktreeId ?? undefined,
+      worktreePath: worktreePath ?? undefined,
+    }
   )
 }
 
@@ -208,12 +225,13 @@ export function usePluginSkills() {
 }
 
 export function useAllBackendSkills(
-  worktreePath?: string | null,
+  worktreeId: string | null | undefined,
+  worktreePath: string | null | undefined,
   installedBackends?: CliBackend[]
 ): BackendSkillsGroup[] {
-  const claudeSkills = useClaudeSkills(worktreePath)
-  const claudeCommands = useClaudeCommands(worktreePath)
-  const codexSkills = useCodexSkills(worktreePath)
+  const claudeSkills = useClaudeSkills(worktreeId, worktreePath)
+  const claudeCommands = useClaudeCommands(worktreeId, worktreePath)
+  const codexSkills = useCodexSkills(worktreeId, worktreePath)
   const opencodeSkills = useOpenCodeSkills()
   const cursorSkills = useCursorSkills()
   const piSkills = usePiSkills()

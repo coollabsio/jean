@@ -14,22 +14,32 @@ import { Kbd } from '@/components/ui/kbd'
 import { useIsMobile } from '@/hooks/use-mobile'
 
 export function RemotePickerModal() {
-  const { remotePickerOpen, remotePickerRepoPath, closeRemotePicker } =
-    useUIStore()
+  const {
+    remotePickerOpen,
+    remotePickerRepoPath,
+    remotePickerOwner,
+    closeRemotePicker,
+  } = useUIStore()
   const contentRef = useRef<HTMLDivElement>(null)
   const [selectedIndex, setSelectedIndex] = useState(0)
   const queryClient = useQueryClient()
   const isMobile = useIsMobile()
 
   const { data: remotes = [] } = useQuery({
-    queryKey: ['git-remotes', remotePickerRepoPath],
+    queryKey: ['git-remotes', remotePickerRepoPath, remotePickerOwner],
     queryFn: async () => {
-      if (!remotePickerRepoPath) return []
-      const orderedRemotes = await getGitRemotes(remotePickerRepoPath)
+      if (!remotePickerRepoPath || !remotePickerOwner) return []
+      const orderedRemotes = await getGitRemotes(
+        remotePickerOwner,
+        remotePickerRepoPath
+      )
       setSelectedIndex(0)
       return orderedRemotes
     },
-    enabled: remotePickerOpen && remotePickerRepoPath !== null,
+    enabled:
+      remotePickerOpen &&
+      remotePickerRepoPath !== null &&
+      remotePickerOwner !== null,
     staleTime: 10_000,
   })
 
@@ -47,17 +57,27 @@ export function RemotePickerModal() {
   const handleRemoveRemote = useCallback(
     async (index: number) => {
       const remote = remotes[index]
-      if (!remote || !remotePickerRepoPath || remote.name === 'origin') return
+      if (
+        !remote ||
+        !remotePickerRepoPath ||
+        !remotePickerOwner ||
+        remote.name === 'origin'
+      )
+        return
 
-      await removeGitRemote(remotePickerRepoPath, remote.name)
+      await removeGitRemote(
+        remotePickerOwner,
+        remotePickerRepoPath,
+        remote.name
+      )
       await queryClient.invalidateQueries({
-        queryKey: ['git-remotes', remotePickerRepoPath],
+        queryKey: ['git-remotes', remotePickerRepoPath, remotePickerOwner],
       })
 
       // Adjust selection if we removed the last item
       setSelectedIndex(i => Math.min(i, remotes.length - 2))
     },
-    [remotes, remotePickerRepoPath, queryClient]
+    [remotes, remotePickerRepoPath, remotePickerOwner, queryClient]
   )
 
   const handleKeyDown = useCallback(

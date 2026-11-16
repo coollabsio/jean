@@ -3,6 +3,7 @@ import { devtools } from 'zustand/middleware'
 import type { CliBackend } from '@/types/preferences'
 import type { IssueContext } from '@/types/github'
 import type { CliType } from '@/lib/cli-update'
+import type { GitRepoOwner } from '@/services/git-status'
 import { mergeSeenFailedWorkflowRunIds } from '@/components/shared/workflow-run-utils'
 import { isMobileViewport } from '@/lib/viewport'
 
@@ -162,6 +163,7 @@ interface UIState {
   openInModalOpen: boolean
   remotePickerOpen: boolean
   remotePickerRepoPath: string | null
+  remotePickerOwner: GitRepoOwner | null
   loadContextModalOpen: boolean
   linkedProjectsModalOpen: boolean
   magicModalOpen: boolean
@@ -180,6 +182,7 @@ interface UIState {
   updatePrModalOpen: boolean
   reviewCommentsModalOpen: boolean
   workflowRunsModalOpen: boolean
+  workflowRunsModalProjectId: string | null
   workflowRunsModalProjectPath: string | null
   workflowRunsModalBranch: string | null
   /**
@@ -299,6 +302,7 @@ interface UIState {
   setOpenInModalOpen: (open: boolean) => void
   openRemotePicker: (
     repoPath: string,
+    owner: GitRepoOwner,
     callback: (remote: string) => void
   ) => void
   closeRemotePicker: () => void
@@ -323,8 +327,7 @@ interface UIState {
   setReviewCommentsModalOpen: (open: boolean) => void
   setWorkflowRunsModalOpen: (
     open: boolean,
-    projectPath?: string | null,
-    branch?: string | null
+    target?: { projectId: string; projectPath: string; branch?: string | null }
   ) => void
   markFailedWorkflowRunsSeen: (runIds: number[]) => void
   setSeenFailedWorkflowRunIds: (runIds: number[]) => void
@@ -473,6 +476,7 @@ export const useUIStore = create<UIState>()(
       openInModalOpen: false,
       remotePickerOpen: false,
       remotePickerRepoPath: null,
+      remotePickerOwner: null,
       loadContextModalOpen: false,
       linkedProjectsModalOpen: false,
       magicModalOpen: false,
@@ -483,6 +487,7 @@ export const useUIStore = create<UIState>()(
       updatePrModalOpen: false,
       reviewCommentsModalOpen: false,
       workflowRunsModalOpen: false,
+      workflowRunsModalProjectId: null,
       workflowRunsModalProjectPath: null,
       workflowRunsModalBranch: null,
       seenFailedWorkflowRunIds: [],
@@ -861,12 +866,13 @@ export const useUIStore = create<UIState>()(
           'setOpenInModalOpen'
         ),
 
-      openRemotePicker: (repoPath, callback) => {
+      openRemotePicker: (repoPath, owner, callback) => {
         _remotePickerCallback = callback
         set(
           {
             remotePickerOpen: true,
             remotePickerRepoPath: repoPath,
+            remotePickerOwner: owner,
           },
           undefined,
           'openRemotePicker'
@@ -879,6 +885,7 @@ export const useUIStore = create<UIState>()(
           {
             remotePickerOpen: false,
             remotePickerRepoPath: null,
+            remotePickerOwner: null,
           },
           undefined,
           'closeRemotePicker'
@@ -965,12 +972,17 @@ export const useUIStore = create<UIState>()(
           'setReviewCommentsModalOpen'
         ),
 
-      setWorkflowRunsModalOpen: (open, projectPath, branch) =>
+      setWorkflowRunsModalOpen: (open, target) =>
         set(
           {
             workflowRunsModalOpen: open,
-            workflowRunsModalProjectPath: open ? (projectPath ?? null) : null,
-            workflowRunsModalBranch: open ? (branch ?? null) : null,
+            workflowRunsModalProjectId: open
+              ? (target?.projectId ?? null)
+              : null,
+            workflowRunsModalProjectPath: open
+              ? (target?.projectPath ?? null)
+              : null,
+            workflowRunsModalBranch: open ? (target?.branch ?? null) : null,
           },
           undefined,
           'setWorkflowRunsModalOpen'

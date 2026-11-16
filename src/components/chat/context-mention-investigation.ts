@@ -238,7 +238,7 @@ export async function investigatePRInNewWorktree({
   createWorktree: ReturnType<typeof useCreateWorktree>['mutateAsync']
   background: boolean
 }): Promise<void> {
-  const prContext = await fetchPullRequestContext(projectPath, pr)
+  const prContext = await fetchPullRequestContext(projectPath, projectId, pr)
   if (background) useUIStore.getState().incrementPendingBackgroundCreations()
   const worktree = await createWorktree({ projectId, prContext, background })
   useUIStore.getState().markWorktreeForAutoInvestigatePR(worktree.id)

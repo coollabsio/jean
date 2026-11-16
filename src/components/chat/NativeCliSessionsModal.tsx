@@ -140,6 +140,7 @@ export function NativeCliSessionsModal({
   })
   const normalizedSearch = searchQuery.trim().toLowerCase()
   const nativeSessionsQuery = useNativeCliSessions(
+    worktreeId,
     worktreePath,
     backend ?? null,
     {

@@ -74,7 +74,7 @@ export function AgentRunFields({
     : value.backend
       ? [value.backend as CliBackend]
       : backendValues
-  const groups = useAllBackendSkills(undefined, skillBackend)
+  const groups = useAllBackendSkills(undefined, undefined, skillBackend)
   const skills = skillChoices(groups, value.backend)
   const efforts = effortOptionsForBackend(value.backend)
   const thinking = thinkingOptionsForBackend(value.backend)

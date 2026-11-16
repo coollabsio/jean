@@ -879,9 +879,13 @@ const ChatWindowContent = memo(function ChatWindowContent({
   const mergeableStatus = prStatus?.mergeable ?? undefined
 
   // Run scripts for this worktree (used by CMD+R keybinding)
-  const { data: runScripts = [] } = useRunScripts(activeWorktreePath ?? null)
+  const { data: runScripts = [] } = useRunScripts(
+    activeWorktreePath ?? null,
+    activeWorktreeId
+  )
   const { data: packageScripts = [] } = usePackageScripts(
-    activeWorktreePath ?? null
+    activeWorktreePath ?? null,
+    activeWorktreeId ? { worktreeId: activeWorktreeId } : null
   )
   const handleRunCommand = useCallback(
     (command: string) => {
@@ -2122,7 +2126,10 @@ const ChatWindowContent = memo(function ChatWindowContent({
   })
 
   // Wrap push/pull/commit-and-push with remote picker for multi-remote repos
-  const pickRemoteOrRun = useRemotePicker(activeWorktreePath)
+  const pickRemoteOrRun = useRemotePicker(
+    activeWorktreePath,
+    activeWorktreeId ? { worktreeId: activeWorktreeId } : null
+  )
 
   const handlePushWithPicker = useCallback(
     () =>

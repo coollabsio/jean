@@ -151,7 +151,7 @@ export function useLoadContextData({
     isFetching: isRefetchingSecurityAlerts,
     error: securityError,
     refetch: refetchSecurityAlerts,
-  } = useDependabotAlerts(worktreePath, securityState)
+  } = useDependabotAlerts(worktreePath, projectId, securityState)
 
   // Repository advisories query — fetch all states, filter closed on frontend
   const {
@@ -159,7 +159,7 @@ export function useLoadContextData({
     isLoading: isLoadingAdvisories,
     isFetching: isRefetchingAdvisories,
     refetch: refetchAdvisories,
-  } = useRepositoryAdvisories(worktreePath)
+  } = useRepositoryAdvisories(worktreePath, projectId)
 
   // GitHub PRs query
   const prState = includeClosed ? 'all' : 'open'
@@ -200,10 +200,11 @@ export function useLoadContextData({
 
   // GitHub search queries (triggered when local filter may miss results)
   const { data: searchedIssues, isFetching: isSearchingIssues } =
-    useSearchGitHubIssues(worktreePath, debouncedSearchQuery)
+    useSearchGitHubIssues(worktreePath, projectId, debouncedSearchQuery)
 
   const { data: searchedPRs, isFetching: isSearchingPRs } = useSearchGitHubPRs(
     worktreePath,
+    projectId,
     debouncedSearchQuery
   )
 
@@ -213,10 +214,12 @@ export function useLoadContextData({
   // Exact number lookups (finds any issue/PR regardless of age or state)
   const { data: exactIssue } = useGetGitHubIssueByNumber(
     worktreePath,
+    projectId,
     debouncedSearchQuery
   )
   const { data: exactPR } = useGetGitHubPRByNumber(
     worktreePath,
+    projectId,
     debouncedSearchQuery
   )
   const { data: exactLinearIssue } = useGetLinearIssueByNumber(

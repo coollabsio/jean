@@ -108,6 +108,7 @@ describe('useNewWorktreeHandlers duplicate guard', () => {
     expect(invoke).toHaveBeenCalledTimes(1)
     expect(invoke).toHaveBeenCalledWith('get_github_issue', {
       projectPath: '/repo',
+      projectId: 'project-1',
       issueNumber: 2,
     })
     expect(toast.info).toHaveBeenCalledWith(
@@ -141,6 +142,7 @@ describe('useNewWorktreeHandlers duplicate guard', () => {
     expect(openContextLinkMatch).not.toHaveBeenCalled()
     expect(invoke).toHaveBeenCalledWith('get_github_issue', {
       projectPath: '/repo',
+      projectId: 'project-1',
       issueNumber: 42,
       repo: 'octocat/jean',
     })

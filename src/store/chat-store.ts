@@ -2868,6 +2868,7 @@ export const useChatStore = create<ChatUIState>()(
                 const replyDir = req.working_dir?.trim()
                 if (!replyDir) continue
                 void invoke('respond_opencode_permission', {
+                  sessionId,
                   worktreePath: replyDir,
                   requestId: req.request_id,
                   reply: 'always',

@@ -304,7 +304,10 @@ export function MagicModal() {
   // Whether MagicModal was opened from ProjectCanvasView (no active chat session)
   const isOnCanvas =
     !useChatStore(state => state.activeWorktreePath) && !sessionModalOpen
-  const pickRemoteOrRun = useRemotePicker(worktree?.path)
+  const pickRemoteOrRun = useRemotePicker(
+    worktree?.path,
+    worktree ? { worktreeId: worktree.id } : null
+  )
   const targetServerId = selectedWorktreeId
     ? parseServerResourceKey(selectedWorktreeId)?.serverId
     : undefined
@@ -715,7 +718,7 @@ export function MagicModal() {
           try {
             const result = await invoke<RevertCommitResponse>(
               'revert_last_local_commit',
-              { worktreePath: worktree.path }
+              { worktreeId: worktree.id, worktreePath: worktree.path }
             )
             triggerImmediateGitPoll()
             if (worktree.project_id) fetchWorktreesStatus(worktree.project_id)
@@ -846,6 +849,7 @@ export function MagicModal() {
             const result = await invoke<CreatePrResponse>(
               'create_pr_with_ai_content',
               {
+                worktreeId: worktree.id,
                 worktreePath: worktree.path,
                 customPrompt: preferences?.magic_prompts?.pr_content,
                 model: preferences?.magic_prompt_models?.pr_content_model,
@@ -904,6 +908,7 @@ export function MagicModal() {
           const mergePrToastId = toast.loading('Merging PR...')
           try {
             const result = await invoke<MergePrResponse>('merge_github_pr', {
+              worktreeId: worktree.id,
               worktreePath: worktree.path,
             })
             toast.success(result.message, { id: mergePrToastId })
@@ -1087,6 +1092,7 @@ ${resolveInstructions}`
                 mcpConfig: prConflictMcpConfig,
                 enabledServers: prConflictEnabledMcp,
               } = await resolveMcpConfigForSend({
+                worktreeId: worktree.id,
                 worktreePath: worktree.path,
                 backend: resolvedBackend as CliBackend,
                 projectEnabled: project?.enabled_mcp_servers,
@@ -1281,6 +1287,7 @@ ${resolveInstructions}`
               mcpConfig: conflictMcpConfig,
               enabledServers: conflictEnabledMcp,
             } = await resolveMcpConfigForSend({
+              worktreeId: worktree.id,
               worktreePath: worktree.path,
               backend: resolvedBackend as CliBackend,
               projectEnabled: project?.enabled_mcp_servers,

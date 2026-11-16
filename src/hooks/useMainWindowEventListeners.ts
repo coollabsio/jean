@@ -674,9 +674,12 @@ function executeKeybindingAction(
             useProjectsStore.getState().selectedWorktreeId)
 
       // Resolve path: chat store first, then fall back to worktrees query cache (canvas)
+      // The path must belong to targetWorktreeId: both go to get_run_scripts.
       let targetWorktreePath = targetWorktreeId
-        ? (chatStore.activeWorktreePath ??
-          chatStore.worktreePaths[targetWorktreeId])
+        ? (chatStore.worktreePaths[targetWorktreeId] ??
+          (targetWorktreeId === chatStore.activeWorktreeId
+            ? chatStore.activeWorktreePath
+            : null))
         : null
 
       if (!targetWorktreePath && targetWorktreeId) {
@@ -703,10 +706,11 @@ function executeKeybindingAction(
         let runScripts: string[] = []
         try {
           runScripts = await queryClient.fetchQuery<string[]>({
-            queryKey: ['run-scripts', resolvedWorktreePath],
+            queryKey: ['run-scripts', targetWorktreeId, resolvedWorktreePath],
             queryFn: () =>
               invoke<string[]>('get_run_scripts', {
                 worktreePath: resolvedWorktreePath,
+                worktreeId: targetWorktreeId,
               }),
             staleTime: 0,
           })

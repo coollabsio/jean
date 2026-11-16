@@ -4,11 +4,22 @@ import { logger } from '@/lib/logger'
 import type { WorktreeFile } from '@/types/chat'
 import { isTauri } from '@/services/projects'
 
+/** Worktree or project that owns a listed path; routes to its Jean server. */
+export interface FileListOwner {
+  worktreeId?: string
+  projectId?: string
+}
+
 // Query keys for files
 export const fileQueryKeys = {
   all: ['files'] as const,
-  worktreeFiles: (worktreePath: string) =>
-    [...fileQueryKeys.all, 'worktree', worktreePath] as const,
+  worktreeFiles: (worktreePath: string, owner: FileListOwner) =>
+    [
+      ...fileQueryKeys.all,
+      'worktree',
+      worktreePath,
+      owner.worktreeId ?? owner.projectId ?? '',
+    ] as const,
 }
 
 /**
@@ -17,9 +28,12 @@ export const fileQueryKeys = {
  * `node_modules` / `vendor` / `target` are pruned server-side (BFS walk).
  * Results are cached and only refetched when worktree changes.
  */
-export function useWorktreeFiles(worktreePath: string | null) {
+export function useWorktreeFiles(
+  worktreePath: string | null,
+  owner: FileListOwner
+) {
   return useQuery({
-    queryKey: fileQueryKeys.worktreeFiles(worktreePath ?? ''),
+    queryKey: fileQueryKeys.worktreeFiles(worktreePath ?? '', owner),
     queryFn: async (): Promise<WorktreeFile[]> => {
       if (!isTauri() || !worktreePath) {
         return []
@@ -28,6 +42,8 @@ export function useWorktreeFiles(worktreePath: string | null) {
       try {
         logger.debug('Loading worktree files', { worktreePath })
         const files = await invoke<WorktreeFile[]>('list_worktree_files', {
+          worktreeId: owner.worktreeId,
+          projectId: owner.projectId,
           worktreePath,
           maxFiles: 5000,
         })

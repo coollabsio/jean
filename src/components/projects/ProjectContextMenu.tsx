@@ -82,7 +82,7 @@ export function ProjectContextMenu({
   if (project.offline) return <>{children}</>
 
   const handleOpenInFinder = () => {
-    openInFinder.mutate(project.path)
+    openInFinder.mutate({ worktreePath: project.path, projectId: project.id })
   }
 
   const handleOpenWorktreesFolder = () => {
@@ -92,6 +92,7 @@ export function ProjectContextMenu({
   const handleOpenInTerminal = () => {
     openInTerminal.mutate({
       worktreePath: project.path,
+      projectId: project.id,
       terminal: preferences?.terminal,
     })
   }
@@ -99,6 +100,7 @@ export function ProjectContextMenu({
   const handleOpenInEditor = () => {
     openInEditor.mutate({
       worktreePath: project.path,
+      projectId: project.id,
       editor: preferences?.editor,
     })
   }

@@ -328,10 +328,12 @@ export function ReviewCommentsDialog() {
     try {
       const [inlineResult, prDetail] = await Promise.all([
         invoke<GitHubReviewComment[]>('get_pr_review_comments', {
+          worktreeId: worktree?.id,
           projectPath: worktreePath,
           prNumber,
         }),
         invoke<GitHubPullRequestDetail>('get_github_pr', {
+          worktreeId: worktree?.id,
           projectPath: worktreePath,
           prNumber,
         }),
@@ -382,7 +384,7 @@ export function ReviewCommentsDialog() {
       setError(String(err))
       setPhase('select')
     }
-  }, [worktreePath, prNumber, resetTransientState])
+  }, [worktree?.id, worktreePath, prNumber, resetTransientState])
 
   // Fetch when modal opens
   useEffect(() => {

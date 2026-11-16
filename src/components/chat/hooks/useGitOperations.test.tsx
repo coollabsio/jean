@@ -348,7 +348,7 @@ describe('useGitOperations conflict resolution', () => {
 
     expect(mocks.invoke).toHaveBeenCalledWith(
       'cancel_create_pr_with_ai_content',
-      { worktreePath: '/repo/worktree' }
+      { worktreeId: 'wt-1', worktreePath: '/repo/worktree' }
     )
     expect(mocks.toastInfo).toHaveBeenCalledWith('Cancelling PR creation...', {
       id: 'toast-1',

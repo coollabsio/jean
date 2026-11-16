@@ -859,17 +859,19 @@ export const ChatInput = memo(function ChatInput({
         if (mentions.length === 0) return
 
         // Get file list: cache-first, async fallback
+        const fileOwner = { worktreeId: activeWorktreeId ?? undefined }
         let fileList: WorktreeFile[] | undefined = queryClient.getQueryData(
-          fileQueryKeys.worktreeFiles(activeWorktreePath)
+          fileQueryKeys.worktreeFiles(activeWorktreePath, fileOwner)
         )
         if (!fileList) {
           try {
             fileList = await invoke<WorktreeFile[]>('list_worktree_files', {
+              worktreeId: fileOwner.worktreeId,
               worktreePath: activeWorktreePath,
               maxFiles: 5000,
             })
             queryClient.setQueryData(
-              fileQueryKeys.worktreeFiles(activeWorktreePath),
+              fileQueryKeys.worktreeFiles(activeWorktreePath, fileOwner),
               fileList
             )
           } catch {
@@ -1095,7 +1097,13 @@ export const ChatInput = memo(function ChatInput({
       // Auto-resolve @file mentions in regular (small) text pastes
       await resolvePastedMentions(text)
     },
-    [activeSessionId, activeWorktreePath, inputRef, resizeTextarea]
+    [
+      activeSessionId,
+      activeWorktreeId,
+      activeWorktreePath,
+      inputRef,
+      resizeTextarea,
+    ]
   )
 
   const handleFileInputChange = useCallback(
@@ -1583,6 +1591,7 @@ export const ChatInput = memo(function ChatInput({
       ) : (
         <FileMentionPopover
           worktreePath={activeWorktreePath ?? null}
+          worktreeId={activeWorktreeId ?? null}
           currentProjectId={activeProjectId ?? null}
           open={fileMentionOpen}
           onOpenChange={setFileMentionOpen}
@@ -1622,6 +1631,7 @@ export const ChatInput = memo(function ChatInput({
         containerRef={formRef}
         isAtPromptStart={isSlashAtPromptStart}
         worktreePath={activeWorktreePath}
+        worktreeId={activeWorktreeId}
         handleRef={slashPopoverHandleRef}
         installedBackends={installedBackends}
         sessionBackend={selectedBackend}

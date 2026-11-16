@@ -22,6 +22,7 @@ import { fileToBase64 } from '@/lib/file-base64'
 import { disposeAllWorktreeTerminals } from '@/lib/terminal-instances'
 import { toastActionLabel } from '@/lib/toast-action-label'
 import { parseUnmanagedWorktreeListing } from '@/lib/import-existing-worktree'
+import type { GitRepoOwner } from '@/services/git-status'
 import type {
   AutoFixStatus,
   AutoFixIssuePreview,
@@ -2105,9 +2106,11 @@ export function useOpenBranchOnGitHub() {
   return useMutation({
     mutationFn: async ({
       repoPath,
+      worktreeId,
       branch,
     }: {
       repoPath: string
+      worktreeId: string
       branch: string
     }): Promise<void> => {
       if (!isTauri()) {
@@ -2122,6 +2125,7 @@ export function useOpenBranchOnGitHub() {
       try {
         const url = await invoke<string>('get_github_branch_url', {
           repoPath,
+          worktreeId,
           branch,
         })
 
@@ -2155,12 +2159,21 @@ export interface GitHubRemote {
 /**
  * Hook to fetch all GitHub remotes for a repository
  */
-export function useGitHubRemotes(repoPath: string | null, enabled: boolean) {
+export function useGitHubRemotes(
+  repoPath: string | null,
+  owner: GitRepoOwner,
+  enabled: boolean
+) {
+  const { worktreeId, projectId } = owner
   return useQuery({
-    queryKey: ['github-remotes', repoPath],
+    queryKey: ['github-remotes', worktreeId ?? projectId ?? null, repoPath],
     queryFn: async () => {
       if (!repoPath) return []
-      return invoke<GitHubRemote[]>('get_github_remotes', { repoPath })
+      return invoke<GitHubRemote[]>('get_github_remotes', {
+        repoPath,
+        worktreeId,
+        projectId,
+      })
     },
     enabled: enabled && repoPath !== null,
     staleTime: 30_000,
@@ -2188,18 +2201,29 @@ function githubRepoFromUrl(url: string): string | undefined {
  */
 export function useProjectRemotes(
   repoPath: string | null | undefined,
+  projectId: string | null | undefined,
   branch: string | null | undefined
 ) {
   return useQuery({
-    queryKey: ['project-remotes', repoPath ?? null, branch ?? null] as const,
+    queryKey: [
+      'project-remotes',
+      projectId ?? null,
+      repoPath ?? null,
+      branch ?? null,
+    ] as const,
     queryFn: async (): Promise<ProjectRemote[]> => {
       if (!repoPath || !branch) return []
 
       const [names, githubRemotes] = await Promise.all([
-        invoke<string[]>('list_remotes_with_branch', { repoPath, branch }),
-        invoke<GitHubRemote[]>('get_github_remotes', { repoPath }).catch(
-          () => [] as GitHubRemote[]
-        ),
+        invoke<string[]>('list_remotes_with_branch', {
+          repoPath,
+          projectId,
+          branch,
+        }),
+        invoke<GitHubRemote[]>('get_github_remotes', {
+          repoPath,
+          projectId,
+        }).catch(() => [] as GitHubRemote[]),
       ])
 
       const repoByRemote = new Map(
@@ -2230,7 +2254,11 @@ export function useProjectRemotes(
 export function useOpenWorktreeInFinder() {
   // react-doctor-disable-next-line react-doctor/query-mutation-missing-invalidation -- opens the OS file manager; no cached data changes
   return useMutation({
-    mutationFn: async (worktreePath: string): Promise<void> => {
+    mutationFn: async ({
+      worktreePath,
+      worktreeId,
+      projectId,
+    }: { worktreePath: string } & GitRepoOwner): Promise<void> => {
       if (!isTauri()) {
         throw new Error('Not in Tauri context')
       }
@@ -2238,7 +2266,11 @@ export function useOpenWorktreeInFinder() {
       logger.debug(`Opening worktree in ${getFileManagerName()}`, {
         worktreePath,
       })
-      await invoke('open_worktree_in_finder', { worktreePath })
+      await invoke('open_worktree_in_finder', {
+        worktreePath,
+        worktreeId,
+        projectId,
+      })
       logger.info(`Opened worktree in ${getFileManagerName()}`)
     },
     // No query invalidation: OS file manager side effect only
@@ -2294,17 +2326,24 @@ export function useOpenWorktreeInTerminal() {
   return useMutation({
     mutationFn: async ({
       worktreePath,
+      worktreeId,
+      projectId,
       terminal,
     }: {
       worktreePath: string
       terminal?: string
-    }): Promise<void> => {
+    } & GitRepoOwner): Promise<void> => {
       if (!isTauri()) {
         throw new Error('Not in Tauri context')
       }
 
       logger.debug('Opening worktree in Terminal', { worktreePath, terminal })
-      await invoke('open_worktree_in_terminal', { worktreePath, terminal })
+      await invoke('open_worktree_in_terminal', {
+        worktreePath,
+        worktreeId,
+        projectId,
+        terminal,
+      })
       logger.info('Opened worktree in Terminal')
     },
     // No query invalidation: OS terminal side effect only
@@ -2329,17 +2368,24 @@ export function useOpenWorktreeInEditor() {
   return useMutation({
     mutationFn: async ({
       worktreePath,
+      worktreeId,
+      projectId,
       editor,
     }: {
       worktreePath: string
       editor?: string
-    }): Promise<void> => {
+    } & GitRepoOwner): Promise<void> => {
       if (!isTauri()) {
         throw new Error('Not in Tauri context')
       }
 
       logger.debug('Opening worktree in Editor', { worktreePath, editor })
-      await invoke('open_worktree_in_editor', { worktreePath, editor })
+      await invoke('open_worktree_in_editor', {
+        worktreePath,
+        worktreeId,
+        projectId,
+        editor,
+      })
       logger.info('Opened worktree in Editor')
     },
     // No query invalidation: OS editor side effect only
@@ -2392,13 +2438,17 @@ export function normalizeRunScripts(
 /**
  * Hook to get full jean.json config for a project
  */
-export function useJeanConfig(projectPath: string | null) {
+export function useJeanConfig(
+  projectPath: string | null,
+  projectId: string | null | undefined
+) {
   return useQuery<JeanConfig | null>({
-    queryKey: ['jean-config', projectPath],
+    queryKey: ['jean-config', projectId ?? null, projectPath],
     queryFn: async () => {
       if (!isTauri() || !projectPath) return null
       const config = await invoke<JeanConfig | null>('get_jean_config', {
         projectPath,
+        projectId,
       })
       return config ?? null
     },
@@ -2416,15 +2466,19 @@ export function useSaveJeanConfig() {
   return useMutation({
     mutationFn: async ({
       projectPath,
+      projectId,
       config,
     }: {
       projectPath: string
+      projectId: string
       config: JeanConfig
     }) => {
-      await invoke('save_jean_config', { projectPath, config })
+      await invoke('save_jean_config', { projectPath, projectId, config })
     },
-    onSuccess: (_, { projectPath }) => {
-      queryClient.invalidateQueries({ queryKey: ['jean-config', projectPath] })
+    onSuccess: (_, { projectPath, projectId }) => {
+      queryClient.invalidateQueries({
+        queryKey: ['jean-config', projectId, projectPath],
+      })
       queryClient.invalidateQueries({ queryKey: ['run-scripts'] })
       queryClient.invalidateQueries({ queryKey: ['ports'] })
       // A saved `provider` block changes git-host resolution; refresh it so
@@ -2443,15 +2497,19 @@ export function useSaveJeanConfig() {
  * Hook to get the run script(s) from jean.json for a worktree.
  * Returns string[] (empty = none configured).
  */
-export function useRunScripts(worktreePath: string | null) {
+export function useRunScripts(
+  worktreePath: string | null,
+  worktreeId: string | null | undefined
+) {
   return useQuery<string[]>({
-    queryKey: ['run-scripts', worktreePath],
+    queryKey: ['run-scripts', worktreeId ?? null, worktreePath],
     queryFn: async () => {
       if (!isTauri() || !worktreePath) return []
 
       logger.debug('Fetching run scripts', { worktreePath })
       const scripts = await invoke<string[]>('get_run_scripts', {
         worktreePath,
+        worktreeId,
       })
       logger.debug('Run scripts result', { scripts })
       return scripts
@@ -2471,12 +2529,25 @@ export interface PackageScript {
 }
 
 /** Get scripts from package.json with the detected package-manager command. */
-export function usePackageScripts(worktreePath: string | null) {
+export function usePackageScripts(
+  worktreePath: string | null,
+  owner: GitRepoOwner | null
+) {
+  const worktreeId = owner?.worktreeId
+  const projectId = owner?.projectId
   return useQuery<PackageScript[]>({
-    queryKey: ['package-scripts', worktreePath],
+    queryKey: [
+      'package-scripts',
+      worktreeId ?? projectId ?? null,
+      worktreePath,
+    ],
     queryFn: () =>
       worktreePath
-        ? invoke<PackageScript[]>('get_package_scripts', { worktreePath })
+        ? invoke<PackageScript[]>('get_package_scripts', {
+            worktreePath,
+            worktreeId,
+            projectId,
+          })
         : Promise.resolve([]),
     enabled: !!worktreePath && hasBackendTransport(),
     staleTime: 0,
@@ -2488,12 +2559,21 @@ export function usePackageScripts(worktreePath: string | null) {
  * Returns PortEntry[] (empty = none configured).
  * Works on native Tauri and web access (via backend transport).
  */
-export function usePorts(worktreePath: string | null) {
+export function usePorts(
+  worktreePath: string | null,
+  owner: GitRepoOwner | null
+) {
+  const worktreeId = owner?.worktreeId
+  const projectId = owner?.projectId
   return useQuery<PortEntry[]>({
-    queryKey: ['ports', worktreePath],
+    queryKey: ['ports', worktreeId ?? projectId ?? null, worktreePath],
     queryFn: async () => {
       if (!worktreePath || !hasBackendTransport()) return []
-      const ports = await invoke<PortEntry[]>('get_ports', { worktreePath })
+      const ports = await invoke<PortEntry[]>('get_ports', {
+        worktreePath,
+        worktreeId,
+        projectId,
+      })
       return ports
     },
     enabled: !!worktreePath && hasBackendTransport(),
@@ -2617,6 +2697,7 @@ export function useOpenProjectOnGitHub() {
       try {
         const url = await invoke<string>('get_github_repo_url', {
           repoPath: project.path,
+          projectId: project.id,
         })
 
         await openExternal(url, win)
@@ -2645,13 +2726,19 @@ export function useOpenProjectOnGitHub() {
  * Get a dynamically generated PR prompt with git context
  * Includes uncommitted changes count, branch info, and PR template if available
  */
-export async function getPrPrompt(worktreePath: string): Promise<string> {
+export async function getPrPrompt(
+  worktreePath: string,
+  worktreeId: string
+): Promise<string> {
   if (!isTauri()) {
     throw new Error('Not in Tauri context')
   }
 
   logger.debug('Getting PR prompt', { worktreePath })
-  const prompt = await invoke<string>('get_pr_prompt', { worktreePath })
+  const prompt = await invoke<string>('get_pr_prompt', {
+    worktreePath,
+    worktreeId,
+  })
   logger.info('PR prompt generated successfully')
   return prompt
 }
@@ -2667,7 +2754,8 @@ export interface ReviewPromptResponse {
  * Returns the full prompt inline (no file is saved)
  */
 export async function getReviewPrompt(
-  worktreePath: string
+  worktreePath: string,
+  worktreeId: string
 ): Promise<ReviewPromptResponse> {
   if (!isTauri()) {
     throw new Error('Not in Tauri context')
@@ -2676,7 +2764,7 @@ export async function getReviewPrompt(
   logger.debug('Generating review prompt', { worktreePath })
   const response = await invoke<{
     prompt: string
-  }>('get_review_prompt', { worktreePath })
+  }>('get_review_prompt', { worktreePath, worktreeId })
   logger.info('Review prompt generated successfully')
   return {
     prompt: response.prompt,

@@ -380,6 +380,8 @@ export function resolveEnabledMcpServers(options: {
 }
 
 export interface ResolveMcpConfigForSendOptions {
+  /** Owner of `worktreePath`; routes discovery to the right Jean server. */
+  worktreeId: string
   worktreePath: string
   backend: CliBackend
   sessionEnabled?: string[]
@@ -402,6 +404,7 @@ export async function resolveMcpConfigForSend(
   try {
     availableServers = await invoke<McpServerInfo[]>('get_mcp_servers', {
       backend: options.backend,
+      worktreeId: options.worktreeId,
       worktreePath: options.worktreePath,
     })
     if (!Array.isArray(availableServers)) {

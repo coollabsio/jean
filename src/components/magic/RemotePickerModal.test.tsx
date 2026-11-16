@@ -17,6 +17,7 @@ vi.mock('@/store/ui-store', () => ({
   useUIStore: () => ({
     remotePickerOpen: true,
     remotePickerRepoPath: '/repo',
+    remotePickerOwner: { worktreeId: 'wt-1' },
     closeRemotePicker: mocks.closeRemotePicker,
   }),
   getRemotePickerCallback: () => vi.fn(),

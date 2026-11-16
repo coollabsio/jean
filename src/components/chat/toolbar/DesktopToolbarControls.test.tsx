@@ -53,6 +53,7 @@ function renderDesktopToolbarControls(
     prNumber: undefined,
     displayStatus: undefined,
     activeWorktreePath: undefined,
+    worktreeId: null,
     availableMcpServers: [],
     enabledMcpServers: [],
     activeMcpCount: 0,

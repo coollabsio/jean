@@ -320,6 +320,7 @@ export const chatQueryKeys = {
   session: (sessionId: string) =>
     [...chatQueryKeys.all, 'session', sessionId] as const,
   nativeCliSessions: (
+    worktreeId: string,
     worktreePath: string,
     backend: string,
     searchQuery: string,
@@ -329,6 +330,7 @@ export const chatQueryKeys = {
       ...chatQueryKeys.all,
       'native-cli-sessions',
       backend,
+      worktreeId,
       worktreePath,
       searchQuery,
       resultLimit,
@@ -441,6 +443,7 @@ export function useSessions(
 }
 
 export function useNativeCliSessions(
+  worktreeId: string | null,
   worktreePath: string | null,
   backend: NonNullable<Session['backend']> | null,
   options?: { enabled?: boolean; searchQuery?: string; resultLimit?: number }
@@ -450,6 +453,7 @@ export function useNativeCliSessions(
 
   return useQuery({
     queryKey: chatQueryKeys.nativeCliSessions(
+      worktreeId ?? '',
       worktreePath ?? '',
       backend ?? '',
       searchQuery,
@@ -461,6 +465,7 @@ export function useNativeCliSessions(
         return await invoke<NativeCliHistorySession[]>(
           'list_native_cli_sessions',
           {
+            worktreeId: worktreeId ?? undefined,
             worktreePath,
             backend,
             searchQuery,

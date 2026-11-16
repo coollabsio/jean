@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 import { useUIStore } from '@/store/ui-store'
-import { getGitRemotes } from '@/services/git-status'
+import { getGitRemotes, type GitRepoOwner } from '@/services/git-status'
 
 export function pushNeedsRemotePicker(prNumber?: number | null) {
   return prNumber == null
@@ -12,29 +12,39 @@ export function pushNeedsRemotePicker(prNumber?: number | null) {
  * - 1 remote: calls action immediately with that remote name
  * - 2+ remotes: opens RemotePickerModal, action runs after user selects
  */
-export function useRemotePicker(repoPath: string | null | undefined) {
+export function useRemotePicker(
+  repoPath: string | null | undefined,
+  owner: GitRepoOwner | null | undefined
+) {
   const openRemotePicker = useUIStore(state => state.openRemotePicker)
+  const worktreeId = owner?.worktreeId
+  const projectId = owner?.projectId
 
   const pickRemoteOrRun = useCallback(
     async (action: (remote: string) => void) => {
-      if (!repoPath) {
+      const repoOwner: GitRepoOwner | null = worktreeId
+        ? { worktreeId }
+        : projectId
+          ? { projectId }
+          : null
+      if (!repoPath || !repoOwner) {
         action('origin')
         return
       }
 
       try {
-        const remotes = await getGitRemotes(repoPath)
+        const remotes = await getGitRemotes(repoOwner, repoPath)
         if (remotes.length <= 1) {
           action(remotes[0]?.name ?? 'origin')
         } else {
-          openRemotePicker(repoPath, action)
+          openRemotePicker(repoPath, repoOwner, action)
         }
       } catch {
         // If we can't list remotes, fall back to origin
         action('origin')
       }
     },
-    [repoPath, openRemotePicker]
+    [repoPath, worktreeId, projectId, openRemotePicker]
   )
 
   return pickRemoteOrRun

@@ -50,7 +50,11 @@ depend on argument order. On ordinary `invoke`, a raw id combined with one of
 those paths means `local`. A raw id with no path stays unscoped. A call that
 already targets one server (`invokeForServer`) keeps that server when its ids
 have been stripped. A path alone still routes when exactly one server owns it,
-and fails when several do. Server capability responses publish API protocol
+and fails when several do. Every direct `invoke` that sends a repository path therefore
+also sends the id of the resource that owns it (`worktreeId` or `projectId`),
+and path-keyed queries include that id in their key.
+`server-command-routing.callers.test.ts` fails on a path-only `invoke`. When a
+server is removed or disabled, its path registrations are forgotten. Server capability responses publish API protocol
 range `1..=1` and versioned named capabilities. Missing protocol fields are
 read as the legacy protocol version 1.
 

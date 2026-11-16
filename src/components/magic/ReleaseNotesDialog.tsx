@@ -72,6 +72,7 @@ export function ReleaseNotesDialog() {
     try {
       setReleases(
         await invoke<GitHubRelease[]>('list_github_releases', {
+          projectId: project.id,
           projectPath: project.path,
         })
       )
@@ -80,7 +81,7 @@ export function ReleaseNotesDialog() {
     } finally {
       setIsLoading(false)
     }
-  }, [project?.path])
+  }, [project?.id, project?.path])
 
   useEffect(() => {
     if (releaseNotesModalOpen) void fetchReleases()
@@ -142,6 +143,7 @@ export function ReleaseNotesDialog() {
         store.setExecutionMode(session.id, 'yolo')
 
         const { mcpConfig, enabledServers } = await resolveMcpConfigForSend({
+          worktreeId: baseWorktree.id,
           worktreePath: baseWorktree.path,
           backend,
           projectEnabled: project.enabled_mcp_servers,

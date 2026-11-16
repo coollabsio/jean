@@ -103,20 +103,27 @@ export function useNewWorktreeData(
   const debouncedSearchQuery = useDebouncedValue(searchQuery, 300)
 
   const { data: searchedIssues, isFetching: isSearchingIssues } =
-    useSearchGitHubIssues(selectedProject?.path ?? null, debouncedSearchQuery)
+    useSearchGitHubIssues(
+      selectedProject?.path ?? null,
+      selectedProject?.id,
+      debouncedSearchQuery
+    )
 
   const { data: searchedPRs, isFetching: isSearchingPRs } = useSearchGitHubPRs(
     selectedProject?.path ?? null,
+    selectedProject?.id,
     debouncedSearchQuery
   )
 
   // Exact number lookups across every linked GitHub repository.
   const { data: exactIssues } = useListGitHubIssuesByNumber(
     selectedProject?.path ?? null,
+    selectedProject?.id,
     debouncedSearchQuery
   )
   const { data: exactPRs } = useListGitHubPRsByNumber(
     selectedProject?.path ?? null,
+    selectedProject?.id,
     debouncedSearchQuery
   )
 
@@ -186,15 +193,21 @@ export function useNewWorktreeData(
     hasNextPage: hasMoreDiscussions,
     fetchNextPage: fetchMoreDiscussions,
     isFetchingNextPage: isLoadingMoreDiscussions,
-  } = useGitHubDiscussions(selectedProject?.path ?? null, discussionState)
+  } = useGitHubDiscussions(
+    selectedProject?.path ?? null,
+    selectedProject?.id,
+    discussionState
+  )
 
   const { data: searchedDiscussions, isFetching: isSearchingDiscussions } =
     useSearchGitHubDiscussions(
       selectedProject?.path ?? null,
+      selectedProject?.id,
       debouncedSearchQuery
     )
   const { data: exactDiscussion } = useGetGitHubDiscussionByNumber(
     selectedProject?.path ?? null,
+    selectedProject?.id,
     debouncedSearchQuery
   )
 
@@ -261,6 +274,7 @@ export function useNewWorktreeData(
   // actions when a project tracks more than one, e.g. upstream plus a fork)
   const { data: remotes } = useProjectRemotes(
     selectedProject?.path,
+    selectedProject?.id,
     selectedProject?.default_branch
   )
 
@@ -272,7 +286,11 @@ export function useNewWorktreeData(
     isFetching: isRefetchingSecurityAlerts,
     error: securityError,
     refetch: refetchSecurityAlerts,
-  } = useDependabotAlerts(selectedProject?.path ?? null, securityState)
+  } = useDependabotAlerts(
+    selectedProject?.path ?? null,
+    selectedProject?.id,
+    securityState
+  )
 
   const filteredSecurityAlerts = useMemo(() => {
     const ALERT_STATE_ORDER = ['open', 'dismissed', 'fixed', 'auto_dismissed']
@@ -289,7 +307,10 @@ export function useNewWorktreeData(
     isLoading: isLoadingAdvisories,
     isFetching: isRefetchingAdvisories,
     refetch: refetchAdvisories,
-  } = useRepositoryAdvisories(selectedProject?.path ?? null)
+  } = useRepositoryAdvisories(
+    selectedProject?.path ?? null,
+    selectedProject?.id
+  )
 
   const filteredAdvisories = useMemo(() => {
     const ADVISORY_STATE_ORDER = ['triage', 'draft', 'published', 'closed']
@@ -343,7 +364,10 @@ export function useNewWorktreeData(
   )
 
   // Jean config
-  const { data: jeanConfig } = useJeanConfig(selectedProject?.path ?? null)
+  const { data: jeanConfig } = useJeanConfig(
+    selectedProject?.path ?? null,
+    selectedProject?.id
+  )
 
   // Mutations
   const createWorktree = useCreateWorktree()

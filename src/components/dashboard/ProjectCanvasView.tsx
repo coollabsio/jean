@@ -595,7 +595,9 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
   const diffRemoved =
     gitStatus?.uncommitted_removed ?? worktree.cached_uncommitted_removed ?? 0
 
-  const pickRemoteOrRun = useRemotePicker(worktree.path)
+  const pickRemoteOrRun = useRemotePicker(worktree.path, {
+    worktreeId: worktree.id,
+  })
 
   const runGitSync = useCallback(() => {
     const runSync = async (remote?: string) => {
@@ -1171,7 +1173,9 @@ export function ProjectCanvasView({
   })
 
   // Open PRs: used to link a worktree's base_branch to a PR number in row badges
-  const { data: gitProviderInfo } = useProjectGitProvider(project?.path)
+  const { data: gitProviderInfo } = useProjectGitProvider(project?.path, {
+    projectId: project?.id,
+  })
   const gitProvider = gitProviderInfo?.provider ?? 'github'
   const isGitlab = gitProvider === 'gitlab'
   const forgeLabels = providerLabels(gitProvider)
@@ -1189,12 +1193,18 @@ export function ProjectCanvasView({
     staleTime: FORGE_COUNT_STALE_TIME,
     ownerId: projectId ?? undefined,
   })
-  const { data: alerts } = useDependabotAlerts(project?.path ?? null, 'open', {
-    enabled: githubCountsEnabled,
-    staleTime: FORGE_COUNT_STALE_TIME,
-  })
+  const { data: alerts } = useDependabotAlerts(
+    project?.path ?? null,
+    project?.id,
+    'open',
+    {
+      enabled: githubCountsEnabled,
+      staleTime: FORGE_COUNT_STALE_TIME,
+    }
+  )
   const { data: advisories } = useRepositoryAdvisories(
     project?.path ?? null,
+    project?.id,
     undefined,
     {
       enabled: githubCountsEnabled,
@@ -1203,6 +1213,7 @@ export function ProjectCanvasView({
   )
   const { data: workflowRuns } = useWorkflowRuns(
     project?.path ?? null,
+    project?.id,
     undefined,
     {
       enabled: githubCountsEnabled,
@@ -3365,9 +3376,10 @@ export function ProjectCanvasView({
                     {!isGitlab && (
                       <DropdownMenuItem
                         onSelect={() =>
-                          useUIStore
-                            .getState()
-                            .setWorkflowRunsModalOpen(true, project.path)
+                          useUIStore.getState().setWorkflowRunsModalOpen(true, {
+                            projectId: project.id,
+                            projectPath: project.path,
+                          })
                         }
                       >
                         {failedWorkflowCount > 0 ? (
@@ -3412,6 +3424,7 @@ export function ProjectCanvasView({
                             onSelect={() =>
                               openInEditor.mutate({
                                 worktreePath: project.path,
+                                projectId: project.id,
                                 editor: preferences?.editor,
                               })
                             }
@@ -3423,7 +3436,12 @@ export function ProjectCanvasView({
 
                         {canOpenInFinder(project.serverId) && (
                           <DropdownMenuItem
-                            onSelect={() => openInFinder.mutate(project.path)}
+                            onSelect={() =>
+                              openInFinder.mutate({
+                                worktreePath: project.path,
+                                projectId: project.id,
+                              })
+                            }
                           >
                             <FolderOpen className="h-4 w-4" />
                             Open in Finder
@@ -3435,6 +3453,7 @@ export function ProjectCanvasView({
                             onSelect={() =>
                               openInTerminal.mutate({
                                 worktreePath: project.path,
+                                projectId: project.id,
                                 terminal: preferences?.terminal,
                               })
                             }
@@ -3470,6 +3489,7 @@ export function ProjectCanvasView({
                     {!isMobile && (
                       <ScriptsSubmenu
                         projectId={project.id}
+                        owner={{ projectId: project.id }}
                         worktreePath={project.path}
                         onRun={handlePackageScript}
                       />
@@ -4113,7 +4133,7 @@ function EmptyDashboardTabs({
   projectPath: string | null
 }) {
   const shortcut = formatShortcutDisplay(DEFAULT_KEYBINDINGS.new_worktree)
-  const { data: jeanConfig } = useJeanConfig(projectPath)
+  const { data: jeanConfig } = useJeanConfig(projectPath, projectId)
   const { openProjectSettings } = useProjectsStore.getState()
 
   return (

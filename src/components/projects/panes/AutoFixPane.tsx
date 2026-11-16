@@ -644,7 +644,7 @@ export function AutoFixPane({ projectId }: { projectId: string }) {
     [preferences?.custom_cli_profiles]
   )
   const { data: githubLabels = [], isLoading: githubLabelsLoading } =
-    useGitHubLabels(project?.path ?? null, {
+    useGitHubLabels(project?.path ?? null, project?.id, {
       enabled: Boolean(project?.path && !project?.is_folder),
     })
 

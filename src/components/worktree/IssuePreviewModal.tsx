@@ -49,6 +49,8 @@ interface IssuePreviewModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   projectPath: string
+  /** Owner of `projectPath`; routes the fetch to the right Jean server */
+  projectId: string | null | undefined
   type: 'issue' | 'pr' | 'security' | 'advisory'
   number: number
   ghsaId?: string
@@ -582,25 +584,36 @@ export function IssuePreviewModal({
   open,
   onOpenChange,
   projectPath,
+  projectId,
   type,
   number,
   ghsaId,
   repo,
 }: IssuePreviewModalProps) {
-  const { data: gitProviderInfo } = useProjectGitProvider(projectPath)
+  const { data: gitProviderInfo } = useProjectGitProvider(projectPath, {
+    projectId,
+  })
   const forgeLabels = providerLabels(gitProviderInfo?.provider ?? 'github')
   const issueQuery = useGitHubIssue(
     projectPath,
+    projectId,
     type === 'issue' ? number : null,
     repo
   )
-  const prQuery = useGitHubPR(projectPath, type === 'pr' ? number : null, repo)
+  const prQuery = useGitHubPR(
+    projectPath,
+    projectId,
+    type === 'pr' ? number : null,
+    repo
+  )
   const securityQuery = useDependabotAlert(
     projectPath,
+    projectId,
     type === 'security' ? number : null
   )
   const advisoryQuery = useRepositoryAdvisory(
     projectPath,
+    projectId,
     type === 'advisory' ? (ghsaId ?? null) : null
   )
 

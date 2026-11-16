@@ -107,7 +107,9 @@ function NewWorktreeModalContent() {
 
   // Resolve the project's git host provider for provider-aware auth + wording.
   const { data: providerInfo, isLoading: isProviderLoading } =
-    useProjectGitProvider(data.selectedProject?.path)
+    useProjectGitProvider(data.selectedProject?.path, {
+      projectId: data.selectedProject?.id,
+    })
   const provider = providerInfo?.provider ?? 'github'
   // Until the provider resolves it defaults to `github`; auth-error UI must wait
   // for this so a GitLab project never flashes the GitHub sign-in prompt.
@@ -648,6 +650,7 @@ function NewWorktreeModalContent() {
             }
           }}
           projectPath={data.selectedProject.path}
+          projectId={data.selectedProject.id}
           type={previewItem.type}
           number={previewItem.number}
           ghsaId={previewItem.ghsaId}

@@ -1018,7 +1018,7 @@ describe('MagicModal manual PR link', () => {
     await waitFor(() => {
       expect(mocks.invokeMock).toHaveBeenCalledWith(
         'revert_last_local_commit',
-        { worktreePath: '/repo/worktree' }
+        { worktreeId: 'wt-1', worktreePath: '/repo/worktree' }
       )
     })
     expect(

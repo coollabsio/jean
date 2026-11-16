@@ -415,7 +415,9 @@ export const WorktreeItem = memo(function WorktreeItem({
   const unpushedCount =
     gitStatus?.unpushed_count ?? worktree.cached_unpushed_count ?? 0
   const pushCount = unpushedCount
-  const pickRemoteOrRun = useRemotePicker(worktree.path)
+  const pickRemoteOrRun = useRemotePicker(worktree.path, {
+    worktreeId: worktree.id,
+  })
 
   // Uncommitted changes (working directory)
   const uncommittedAdded =
@@ -938,6 +940,14 @@ export const WorktreeItem = memo(function WorktreeItem({
               >
                 <DisclosureChevron open={isExpanded} className="size-3" />
               </button>
+              {/* Left of the sync/diff badges so it does not move them on hover (#912) */}
+              {showStatusBadges && (
+                <CollapsedCountBadge
+                  count={sessionsData?.sessions.length ?? 0}
+                  label="sessions"
+                  isExpanded={isExpanded}
+                />
+              )}
             </span>
           )}
 
@@ -993,13 +1003,6 @@ export const WorktreeItem = memo(function WorktreeItem({
               </TooltipTrigger>
               <TooltipContent>{`Uncommitted: +${uncommittedAdded}/-${uncommittedRemoved} lines`}</TooltipContent>
             </Tooltip>
-          )}
-          {showStatusBadges && (
-            <CollapsedCountBadge
-              count={sessionsData?.sessions.length ?? 0}
-              label="sessions"
-              isExpanded={isExpanded}
-            />
           )}
         </div>
       </WorktreeContextMenu>

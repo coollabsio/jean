@@ -87,7 +87,7 @@ export function LoadContextModal({
 
   // Resolve the project's git host provider for provider-aware auth + wording.
   const { data: providerInfo, isLoading: isProviderLoading } =
-    useProjectGitProvider(worktreePath)
+    useProjectGitProvider(worktreePath, { worktreeId })
   const provider = providerInfo?.provider ?? 'github'
   // Until the provider resolves it defaults to `github`; auth-error UI must wait
   // for this so a GitLab project never flashes the GitHub sign-in prompt.
@@ -604,6 +604,7 @@ export function LoadContextModal({
                 if (!open) handlers.setViewingContext(null)
               }}
               projectPath={worktreePath}
+              projectId={projectId}
               type={handlers.viewingContext.type}
               number={handlers.viewingContext.number}
             />

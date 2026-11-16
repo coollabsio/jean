@@ -26,7 +26,7 @@ export function useWorktreeMenuActions({
   const openInFinder = useOpenWorktreeInFinder()
   const openInTerminal = useOpenWorktreeInTerminal()
   const openInEditor = useOpenWorktreeInEditor()
-  const { data: runScripts = [] } = useRunScripts(worktree.path)
+  const { data: runScripts = [] } = useRunScripts(worktree.path, worktree.id)
   const { data: preferences } = usePreferences()
   const { data: sessionsData } = useSessions(worktree.id, worktree.path)
   const isBase = isBaseSession(worktree)
@@ -58,22 +58,27 @@ export function useWorktreeMenuActions({
   }, [worktree.id])
 
   const handleOpenInFinder = useCallback(() => {
-    openInFinder.mutate(worktree.path)
-  }, [openInFinder, worktree.path])
+    openInFinder.mutate({
+      worktreePath: worktree.path,
+      worktreeId: worktree.id,
+    })
+  }, [openInFinder, worktree.path, worktree.id])
 
   const handleOpenInTerminal = useCallback(() => {
     openInTerminal.mutate({
       worktreePath: worktree.path,
+      worktreeId: worktree.id,
       terminal: preferences?.terminal,
     })
-  }, [openInTerminal, worktree.path, preferences?.terminal])
+  }, [openInTerminal, worktree.path, worktree.id, preferences?.terminal])
 
   const handleOpenInEditor = useCallback(() => {
     openInEditor.mutate({
       worktreePath: worktree.path,
+      worktreeId: worktree.id,
       editor: preferences?.editor,
     })
-  }, [openInEditor, worktree.path, preferences?.editor])
+  }, [openInEditor, worktree.path, worktree.id, preferences?.editor])
 
   // The base session is permanent: it never closes.
   const handleClose = useCallback(() => {

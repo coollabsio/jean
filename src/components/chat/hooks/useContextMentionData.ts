@@ -217,13 +217,18 @@ export function useContextMentionData({
     isFetching: isFetchingDiscussions,
     hasNextPage: hasMoreDiscussionPages,
     fetchNextPage: fetchNextDiscussionPage,
-  } = useGitHubDiscussions(enabledProjectPath, discussionState, {
-    enabled: open,
-  })
+  } = useGitHubDiscussions(
+    enabledProjectPath,
+    enabledProjectId,
+    discussionState,
+    { enabled: open }
+  )
   const { data: alerts = [], isFetching: isFetchingAlerts } =
-    useDependabotAlerts(enabledProjectPath, securityState, { enabled: open })
+    useDependabotAlerts(enabledProjectPath, enabledProjectId, securityState, {
+      enabled: open,
+    })
   const { data: advisories = [], isFetching: isFetchingAdvisories } =
-    useRepositoryAdvisories(enabledProjectPath, undefined, {
+    useRepositoryAdvisories(enabledProjectPath, enabledProjectId, undefined, {
       enabled: open,
     })
   const { data: linearResult, isFetching: isFetchingLinear } = useLinearIssues(
@@ -232,26 +237,35 @@ export function useContextMentionData({
   )
 
   const { data: searchedIssues, isFetching: isSearchingIssues } =
-    useSearchGitHubIssues(enabledProjectPath, activeQuery)
+    useSearchGitHubIssues(enabledProjectPath, enabledProjectId, activeQuery)
   const { data: searchedPRs, isFetching: isSearchingPRs } = useSearchGitHubPRs(
     enabledProjectPath,
+    enabledProjectId,
     activeQuery
   )
   const { data: searchedDiscussions, isFetching: isSearchingDiscussions } =
-    useSearchGitHubDiscussions(enabledProjectPath, activeQuery)
+    useSearchGitHubDiscussions(
+      enabledProjectPath,
+      enabledProjectId,
+      activeQuery
+    )
   const { data: searchedLinear, isFetching: isSearchingLinear } =
     useSearchLinearIssues(enabledProjectId, activeQuery, { enabled: open })
 
   const { data: exactIssue, isFetching: isFetchingExactIssue } =
-    useGetGitHubIssueByNumber(enabledProjectPath, activeQuery)
+    useGetGitHubIssueByNumber(enabledProjectPath, enabledProjectId, activeQuery)
   const { data: exactPR, isFetching: isFetchingExactPR } =
-    useGetGitHubPRByNumber(enabledProjectPath, activeQuery)
+    useGetGitHubPRByNumber(enabledProjectPath, enabledProjectId, activeQuery)
   const { data: exactDiscussion, isFetching: isFetchingExactDiscussion } =
-    useGetGitHubDiscussionByNumber(enabledProjectPath, activeQuery)
+    useGetGitHubDiscussionByNumber(
+      enabledProjectPath,
+      enabledProjectId,
+      activeQuery
+    )
   const { data: exactSecurity, isFetching: isFetchingExactSecurity } =
-    useDependabotAlert(enabledProjectPath, itemNumber)
+    useDependabotAlert(enabledProjectPath, enabledProjectId, itemNumber)
   const { data: exactAdvisory, isFetching: isFetchingExactAdvisory } =
-    useRepositoryAdvisory(enabledProjectPath, ghsaId)
+    useRepositoryAdvisory(enabledProjectPath, enabledProjectId, ghsaId)
   const { data: exactLinear, isFetching: isFetchingExactLinear } =
     useGetLinearIssueByNumber(enabledProjectId, activeQuery, { enabled: open })
 

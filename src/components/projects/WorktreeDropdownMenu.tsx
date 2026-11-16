@@ -154,7 +154,8 @@ export function WorktreeDropdownMenu({
   ])
   const isGitHubAuthenticated = authData?.authenticated ?? false
   const { data: gitProviderInfo } = useProjectGitProvider(
-    isServer ? null : projectPath
+    isServer ? null : projectPath,
+    { projectId }
   )
   const gitProvider = gitProviderInfo?.provider ?? 'github'
   const isGitlab = gitProvider === 'gitlab'
@@ -176,18 +177,28 @@ export function WorktreeDropdownMenu({
     staleTime: BADGE_STALE_TIME,
     ownerId: projectId,
   })
-  const { data: alerts } = useDependabotAlerts(projectPath, 'open', {
+  const { data: alerts } = useDependabotAlerts(projectPath, projectId, 'open', {
     enabled: !isServer && isGitHubAuthenticated && !isGitlab,
     staleTime: BADGE_STALE_TIME,
   })
-  const { data: advisories } = useRepositoryAdvisories(projectPath, undefined, {
-    enabled: !isServer && isGitHubAuthenticated && !isGitlab,
-    staleTime: BADGE_STALE_TIME,
-  })
-  const { data: workflowRuns } = useWorkflowRuns(projectPath, undefined, {
-    enabled: !isServer && isGitHubAuthenticated && !isGitlab,
-    staleTime: BADGE_STALE_TIME,
-  })
+  const { data: advisories } = useRepositoryAdvisories(
+    projectPath,
+    projectId,
+    undefined,
+    {
+      enabled: !isServer && isGitHubAuthenticated && !isGitlab,
+      staleTime: BADGE_STALE_TIME,
+    }
+  )
+  const { data: workflowRuns } = useWorkflowRuns(
+    projectPath,
+    projectId,
+    undefined,
+    {
+      enabled: !isServer && isGitHubAuthenticated && !isGitlab,
+      staleTime: BADGE_STALE_TIME,
+    }
+  )
   const seenFailedWorkflowRunIds = useUIStore(
     state => state.seenFailedWorkflowRunIds
   )
@@ -254,8 +265,10 @@ export function WorktreeDropdownMenu({
   }, [projectId])
 
   const handleOpenWorkflowRuns = useCallback(() => {
-    useUIStore.getState().setWorkflowRunsModalOpen(true, projectPath)
-  }, [projectPath])
+    useUIStore
+      .getState()
+      .setWorkflowRunsModalOpen(true, { projectId, projectPath })
+  }, [projectId, projectPath])
 
   return (
     <>

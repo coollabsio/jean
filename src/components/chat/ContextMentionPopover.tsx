@@ -847,6 +847,7 @@ export function ContextMentionPopover({
             if (!isOpen) setPreviewTarget(null)
           }}
           projectPath={projectPath}
+          projectId={projectId}
           type={previewTarget.type}
           number={previewTarget.number}
           ghsaId={previewTarget.ghsaId}

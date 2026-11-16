@@ -358,6 +358,7 @@ export function useNewWorktreeHandlers(
           }
         >('get_github_issue', {
           projectPath,
+          projectId: selectedProjectId,
           issueNumber: issue.number,
           ...githubRepoArgs(issue.repo),
         })
@@ -441,6 +442,7 @@ export function useNewWorktreeHandlers(
           }
         >('get_github_issue', {
           projectPath,
+          projectId: selectedProjectId,
           issueNumber: issue.number,
           ...githubRepoArgs(issue.repo),
         })
@@ -528,6 +530,7 @@ export function useNewWorktreeHandlers(
           }
         >('get_github_issue', {
           projectPath,
+          projectId: selectedProjectId,
           issueNumber: issue.number,
           ...githubRepoArgs(issue.repo),
         })
@@ -592,7 +595,11 @@ export function useNewWorktreeHandlers(
 
       setIsBulkInvestigating(true)
       await runBulkInvestigation(prs, 'PR', 'PRs', async pr => {
-        const prContext = await fetchPullRequestContext(projectPath, pr)
+        const prContext = await fetchPullRequestContext(
+          projectPath,
+          selectedProjectId,
+          pr
+        )
 
         useUIStore.getState().incrementPendingBackgroundCreations()
         const worktree = await createWorktree.mutateAsync({
@@ -638,6 +645,7 @@ export function useNewWorktreeHandlers(
             'get_dependabot_alert',
             {
               projectPath,
+              projectId: selectedProjectId,
               alertNumber: item.alert.number,
             }
           )
@@ -669,6 +677,7 @@ export function useNewWorktreeHandlers(
           'get_repository_advisory',
           {
             projectPath,
+            projectId: selectedProjectId,
             ghsaId: item.advisory.ghsaId,
           }
         )
@@ -791,7 +800,11 @@ export function useNewWorktreeHandlers(
       setCreatingFromRepo(pr.repo ?? null)
 
       try {
-        const prContext = await fetchPullRequestContext(projectPath, pr)
+        const prContext = await fetchPullRequestContext(
+          projectPath,
+          selectedProjectId,
+          pr
+        )
 
         if (background)
           useUIStore.getState().incrementPendingBackgroundCreations()
@@ -841,7 +854,11 @@ export function useNewWorktreeHandlers(
       setCreatingFromRepo(pr.repo ?? null)
 
       try {
-        const prContext = await fetchPullRequestContext(projectPath, pr)
+        const prContext = await fetchPullRequestContext(
+          projectPath,
+          selectedProjectId,
+          pr
+        )
 
         if (background)
           useUIStore.getState().incrementPendingBackgroundCreations()
@@ -901,6 +918,7 @@ export function useNewWorktreeHandlers(
           'get_dependabot_alert',
           {
             projectPath,
+            projectId: selectedProjectId,
             alertNumber: alert.number,
           }
         )
@@ -968,6 +986,7 @@ export function useNewWorktreeHandlers(
           'get_dependabot_alert',
           {
             projectPath,
+            projectId: selectedProjectId,
             alertNumber: alert.number,
           }
         )
@@ -1039,6 +1058,7 @@ export function useNewWorktreeHandlers(
           'get_repository_advisory',
           {
             projectPath,
+            projectId: selectedProjectId,
             ghsaId: advisory.ghsaId,
           }
         )
@@ -1108,6 +1128,7 @@ export function useNewWorktreeHandlers(
           'get_repository_advisory',
           {
             projectPath,
+            projectId: selectedProjectId,
             ghsaId: advisory.ghsaId,
           }
         )
@@ -1345,7 +1366,11 @@ export function useNewWorktreeHandlers(
 
       setCreatingFromNumber(discussion.number)
       try {
-        const detail = await getGitHubDiscussion(projectPath, discussion.number)
+        const detail = await getGitHubDiscussion(
+          projectPath,
+          selectedProjectId,
+          discussion.number
+        )
         if (background)
           useUIStore.getState().incrementPendingBackgroundCreations()
         await createWorktree.mutateAsync({

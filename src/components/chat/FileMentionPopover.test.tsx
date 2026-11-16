@@ -122,6 +122,7 @@ describe('FileMentionPopover linked project scopes', () => {
     render(
       <FileMentionPopover
         worktreePath="/tmp/current-worktree"
+        worktreeId="wt-current"
         currentProjectId="current"
         open
         onOpenChange={vi.fn()}
@@ -176,6 +177,7 @@ describe('FileMentionPopover linked project scopes', () => {
     render(
       <FileMentionPopover
         worktreePath="/tmp/current-worktree"
+        worktreeId="wt-current"
         currentProjectId="current"
         open
         onOpenChange={vi.fn()}
@@ -216,6 +218,7 @@ describe('FileMentionPopover linked project scopes', () => {
     render(
       <FileMentionPopover
         worktreePath="/tmp/current-worktree"
+        worktreeId="wt-current"
         currentProjectId="current"
         open
         onOpenChange={vi.fn()}
@@ -245,6 +248,7 @@ describe('FileMentionPopover linked project scopes', () => {
     render(
       <FileMentionPopover
         worktreePath="/tmp/current-worktree"
+        worktreeId="wt-current"
         currentProjectId="current"
         open
         onOpenChange={vi.fn()}

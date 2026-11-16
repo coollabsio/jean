@@ -323,7 +323,7 @@ export const BrowserToolbar = memo(function BrowserToolbar({
   const worktreePath = useChatStore(
     state => state.worktreePaths[worktreeId] ?? null
   )
-  const { data: configuredPorts } = usePorts(worktreePath)
+  const { data: configuredPorts } = usePorts(worktreePath, { worktreeId })
   const terminals = useTerminalStore(state => state.terminals[worktreeId])
   const { data: listeningPorts = EMPTY_LISTENING } = useTerminalListeningPorts(
     (terminals?.length ?? 0) > 0

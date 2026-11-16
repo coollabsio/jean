@@ -20,6 +20,11 @@ import {
   subscribeRemoteConnections,
   updateRemoteConnection,
 } from './remote-connections'
+import {
+  clearServerResourcePaths,
+  registerServerResourcePath,
+  resolveServerCommand,
+} from './server-command-routing'
 
 describe('remote connections', () => {
   beforeEach(() => {
@@ -89,6 +94,34 @@ describe('remote connections', () => {
 
     expect(getEnabledServerConnections()).toEqual([])
     expect(getActiveConnectionId()).toBe('local')
+  })
+
+  it('stops a disabled or removed server from sharing repository paths', () => {
+    clearServerResourcePaths()
+    const remote = addRemoteConnection({
+      name: 'Build server',
+      url: 'https://jean.example.com',
+      token: 'token',
+    })
+    registerServerResourcePath('local', '/srv/project')
+    registerServerResourcePath(remote.id, '/srv/project')
+    registerServerResourcePath(remote.id, '/srv/remote-only')
+    expect(() => resolveServerCommand({ repoPath: '/srv/project' })).toThrow(
+      'ambiguous'
+    )
+
+    setRemoteConnectionEnabled(remote.id, false)
+    expect(resolveServerCommand({ repoPath: '/srv/project' })?.serverId).toBe(
+      'local'
+    )
+    expect(resolveServerCommand({ repoPath: '/srv/remote-only' })).toBeNull()
+
+    setRemoteConnectionEnabled(remote.id, true)
+    registerServerResourcePath(remote.id, '/srv/project')
+    removeRemoteConnection(remote.id)
+    expect(resolveServerCommand({ repoPath: '/srv/project' })?.serverId).toBe(
+      'local'
+    )
   })
 
   it('can exclude local from the dashboard without changing selection', () => {

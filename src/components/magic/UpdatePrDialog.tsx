@@ -78,6 +78,7 @@ export function UpdatePrDialog() {
     setIsDetectingBranchPr(true)
 
     invoke<DetectPrResponse | null>('detect_open_pr_for_branch', {
+      worktreeId: worktree?.id,
       worktreePath,
     })
       .then(result => {
@@ -96,7 +97,7 @@ export function UpdatePrDialog() {
     return () => {
       cancelled = true
     }
-  }, [updatePrModalOpen, worktreePath])
+  }, [updatePrModalOpen, worktree?.id, worktreePath])
 
   const handleOpenChange = useCallback(
     (open: boolean) => {
@@ -165,6 +166,7 @@ export function UpdatePrDialog() {
 
         const resolvedBackend = (backend ?? 'claude') as CliBackend
         const { mcpConfig, enabledServers } = await resolveMcpConfigForSend({
+          worktreeId,
           worktreePath,
           backend: resolvedBackend,
           projectEnabled: project?.enabled_mcp_servers,

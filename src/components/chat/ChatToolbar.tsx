@@ -167,7 +167,10 @@ export const ChatToolbar = memo(function ChatToolbar({
   const zenMode = useUIStore(state => state.zenMode)
   const [revertConfirmOpen, setRevertConfirmOpen] = useState(false)
 
-  const pickRemoteOrRun = useRemotePicker(activeWorktreePath)
+  const pickRemoteOrRun = useRemotePicker(
+    activeWorktreePath,
+    worktreeId ? { worktreeId } : null
+  )
 
   const handleMcpDropdownOpenChange = useCallback(
     (open: boolean) => {
@@ -426,7 +429,7 @@ export const ChatToolbar = memo(function ChatToolbar({
     try {
       const result = await invoke<RevertCommitResponse>(
         'revert_last_local_commit',
-        { worktreePath: activeWorktreePath }
+        { worktreeId, worktreePath: activeWorktreePath }
       )
       triggerImmediateGitPoll()
       if (projectId) fetchWorktreesStatus(projectId)
@@ -434,7 +437,7 @@ export const ChatToolbar = memo(function ChatToolbar({
     } catch (error) {
       revertToast.error(`Failed to revert: ${error}`)
     }
-  }, [activeWorktreePath, projectId])
+  }, [activeWorktreePath, worktreeId, projectId])
 
   const handleRevertLastCommit = useCallback(() => {
     if (!activeWorktreePath) return
@@ -597,6 +600,7 @@ export const ChatToolbar = memo(function ChatToolbar({
               prNumber={prNumber}
               displayStatus={displayStatus}
               activeWorktreePath={activeWorktreePath}
+              worktreeId={worktreeId}
               availableMcpServers={availableMcpServers}
               enabledMcpServers={enabledMcpServers}
               activeMcpCount={activeMcpCount}

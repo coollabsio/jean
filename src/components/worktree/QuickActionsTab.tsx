@@ -151,6 +151,7 @@ export function QuickActionsTab({
   // pass default-branch remotes as a fallback while this query loads.
   const { data: remotesForSelectedBase } = useProjectRemotes(
     projectPath,
+    projectId,
     effectiveBaseBranch
   )
   const activeRemotes =

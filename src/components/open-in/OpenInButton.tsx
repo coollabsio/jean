@@ -44,6 +44,7 @@ import {
 } from '@/components/projects/servers/server-open'
 
 interface OpenInButtonProps {
+  worktreeId: string
   worktreePath: string
   serverId?: string
   branch?: string | null
@@ -53,6 +54,7 @@ interface OpenInButtonProps {
 }
 
 export function OpenInButton({
+  worktreeId,
   worktreePath,
   serverId,
   branch: worktreeBranch,
@@ -67,7 +69,8 @@ export function OpenInButton({
   const openInFinder = useOpenWorktreeInFinder()
   const openOnGitHub = useOpenBranchOnGitHub()
   const { data: gitProviderInfo } = useProjectGitProvider(
-    server ? null : worktreePath
+    server ? null : worktreePath,
+    { worktreeId }
   )
   const gitProvider = gitProviderInfo?.provider ?? 'github'
   const forgeName = providerLabels(gitProvider).name
@@ -93,19 +96,29 @@ export function OpenInButton({
         case 'terminal':
           openInTerminal.mutate({
             worktreePath,
+            worktreeId,
             terminal: preferences?.terminal,
           })
           break
         case 'finder':
-          openInFinder.mutate(worktreePath)
+          openInFinder.mutate({ worktreePath, worktreeId })
           break
         case 'github':
-          if (branch) openOnGitHub.mutate({ repoPath: worktreePath, branch })
+          if (branch)
+            openOnGitHub.mutate({ repoPath: worktreePath, worktreeId, branch })
           else
-            openInEditor.mutate({ worktreePath, editor: preferences?.editor })
+            openInEditor.mutate({
+              worktreePath,
+              worktreeId,
+              editor: preferences?.editor,
+            })
           break
         default:
-          openInEditor.mutate({ worktreePath, editor: preferences?.editor })
+          openInEditor.mutate({
+            worktreePath,
+            worktreeId,
+            editor: preferences?.editor,
+          })
       }
     },
     [
@@ -113,6 +126,7 @@ export function OpenInButton({
       openInTerminal,
       openInFinder,
       openOnGitHub,
+      worktreeId,
       worktreePath,
       branch,
       server,

@@ -40,6 +40,8 @@ interface SlashPopoverProps {
   containerRef?: React.RefObject<HTMLElement | null>
   isAtPromptStart: boolean
   worktreePath?: string | null
+  /** Id of the worktree that owns `worktreePath` */
+  worktreeId?: string | null
   handleRef?: React.RefObject<SlashPopoverHandle | null>
   installedBackends?: CliBackend[]
   /** Active session backend — gates backend-native built-ins (/goal). */
@@ -97,12 +99,17 @@ export function SlashPopover({
   containerRef,
   isAtPromptStart,
   worktreePath,
+  worktreeId,
   handleRef,
   installedBackends,
   sessionBackend,
   triggerKind = 'mixed',
 }: SlashPopoverProps) {
-  const backendGroups = useAllBackendSkills(worktreePath, installedBackends)
+  const backendGroups = useAllBackendSkills(
+    worktreeId,
+    worktreePath,
+    installedBackends
+  )
   const listRef = useRef<HTMLDivElement>(null)
   const [selectedIndex, setSelectedIndex] = useState(0)
 

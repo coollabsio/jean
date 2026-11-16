@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { usePackageScripts, type PackageScript } from '@/services/projects'
+import type { GitRepoOwner } from '@/services/git-status'
 import { usePatchPreferences, usePreferences } from '@/services/preferences'
 import {
   Tooltip,
@@ -20,16 +21,19 @@ import { cn } from '@/lib/utils'
 
 interface ScriptsButtonProps {
   projectId?: string
+  /** Worktree or project that owns `worktreePath` */
+  owner: GitRepoOwner
   worktreePath: string
   onRun: (script: PackageScript) => void
 }
 
 function ScriptMenuItems({
   projectId,
+  owner,
   worktreePath,
   onRun,
 }: ScriptsButtonProps) {
-  const { data: scripts = [] } = usePackageScripts(worktreePath)
+  const { data: scripts = [] } = usePackageScripts(worktreePath, owner)
   const { data: preferences } = usePreferences()
   const patchPreferences = usePatchPreferences()
   const favoriteKeys = preferences?.favorite_package_scripts ?? []
@@ -95,7 +99,10 @@ function ScriptMenuItems({
 }
 
 export function ScriptsButton(props: ScriptsButtonProps) {
-  const { data: scripts = [] } = usePackageScripts(props.worktreePath)
+  const { data: scripts = [] } = usePackageScripts(
+    props.worktreePath,
+    props.owner
+  )
   if (scripts.length === 0) return null
 
   return (
@@ -124,7 +131,10 @@ export function ScriptsButton(props: ScriptsButtonProps) {
 
 /** The same script list as a submenu, for hosting inside another menu. */
 export function ScriptsSubmenu(props: ScriptsButtonProps) {
-  const { data: scripts = [] } = usePackageScripts(props.worktreePath)
+  const { data: scripts = [] } = usePackageScripts(
+    props.worktreePath,
+    props.owner
+  )
   if (scripts.length === 0) return null
 
   return (

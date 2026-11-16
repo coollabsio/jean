@@ -477,6 +477,7 @@ export function useMessageHandlers({
 
         // Reply via OpenCode Question API to unblock the in-flight HTTP POST
         invoke('answer_opencode_question', {
+          worktreeId,
           worktreePath,
           toolCallId: toolCallId,
           answers: openCodeAnswers,
@@ -2832,6 +2833,7 @@ export function useMessageHandlers({
       const replyDir = request.working_dir?.trim() || worktreePath
 
       invoke('respond_opencode_permission', {
+        worktreeId,
         worktreePath: replyDir,
         requestId: request.request_id,
         reply,

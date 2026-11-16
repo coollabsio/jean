@@ -673,7 +673,7 @@ export function useGitOperations({
     try {
       const result = await invoke<RevertCommitResponse>(
         'revert_last_local_commit',
-        { worktreePath: activeWorktreePath }
+        { worktreeId: activeWorktreeId, worktreePath: activeWorktreePath }
       )
       triggerImmediateGitPoll()
       if (worktree?.project_id) fetchWorktreesStatus(worktree.project_id)
@@ -727,6 +727,7 @@ export function useGitOperations({
           cancellationRequested = true
           toast.info('Cancelling PR creation...', { id: toastId })
           await invoke<boolean>('cancel_create_pr_with_ai_content', {
+            worktreeId: activeWorktreeId,
             worktreePath: activeWorktreePath,
           })
         },
@@ -1114,6 +1115,7 @@ export function useGitOperations({
     const mergePrToastId = toast.loading('Merging PR...')
     try {
       const result = await invoke<MergePrResponse>('merge_github_pr', {
+        worktreeId: worktree.id,
         worktreePath: worktree.path,
       })
       toast.success(result.message, { id: mergePrToastId })

@@ -19,25 +19,42 @@ export interface GitProviderInfo {
   host: string
 }
 
+/** Worktree or project that owns the path; routes to its Jean server. */
+export interface GitProviderOwner {
+  worktreeId?: string | null
+  projectId?: string | null
+}
+
 export const gitProviderQueryKeys = {
   all: ['git-provider'] as const,
-  forPath: (projectPath: string | null | undefined) =>
-    [...gitProviderQueryKeys.all, projectPath] as const,
+  forPath: (projectPath: string | null | undefined, owner: GitProviderOwner) =>
+    [
+      ...gitProviderQueryKeys.all,
+      projectPath,
+      owner.worktreeId ?? owner.projectId ?? '',
+    ] as const,
 }
 
 /**
  * Resolve a project's git host provider. Defaults to GitHub when unknown or
  * outside a Tauri context, matching the backend's fallback.
  */
-export function useProjectGitProvider(projectPath: string | null | undefined) {
+export function useProjectGitProvider(
+  projectPath: string | null | undefined,
+  owner: GitProviderOwner
+) {
   return useQuery<GitProviderInfo>({
-    queryKey: gitProviderQueryKeys.forPath(projectPath),
+    queryKey: gitProviderQueryKeys.forPath(projectPath, owner),
     queryFn: async () => {
       if (!isTauri() || !projectPath) {
         return { provider: 'github', host: 'github.com' }
       }
       try {
-        return await invoke<GitProviderInfo>('get_git_provider', { projectPath })
+        return await invoke<GitProviderInfo>('get_git_provider', {
+          worktreeId: owner.worktreeId ?? undefined,
+          projectId: owner.projectId ?? undefined,
+          projectPath,
+        })
       } catch {
         return { provider: 'github', host: 'github.com' }
       }

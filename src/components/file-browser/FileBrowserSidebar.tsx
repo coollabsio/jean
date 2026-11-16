@@ -32,7 +32,11 @@ import { useChatStore } from '@/store/chat-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
 import { useWorktree, useProjects } from '@/services/projects'
-import { fileQueryKeys, useWorktreeFiles } from '@/services/files'
+import {
+  fileQueryKeys,
+  useWorktreeFiles,
+  type FileListOwner,
+} from '@/services/files'
 import { Empty, EmptyDescription, EmptyHeader } from '@/components/ui/empty'
 import { getFilename, joinPaths } from '@/lib/path-utils'
 import type { WorktreeFile } from '@/types/chat'
@@ -69,8 +73,10 @@ interface FileBrowserSidebarProps {
 
 function useFileBrowserRootPath(): {
   rootPath: string | null
+  owner: FileListOwner
   label: string | null
 } {
+  const activeWorktreeId = useChatStore(state => state.activeWorktreeId)
   const activeWorktreePath = useChatStore(state => state.activeWorktreePath)
   const selectedWorktreeId = useProjectsStore(state => state.selectedWorktreeId)
   const selectedProjectId = useProjectsStore(state => state.selectedProjectId)
@@ -81,12 +87,14 @@ function useFileBrowserRootPath(): {
     if (activeWorktreePath) {
       return {
         rootPath: activeWorktreePath,
+        owner: { worktreeId: activeWorktreeId ?? undefined },
         label: getFilename(activeWorktreePath),
       }
     }
     if (selectedWorktree?.path) {
       return {
         rootPath: selectedWorktree.path,
+        owner: { worktreeId: selectedWorktree.id },
         label: selectedWorktree.name || getFilename(selectedWorktree.path),
       }
     }
@@ -96,11 +104,18 @@ function useFileBrowserRootPath(): {
     if (project?.path) {
       return {
         rootPath: project.path,
+        owner: { projectId: project.id },
         label: project.name || getFilename(project.path),
       }
     }
-    return { rootPath: null, label: null }
-  }, [activeWorktreePath, selectedWorktree, projects, selectedProjectId])
+    return { rootPath: null, owner: {}, label: null }
+  }, [
+    activeWorktreeId,
+    activeWorktreePath,
+    selectedWorktree,
+    projects,
+    selectedProjectId,
+  ])
 }
 
 export function FileBrowserSidebar({ className }: FileBrowserSidebarProps) {
@@ -110,14 +125,14 @@ export function FileBrowserSidebar({ className }: FileBrowserSidebarProps) {
   const setViewingFilePath = useUIStore(state => state.setViewingFilePath)
   const viewingFilePath = useUIStore(state => state.viewingFilePath)
 
-  const { rootPath } = useFileBrowserRootPath()
+  const { rootPath, owner } = useFileBrowserRootPath()
   const {
     data: files = EMPTY_WORKTREE_FILES,
     isLoading,
     isFetching,
     isError,
     error,
-  } = useWorktreeFiles(rootPath)
+  } = useWorktreeFiles(rootPath, owner)
 
   const [search, setSearch] = useState('')
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
@@ -205,9 +220,9 @@ export function FileBrowserSidebar({ className }: FileBrowserSidebarProps) {
   const handleRefresh = useCallback(() => {
     if (!rootPath) return
     void queryClient.invalidateQueries({
-      queryKey: fileQueryKeys.worktreeFiles(rootPath),
+      queryKey: fileQueryKeys.worktreeFiles(rootPath, owner),
     })
-  }, [queryClient, rootPath])
+  }, [queryClient, rootPath, owner])
 
   const toggleDir = useCallback(
     (relativePath: string) => {

@@ -175,7 +175,9 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
     [project.id, toggleProjectExpanded]
   )
 
-  const pickRemoteOrRun = useRemotePicker(project.path)
+  const pickRemoteOrRun = useRemotePicker(project.path, {
+    projectId: project.id,
+  })
 
   const handleBaseSync = useCallback(
     (e: React.MouseEvent) => {
@@ -272,6 +274,12 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
                   <DisclosureChevron open={isExpanded} className="size-3" />
                 </button>
               )}
+              {/* Left of the sync badge so it does not move it on hover (#912) */}
+              <CollapsedCountBadge
+                count={worktreeCount}
+                label="workspaces"
+                isExpanded={isExpanded}
+              />
             </span>
           )}
 
@@ -313,12 +321,6 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
                 </TooltipContent>
               </Tooltip>
             )}
-
-          <CollapsedCountBadge
-            count={worktreeCount}
-            label="workspaces"
-            isExpanded={isExpanded}
-          />
         </div>
       </ProjectContextMenu>
 

@@ -376,7 +376,9 @@ export const SessionChatModal = memo(function SessionChatModal({
     [activeSessionGone, missingActiveSession, sessions]
   )
   const showSessionTabs = tabSessions.length > 0 || !!currentSessionId
-  const { data: packageScripts = [] } = usePackageScripts(worktreePath)
+  const { data: packageScripts = [] } = usePackageScripts(worktreePath, {
+    worktreeId,
+  })
   const modalTerminalDockMode = useTerminalStore(
     state => state.modalTerminalDockMode
   )
@@ -1001,7 +1003,7 @@ export const SessionChatModal = memo(function SessionChatModal({
       window.removeEventListener('switch-session', handleSwitchSession)
   }, [isOpen, sortedSessions, currentSessionId, worktreeId])
 
-  const pickRemoteOrRun = useRemotePicker(worktreePath)
+  const pickRemoteOrRun = useRemotePicker(worktreePath, { worktreeId })
 
   // Display preference of this client, not of the worktree's server
   const { data: localPreferences } = usePreferences(LOCAL_SERVER_ID)
@@ -1370,6 +1372,7 @@ export const SessionChatModal = memo(function SessionChatModal({
                       {/* Desktop: secondary tools that are not in the menu */}
                       <div className="hidden items-center gap-1 @3xl/header:flex">
                         <OpenInButton
+                          worktreeId={worktreeId}
                           worktreePath={worktreePath}
                           serverId={worktree?.serverId}
                           branch={worktree?.branch}
@@ -1377,6 +1380,7 @@ export const SessionChatModal = memo(function SessionChatModal({
                         />
                         <ScriptsButton
                           projectId={worktree?.project_id}
+                          owner={{ worktreeId }}
                           worktreePath={worktreePath}
                           onRun={handlePackageScript}
                         />

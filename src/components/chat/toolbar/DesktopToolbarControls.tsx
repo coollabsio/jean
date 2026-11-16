@@ -107,6 +107,8 @@ interface DesktopToolbarControlsProps {
   prNumber: number | undefined
   displayStatus: PrDisplayStatus | undefined
   activeWorktreePath: string | undefined
+  /** Id of the worktree that owns `activeWorktreePath` */
+  worktreeId: string | null
 
   availableMcpServers: McpServerInfo[]
   enabledMcpServers: string[]
@@ -176,6 +178,7 @@ export function DesktopToolbarControls({
   prNumber,
   displayStatus,
   activeWorktreePath,
+  worktreeId,
   availableMcpServers: _availableMcpServers,
   enabledMcpServers: _enabledMcpServers,
   activeMcpCount,
@@ -217,7 +220,9 @@ export function DesktopToolbarControls({
   handleViewSentry,
   handleViewSavedContext,
 }: DesktopToolbarControlsProps) {
-  const { data: gitProviderInfo } = useProjectGitProvider(activeWorktreePath)
+  const { data: gitProviderInfo } = useProjectGitProvider(activeWorktreePath, {
+    worktreeId,
+  })
   const gitProvider = gitProviderInfo?.provider ?? 'github'
   const forgeLabels = providerLabels(gitProvider)
   const forgeHost =

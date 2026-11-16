@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import { LOCAL_SERVER_ID } from '@/types/server-resource'
+import { forgetServerResourcePaths } from './server-command-routing'
 import { generateId } from './uuid'
 
 export const LOCAL_CONNECTION_ID = LOCAL_SERVER_ID
@@ -109,7 +110,8 @@ export function rememberSshToken(id: string, token: string): void {
   sshTokens.set(id, token)
   let changed = false
   const next = connectionsSnapshot.map(connection => {
-    if (connection.id !== id || connection.transport !== 'ssh') return connection
+    if (connection.id !== id || connection.transport !== 'ssh')
+      return connection
     if (connection.token === token) return connection
     changed = true
     return { ...connection, token }
@@ -156,9 +158,7 @@ function normalizeOptionalPort(value: unknown): number | undefined {
   return value
 }
 
-function normalizeSshTunnel(
-  value: unknown
-): SshTunnelSettings | undefined {
+function normalizeSshTunnel(value: unknown): SshTunnelSettings | undefined {
   if (!value || typeof value !== 'object') return undefined
   const record = value as Record<string, unknown>
   const user = normalizeOptionalString(record.user)
@@ -390,9 +390,7 @@ export function addSshRemoteConnection(
   const id = input.id?.trim() || generateId()
   const connection = connectionFromSshInput(id, input, true)
   writeConnections([...getRemoteConnections(), connection])
-  return (
-    getRemoteConnections().find(item => item.id === id) ?? connection
-  )
+  return getRemoteConnections().find(item => item.id === id) ?? connection
 }
 
 export function updateSshRemoteConnection(
@@ -405,11 +403,7 @@ export function updateSshRemoteConnection(
   if (!existing) {
     throw new Error('Remote connection not found.')
   }
-  const updated = connectionFromSshInput(
-    id,
-    input,
-    existing.enabled !== false
-  )
+  const updated = connectionFromSshInput(id, input, existing.enabled !== false)
   writeConnections(
     getRemoteConnections().map(connection =>
       connection.id === id ? updated : connection
@@ -479,9 +473,9 @@ export function setRemoteConnectionEnabled(id: string, enabled: boolean): void {
       connection.id === id ? { ...connection, enabled } : connection
     )
   )
-  if (!enabled && getActiveConnectionId() === id) {
-    selectConnection(LOCAL_CONNECTION_ID)
-  }
+  if (enabled) return
+  forgetServerResourcePaths(id)
+  if (getActiveConnectionId() === id) selectConnection(LOCAL_CONNECTION_ID)
 }
 
 export function getLocalDashboardEnabled(): boolean {
@@ -503,6 +497,7 @@ export function removeRemoteConnection(id: string): void {
     getRemoteConnections().filter(connection => connection.id !== id)
   )
   sshTokens.delete(id)
+  forgetServerResourcePaths(id)
   if (existing?.transport === 'ssh') sshProfileLifecycle.onRemoved?.(id)
   if (getActiveConnectionId() === id) selectConnection(LOCAL_CONNECTION_ID)
 }

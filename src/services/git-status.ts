@@ -225,6 +225,7 @@ export async function triggerImmediateGitPoll(): Promise<void> {
  * @returns Output from git pull command
  */
 export async function gitPull(
+  worktreeId: string,
   worktreePath: string,
   baseBranch: string,
   remote?: string
@@ -233,6 +234,7 @@ export async function gitPull(
     throw new Error('Git pull only available in Tauri')
   }
   return invoke<string>('git_pull', {
+    worktreeId,
     worktreePath,
     baseBranch,
     remote: remote ?? null,
@@ -242,21 +244,27 @@ export async function gitPull(
 /**
  * Stash all local changes including untracked files.
  */
-export async function gitStash(worktreePath: string): Promise<string> {
+export async function gitStash(
+  worktreeId: string,
+  worktreePath: string
+): Promise<string> {
   if (!isTauri()) {
     throw new Error('Git stash only available in Tauri')
   }
-  return invoke<string>('git_stash', { worktreePath })
+  return invoke<string>('git_stash', { worktreeId, worktreePath })
 }
 
 /**
  * Pop the most recent stash.
  */
-export async function gitStashPop(worktreePath: string): Promise<string> {
+export async function gitStashPop(
+  worktreeId: string,
+  worktreePath: string
+): Promise<string> {
   if (!isTauri()) {
     throw new Error('Git stash pop only available in Tauri')
   }
-  return invoke<string>('git_stash_pop', { worktreePath })
+  return invoke<string>('git_stash_pop', { worktreeId, worktreePath })
 }
 
 // ============================================================================
@@ -329,7 +337,7 @@ export async function performGitPull(opts: GitPullOptions): Promise<boolean> {
   }
 
   try {
-    await gitPull(worktreePath, baseBranch, remote)
+    await gitPull(worktreeId, worktreePath, baseBranch, remote)
     await triggerImmediateGitPoll()
     invalidateJeanConfigQueries()
     if (projectId) fetchWorktreesStatus(projectId)
@@ -362,10 +370,10 @@ export async function performGitPull(opts: GitPullOptions): Promise<boolean> {
 
       toast.loading('Auto-stashing local changes...', { id: toastId })
       try {
-        await gitStash(worktreePath)
-        await gitPull(worktreePath, baseBranch, remote)
+        await gitStash(worktreeId, worktreePath)
+        await gitPull(worktreeId, worktreePath, baseBranch, remote)
         toast.loading('Restoring stashed changes...', { id: toastId })
-        await gitStashPop(worktreePath)
+        await gitStashPop(worktreeId, worktreePath)
         await triggerImmediateGitPoll()
         invalidateJeanConfigQueries()
         if (projectId) fetchWorktreesStatus(projectId)
@@ -571,6 +579,11 @@ export interface GitRemote {
   name: string
 }
 
+/** The worktree or project whose path a repository command receives. */
+export type GitRepoOwner =
+  | { worktreeId: string; projectId?: never }
+  | { projectId: string; worktreeId?: never }
+
 function sortRemotesOriginFirst(remotes: GitRemote[]): GitRemote[] {
   const origin = remotes.find(remote => remote.name === 'origin')
   if (!origin) return remotes
@@ -580,8 +593,15 @@ function sortRemotesOriginFirst(remotes: GitRemote[]): GitRemote[] {
 /**
  * Get all git remotes for a repository.
  */
-export async function getGitRemotes(repoPath: string): Promise<GitRemote[]> {
-  const remotes = await invoke<GitRemote[]>('get_git_remotes', { repoPath })
+export async function getGitRemotes(
+  owner: GitRepoOwner,
+  repoPath: string
+): Promise<GitRemote[]> {
+  const remotes = await invoke<GitRemote[]>('get_git_remotes', {
+    worktreeId: owner.worktreeId,
+    projectId: owner.projectId,
+    repoPath,
+  })
   return sortRemotesOriginFirst(remotes)
 }
 
@@ -589,10 +609,16 @@ export async function getGitRemotes(repoPath: string): Promise<GitRemote[]> {
  * Remove a git remote from a repository.
  */
 export async function removeGitRemote(
+  owner: GitRepoOwner,
   repoPath: string,
   remoteName: string
 ): Promise<void> {
-  await invoke('remove_git_remote', { repoPath, remoteName })
+  await invoke('remove_git_remote', {
+    worktreeId: owner.worktreeId,
+    projectId: owner.projectId,
+    repoPath,
+    remoteName,
+  })
 }
 
 /**
