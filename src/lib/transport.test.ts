@@ -425,6 +425,32 @@ describe('transport bootstrap', () => {
     })
   })
 
+  it.each([
+    ['open_file_in_default_app', { path: '/Users/jean/a.ts', editor: 'zed' }],
+    ['open_worktree_in_finder', { worktreePath: '/Users/jean/project' }],
+    [
+      'open_worktree_in_editor',
+      { worktreePath: '/Users/jean/project', editor: 'zed' },
+    ],
+    [
+      'open_worktree_in_terminal',
+      { worktreePath: '/Users/jean/project', terminal: 'ghostty' },
+    ],
+  ])(
+    'keeps explicitly local %s on its native Tauri handler',
+    async (command, args) => {
+      const tauriInvoke = vi.fn().mockResolvedValue(undefined)
+      const invokeOnServer = vi.fn()
+      vi.doMock('./server-connections', () => ({ invokeOnServer }))
+      const transport = await loadNativeTransportModule(tauriInvoke)
+
+      await transport.invokeForOptionalServer('local', command, args)
+
+      expect(tauriInvoke).toHaveBeenCalledWith(command, args)
+      expect(invokeOnServer).not.toHaveBeenCalled()
+    }
+  )
+
   it('keeps path-routed local Open In commands on native Tauri handlers', async () => {
     const tauriInvoke = vi.fn().mockResolvedValue(undefined)
     const transport = await loadNativeTransportModule(tauriInvoke)

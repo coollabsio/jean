@@ -619,6 +619,12 @@ export async function invokeForServer<T>(
     import('./server-command-routing'),
   ])
   const serverArgs = stripServerScope(serverId, args)
+  // The local core dispatcher rejects desktop-only commands. Explicitly local
+  // shell actions (editor, Finder, terminal opens) use their native handlers.
+  if (serverId === 'local' && DESKTOP_ONLY_COMMANDS.has(command)) {
+    const { invoke: tauriInvoke } = await import('@tauri-apps/api/core')
+    return tauriInvoke<T>(command, serverArgs)
+  }
   let value: T
   try {
     value = await invokeOnServer<T>(serverId, command, serverArgs)
