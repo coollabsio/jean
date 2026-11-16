@@ -220,7 +220,7 @@ pub struct AppPreferences {
     #[serde(default = "default_font_weight")]
     pub font_weight: String, // Overall font weight: light, normal, medium
     #[serde(default = "default_keybindings")]
-    pub keybindings: std::collections::HashMap<String, String>, // User-configurable keyboard shortcuts
+    pub keybindings: std::collections::BTreeMap<String, String>, // User-configurable keyboard shortcuts (sorted for stable saves)
     /// One-shot keybinding migrations already applied. Client-local; kept here
     /// so a preferences round-trip does not drop the marker.
     #[serde(default)]
@@ -666,8 +666,8 @@ fn default_open_in() -> String {
     "editor".to_string()
 }
 
-fn default_keybindings() -> std::collections::HashMap<String, String> {
-    let mut map = std::collections::HashMap::new();
+fn default_keybindings() -> std::collections::BTreeMap<String, String> {
+    let mut map = std::collections::BTreeMap::new();
     map.insert("focus_chat_input".to_string(), "mod+l".to_string());
     map.insert("toggle_left_sidebar".to_string(), "mod+1".to_string());
     map.insert("open_preferences".to_string(), "mod+comma".to_string());
@@ -1000,11 +1000,11 @@ mod tests {
         default_parallel_execution_prompt, effective_global_system_prompt,
         is_legacy_default_global_system_prompt,
         legacy_parallel_execution_prompt_before_subagent_strategy, normalize_browser_default_host,
-        parse_cli_args_from, resolve_headless_bind_host, resolve_headless_token_required,
-        resolve_http_server_bind_host, resolve_stored_parallel_execution_prompt,
-        server_preferences_value, should_auto_select_cli_source,
-        upgrade_legacy_parallel_execution_prompt, validate_headless_security, AppPreferences,
-        MagicPrompts,
+        parse_cli_args_from, preferences_file_contents, resolve_headless_bind_host,
+        resolve_headless_token_required, resolve_http_server_bind_host,
+        resolve_stored_parallel_execution_prompt, server_preferences_value,
+        should_auto_select_cli_source, upgrade_legacy_parallel_execution_prompt,
+        validate_headless_security, AppPreferences, MagicPrompts,
     };
     use serde_json::json;
 
@@ -1635,6 +1635,38 @@ mod tests {
 
     #[test]
     fn app_preferences_default_font_weight_for_new_and_missing_prefs() {
+    #[test]
+    fn preferences_file_contents_are_stable_across_insertion_order_and_reloads() {
+        let bindings = [
+            ("open_git_diff", "mod+g"),
+            ("focus_chat_input", "mod+k"),
+            ("toggle_left_sidebar", "mod+b"),
+            ("execute_run", "mod+shift+r"),
+        ];
+        let mut forward = AppPreferences::default();
+        let mut reverse = AppPreferences::default();
+        for (action, key) in bindings {
+            forward
+                .keybindings
+                .insert(action.to_string(), key.to_string());
+        }
+        for (action, key) in bindings.iter().rev() {
+            reverse
+                .keybindings
+                .insert(action.to_string(), key.to_string());
+        }
+
+        let saved = preferences_file_contents(&forward).unwrap();
+        assert_eq!(saved, preferences_file_contents(&reverse).unwrap());
+        assert!(saved.ends_with("}\n"));
+
+        // Load + save of an unchanged file must give identical bytes.
+        let reloaded: AppPreferences = serde_json::from_str(&saved).unwrap();
+        assert_eq!(reloaded.keybindings, forward.keybindings);
+        assert_eq!(reloaded.keybindings["focus_chat_input"], "mod+k");
+        assert_eq!(preferences_file_contents(&reloaded).unwrap(), saved);
+    }
+
         assert_eq!(AppPreferences::default().font_weight, "normal");
 
         let mut prefs_json = serde_json::to_value(AppPreferences::default()).unwrap();
@@ -4093,11 +4125,10 @@ async fn load_preferences(app: AppHandle) -> Result<AppPreferences, String> {
     if !prefs_path.exists() {
         log::trace!("Preferences file not found, using defaults");
         let mut preferences = AppPreferences::default();
-        if maybe_auto_select_system_cli_preferences(&app, &mut preferences, None) {
-            if let Ok(json) = serde_json::to_string_pretty(&preferences) {
-                let _ = std::fs::write(&prefs_path, json);
-                log::trace!("Saved preferences after CLI PATH auto-detection");
-            }
+        if maybe_auto_select_system_cli_preferences(&app, &mut preferences, None)
+            && write_preferences_file(&prefs_path, &preferences).is_ok()
+        {
+            log::trace!("Saved preferences after CLI PATH auto-detection");
         }
         return Ok(preferences);
     }
@@ -4197,15 +4228,8 @@ async fn load_preferences(app: AppHandle) -> Result<AppPreferences, String> {
     }
 
     // Re-save preferences with settings_json cleared (file is now source of truth)
-    if needs_resave {
-        let mut prefs_for_disk = preferences.clone();
-        for profile in &mut prefs_for_disk.custom_cli_profiles {
-            profile.settings_json = String::new();
-        }
-        if let Ok(json) = serde_json::to_string_pretty(&prefs_for_disk) {
-            let _ = std::fs::write(&prefs_path, json);
-            log::trace!("Re-saved preferences after CLI profile migration");
-        }
+    if needs_resave && write_preferences_file(&prefs_path, &preferences).is_ok() {
+        log::trace!("Re-saved preferences after migration");
     }
 
     log::trace!("Successfully loaded preferences");
@@ -4215,6 +4239,28 @@ async fn load_preferences(app: AppHandle) -> Result<AppPreferences, String> {
 async fn save_preferences(app: AppHandle, mut preferences: AppPreferences) -> Result<(), String> {
     // Validate before this command changes any related persisted state.
     validate_theme(&preferences.theme)?;
+/// Serialize preferences exactly as stored in preferences.json. All writers use
+/// this so unchanged settings always produce identical bytes (issue #917).
+/// CLI profile settings live in standalone files, so their contents and paths
+/// are not stored here.
+fn preferences_file_contents(preferences: &AppPreferences) -> Result<String, String> {
+    let mut prefs_for_disk = preferences.clone();
+    for profile in &mut prefs_for_disk.custom_cli_profiles {
+        profile.settings_json = String::new();
+        profile.file_path = String::new();
+    }
+    let mut json = serde_json::to_string_pretty(&prefs_for_disk)
+        .map_err(|e| format!("Failed to serialize preferences: {e}"))?;
+    json.push('\n');
+    Ok(json)
+}
+
+fn write_preferences_file(path: &Path, preferences: &AppPreferences) -> Result<(), String> {
+    preferences_file_contents(preferences)
+        .and_then(|json| crate::platform::write_file_atomically(path, json.as_bytes()))
+        .inspect_err(|error| log::error!("Failed to save preferences file: {error}"))
+}
+
     preferences.browser_default_host =
         normalize_browser_default_host(preferences.browser_default_host.take())?;
 
@@ -4255,14 +4301,9 @@ async fn save_preferences(app: AppHandle, mut preferences: AppPreferences) -> Re
         }
     }
 
-    // Strip settings_json from CLI profiles before writing to preferences.json (file is source of truth)
     let mut prefs_for_disk = preferences;
     // Jean MCP is mandatory. Normalize stale clients and hand-edited files.
     prefs_for_disk.jean_mcp_enabled = true;
-    for profile in &mut prefs_for_disk.custom_cli_profiles {
-        profile.settings_json = String::new();
-        profile.file_path = String::new();
-    }
 
     if prefs_for_disk.jean_mcp_enabled
         && prefs_for_disk
@@ -4273,17 +4314,7 @@ async fn save_preferences(app: AppHandle, mut preferences: AppPreferences) -> Re
         prefs_for_disk.http_server_token = Some(http_server::auth::generate_token());
     }
 
-    let json_content = serde_json::to_string_pretty(&prefs_for_disk).map_err(|e| {
-        log::error!("Failed to serialize preferences: {e}");
-        format!("Failed to serialize preferences: {e}")
-    })?;
-
-    crate::platform::write_file_atomically(&prefs_path, json_content.as_bytes()).map_err(
-        |error| {
-            log::error!("Failed to save preferences file: {error}");
-            error
-        },
-    )?;
+    write_preferences_file(&prefs_path, &prefs_for_disk)?;
 
     log::trace!("Successfully saved preferences to {prefs_path:?}");
 
