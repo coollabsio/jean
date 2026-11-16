@@ -96,13 +96,11 @@ impl V2Client {
     }
 
     /// Queue a user message. Returns its inbox id (`msg_...`).
+    /// Queue a prompt. Jean's image, skill and text-file annotations in
+    /// `text` become attachments or inlined text, as on 1.x.
     pub fn prompt(&self, session_id: &str, text: &str, delivery: &str) -> Result<String, String> {
         let path = format!("/api/session/{session_id}/prompt");
-        let data = self.call(
-            Method::POST,
-            &path,
-            Some(json!({ "text": text, "delivery": delivery })),
-        )?;
+        let data = self.call(Method::POST, &path, Some(prompt_body(text, delivery)))?;
         data.get("id")
             .and_then(Value::as_str)
             .map(str::to_string)
@@ -171,9 +169,37 @@ impl V2Client {
     }
 }
 
+/// The 2.x prompt body from the 1.x message parts: the text part, and file
+/// parts as `files` with their data URI (2.x reads `file:` and `data:` URIs).
+fn prompt_body(text: &str, delivery: &str) -> Value {
+    let parts = super::super::opencode::prepare_opencode_parts(text);
+    v2_prompt_body(
+        parts.as_array().map(Vec::as_slice).unwrap_or_default(),
+        delivery,
+    )
+}
+
+fn v2_prompt_body(parts: &[Value], delivery: &str) -> Value {
+    let text = parts
+        .iter()
+        .find(|part| part["type"] == "text")
+        .and_then(|part| part["text"].as_str())
+        .unwrap_or_default();
+    let files: Vec<Value> = parts
+        .iter()
+        .filter(|part| part["type"] == "file")
+        .map(|part| json!({ "uri": part["url"], "name": part["filename"] }))
+        .collect();
+    let mut body = json!({ "text": text, "delivery": delivery });
+    if !files.is_empty() {
+        body["files"] = Value::Array(files);
+    }
+    body
+}
+
 #[cfg(test)]
 mod tests {
-    use super::parse_response;
+    use super::{parse_response, v2_prompt_body};
     use serde_json::json;
 
     #[test]
@@ -195,5 +221,25 @@ mod tests {
             Err("status=404, SessionNotFoundError: Session not found: ses_x".to_string())
         );
         assert_eq!(parse_response(405, ""), Err("status=405, ".to_string()));
+    }
+
+    #[test]
+    fn file_parts_become_attachments() {
+        let parts = [
+            json!({ "type": "text", "text": "What is in the image?" }),
+            json!({ "type": "file", "mime": "image/png", "url": "data:image/png;base64,AAAA", "filename": "a.png" }),
+        ];
+        assert_eq!(
+            v2_prompt_body(&parts, "steer"),
+            json!({
+                "text": "What is in the image?",
+                "delivery": "steer",
+                "files": [{ "uri": "data:image/png;base64,AAAA", "name": "a.png" }],
+            })
+        );
+        assert_eq!(
+            v2_prompt_body(&parts[..1], "queue"),
+            json!({ "text": "What is in the image?", "delivery": "queue" })
+        );
     }
 }

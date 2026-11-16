@@ -192,12 +192,14 @@ pub fn execute_turn(
     };
 
     match outcome {
-        Outcome::Interrupted => Ok(cancelled_response(opencode_session_id, state)),
         Outcome::Failed(error) => {
             emit_chat_error(app, req.session_id, req.worktree_id, &error);
             Err(error)
         }
-        Outcome::Succeeded => {
+        // 2.x also interrupts the execution when the user rejects a
+        // permission. As on 1.x, that ends the turn; only a Jean cancel
+        // makes it a cancelled turn.
+        Outcome::Succeeded | Outcome::Interrupted => {
             if cancelled.load(Ordering::SeqCst) {
                 return Ok(cancelled_response(opencode_session_id, state));
             }
@@ -730,6 +732,32 @@ mod tests {
             content.contains("Blue"),
             "answer reached the model: {content}"
         );
+
+        // Jean's image annotation becomes a file attachment.
+        let image = dir.join("jean-live-test.png");
+        std::fs::write(&image, b"not really a png").unwrap();
+        let session = new_session();
+        client
+            .prompt(
+                &session,
+                &format!(
+                    "Say OK. [Image attached: {} - Use the Read tool to view this image]",
+                    image.display()
+                ),
+                "queue",
+            )
+            .unwrap();
+        let messages = client.messages(&session).unwrap();
+        let user = messages.iter().find(|m| m["type"] == "user").unwrap();
+        assert_eq!(user["text"], "Say OK.");
+        // 2.x detects the type from the bytes, so only the data is checked.
+        assert_eq!(
+            user["files"][0]["data"], "bm90IHJlYWxseSBhIHBuZw==",
+            "{user}"
+        );
+        assert_eq!(user["files"][0]["name"], "jean-live-test.png");
+        client.interrupt(&session).ok();
+        std::fs::remove_file(&image).ok();
 
         // One-shot with and without a JSON schema.
         let text = run_one_shot(

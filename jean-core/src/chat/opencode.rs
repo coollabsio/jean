@@ -1612,7 +1612,7 @@ pub(super) fn structured_output_text_prompt(prompt: &str, schema: &str) -> Strin
 /// - Image annotations → base64-encoded file parts
 /// - Skill annotations → inlined text content
 /// - Pasted text annotations → inlined text content
-fn prepare_opencode_parts(prompt: &str) -> serde_json::Value {
+pub(super) fn prepare_opencode_parts(prompt: &str) -> serde_json::Value {
     let mut cleaned = prompt.to_string();
     let mut image_parts: Vec<serde_json::Value> = Vec::new();
 
