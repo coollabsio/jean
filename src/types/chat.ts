@@ -318,6 +318,10 @@ export interface Session {
   messages: ChatMessage[]
   /** Message count (populated separately for efficiency when full messages not needed) */
   message_count?: number
+  /** Session-wide token totals across runs that reported usage (derived). */
+  total_usage?: UsageData | null
+  /** Usage of the most recent run that reported tokens (derived). */
+  latest_usage?: UsageData | null
   /** Backend used for this session. */
   backend?: Backend
   /** Claude CLI session ID for resuming conversations */

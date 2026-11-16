@@ -87,6 +87,38 @@ pub struct UsageData {
     pub cache_creation_input_tokens: u64,
 }
 
+/// Token totals derived from a session's runs. Not persisted: rebuilt from
+/// `runs[].usage` whenever a session is serialized.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionUsageTotals {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    #[serde(default)]
+    pub cache_read_input_tokens: u64,
+    #[serde(default)]
+    pub cache_creation_input_tokens: u64,
+}
+
+impl SessionUsageTotals {
+    fn add(&mut self, usage: &UsageData) {
+        self.input_tokens += usage.input_tokens;
+        self.output_tokens += usage.output_tokens;
+        self.cache_read_input_tokens += usage.cache_read_input_tokens;
+        self.cache_creation_input_tokens += usage.cache_creation_input_tokens;
+    }
+}
+
+impl From<&UsageData> for SessionUsageTotals {
+    fn from(usage: &UsageData) -> Self {
+        Self {
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            cache_read_input_tokens: usage.cache_read_input_tokens,
+            cache_creation_input_tokens: usage.cache_creation_input_tokens,
+        }
+    }
+}
+
 // ============================================================================
 // Message Types
 // ============================================================================
@@ -824,6 +856,13 @@ pub struct Session {
     /// Message count (populated separately for efficiency when full messages not needed)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message_count: Option<u32>,
+    /// Session-wide token totals across runs that reported usage (derived).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_usage: Option<SessionUsageTotals>,
+    /// Usage of the most recent run that reported tokens (derived). Its
+    /// input + cache tokens are the context size of that turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_usage: Option<SessionUsageTotals>,
     /// Backend for this session (claude, codex, or opencode)
     #[serde(default)]
     pub backend: Backend,
@@ -1260,6 +1299,8 @@ impl Session {
             last_message_at: None,
             messages: vec![],
             message_count: None,
+            total_usage: None,
+            latest_usage: None,
             backend,
             claude_session_id: None,
             codex_thread_id: None,
@@ -1634,6 +1675,19 @@ impl SessionMetadata {
 
         let updated_at = self.updated_at();
         let last_message_at = self.runs.last().map(|r| r.ended_at.unwrap_or(r.started_at));
+
+        // Derive token totals from run metadata so the toolbar chip does not
+        // need a second command or a partial message window.
+        let mut total_usage = SessionUsageTotals::default();
+        let mut latest_usage = None;
+        for run in &self.runs {
+            if let Some(usage) = run.usage.as_ref() {
+                total_usage.add(usage);
+                latest_usage = Some(SessionUsageTotals::from(usage));
+            }
+        }
+        let total_usage = latest_usage.map(|_| total_usage);
+
         Session {
             id: self.id.clone(),
             name: self.name.clone(),
@@ -1643,6 +1697,8 @@ impl SessionMetadata {
             last_message_at,
             messages: vec![], // Loaded separately from JSONL files
             message_count: Some(self.to_index_entry().message_count),
+            total_usage,
+            latest_usage,
             backend: self.backend.clone(),
             claude_session_id: self.claude_session_id.clone(),
             codex_thread_id: self.codex_thread_id.clone(),
@@ -4005,5 +4061,48 @@ mod tests {
         });
 
         assert_eq!(metadata.latest_claude_session_id(), Some("claude-sess-abc"));
+    }
+
+    #[test]
+    fn to_session_derives_usage_totals_from_runs() {
+        let mut metadata =
+            SessionMetadata::new("s1".to_string(), "wt".to_string(), "Session".to_string(), 0);
+        let mut first = finished_run(RunStatus::Completed, Some("a"), false);
+        first.usage = Some(UsageData {
+            input_tokens: 100,
+            output_tokens: 10,
+            cache_read_input_tokens: 50,
+            cache_creation_input_tokens: 5,
+        });
+        let mut second = finished_run(RunStatus::Completed, Some("b"), false);
+        second.usage = Some(UsageData {
+            input_tokens: 200,
+            output_tokens: 20,
+            cache_read_input_tokens: 70,
+            cache_creation_input_tokens: 7,
+        });
+        metadata.runs.push(first);
+        metadata.runs.push(second);
+
+        let session = metadata.to_session();
+
+        assert_eq!(
+            session.latest_usage,
+            Some(SessionUsageTotals {
+                input_tokens: 200,
+                output_tokens: 20,
+                cache_read_input_tokens: 70,
+                cache_creation_input_tokens: 7,
+            })
+        );
+        assert_eq!(
+            session.total_usage,
+            Some(SessionUsageTotals {
+                input_tokens: 300,
+                output_tokens: 30,
+                cache_read_input_tokens: 120,
+                cache_creation_input_tokens: 12,
+            })
+        );
     }
 }
