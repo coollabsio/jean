@@ -199,6 +199,24 @@ describe('ProjectTreeItem', () => {
     ).not.toBeInTheDocument()
   })
 
+  // #912: a badge after the sync control pushed it left when it appeared.
+  it('places the workspace count before the base sync control', () => {
+    mocks.worktrees = [{ ...worktree, cached_base_branch_behind_count: 4 }]
+    useProjectsStore.setState({
+      selectedProjectId: null,
+      selectedWorktreeId: null,
+      expandedProjectIds: new Set(),
+    })
+
+    render(<ProjectTreeItem project={project} />)
+
+    const count = screen.getByRole('status', { name: '1 workspace' })
+    const sync = screen.getByRole('button', { name: '4' })
+    expect(
+      count.compareDocumentPosition(sync) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+  })
+
   it('hides the count when workspaces are shown', () => {
     render(<ProjectTreeItem project={{ ...project, worktree_count: 1 }} />)
 

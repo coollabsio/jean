@@ -93,6 +93,25 @@ describe('WorktreeItem count', () => {
     ).not.toBeInTheDocument()
   })
 
+  // #912: a badge after the sync control pushed it left when it appeared.
+  it('places the session count before the sync control', () => {
+    mocks.sessions = [{ id: 's1', messages: [] }]
+    render(
+      <WorktreeItem
+        worktree={{ ...worktree, cached_behind_count: 3 }}
+        projectId="project-1"
+        projectPath="/tmp/project"
+        defaultBranch="main"
+      />
+    )
+
+    const count = screen.getByRole('status', { name: '1 session' })
+    const sync = screen.getByRole('button', { name: '3' })
+    expect(
+      count.compareDocumentPosition(sync) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+  })
+
   it('does not show an empty count', () => {
     render(
       <WorktreeItem
