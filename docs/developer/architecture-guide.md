@@ -1015,6 +1015,55 @@ Known limitations:
 - Mid-turn injection is observed CLI behavior (tested with Claude Code 2.1.285+), not a documented contract. This is why the setting is off by default.
 - One extra host process per running Claude session. Windows/WSL, older CLIs, and runs started before the setting was enabled keep the plain pipeline; steering them fails and the prompt is queued.
 
+## OpenCode 1.x and 2.x
+
+OpenCode 2.x (from 2.2.0) replaced the 1.x HTTP API (issue #896). Jean
+supports both. The 1.x code in `jean-core/src/chat/opencode.rs` is unchanged;
+2.x turns run in `jean-core/src/chat/opencode_v2/`.
+
+- **Detection**: `opencode_server::acquire_server` returns
+  `OpenCodeServer { url, api, password }`. A JSON answer on `/global/health`
+  is 1.x. Otherwise `GET /api/info` with HTTP Basic auth (user `opencode`)
+  must report a 2.x version. Branch on `server.api`; do not probe again.
+- **Auth**: 2.x requires a password on every `/api` call. Jean starts a
+  managed 2.x server with a random `OPENCODE_SERVER_PASSWORD`. For an
+  unmanaged 2.x server, Jean reads `OPENCODE_SERVER_PASSWORD` from its own
+  environment.
+- **Responses**: success bodies are `{data: ...}`; errors are
+  `{_tag, message}`. Bare GET paths return the web UI HTML with status 200,
+  so never treat a 200 as proof of the API.
+- **Turns**: `POST /api/session/{id}/prompt {text, files, delivery:"steer"}`
+  returns an inbox id at once. The turn ends with
+  `session.execution.succeeded|failed|interrupted` on the global
+  `GET /api/event` stream, but only after every inbox id Jean sent was
+  delivered (`session.inbox.delivered`). A steer delivered after the end
+  starts a new execution. `turn.rs` holds this as a pure state machine; keep
+  it free of I/O so it stays unit-tested.
+- **Steering** (`steer.rs`): a steer posts only while the turn is
+  registered, and the turn unregisters only when no steer is pending, under
+  one lock. A failed steer is sent as a normal message.
+- **Permissions**: the same action names as 1.x (`read`, `edit`, `glob`,
+  `grep`, `skill`, `question`, `todowrite`, `external_directory`; `shell` and
+  `subagent` replace `bash` and `task`). Jean's rule sets are converted to
+  `{action, resource, effect}`. A rejected permission interrupts the
+  execution; Jean ends the turn normally then, as on 1.x.
+- **Questions**: the `question` tool opens a form (`form.created`). Jean
+  answers it through `/form/{id}/reply`; a `multiselect` field takes an
+  array, other fields a string. Jean cancels other forms.
+- **System prompt**: the experimental instructions entry `jean`; if that
+  fails, Jean puts the system prompt in front of the prompt text.
+- **Magic prompts and naming**: a temporary `plan` session, deleted after
+  use. 2.x has no structured output, so Jean asks for strict JSON text.
+- **MCP config**: 2.x reads `mcp.servers.<name>` with a `disabled` flag;
+  1.x reads `mcp.<name>` with `enabled`. Jean writes the shape of the
+  installed CLI (`opencode_cli::is_opencode_v2`) and reads both.
+- **Versions**: `opencode_cli` lists and installs 1.x and tested 2.x minors
+  only (`MAX_TESTED_OPENCODE_2_MINOR`). Update checks never move an OpenCode
+  install to another major version, because 1.x and 2.x configs differ.
+  When a new 2.x minor comes out, compare its `/openapi.json` with the
+  tested one, run the ignored live tests `live_v2_turn` and
+  `live_v2_interactions`, then raise the cap.
+
 ## Antigravity CLI backend
 
 Jean integrates Google's native `agy` executable through its documented headless interface. Interactive turns use `agy -p --output-format stream-json`; structured one-shot operations use `--output-format json --json-schema`. Jean maps Plan to `--mode plan`, Build to `--mode accept-edits`, and Yolo to `--mode accept-edits --dangerously-skip-permissions`.

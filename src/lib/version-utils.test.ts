@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { compareVersions, isNewerVersion } from './version-utils'
+import {
+  compareVersions,
+  isNewerVersion,
+  latestStableUpdate,
+} from './version-utils'
 
 describe('compareVersions', () => {
   it('compares equal versions', () => {
@@ -69,5 +73,26 @@ describe('isNewerVersion', () => {
     expect(isNewerVersion('1.0.0', '2.0.0')).toBe(false)
     expect(isNewerVersion('1.0.0', '1.1.0')).toBe(false)
     expect(isNewerVersion('1.0.0', '1.0.1')).toBe(false)
+  })
+})
+
+describe('latestStableUpdate', () => {
+  // Newest first, as the version lists arrive.
+  const versions = [
+    { version: '2.4.0-beta', prerelease: true },
+    { version: '2.3.0', prerelease: false },
+    { version: '2.2.6', prerelease: false },
+    { version: '1.19.5', prerelease: false },
+  ]
+
+  it('offers the newest stable release', () => {
+    expect(latestStableUpdate(versions, '1.19.4')?.version).toBe('2.3.0')
+    expect(latestStableUpdate(versions, '2.3.0')).toBeUndefined()
+  })
+
+  it('stays within the installed major version when asked', () => {
+    expect(latestStableUpdate(versions, '1.19.4', true)?.version).toBe('1.19.5')
+    expect(latestStableUpdate(versions, '1.19.5', true)).toBeUndefined()
+    expect(latestStableUpdate(versions, '2.2.6', true)?.version).toBe('2.3.0')
   })
 })

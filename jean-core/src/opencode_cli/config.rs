@@ -136,6 +136,18 @@ pub fn resolve_cli_binary(app: &AppHandle) -> PathBuf {
     jean_managed_path(app)
 }
 
+/// Whether the resolved OpenCode CLI is 2.x or later. 2.x stores MCP servers
+/// under `mcp.servers` with a `disabled` flag; 1.x reads `mcp.<name>` with
+/// `enabled`. A missing CLI or unreadable version counts as 1.x.
+pub async fn is_opencode_v2(app: &AppHandle) -> bool {
+    super::check_opencode_cli_installed(app.clone())
+        .await
+        .ok()
+        .and_then(|status| status.version)
+        .and_then(|version| version.split('.').next()?.parse::<u32>().ok())
+        .is_some_and(|major| major >= 2)
+}
+
 /// Ensure the CLI directory exists.
 pub fn ensure_cli_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let cli_dir = get_cli_dir(app)?;

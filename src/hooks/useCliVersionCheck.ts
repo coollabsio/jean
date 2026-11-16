@@ -64,7 +64,7 @@ import {
   devinCliQueryKeys,
 } from '@/services/devin-cli'
 import { useUIStore } from '@/store/ui-store'
-import { isNewerVersion } from '@/lib/version-utils'
+import { latestStableUpdate } from '@/lib/version-utils'
 import { logger } from '@/lib/logger'
 import { hasBackend, updateTargetLabel } from '@/lib/environment'
 import { usePreferences } from '@/services/preferences'
@@ -372,12 +372,14 @@ export function useCliVersionCheck() {
 
       for (const { type, info, versions } of checks) {
         if (!info.version || !versions?.length) continue
-        const latestStable = versions.find(v => !v.prerelease)
-        if (
-          !latestStable ||
-          !isNewerVersion(latestStable.version, info.version)
+        // OpenCode 2.x has another API and config schema than 1.x, so
+        // updates never move an OpenCode install to another major version.
+        const latestStable = latestStableUpdate(
+          versions,
+          info.version,
+          type === 'opencode'
         )
-          continue
+        if (!latestStable) continue
         currentlyOutdated.add(type)
         const key = `${type}:${info.version}→${latestStable.version}`
         if (notifiedRef.current.has(key)) continue

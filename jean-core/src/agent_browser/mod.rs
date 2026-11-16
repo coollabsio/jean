@@ -173,6 +173,15 @@ impl McpEntry {
         })
     }
 
+    /// OpenCode 2.x entry: same as 1.x minus `enabled` (2.x uses `disabled`).
+    fn opencode_v2_server_json(&self) -> Value {
+        let mut value = self.opencode_server_json();
+        if let Some(object) = value.as_object_mut() {
+            object.remove("enabled");
+        }
+        value
+    }
+
     fn claude_snippet(&self) -> String {
         let v = json!({
             "mcpServers": {
@@ -845,15 +854,17 @@ pub async fn install_agent_browser_mcp(
     backends: Option<Vec<String>>,
 ) -> Result<Vec<AgentBrowserInstallResult>, String> {
     let entry = build_entry(&app);
-    let backends =
+    let backends: Vec<String> =
         backends.unwrap_or_else(|| CONFIG_BACKENDS.iter().map(|b| b.to_string()).collect());
+    let opencode_v2 =
+        backends.iter().any(|b| b == "opencode") && crate::opencode_cli::is_opencode_v2(&app).await;
 
     let mut results = Vec::with_capacity(backends.len());
     for backend in backends {
         let result = match backend.as_str() {
             "claude" => install_claude(&entry),
             "codex" => install_codex(&entry),
-            "opencode" => install_opencode(&entry),
+            "opencode" => install_opencode(&entry, opencode_v2),
             "cursor" => install_cursor(&entry),
             "grok" => install_grok(&entry),
             "kimi" => install_kimi(&entry),
@@ -907,26 +918,32 @@ pub(crate) fn remove_agent_browser_mcp_sync() -> Vec<AgentBrowserInstallResult> 
         .iter()
         .filter_map(|backend| {
             let result = match *backend {
-                "claude" => remove_json_server(&home.join(".claude.json"), "mcpServers", "env"),
-                "cursor" => {
-                    remove_json_server(&home.join(".cursor").join("mcp.json"), "mcpServers", "env")
-                }
+                "claude" => remove_json_server(&home.join(".claude.json"), &["mcpServers"], "env"),
+                "cursor" => remove_json_server(
+                    &home.join(".cursor").join("mcp.json"),
+                    &["mcpServers"],
+                    "env",
+                ),
                 "kimi" => remove_json_server(
                     &home.join(".kimi-code").join("mcp.json"),
-                    "mcpServers",
+                    &["mcpServers"],
                     "env",
                 ),
                 "antigravity" => remove_json_server(
                     &home.join(".gemini").join("config").join("mcp_config.json"),
-                    "mcpServers",
+                    &["mcpServers"],
                     "env",
                 ),
                 "muse" => match crate::muse_cli::settings_path() {
-                    Some(path) => remove_json_server(&path, "mcp_servers", "env"),
+                    Some(path) => remove_json_server(&path, &["mcp_servers"], "env"),
                     None => Ok(None),
                 },
+                // Clear both the 2.x (`mcp.servers`) and 1.x (`mcp`) shapes.
                 "opencode" => match find_opencode_config_path(&home) {
-                    Some(path) => remove_json_server(&path, "mcp", "environment"),
+                    Some(path) => remove_json_server(&path, &["mcp", "servers"], "environment")
+                        .and_then(|v2| {
+                            Ok(remove_json_server(&path, &["mcp"], "environment")?.or(v2))
+                        }),
                     None => Ok(None),
                 },
                 "codex" => remove_toml_server(&home.join(".codex").join("config.toml")),
@@ -965,7 +982,7 @@ fn is_jean_env(env: Option<&Value>) -> bool {
 /// Returns `Ok(None)` when the file has no Jean-written entry.
 fn remove_json_server(
     path: &Path,
-    container_key: &str,
+    container_path: &[&str],
     env_key: &str,
 ) -> Result<Option<(PathBuf, Option<PathBuf>)>, String> {
     let content = match std::fs::read_to_string(path) {
@@ -978,7 +995,11 @@ fn remove_json_server(
     }
     let mut root: Value = serde_json::from_str(&strip_jsonc_comments_simple(&content))
         .map_err(|e| format!("Failed to parse {}: {e}", path.display()))?;
-    let Some(container) = root.get_mut(container_key).and_then(Value::as_object_mut) else {
+    let Some(container) = container_path
+        .iter()
+        .try_fold(&mut root, |value, key| value.get_mut(*key))
+        .and_then(Value::as_object_mut)
+    else {
         return Ok(None);
     };
     if !container
@@ -1079,7 +1100,7 @@ fn install_claude(entry: &McpEntry) -> Result<(PathBuf, Option<PathBuf>), String
     let home = dirs::home_dir().ok_or_else(|| "Home directory unavailable".to_string())?;
     install_json_server(
         home.join(".claude.json"),
-        "mcpServers",
+        &["mcpServers"],
         entry.claude_server_json(),
     )
 }
@@ -1088,7 +1109,7 @@ fn install_cursor(entry: &McpEntry) -> Result<(PathBuf, Option<PathBuf>), String
     let home = dirs::home_dir().ok_or_else(|| "Home directory unavailable".to_string())?;
     install_json_server(
         home.join(".cursor").join("mcp.json"),
-        "mcpServers",
+        &["mcpServers"],
         entry.cursor_server_json(),
     )
 }
@@ -1098,7 +1119,7 @@ fn install_devin(entry: &McpEntry) -> Result<(PathBuf, Option<PathBuf>), String>
         .ok_or_else(|| "Devin config directory unavailable".to_string())?;
     install_json_server(
         dir.join("mcp_config.json"),
-        "mcpServers",
+        &["mcpServers"],
         entry.claude_server_json(),
     )
 }
@@ -1107,7 +1128,7 @@ fn install_kimi(entry: &McpEntry) -> Result<(PathBuf, Option<PathBuf>), String> 
     let home = dirs::home_dir().ok_or_else(|| "Home directory unavailable".to_string())?;
     install_json_server(
         home.join(".kimi-code").join("mcp.json"),
-        "mcpServers",
+        &["mcpServers"],
         entry.kimi_server_json(),
     )
 }
@@ -1124,21 +1145,36 @@ fn install_antigravity_at(
     path: PathBuf,
     entry: &McpEntry,
 ) -> Result<(PathBuf, Option<PathBuf>), String> {
-    install_json_server(path, "mcpServers", entry.claude_server_json())
+    install_json_server(path, &["mcpServers"], entry.claude_server_json())
 }
 
 fn install_muse(entry: &McpEntry) -> Result<(PathBuf, Option<PathBuf>), String> {
     let path =
         crate::muse_cli::settings_path().ok_or_else(|| "Home directory unavailable".to_string())?;
     crate::jean_mcp_config::ensure_muse_settings_file(&path)?;
-    install_json_server(path, "mcp_servers", entry.muse_server_json())
+    install_json_server(path, &["mcp_servers"], entry.muse_server_json())
 }
 
-fn install_opencode(entry: &McpEntry) -> Result<(PathBuf, Option<PathBuf>), String> {
+fn install_opencode(
+    entry: &McpEntry,
+    opencode_v2: bool,
+) -> Result<(PathBuf, Option<PathBuf>), String> {
     let home = dirs::home_dir().ok_or_else(|| "Home directory unavailable".to_string())?;
     let path = find_opencode_config_path(&home)
         .unwrap_or_else(|| home.join(".config").join("opencode").join("opencode.json"));
-    install_json_server(path, "mcp", entry.opencode_server_json())
+    install_opencode_at(path, entry, opencode_v2)
+}
+
+fn install_opencode_at(
+    path: PathBuf,
+    entry: &McpEntry,
+    opencode_v2: bool,
+) -> Result<(PathBuf, Option<PathBuf>), String> {
+    if opencode_v2 {
+        install_json_server(path, &["mcp", "servers"], entry.opencode_v2_server_json())
+    } else {
+        install_json_server(path, &["mcp"], entry.opencode_server_json())
+    }
 }
 
 fn install_codex(entry: &McpEntry) -> Result<(PathBuf, Option<PathBuf>), String> {
@@ -1189,9 +1225,11 @@ mod antigravity_install_tests {
     }
 }
 
+/// Upserts the agent-browser entry at `container_path` (e.g. `["mcp", "servers"]`),
+/// creating missing container objects.
 fn install_json_server(
     path: PathBuf,
-    container_key: &str,
+    container_path: &[&str],
     server_value: Value,
 ) -> Result<(PathBuf, Option<PathBuf>), String> {
     if let Some(parent) = path.parent() {
@@ -1214,16 +1252,24 @@ fn install_json_server(
             .map_err(|e| format!("Failed to parse {}: {e}", path.display()))?
     };
 
-    let obj = root
-        .as_object_mut()
-        .ok_or_else(|| format!("{} root must be an object", path.display()))?;
-
-    let container = obj
-        .entry(container_key.to_string())
-        .or_insert_with(|| json!({}));
-    let container_obj = container
-        .as_object_mut()
-        .ok_or_else(|| format!("{container_key} must be an object in {}", path.display()))?;
+    if !root.is_object() {
+        return Err(format!("{} root must be an object", path.display()));
+    }
+    let mut container = &mut root;
+    for key in container_path {
+        container = container
+            .as_object_mut()
+            .ok_or_else(|| format!("{key} parent must be an object in {}", path.display()))?
+            .entry(key.to_string())
+            .or_insert_with(|| json!({}));
+    }
+    let container_obj = container.as_object_mut().ok_or_else(|| {
+        format!(
+            "{} must be an object in {}",
+            container_path.join("."),
+            path.display()
+        )
+    })?;
     container_obj.insert(MCP_SERVER_NAME.to_string(), server_value);
 
     let updated = serde_json::to_string_pretty(&root)
@@ -1473,7 +1519,7 @@ mod tests {
         .unwrap();
 
         let entry = McpEntry::new("agent-browser".into(), None);
-        install_json_server(path.clone(), "mcpServers", entry.claude_server_json()).unwrap();
+        install_json_server(path.clone(), &["mcpServers"], entry.claude_server_json()).unwrap();
 
         let parsed: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert!(parsed["mcpServers"]["other"].is_object());
@@ -1513,9 +1559,9 @@ mod tests {
         )
         .unwrap();
         let entry = McpEntry::new("agent-browser".into(), None);
-        install_json_server(path.clone(), "mcpServers", entry.claude_server_json()).unwrap();
+        install_json_server(path.clone(), &["mcpServers"], entry.claude_server_json()).unwrap();
 
-        assert!(remove_json_server(&path, "mcpServers", "env")
+        assert!(remove_json_server(&path, &["mcpServers"], "env")
             .unwrap()
             .is_some());
         let parsed: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
@@ -1528,11 +1574,52 @@ mod tests {
             r#"{ "mcpServers": { "agent-browser": { "command": "agent-browser" } } }"#,
         )
         .unwrap();
-        assert!(remove_json_server(&path, "mcpServers", "env")
+        assert!(remove_json_server(&path, &["mcpServers"], "env")
             .unwrap()
             .is_none());
         let parsed: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert!(parsed["mcpServers"][MCP_SERVER_NAME].is_object());
+    }
+
+    #[test]
+    fn opencode_v2_install_nests_under_mcp_servers() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("opencode.jsonc");
+        fs::write(
+            &path,
+            "{\n  // comment\n  \"mcp\": { \"legacy\": { \"type\": \"local\", \"command\": [\"x\"], \"enabled\": true } }\n}",
+        )
+        .unwrap();
+        let entry = McpEntry::new("/bin/agent-browser".into(), None);
+        install_opencode_at(path.clone(), &entry, true).unwrap();
+
+        let parsed: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(parsed["mcp"]["legacy"].is_object());
+        let server = &parsed["mcp"]["servers"][MCP_SERVER_NAME];
+        assert_eq!(server["command"], json!(["/bin/agent-browser", "mcp"]));
+        assert_eq!(server["environment"][RESTORE_ENV], RESTORE_KEY);
+        assert!(server.get("enabled").is_none());
+
+        assert!(
+            remove_json_server(&path, &["mcp", "servers"], "environment")
+                .unwrap()
+                .is_some()
+        );
+        let parsed: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(parsed["mcp"]["servers"], json!({}));
+        assert!(parsed["mcp"]["legacy"].is_object());
+    }
+
+    #[test]
+    fn opencode_v1_install_keeps_flat_mcp_shape() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("opencode.json");
+        let entry = McpEntry::new("/bin/agent-browser".into(), None);
+        install_opencode_at(path.clone(), &entry, false).unwrap();
+
+        let parsed: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(parsed["mcp"][MCP_SERVER_NAME]["enabled"], true);
+        assert!(parsed["mcp"].get("servers").is_none());
     }
 
     #[test]

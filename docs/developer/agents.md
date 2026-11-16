@@ -449,7 +449,7 @@ config). The file readers are:
 |---|---|---|
 | Claude | `~/.claude.json` (`mcpServers` and `projects[path].mcpServers`), `<worktree>/.mcp.json` | `claude mcp list` for `claude.ai` and `plugin:` names |
 | Codex | `~/.codex/config.toml` and `<worktree>/.codex/config.toml` `[mcp_servers.*]` | app-server `mcpServerStatus/list` |
-| OpenCode | project, home, and `~/.config/opencode` `opencode.json` / `.jsonc` `mcp` object | `opencode mcp list` |
+| OpenCode | project, home, and `~/.config/opencode` `opencode.json` / `.jsonc`: `mcp` object (1.x) and `mcp.servers` (2.x) | `opencode mcp list` |
 | Cursor | `~/.cursor/mcp.json` and `<worktree>/.cursor/mcp.json` | `cursor-agent mcp list` |
 | Grok | `~/.grok/config.toml` and project `.grok/config.toml`, plus Claude, Cursor, and `.mcp.json` compat files | `grok mcp doctor --json` |
 | Kimi | `~/.kimi-code/mcp.json` and project `.kimi-code/mcp.json` | none |

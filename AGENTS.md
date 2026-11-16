@@ -230,6 +230,10 @@ accumulating `PiResponse`. Both the batch parser (`parse_pi_json_stream_inner`)
 and the live streaming parser (`parse_pi_stream`) call it per line — never
 re-parse the whole accumulated buffer (avoids O(n²) on long sessions).
 
+#### OpenCode 1.x and 2.x
+
+**Read this before changing OpenCode code.** OpenCode 2.x (2.2.0+) has a different HTTP API, auth, event stream and MCP config shape than 1.x. 1.x stays in `jean-core/src/chat/opencode.rs`; 2.x turns are in `jean-core/src/chat/opencode_v2/`. Branch on `OpenCodeServer.api` from `opencode_server::acquire_server`; never add 2.x paths to the 1.x code. Details, and the steps to support a new 2.x minor: `docs/developer/architecture-guide.md` → "OpenCode 1.x and 2.x".
+
 #### Claude CLI Mid-Turn Steering (Detached Host)
 
 **Read this before changing Claude run spawning or `tail_claude_output`.**

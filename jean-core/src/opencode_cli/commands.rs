@@ -13,10 +13,10 @@ const GITHUB_REPO: &str = "anomalyco/opencode";
 
 /// Emergency fallback version when API fails AND no cache exists.
 const FALLBACK_OPENCODE_VERSION: &str = "1.19.5";
-/// Newest OpenCode major version Jean supports. OpenCode 2.x replaced the
-/// HTTP API that Jean's OpenCode backend uses, so Jean lists and installs
-/// 1.x releases only.
-const MAX_SUPPORTED_OPENCODE_MAJOR: u64 = 1;
+/// Newest OpenCode 2.x minor tested with Jean's 2.x backend. OpenCode 2.x
+/// (from 2.2.0) replaced the 1.x HTTP API, and its API still changes between
+/// minors, so newer 2.x releases are not listed or installed until tested.
+const MAX_TESTED_OPENCODE_2_MINOR: u64 = 3;
 const OPENCODE_VERSIONS_CACHE_FILE: &str = "opencode-versions-cache.json";
 
 /// Status of the OpenCode CLI installation
@@ -526,15 +526,19 @@ fn save_opencode_versions_cache(app: &AppHandle, versions: &[OpenCodeReleaseInfo
     }
 }
 
-/// True for an OpenCode release version (`1.19.5`, `v1.19.5`) that Jean
-/// supports. Other tags in the repo (`process-daemon-v0.5.2`) are rejected.
+/// True for an OpenCode release version (`1.19.5`, `v2.3.0`) that Jean
+/// supports: any 0.x/1.x, and tested 2.x minors. Other tags in the repo
+/// (`process-daemon-v0.5.2`) are rejected.
 fn is_supported_opencode_version(version: &str) -> bool {
-    version
+    let mut parts = version
         .trim_start_matches('v')
         .split('.')
-        .next()
-        .and_then(|major| major.parse::<u64>().ok())
-        .is_some_and(|major| major <= MAX_SUPPORTED_OPENCODE_MAJOR)
+        .map(|part| part.parse::<u64>().ok());
+    match (parts.next().flatten(), parts.next().flatten()) {
+        (Some(0 | 1), Some(_)) => true,
+        (Some(2), Some(minor)) => minor <= MAX_TESTED_OPENCODE_2_MINOR,
+        _ => false,
+    }
 }
 
 fn load_opencode_versions_cache(app: &AppHandle) -> Option<Vec<OpenCodeReleaseInfo>> {
@@ -635,7 +639,8 @@ async fn fetch_opencode_versions_from_api() -> Result<Vec<OpenCodeReleaseInfo>, 
     let response = client
         .get(&url)
         .header("User-Agent", "jean-desktop")
-        // 2.x and non-CLI releases push 1.x releases off a short first page.
+        // Untested 2.x and non-CLI releases push supported releases off a
+        // short first page.
         .query(&[("per_page", "100")])
         .send()
         .await
@@ -721,8 +726,8 @@ pub async fn install_opencode_cli(app: AppHandle, version: Option<String>) -> Re
     };
     if !is_supported_opencode_version(&version) {
         return Err(format!(
-            "OpenCode {version} is not supported. OpenCode 2.x replaced the HTTP API \
-             that Jean uses. Install an OpenCode 1.x version."
+            "OpenCode {version} is not supported yet. Install OpenCode 1.x or \
+             2.{MAX_TESTED_OPENCODE_2_MINOR} or older."
         ));
     }
 
@@ -922,8 +927,8 @@ fn extract_binary_from_zip(archive_bytes: &[u8], binary_name: &str) -> Result<Ve
     ))
 }
 
-/// Latest supported stable release. Not GitHub's `releases/latest`, which is
-/// an unsupported 2.x release.
+/// Latest supported stable release. Not GitHub's `releases/latest`, which
+/// can be an untested 2.x release.
 ///
 /// Falls back to disk cache or hardcoded version if the API is unreachable.
 async fn fetch_latest_version(app: &AppHandle) -> Result<String, String> {
@@ -943,13 +948,15 @@ mod tests {
     };
 
     #[test]
-    fn supports_only_opencode_1x_releases() {
+    fn supports_1x_and_tested_2x_releases() {
         assert!(is_supported_opencode_version("1.19.5"));
         assert!(is_supported_opencode_version("v1.19.5"));
         assert!(is_supported_opencode_version("0.4.1"));
-        // OpenCode 2.x replaced the v1 HTTP API (issue #896).
-        assert!(!is_supported_opencode_version("2.2.6"));
-        assert!(!is_supported_opencode_version("v2.3.0"));
+        // OpenCode 2.x has its own backend (issue #896); untested minors wait.
+        assert!(is_supported_opencode_version("2.2.6"));
+        assert!(is_supported_opencode_version("v2.3.0"));
+        assert!(!is_supported_opencode_version("2.4.0"));
+        assert!(!is_supported_opencode_version("3.0.0"));
         assert!(!is_supported_opencode_version("process-daemon-v0.5.2"));
         assert!(!is_supported_opencode_version(""));
     }

@@ -8,7 +8,10 @@
 //! - Home scope:    ~/{opencode.jsonc,opencode.json,config.json}                  → `mcp` object
 //! - Global scope:  ~/.config/opencode/{opencode.jsonc,opencode.json,config.json} → `mcp` object
 //!
-//! OpenCode JSON example:
+//! OpenCode 2.x nests servers under `mcp.servers` and uses `disabled`
+//! instead of `enabled`; both shapes are read (2.x first).
+//!
+//! OpenCode 1.x JSON example:
 //!   {
 //!     "mcp": {
 //!       "filesystem": { "type": "local", "command": ["npx", "..."], "enabled": true },
@@ -166,23 +169,54 @@ fn collect_from_opencode_json(
         return;
     };
 
-    for (name, config) in mcp {
-        if seen_names.insert(name.clone()) {
-            // OpenCode uses "enabled" bool in the server object; default true
-            let disabled = config
-                .get("enabled")
-                .and_then(|v| v.as_bool())
-                .map(|b| !b)
-                .unwrap_or(false);
-
-            servers.push(McpServerInfo {
-                name: name.clone(),
-                config: config.clone(),
-                scope: scope.to_string(),
-                disabled,
-                backend: "opencode".to_string(),
-            });
+    // OpenCode 2.x: `mcp.servers.<name>` with a `disabled` flag (default false).
+    // `servers`/`timeout` are 1.x server names only when they hold a server entry.
+    let is_v2_container = |key: &str| {
+        mcp.get(key)
+            .is_some_and(|v| v.is_object() && v.get("type").is_none())
+    };
+    if is_v2_container("servers") {
+        if let Some(entries) = mcp.get("servers").and_then(|v| v.as_object()) {
+            for (name, config) in entries {
+                let disabled = config
+                    .get("disabled")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                push_server(servers, seen_names, name, config, scope, disabled);
+            }
         }
+    }
+
+    // OpenCode 1.x: `mcp.<name>` with an `enabled` flag (default true).
+    for (name, config) in mcp {
+        if matches!(name.as_str(), "servers" | "timeout") && is_v2_container(name) {
+            continue;
+        }
+        let disabled = config
+            .get("enabled")
+            .and_then(|v| v.as_bool())
+            .map(|b| !b)
+            .unwrap_or(false);
+        push_server(servers, seen_names, name, config, scope, disabled);
+    }
+}
+
+fn push_server(
+    servers: &mut Vec<McpServerInfo>,
+    seen_names: &mut HashSet<String>,
+    name: &str,
+    config: &serde_json::Value,
+    scope: &str,
+    disabled: bool,
+) {
+    if seen_names.insert(name.to_string()) {
+        servers.push(McpServerInfo {
+            name: name.to_string(),
+            config: config.clone(),
+            scope: scope.to_string(),
+            disabled,
+            backend: "opencode".to_string(),
+        });
     }
 }
 
@@ -263,5 +297,68 @@ mod tests {
         );
         assert_eq!(servers[2].target, "missing-cmd");
         assert_eq!(servers[2].status, Some(McpHealthStatus::CouldNotConnect));
+    }
+
+    #[test]
+    fn parses_opencode_v2_mcp_list_output() {
+        let output = "✗ jean-test  failed: Method not found\n✓ docs  connected\n○ slow  pending\n";
+        let servers = parse_mcp_list_output(output);
+        let names: Vec<_> = servers.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["jean-test", "docs", "slow"]);
+        assert_eq!(servers[0].status, Some(McpHealthStatus::CouldNotConnect));
+        assert_eq!(servers[1].status, Some(McpHealthStatus::Connected));
+        assert_eq!(servers[2].status, Some(McpHealthStatus::Unknown));
+    }
+
+    fn collect(content: &str) -> Vec<(String, bool)> {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("opencode.jsonc");
+        std::fs::write(&path, content).unwrap();
+        let mut servers = Vec::new();
+        collect_from_opencode_json(&path, "user", &mut servers, &mut HashSet::new());
+        servers.into_iter().map(|s| (s.name, s.disabled)).collect()
+    }
+
+    #[test]
+    fn reads_opencode_v2_servers_with_disabled_flag() {
+        let servers = collect(
+            r#"{
+  // 2.x shape
+  "mcp": {
+    "timeout": { "connect": 5000 },
+    "servers": {
+      "on": { "type": "local", "command": ["/bin/cat"] },
+      "off": { "type": "remote", "url": "https://x.test/mcp", "disabled": true }
+    }
+  }
+}"#,
+        );
+        assert_eq!(
+            servers,
+            [("off".to_string(), true), ("on".to_string(), false)]
+        );
+    }
+
+    #[test]
+    fn reads_mixed_opencode_v1_and_v2_entries() {
+        let servers = collect(
+            r#"{
+  "mcp": {
+    "legacy": { "type": "local", "command": ["x"], "enabled": false },
+    "servers": { "modern": { "type": "local", "command": ["y"] } },
+    "timeout": { "connect": 1 }
+  }
+}"#,
+        );
+        assert_eq!(
+            servers,
+            [("modern".to_string(), false), ("legacy".to_string(), true)]
+        );
+    }
+
+    #[test]
+    fn keeps_v1_server_literally_named_servers() {
+        let servers = collect(r#"{ "mcp": { "servers": { "type": "local", "command": ["z"] } } }"#);
+        assert_eq!(servers, [("servers".to_string(), false)]);
     }
 }

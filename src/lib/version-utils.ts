@@ -45,3 +45,20 @@ export function compareVersions(a: string, b: string): number {
 export function isNewerVersion(a: string, b: string): boolean {
   return compareVersions(a, b) > 0
 }
+
+/**
+ * Newest stable release to offer as an update for `installed`, or undefined.
+ * `versions` is newest first. With `sameMajor`, releases of another major
+ * version are skipped.
+ */
+export function latestStableUpdate<
+  T extends { version: string; prerelease?: boolean },
+>(versions: T[], installed: string, sameMajor = false): T | undefined {
+  const major = parseVersion(installed)[0]
+  const latest = versions.find(
+    v => !v.prerelease && (!sameMajor || parseVersion(v.version)[0] === major)
+  )
+  return latest && isNewerVersion(latest.version, installed)
+    ? latest
+    : undefined
+}

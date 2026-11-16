@@ -7,4 +7,4 @@ mod config;
 pub mod mcp;
 
 pub use commands::*;
-pub use config::{resolve_cli_binary, should_auto_use_system};
+pub use config::{is_opencode_v2, resolve_cli_binary, should_auto_use_system};

@@ -40,7 +40,7 @@ Claude Supervised uses native `default` permissions and Jean's existing permissi
 
 Codex Supervised uses `untrusted` plus read-only sandboxing. Auto-accept edits keeps Jean's existing granular approvals and workspace-write sandbox. Sandboxed commands can run without approval. Auto uses `on-request` with `approvalsReviewer: auto_review`. Set and reset the reviewer on thread start, resume, and every turn so automatic review cannot leak into Supervised or Full access.
 
-OpenCode installs explicit session permission rules before every turn, including resumed sessions. Failure to apply or confirm the rules in the returned session stops the turn. Supervised asks for edits and commands; Auto-accept edits allows edits but asks for commands. Plan resets permissive rules and denies edits and commands. Environment-file and external-directory access retain separate approval rules.
+OpenCode installs explicit session permission rules before every turn, including resumed sessions. Failure to apply or confirm the rules in the returned session stops the turn. Supervised asks for edits and commands; Auto-accept edits allows edits but asks for commands. Plan resets permissive rules and denies edits and commands. Environment-file and external-directory access retain separate approval rules. On OpenCode 2.x, Jean sends the same rules as `{action, resource, effect}` when it creates the session and `PATCH`es them on resumed sessions.
 
 ### Grok and Kimi ACP approvals
 

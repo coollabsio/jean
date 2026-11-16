@@ -22,7 +22,7 @@ const DIAGNOSTIC_LINE_MAX: usize = 400;
 /// Server is shut down only when this drops to 0.
 static USAGE_COUNT: AtomicUsize = AtomicUsize::new(0);
 
-/// Bumped on every `acquire`. An idle timer stands down when this changed
+/// Bumped on every `acquire_server`. An idle timer stands down when this changed
 /// after it was scheduled, so only the latest release can stop the server.
 static IDLE_EPOCH: AtomicUsize = AtomicUsize::new(0);
 
@@ -626,23 +626,6 @@ pub fn ensure_running(app: &AppHandle) -> Result<OpenCodeServer, String> {
     Ok(OpenCodeServer { url, api, password })
 }
 
-/// Like [`acquire_server`], for callers that speak only the 1.x API.
-/// Returns the base URL, or an error (without holding a usage) on 2.x.
-pub fn acquire(app: &AppHandle) -> Result<String, String> {
-    let server = acquire_server(app)?;
-    match server.api {
-        OpenCodeApi::V1 => Ok(server.url),
-        OpenCodeApi::V2 => {
-            release();
-            Err(
-                "Jean supports only chat on OpenCode 2.x for now. To use this feature, \
-                 install OpenCode 1.x in Settings > Backends > OpenCode > Change version."
-                    .to_string(),
-            )
-        }
-    }
-}
-
 /// Increment usage count and ensure the server is running.
 /// Each `acquire_server` must be paired with a `release` when the caller is done.
 pub fn acquire_server(app: &AppHandle) -> Result<OpenCodeServer, String> {
@@ -697,7 +680,7 @@ fn schedule_idle_stop() {
 
 /// Stop the managed server if nothing acquired it since `epoch`. Checked under
 /// the `OPENCODE_SERVER` lock (also taken by `ensure_running`), so a concurrent
-/// `acquire` either stands this down or respawns after the stop. Returns
+/// `acquire_server` either stands this down or respawns after the stop. Returns
 /// whether the server was stopped.
 fn stop_if_idle(epoch: usize) -> bool {
     let mut guard = match OPENCODE_SERVER.lock() {
