@@ -12,7 +12,11 @@ use crate::platform::silent_command;
 const GITHUB_REPO: &str = "anomalyco/opencode";
 
 /// Emergency fallback version when API fails AND no cache exists.
-const FALLBACK_OPENCODE_VERSION: &str = "0.4.1";
+const FALLBACK_OPENCODE_VERSION: &str = "1.19.5";
+/// Newest OpenCode major version Jean supports. OpenCode 2.x replaced the
+/// HTTP API that Jean's OpenCode backend uses, so Jean lists and installs
+/// 1.x releases only.
+const MAX_SUPPORTED_OPENCODE_MAJOR: u64 = 1;
 const OPENCODE_VERSIONS_CACHE_FILE: &str = "opencode-versions-cache.json";
 
 /// Status of the OpenCode CLI installation
@@ -522,17 +526,34 @@ fn save_opencode_versions_cache(app: &AppHandle, versions: &[OpenCodeReleaseInfo
     }
 }
 
+/// True for an OpenCode release version (`1.19.5`, `v1.19.5`) that Jean
+/// supports. Other tags in the repo (`process-daemon-v0.5.2`) are rejected.
+fn is_supported_opencode_version(version: &str) -> bool {
+    version
+        .trim_start_matches('v')
+        .split('.')
+        .next()
+        .and_then(|major| major.parse::<u64>().ok())
+        .is_some_and(|major| major <= MAX_SUPPORTED_OPENCODE_MAJOR)
+}
+
 fn load_opencode_versions_cache(app: &AppHandle) -> Option<Vec<OpenCodeReleaseInfo>> {
     let cache_path = super::config::get_cli_dir(app)
         .ok()?
         .join(OPENCODE_VERSIONS_CACHE_FILE);
     let contents = std::fs::read_to_string(&cache_path).ok()?;
     let cached: CachedOpenCodeVersions = serde_json::from_str(&contents).ok()?;
-    if cached.versions.is_empty() {
+    // Older caches can hold unsupported releases.
+    let versions: Vec<OpenCodeReleaseInfo> = cached
+        .versions
+        .into_iter()
+        .filter(|v| is_supported_opencode_version(&v.version))
+        .collect();
+    if versions.is_empty() {
         return None;
     }
-    log::trace!("Loaded {} cached OpenCode versions", cached.versions.len());
-    Some(cached.versions)
+    log::trace!("Loaded {} cached OpenCode versions", versions.len());
+    Some(versions)
 }
 
 fn fallback_opencode_versions() -> Vec<OpenCodeReleaseInfo> {
@@ -614,7 +635,8 @@ async fn fetch_opencode_versions_from_api() -> Result<Vec<OpenCodeReleaseInfo>, 
     let response = client
         .get(&url)
         .header("User-Agent", "jean-desktop")
-        .query(&[("per_page", "20")])
+        // 2.x and non-CLI releases push 1.x releases off a short first page.
+        .query(&[("per_page", "100")])
         .send()
         .await
         .map_err(|e| {
@@ -646,6 +668,7 @@ async fn fetch_opencode_versions_from_api() -> Result<Vec<OpenCodeReleaseInfo>, 
 
     let result: Vec<OpenCodeReleaseInfo> = releases
         .into_iter()
+        .filter(|r| is_supported_opencode_version(&r.tag_name))
         .map(|r| {
             let version = r.tag_name.trim_start_matches('v').to_string();
             OpenCodeReleaseInfo {
@@ -696,6 +719,12 @@ pub async fn install_opencode_cli(app: AppHandle, version: Option<String>) -> Re
         Some(v) => v.trim_start_matches('v').to_string(),
         None => fetch_latest_version(&app).await?,
     };
+    if !is_supported_opencode_version(&version) {
+        return Err(format!(
+            "OpenCode {version} is not supported. OpenCode 2.x replaced the HTTP API \
+             that Jean uses. Install an OpenCode 1.x version."
+        ));
+    }
 
     let tag = format!("v{version}");
     let download_url = format!(
@@ -893,42 +922,37 @@ fn extract_binary_from_zip(archive_bytes: &[u8], binary_name: &str) -> Result<Ve
     ))
 }
 
-/// Fetch the latest release version from GitHub.
+/// Latest supported stable release. Not GitHub's `releases/latest`, which is
+/// an unsupported 2.x release.
 ///
 /// Falls back to disk cache or hardcoded version if the API is unreachable.
 async fn fetch_latest_version(app: &AppHandle) -> Result<String, String> {
-    let client = reqwest::Client::new();
-    let response = client
-        .get(format!(
-            "https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-        ))
-        .header("User-Agent", "jean-desktop")
-        .send()
-        .await;
-
-    if let Ok(resp) = response {
-        if resp.status().is_success() {
-            if let Ok(release) = resp.json::<GitHubRelease>().await {
-                return Ok(release.tag_name.trim_start_matches('v').to_string());
-            }
-        }
-    }
-
-    log::warn!("Failed to fetch latest OpenCode version from API, using fallback");
-    if let Some(cached) = load_opencode_versions_cache(app) {
-        if let Some(first) = cached.into_iter().find(|v| !v.prerelease) {
-            return Ok(first.version);
-        }
-    }
-    Ok(FALLBACK_OPENCODE_VERSION.to_string())
+    let versions = get_available_opencode_versions(app.clone()).await?;
+    Ok(versions
+        .into_iter()
+        .find(|v| !v.prerelease)
+        .map(|v| v.version)
+        .unwrap_or_else(|| FALLBACK_OPENCODE_VERSION.to_string()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        has_auth_connections, is_model_identifier, opencode_models_args,
-        parse_opencode_models_output,
+        has_auth_connections, is_model_identifier, is_supported_opencode_version,
+        opencode_models_args, parse_opencode_models_output,
     };
+
+    #[test]
+    fn supports_only_opencode_1x_releases() {
+        assert!(is_supported_opencode_version("1.19.5"));
+        assert!(is_supported_opencode_version("v1.19.5"));
+        assert!(is_supported_opencode_version("0.4.1"));
+        // OpenCode 2.x replaced the v1 HTTP API (issue #896).
+        assert!(!is_supported_opencode_version("2.2.6"));
+        assert!(!is_supported_opencode_version("v2.3.0"));
+        assert!(!is_supported_opencode_version("process-daemon-v0.5.2"));
+        assert!(!is_supported_opencode_version(""));
+    }
 
     #[test]
     fn detects_opencode_v2_auth_connections() {

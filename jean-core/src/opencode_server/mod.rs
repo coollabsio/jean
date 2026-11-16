@@ -179,24 +179,67 @@ fn spawn_stdio_logger(
         });
 }
 
-fn is_healthy(url: &str) -> bool {
+/// What answers on an OpenCode server URL.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ServerHealth {
+    /// OpenCode 1.x API: `/global/health` returned `{"healthy": true}`.
+    Healthy,
+    /// A server answered, but not with the OpenCode 1.x API. OpenCode 2.x
+    /// replaced that API and serves its web UI HTML on `/global/health`.
+    Unsupported,
+    /// No answer yet, or a 1.x server that is not healthy yet.
+    Unreachable,
+}
+
+fn classify_health_response(success: bool, body: &str) -> ServerHealth {
+    if !success {
+        return ServerHealth::Unreachable;
+    }
+    match serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|v| v.get("healthy").and_then(serde_json::Value::as_bool))
+    {
+        Some(true) => ServerHealth::Healthy,
+        Some(false) => ServerHealth::Unreachable,
+        None => ServerHealth::Unsupported,
+    }
+}
+
+fn probe_health(url: &str) -> ServerHealth {
     let health_url = format!("{url}/global/health");
-    reqwest::blocking::Client::new()
+    let Ok(response) = reqwest::blocking::Client::new()
         .get(health_url)
         .timeout(Duration::from_millis(1200))
         .send()
-        .map(|r| r.status().is_success())
-        .unwrap_or(false)
+    else {
+        return ServerHealth::Unreachable;
+    };
+    let success = response.status().is_success();
+    classify_health_response(success, &response.text().unwrap_or_default())
 }
 
-fn wait_until_healthy(url: &str, attempts: u32) -> bool {
+fn is_healthy(url: &str) -> bool {
+    probe_health(url) == ServerHealth::Healthy
+}
+
+/// Poll until the server is healthy or answers as an unsupported server.
+fn wait_for_server(url: &str, attempts: u32) -> ServerHealth {
     for _ in 0..attempts {
-        if is_healthy(url) {
-            return true;
+        let health = probe_health(url);
+        if health != ServerHealth::Unreachable {
+            return health;
         }
         std::thread::sleep(Duration::from_millis(200));
     }
-    false
+    ServerHealth::Unreachable
+}
+
+fn unsupported_server_error(url: &str) -> String {
+    format!(
+        "The OpenCode server at {url} does not serve the OpenCode 1.x API. \
+         OpenCode 2.x replaced that API and Jean does not support it yet. \
+         Install OpenCode 1.x in Settings > Backends > OpenCode > Change version."
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -321,8 +364,10 @@ pub fn ensure_running(app: &AppHandle) -> Result<String, String> {
     let url = server_url(&hostname, port);
 
     // If an unmanaged server is already running, use it.
-    if is_healthy(&url) {
-        return Ok(url);
+    match probe_health(&url) {
+        ServerHealth::Healthy => return Ok(url),
+        ServerHealth::Unsupported => return Err(unsupported_server_error(&url)),
+        ServerHealth::Unreachable => {}
     }
 
     let mut guard = OPENCODE_SERVER
@@ -334,7 +379,7 @@ pub fn ensure_running(app: &AppHandle) -> Result<String, String> {
         match proc_info.child.try_wait() {
             Ok(None) => {
                 let running_url = server_url(&proc_info.hostname, proc_info.port);
-                if wait_until_healthy(&running_url, 5) {
+                if wait_for_server(&running_url, 5) == ServerHealth::Healthy {
                     return Ok(running_url);
                 }
             }
@@ -415,13 +460,20 @@ pub fn ensure_running(app: &AppHandle) -> Result<String, String> {
     // Write PID file so a future Jean instance can clean up if we crash.
     write_pid_file(server_pid, port);
 
-    if !wait_until_healthy(&url, 50) {
-        // Give logger threads a moment to flush a few lines after exit.
-        std::thread::sleep(Duration::from_millis(150));
-        let diag = diagnostics_summary_for_error();
-        return Err(format!(
-            "OpenCode server started but did not become healthy in time. Diagnostics: {diag}"
-        ));
+    match wait_for_server(&url, 50) {
+        ServerHealth::Healthy => {}
+        ServerHealth::Unsupported => {
+            stop_managed_server_locked(&mut guard);
+            return Err(unsupported_server_error(&url));
+        }
+        ServerHealth::Unreachable => {
+            // Give logger threads a moment to flush a few lines after exit.
+            std::thread::sleep(Duration::from_millis(150));
+            let diag = diagnostics_summary_for_error();
+            return Err(format!(
+                "OpenCode server started but did not become healthy in time. Diagnostics: {diag}"
+            ));
+        }
     }
 
     Ok(url)
@@ -567,6 +619,28 @@ pub async fn stop_opencode_server() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn health_response_accepts_only_the_v1_api() {
+        // OpenCode 1.x health payload.
+        assert_eq!(
+            classify_health_response(true, r#"{"healthy":true,"version":"1.19.5"}"#),
+            ServerHealth::Healthy
+        );
+        // OpenCode 2.x answers 200 with its web UI HTML (issue #896).
+        assert_eq!(
+            classify_health_response(true, "<!doctype html><html lang=\"en\">"),
+            ServerHealth::Unsupported
+        );
+        assert_eq!(
+            classify_health_response(true, r#"{"healthy":false}"#),
+            ServerHealth::Unreachable
+        );
+        assert_eq!(
+            classify_health_response(false, r#"{"healthy":true}"#),
+            ServerHealth::Unreachable
+        );
+    }
 
     #[test]
     fn auto_compact_merges_into_inherited_config() {
