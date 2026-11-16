@@ -210,6 +210,7 @@ import {
   useClaudeCliStatus,
   useClaudeUsage,
 } from '@/services/claude-cli'
+import { useCliproxyapiUsage } from '@/services/cliproxyapi'
 import { useCodexUsage } from '@/services/codex-cli'
 import {
   getLimitResetAtMs,
@@ -1071,8 +1072,8 @@ const ChatWindowContent = memo(function ChatWindowContent({
   // CLI version for adaptive thinking feature detection
   const { data: cliStatus } = useClaudeCliStatus({ serverId: targetServerId })
   const { data: modelCatalog } = useModelCatalog()
-  // Custom providers map aliases to an upstream id (`opus` -> `claude-opus-5-5`);
-  // its catalog entry decides effort vs thinking.
+  // Custom providers map aliases to an upstream id (`opus` -> `claude-opus-5-5`
+  // for CLIProxyAPI); its catalog entry decides effort vs thinking.
   const selectedModelReasoning = getCatalogModelReasoning(
     modelCatalog,
     selectedBackend,
@@ -1190,11 +1191,6 @@ const ChatWindowContent = memo(function ChatWindowContent({
   const currentError = useChatStore(state =>
     deferredSessionId ? (state.errors[deferredSessionId] ?? null) : null
   )
-  // The backend holds the queue after a provider rejection (limit/auth/API)
-  // instead of sending the remaining prompts into the same failure.
-  const isQueueHeld = useChatStore(state =>
-    deferredSessionId ? (state.queueHeld[deferredSessionId] ?? false) : false
-  )
 
   // Auto-continue: offer only for usage/rate-limit errors on backends that
   // expose a reset time (Claude, Codex). Reset time comes from the usage cache.
@@ -1219,15 +1215,25 @@ const ChatWindowContent = memo(function ChatWindowContent({
   )
 
   // Claude asks the account owner to accept updated terms on claude.ai. Name
-  // the local Claude login that can be blocked.
+  // the accounts that can be blocked: the proxy's Claude accounts, or the
+  // local Claude login.
   const isTermsError = isClaudeTermsError(currentError)
+  const usesCliproxyapi = selectedProvider === 'CLIProxyAPI'
+  const { data: cliproxyAccounts } = useCliproxyapiUsage({
+    enabled: isTermsError && usesCliproxyapi,
+  })
   const { data: claudeAuth } = useClaudeCliAuth({
     enabled: isTermsError && !isCustomProvider,
   })
-  const termsAccountEmails =
-    isTermsError && !isCustomProvider && claudeAuth?.email
-      ? [claudeAuth.email]
-      : []
+  const termsAccountEmails = !isTermsError
+    ? []
+    : usesCliproxyapi
+      ? (cliproxyAccounts ?? [])
+          .filter(account => account.provider === 'claude' && !account.disabled)
+          .map(account => account.email ?? account.label)
+      : !isCustomProvider && claudeAuth?.email
+        ? [claudeAuth.email]
+        : []
   // Retry reuses the auto-continue resend path, armed for now.
   const canRetry = useChatStore(state =>
     deferredSessionId ? Boolean(state.lastSentArgs[deferredSessionId]) : false
@@ -3340,7 +3346,6 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                     isSessionBusy={
                                       isSending || isWaitingForInput
                                     }
-                                    isPaused={isQueueHeld}
                                     onRemove={handleRemoveQueuedMessage}
                                     onSendNow={handleSendQueuedNow}
                                     onEdit={handleEditQueuedMessage}
@@ -3592,6 +3597,10 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                         activeSessionId={activeSessionId}
                                         projectId={worktree?.project_id}
                                         runScripts={runScripts}
+                                        sessionLatestUsage={
+                                          session?.latest_usage
+                                        }
+                                        sessionTotalUsage={session?.total_usage}
                                         loadedIssueContexts={
                                           loadedIssueContexts ??
                                           EMPTY_ISSUE_CONTEXTS
