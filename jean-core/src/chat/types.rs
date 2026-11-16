@@ -1974,6 +1974,14 @@ impl UserTurnOutcome {
     }
 }
 
+/// An OpenCode 2.x turn on the server: its session and the inbox id of its
+/// prompt (2.x uses that id for the user message too).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpenCodeTurnRef {
+    pub session_id: String,
+    pub prompt_id: String,
+}
+
 /// Metadata for a single Claude CLI execution (stored in manifest)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunEntry {
@@ -2041,6 +2049,10 @@ pub struct RunEntry {
     /// Presence indicates a turn was active when Jean crashed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codex_turn_id: Option<String>,
+    /// OpenCode 2.x turn that runs on the server: set when the prompt is
+    /// queued. Lets a restarted Jean re-attach to the turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opencode_turn: Option<OpenCodeTurnRef>,
     /// Cursor chat ID — persisted per-run so future runs can resume the same chat.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cursor_chat_id: Option<String>,
@@ -2710,6 +2722,7 @@ mod tests {
             usage: None,
             codex_thread_id: None,
             codex_turn_id: None,
+            opencode_turn: None,
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
@@ -3607,6 +3620,7 @@ mod tests {
             usage: None,
             codex_thread_id: Some("thread-1".to_string()),
             codex_turn_id: None,
+            opencode_turn: None,
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
@@ -3655,6 +3669,7 @@ mod tests {
             usage: None,
             codex_thread_id: None,
             codex_turn_id: None,
+            opencode_turn: None,
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
@@ -3695,6 +3710,7 @@ mod tests {
             usage: None,
             codex_thread_id: None,
             codex_turn_id: None,
+            opencode_turn: None,
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
@@ -3785,6 +3801,7 @@ mod tests {
             usage: None,
             codex_thread_id: Some("thread-1".to_string()),
             codex_turn_id: None,
+            opencode_turn: None,
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
@@ -3883,6 +3900,7 @@ mod tests {
             usage: None,
             codex_thread_id: Some("thread-1".to_string()),
             codex_turn_id: None,
+            opencode_turn: None,
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
@@ -3913,6 +3931,7 @@ mod tests {
             usage: None,
             codex_thread_id: Some("thread-1".to_string()),
             codex_turn_id: None,
+            opencode_turn: None,
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
@@ -3961,6 +3980,7 @@ mod tests {
             usage: None,
             codex_thread_id: None,
             codex_turn_id: None,
+            opencode_turn: None,
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
@@ -3995,6 +4015,7 @@ mod tests {
             usage: None,
             codex_thread_id: None,
             codex_turn_id: None,
+            opencode_turn: None,
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,

@@ -15,10 +15,12 @@ pub use steer::steer;
 use super::opencode::{
     agent_for_execution_mode, emit_backend_retry, emit_chat_chunk, emit_chat_done, emit_chat_error,
     emit_chat_thinking, emit_chat_tool_result, emit_chat_tool_use, emit_permission_replied,
-    parse_provider_model, permission_rules_for_mode, should_auto_approve_opencode_permissions,
-    structured_output_text_prompt, variant_for_effort, OpenCodeResponse,
+    normalize_opencode_tool, parse_provider_model, permission_rules_for_mode,
+    should_auto_approve_opencode_permissions, structured_output_text_prompt, variant_for_effort,
+    OpenCodeResponse,
 };
 use super::types::OpenCodePermissionRequestEvent;
+use super::types::OpenCodeTurnRef;
 use crate::http_server::EmitExt;
 use crate::opencode_server::OpenCodeServer;
 use serde_json::{json, Value};
@@ -29,7 +31,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use stream::StreamMsg;
 use tauri::AppHandle;
-use turn::{Outcome, TurnEmit, TurnState};
+use turn::{Outcome, TurnEmit, TurnResult, TurnState};
 
 const INSTRUCTIONS_KEY: &str = "jean";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -165,6 +167,7 @@ pub fn execute_turn(
     }
 
     let inbox_id = client.prompt(&opencode_session_id, &text, "steer")?;
+    record_turn(app, &req, &opencode_session_id, &inbox_id);
     state.expect_delivery(inbox_id);
     let _active_turn = steer::ActiveTurn::register(&opencode_session_id);
     log::info!(
@@ -178,7 +181,7 @@ pub fn execute_turn(
         req.session_id.to_string(),
     );
 
-    let outcome = match wait_for_outcome(
+    let outcome = wait_for_outcome(
         &client,
         &events,
         &mut state,
@@ -186,38 +189,212 @@ pub fn execute_turn(
         cancelled,
         TURN_TIMEOUT,
         |emit| handle_emit(app, &client, &req, emit),
-    )? {
-        Some(outcome) => outcome,
-        None => return Ok(cancelled_response(opencode_session_id, state)),
-    };
+    )?;
+    finish_turn(
+        app,
+        &req,
+        opencode_session_id,
+        outcome,
+        state.finish(),
+        cancelled,
+        true,
+    )
+}
 
+/// The response for a turn that ended with `outcome` (`None`: Jean
+/// cancelled it). With `notify`, emits `chat:done` or `chat:error`.
+fn finish_turn(
+    app: &AppHandle,
+    req: &TurnRequest<'_>,
+    opencode_session_id: String,
+    outcome: Option<Outcome>,
+    result: TurnResult,
+    cancelled: &AtomicBool,
+    notify: bool,
+) -> Result<OpenCodeResponse, String> {
+    let response = |cancelled: bool, result: TurnResult| OpenCodeResponse {
+        content: result.content,
+        session_id: opencode_session_id.clone(),
+        tool_calls: result.tool_calls,
+        content_blocks: result.content_blocks,
+        cancelled,
+        usage: if cancelled { None } else { result.usage },
+    };
     match outcome {
-        Outcome::Failed(error) => {
-            emit_chat_error(app, req.session_id, req.worktree_id, &error);
+        None => Ok(response(true, result)),
+        Some(Outcome::Failed(error)) => {
+            if notify {
+                emit_chat_error(app, req.session_id, req.worktree_id, &error);
+            }
             Err(error)
         }
         // 2.x also interrupts the execution when the user rejects a
         // permission. As on 1.x, that ends the turn; only a Jean cancel
         // makes it a cancelled turn.
-        Outcome::Succeeded | Outcome::Interrupted => {
-            if cancelled.load(Ordering::SeqCst) {
-                return Ok(cancelled_response(opencode_session_id, state));
+        Some(_) if cancelled.load(Ordering::SeqCst) => Ok(response(true, result)),
+        Some(_) => {
+            if notify {
+                emit_chat_done(
+                    app,
+                    req.session_id,
+                    req.worktree_id,
+                    req.execution_mode == Some("plan") && !result.content.is_empty(),
+                );
             }
-            let result = state.finish();
-            emit_chat_done(
-                app,
-                req.session_id,
-                req.worktree_id,
-                req.execution_mode == Some("plan") && !result.content.is_empty(),
-            );
-            Ok(OpenCodeResponse {
-                content: result.content,
-                session_id: opencode_session_id,
-                tool_calls: result.tool_calls,
-                content_blocks: result.content_blocks,
-                cancelled: false,
-                usage: result.usage,
-            })
+            Ok(response(false, result))
+        }
+    }
+}
+
+/// Store the turn on its run, so a restarted Jean can re-attach to it. Only
+/// a recorded turn may survive Jean quitting.
+fn record_turn(app: &AppHandle, req: &TurnRequest<'_>, opencode_session_id: &str, prompt_id: &str) {
+    let turn = OpenCodeTurnRef {
+        session_id: opencode_session_id.to_string(),
+        prompt_id: prompt_id.to_string(),
+    };
+    let recorded = super::run_log::RunLogWriter::resume(app, req.session_id, req.run_id)
+        .and_then(|mut writer| writer.set_opencode_turn(turn));
+    match recorded {
+        Ok(()) if cfg!(unix) => super::registry::mark_cancel_flag_survivable(req.session_id),
+        Ok(()) => {}
+        Err(e) => log::warn!("OpenCode: could not record the turn for recovery: {e}"),
+    }
+}
+
+/// History items read to rebuild a turn after a restart (the 2.x maximum
+/// page). An older part of a longer turn is not rebuilt.
+const RESUME_HISTORY_LIMIT: u32 = 200;
+/// A busy session keeps the wait call open; an idle one answers at once.
+const IDLE_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Re-attach to a turn that ran on the server while Jean was closed: show
+/// requests that wait for the user, stream the rest of the turn, then
+/// rebuild the whole reply from the session history. Does not emit
+/// `chat:done`/`chat:error`: the caller does, after it saved the reply.
+pub fn resume_turn(
+    app: &AppHandle,
+    server: &OpenCodeServer,
+    req: TurnRequest<'_>,
+    turn: &OpenCodeTurnRef,
+    cancelled: &Arc<AtomicBool>,
+) -> Result<OpenCodeResponse, String> {
+    let client = V2Client::new(server, Duration::from_secs(60))?;
+    let opencode_session_id = turn.session_id.clone();
+    let working_dir = req.working_dir.to_string_lossy().to_string();
+    super::registry::update_cancel_flag_context(
+        req.session_id,
+        opencode_session_id.clone(),
+        working_dir.clone(),
+    );
+    if cfg!(unix) {
+        super::registry::mark_cancel_flag_survivable(req.session_id);
+    }
+
+    let mut state = TurnState::new(&opencode_session_id);
+    let events = stream::open(server);
+    if !wait_connected(&events, cancelled)? {
+        return Ok(cancelled_response(opencode_session_id, state));
+    }
+    state.expect_delivery(turn.prompt_id.clone());
+    let history = client.history(&opencode_session_id, RESUME_HISTORY_LIMIT)?;
+    state.resync(&history);
+
+    let outcome = if state.outcome().is_some() {
+        state.outcome().cloned()
+    } else if execution_was_lost(server, &client, &opencode_session_id)? {
+        // The server that ran the turn stopped (for example a reboot).
+        log::warn!("OpenCode: turn {} was lost with its server", turn.prompt_id);
+        Some(Outcome::Interrupted)
+    } else {
+        resurface_pending_requests(app, &client, &req, &history);
+        let _active_turn = steer::ActiveTurn::register(&opencode_session_id);
+        wait_for_outcome(
+            &client,
+            &events,
+            &mut state,
+            &opencode_session_id,
+            cancelled,
+            TURN_TIMEOUT,
+            |emit| handle_emit(app, &client, &req, emit),
+        )?
+    };
+
+    // Events cover only the time since the restart; history has it all.
+    let result = client
+        .history(&opencode_session_id, RESUME_HISTORY_LIMIT)
+        .ok()
+        .and_then(|history| turn::turn_from_history(&history, &turn.prompt_id))
+        .map(|(_, result)| result)
+        .unwrap_or_else(|| state.finish());
+    finish_turn(
+        app,
+        &req,
+        opencode_session_id,
+        outcome,
+        result,
+        cancelled,
+        false,
+    )
+}
+
+/// True when the session runs no execution, has nothing queued, and still
+/// shows no end of the turn: the execution died with an earlier server.
+fn execution_was_lost(
+    server: &OpenCodeServer,
+    client: &V2Client,
+    opencode_session_id: &str,
+) -> Result<bool, String> {
+    if !client.inbox(opencode_session_id)?.is_empty() {
+        return Ok(false);
+    }
+    if !V2Client::new(server, IDLE_PROBE_TIMEOUT)?.is_idle(opencode_session_id)? {
+        return Ok(false);
+    }
+    // The turn can have ended between the history read and the probe.
+    let history = client.history(opencode_session_id, 1)?;
+    Ok(history
+        .first()
+        .is_none_or(|latest| latest["type"] != "idle"))
+}
+
+/// Requests asked while Jean was closed have no event any more: show the
+/// pending permissions, and the question tool calls whose forms wait.
+fn resurface_pending_requests(
+    app: &AppHandle,
+    client: &V2Client,
+    req: &TurnRequest<'_>,
+    history: &[Value],
+) {
+    let session = req.existing_opencode_session_id.unwrap_or_default();
+    let working_dir = Some(req.working_dir.to_string_lossy().to_string());
+    for request in client.pending_permissions(session).unwrap_or_default() {
+        let request = turn::permission_request(&request, working_dir.clone());
+        handle_emit(app, client, req, TurnEmit::PermissionAsked(request));
+    }
+    for form in client.session_forms(session).unwrap_or_default() {
+        let form_id = form["id"].as_str().unwrap_or_default();
+        if form["metadata"]["kind"] != "question" {
+            cancel_form(client, session, form_id);
+            continue;
+        }
+        let tool_id = form["metadata"]["tool"]["id"].as_str().unwrap_or_default();
+        let tool = history
+            .iter()
+            .filter_map(|message| message["content"].as_array())
+            .flatten()
+            .find(|item| item["type"] == "tool" && item["id"] == tool_id);
+        match tool {
+            Some(tool) => {
+                let mut input = tool["state"]["input"].clone();
+                let name = normalize_opencode_tool(
+                    tool["name"].as_str().unwrap_or("question"),
+                    &mut input,
+                );
+                let id = tool_id.to_string();
+                handle_emit(app, client, req, TurnEmit::ToolUse { id, name, input });
+            }
+            None => cancel_form(client, session, form_id),
         }
     }
 }
@@ -625,6 +802,32 @@ mod tests {
         let long = request(None, "Write a 1500 word essay about rivers.", "build");
         let (_, outcome, _, _) = run(&long, Some(Duration::from_secs(4)));
         assert_eq!(outcome, None, "Jean cancel returns before the turn ends");
+    }
+
+    /// The calls Jean uses to re-attach after a restart, on an idle session.
+    /// Needs no inference. Same environment as `live_v2_turn`.
+    #[test]
+    #[ignore]
+    fn live_v2_resume_probes() {
+        let server = OpenCodeServer {
+            url: std::env::var("OPENCODE_V2_URL").unwrap(),
+            api: crate::opencode_server::OpenCodeApi::V2,
+            password: std::env::var("OPENCODE_V2_PASSWORD").ok(),
+        };
+        let dir = std::env::var("OPENCODE_V2_DIR").unwrap();
+        let client = V2Client::new(&server, Duration::from_secs(30)).unwrap();
+        let session = client
+            .create_session(json!({ "location": { "directory": dir }, "agent": "build" }))
+            .unwrap();
+        assert!(client.inbox(&session).unwrap().is_empty());
+        assert!(client.pending_permissions(&session).unwrap().is_empty());
+        assert!(client.session_forms(&session).unwrap().is_empty());
+        assert!(client.history(&session, RESUME_HISTORY_LIMIT).unwrap().is_empty());
+        let probe = V2Client::new(&server, IDLE_PROBE_TIMEOUT).unwrap();
+        assert!(probe.is_idle(&session).unwrap());
+        // A turn whose prompt never ran, on an idle session: lost.
+        assert!(execution_was_lost(&server, &client, &session).unwrap());
+        client.delete_session(&session).unwrap();
     }
 
     /// Steering, question forms and one-shots against a live 2.x server.

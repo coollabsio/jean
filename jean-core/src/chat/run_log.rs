@@ -331,6 +331,25 @@ impl RunLogWriter {
         Ok(())
     }
 
+    /// Record the OpenCode 2.x turn of this run, so a restarted Jean can
+    /// re-attach to it (`repair_session_runs`).
+    pub fn set_opencode_turn(&mut self, turn: super::types::OpenCodeTurnRef) -> Result<(), String> {
+        let run_id = self.run_id.clone();
+        with_metadata_mut(
+            &self.app,
+            &self.session_id,
+            &self.worktree_id,
+            &self.session_name,
+            self.order,
+            |metadata| {
+                if let Some(run) = metadata.find_run_mut(&run_id) {
+                    run.opencode_turn = Some(turn);
+                }
+                Ok(())
+            },
+        )
+    }
+
     /// Clear the Codex turn ID (turn completed successfully).
     pub fn clear_codex_turn_id(&mut self) -> Result<(), String> {
         let run_id = self.run_id.clone();
@@ -583,6 +602,7 @@ pub fn start_run(
         usage: None, // Set on completion via complete()
         codex_thread_id: None,
         codex_turn_id: None,
+        opencode_turn: None,
         cursor_chat_id: None,
         grok_session_id: None,
         kimi_session_id: None,
@@ -1983,6 +2003,7 @@ mod tests {
             usage: None,
             codex_thread_id: None,
             codex_turn_id: None,
+            opencode_turn: None,
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
@@ -3166,6 +3187,7 @@ Move services between instances without downtime.
             usage: None,
             codex_thread_id: None,
             codex_turn_id: None,
+            opencode_turn: None,
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
@@ -3644,6 +3666,20 @@ fn repair_session_runs(
                             metadata.claude_session_id = Some(sid);
                         }
                     }
+                } else if run.opencode_turn.is_some() && cfg!(unix) {
+                    // The OpenCode 2.x server runs the turn and outlives Jean
+                    // on Unix; resume_session re-attaches to it.
+                    run.status = RunStatus::Resumable;
+                    recovered.push(RecoveredRun {
+                        session_id: session_id.to_string(),
+                        worktree_id: worktree_id.clone(),
+                        run_id: run.run_id.clone(),
+                        user_message: run.user_message.clone(),
+                        resumable: true,
+                        execution_mode: run.execution_mode.clone(),
+                        started_at: run.started_at,
+                    });
+                    continue;
                 } else if run.codex_thread_id.is_some() {
                     // Codex sessions can be resumed via thread/resume even after
                     // Jean crashes — threads are persisted to disk by app-server.
@@ -3703,6 +3739,23 @@ fn repair_session_runs(
     }
 
     recovered
+}
+
+/// Whether any session has an unfinished OpenCode 2.x turn. While one
+/// exists, Jean keeps the OpenCode server running across a restart.
+pub fn has_incomplete_opencode_turns(app: &tauri::AppHandle) -> bool {
+    let Ok(session_ids) = super::storage::list_all_session_ids(app) else {
+        return false;
+    };
+    session_ids.into_iter().any(|session_id| {
+        let Ok(Some(metadata)) = load_metadata(app, &session_id) else {
+            return false;
+        };
+        metadata.runs.iter().any(|run| {
+            run.opencode_turn.is_some()
+                && matches!(run.status, RunStatus::Running | RunStatus::Resumable)
+        })
+    })
 }
 
 /// Check if a run's JSONL file contains a "type":"result" line,

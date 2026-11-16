@@ -1459,6 +1459,7 @@ mod tests {
             usage: None,
             codex_thread_id: None,
             codex_turn_id: None,
+            opencode_turn: None,
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,

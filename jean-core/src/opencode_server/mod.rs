@@ -44,7 +44,9 @@ static DIAGNOSTIC_GENERATION: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Debug)]
 struct OpenCodeServerProcess {
-    child: Child,
+    /// `None` for a 2.x server adopted from an earlier Jean (`adopt_server`).
+    child: Option<Child>,
+    pid: u32,
     port: u16,
     hostname: String,
     api: OpenCodeApi,
@@ -371,6 +373,10 @@ struct ServerPidRecord {
     jean_pid: u32,
     server_pid: u32,
     port: u16,
+    /// 2.x only: lets a later Jean adopt a server left running for
+    /// unfinished turns. The file is readable by the user only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    password: Option<String>,
 }
 
 fn pid_file_path() -> Option<PathBuf> {
@@ -380,16 +386,64 @@ fn pid_file_path() -> Option<PathBuf> {
         .map(|d| d.join("opencode-server.pid"))
 }
 
-fn write_pid_file(server_pid: u32, port: u16) {
+fn write_pid_file(server_pid: u32, port: u16, password: Option<&str>) {
     let Some(path) = pid_file_path() else { return };
     let record = ServerPidRecord {
         jean_pid: std::process::id(),
         server_pid,
         port,
+        password: password.map(str::to_string),
     };
-    if let Ok(json) = serde_json::to_string(&record) {
-        let _ = fs::write(&path, json);
+    let Ok(json) = serde_json::to_string(&record) else {
+        return;
+    };
+    // Remove first: `mode` applies only to a new file, and an older file
+    // can have wider permissions.
+    let _ = fs::remove_file(&path);
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
     }
+    if let Err(e) = options
+        .open(&path)
+        .and_then(|mut file| std::io::Write::write_all(&mut file, json.as_bytes()))
+    {
+        log::warn!("Failed to write {}: {e}", path.display());
+    }
+}
+
+fn read_pid_file(path: &std::path::Path) -> Option<ServerPidRecord> {
+    serde_json::from_str(&fs::read_to_string(path).ok()?).ok()
+}
+
+/// Take over a 2.x server that an earlier Jean left running for unfinished
+/// turns (`shutdown_managed_server`, `cleanup_orphaned_server`).
+fn adopt_server(port: u16) -> Option<OpenCodeServerProcess> {
+    let record = read_pid_file(&pid_file_path()?)?;
+    let password = record.password?;
+    if record.port != port || !crate::platform::is_process_alive(record.server_pid) {
+        return None;
+    }
+    let url = server_url(DEFAULT_HOSTNAME, port);
+    if probe_health(&url, Some(&password)) != ServerHealth::Healthy(OpenCodeApi::V2) {
+        return None;
+    }
+    log::info!(
+        "Adopted the OpenCode 2.x server (PID {}) left running for unfinished turns",
+        record.server_pid
+    );
+    write_pid_file(record.server_pid, port, Some(&password));
+    Some(OpenCodeServerProcess {
+        child: None,
+        pid: record.server_pid,
+        port,
+        hostname: DEFAULT_HOSTNAME.to_string(),
+        api: OpenCodeApi::V2,
+        password: Some(password),
+    })
 }
 
 fn remove_pid_file() {
@@ -422,6 +476,21 @@ pub fn cleanup_orphaned_server(app: &AppHandle) {
         }
     };
 
+    // A 2.x server kept for unfinished turns: leave it for `adopt_server`.
+    let url = server_url(DEFAULT_HOSTNAME, record.port);
+    if let Some(password) = record.password.as_deref() {
+        if crate::platform::is_process_alive(record.server_pid)
+            && probe_health(&url, Some(password)) == ServerHealth::Healthy(OpenCodeApi::V2)
+            && crate::chat::run_log::has_incomplete_opencode_turns(app)
+        {
+            log::info!(
+                "[OPENCODE CLEANUP] Keeping OpenCode 2.x server (PID {}) for unfinished turns",
+                record.server_pid
+            );
+            return;
+        }
+    }
+
     // If the Jean instance that spawned the server is still alive, leave it alone.
     if crate::platform::is_process_alive(record.jean_pid) {
         log::debug!(
@@ -433,7 +502,6 @@ pub fn cleanup_orphaned_server(app: &AppHandle) {
 
     // Jean is dead. Check if the server is still running AND healthy on our port
     // (health check guards against PID recycling — an unrelated process won't respond).
-    let url = server_url(DEFAULT_HOSTNAME, record.port);
     let responds = |url: &str| {
         matches!(
             probe_health(url, None),
@@ -465,6 +533,9 @@ pub fn cleanup_orphaned_server(app: &AppHandle) {
     let _ = fs::remove_file(&path);
 }
 
+/// Output of a managed 2.x server (in the app data directory).
+const SERVER_LOG_FILE: &str = "opencode-server.log";
+
 const CONFIG_CONTENT_ENV: &str = "OPENCODE_CONFIG_CONTENT";
 
 /// Inline OpenCode config that sets `compaction.auto`, merged into an
@@ -480,6 +551,15 @@ fn config_content_with_auto_compact(inherited: Option<&str>, auto: Option<bool>)
     }
     config["compaction"]["auto"] = serde_json::json!(auto);
     Some(config.to_string())
+}
+
+impl OpenCodeServerProcess {
+    fn is_alive(&mut self) -> bool {
+        match self.child.as_mut() {
+            Some(child) => matches!(child.try_wait(), Ok(None)),
+            None => crate::platform::is_process_alive(self.pid),
+        }
+    }
 }
 
 fn managed_server(proc_info: &OpenCodeServerProcess) -> OpenCodeServer {
@@ -504,22 +584,25 @@ pub fn ensure_running(app: &AppHandle) -> Result<OpenCodeServer, String> {
     // If we manage a process and it's still alive, return it. Check it before
     // the port probe: only the managed record knows a 2.x server's password.
     if let Some(proc_info) = guard.as_mut() {
-        match proc_info.child.try_wait() {
-            Ok(None) => {
-                let server = managed_server(proc_info);
-                let health = wait_for_server(&server.url, server.password.as_deref(), 5);
-                if health == ServerHealth::Healthy(server.api) {
-                    return Ok(server);
-                }
+        if proc_info.is_alive() {
+            let server = managed_server(proc_info);
+            let health = wait_for_server(&server.url, server.password.as_deref(), 5);
+            if health == ServerHealth::Healthy(server.api) {
+                return Ok(server);
             }
-            Ok(Some(_)) | Err(_) => {
-                *guard = None;
-            }
+        } else {
+            *guard = None;
         }
     }
 
-    // If an unmanaged server is already running, use it.
+    // Take over a 2.x server an earlier Jean left running for unfinished
+    // turns, else use an unmanaged server that is already running.
     if guard.is_none() {
+        if let Some(proc_info) = adopt_server(port) {
+            let server = managed_server(&proc_info);
+            *guard = Some(proc_info);
+            return Ok(server);
+        }
         if let Some(server) = unmanaged_server(&url)? {
             return Ok(server);
         }
@@ -549,6 +632,24 @@ pub fn ensure_running(app: &AppHandle) -> Result<OpenCodeServer, String> {
         // instead of discarding it to null.
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // A 2.x server can outlive Jean for unfinished turns. Pipes would break
+    // when Jean exits, so its output goes to a log file.
+    let log_path = (api == OpenCodeApi::V2)
+        .then(|| {
+            app.path()
+                .app_data_dir()
+                .ok()
+                .map(|d| d.join(SERVER_LOG_FILE))
+        })
+        .flatten();
+    if let Some(path) = &log_path {
+        let log = fs::File::create(path)
+            .map_err(|e| format!("Failed to create {}: {e}", path.display()))?;
+        let log_err = log
+            .try_clone()
+            .map_err(|e| format!("Failed to open {}: {e}", path.display()))?;
+        cmd.stdout(log).stderr(log_err);
+    }
 
     // The server is shared and stops when idle, so a changed value applies
     // from the next server start.
@@ -597,7 +698,8 @@ pub fn ensure_running(app: &AppHandle) -> Result<OpenCodeServer, String> {
 
     let server_pid = child.id();
     *guard = Some(OpenCodeServerProcess {
-        child,
+        child: Some(child),
+        pid: server_pid,
         port,
         hostname: hostname.clone(),
         api,
@@ -605,7 +707,7 @@ pub fn ensure_running(app: &AppHandle) -> Result<OpenCodeServer, String> {
     });
 
     // Write PID file so a future Jean instance can clean up if we crash.
-    write_pid_file(server_pid, port);
+    write_pid_file(server_pid, port, password.as_deref());
 
     match wait_for_server(&url, password.as_deref(), 50) {
         ServerHealth::Healthy(answered) if answered == api => {}
@@ -616,6 +718,11 @@ pub fn ensure_running(app: &AppHandle) -> Result<OpenCodeServer, String> {
         ServerHealth::Unreachable => {
             // Give logger threads a moment to flush a few lines after exit.
             std::thread::sleep(Duration::from_millis(150));
+            if let Some(output) = log_path.and_then(|path| fs::read_to_string(path).ok()) {
+                output
+                    .lines()
+                    .for_each(|line| push_diagnostic_line("log", line, diagnostics_generation));
+            }
             let diag = diagnostics_summary_for_error();
             return Err(format!(
                 "OpenCode server started but did not become healthy in time. Diagnostics: {diag}"
@@ -710,11 +817,12 @@ fn stop_managed_server_locked(
         return false;
     };
 
-    let pid = proc_info.child.id();
-    let _ = crate::platform::kill_process_tree(pid);
+    let _ = crate::platform::kill_process_tree(proc_info.pid);
     // Fallback direct child kill in case tree-kill is unsupported/fails.
-    let _ = proc_info.child.kill();
-    let _ = proc_info.child.wait();
+    if let Some(child) = proc_info.child.as_mut() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
     **guard = None;
     remove_pid_file();
     true
@@ -725,7 +833,7 @@ fn stop_managed_server_locked(
 pub fn current_server() -> Option<OpenCodeServer> {
     if let Ok(mut guard) = OPENCODE_SERVER.lock() {
         if let Some(proc) = guard.as_mut() {
-            if matches!(proc.child.try_wait(), Ok(None)) {
+            if proc.is_alive() {
                 return Some(managed_server(proc));
             }
         }
@@ -736,8 +844,26 @@ pub fn current_server() -> Option<OpenCodeServer> {
 }
 
 /// Stop Jean-managed OpenCode server process during app lifecycle shutdown.
+/// A 2.x server with unfinished turns keeps running on Unix; the next Jean
+/// adopts it from the PID file and re-attaches to the turns.
 pub fn shutdown_managed_server() -> Result<bool, String> {
-    stop_managed_server_inner()
+    let mut guard = OPENCODE_SERVER
+        .lock()
+        .map_err(|e| format!("OpenCode server lock error: {e}"))?;
+    let keep = cfg!(unix)
+        && guard
+            .as_ref()
+            .is_some_and(|proc_info| proc_info.api == OpenCodeApi::V2)
+        && APP_HANDLE
+            .get()
+            .is_some_and(crate::chat::run_log::has_incomplete_opencode_turns);
+    if keep {
+        log::info!("Keeping the OpenCode 2.x server running for unfinished turns");
+        // Dropping the record does not stop the process.
+        *guard = None;
+        return Ok(false);
+    }
+    Ok(stop_managed_server_locked(&mut guard))
 }
 
 pub async fn start_opencode_server(app: AppHandle) -> Result<OpenCodeServerStatus, String> {
@@ -759,6 +885,22 @@ pub async fn stop_opencode_server() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pid_records_without_a_password_still_parse() {
+        let old: ServerPidRecord =
+            serde_json::from_str(r#"{"jean_pid":1,"server_pid":2,"port":4096}"#).unwrap();
+        assert_eq!(old.password, None);
+        let record = ServerPidRecord {
+            jean_pid: 1,
+            server_pid: 2,
+            port: 4096,
+            password: Some("pw".to_string()),
+        };
+        let round: ServerPidRecord =
+            serde_json::from_str(&serde_json::to_string(&record).unwrap()).unwrap();
+        assert_eq!(round.password.as_deref(), Some("pw"));
+    }
 
     #[test]
     fn health_probe_tells_v1_from_v2_servers() {
@@ -971,7 +1113,8 @@ mod tests {
             .spawn()
             .unwrap();
         *OPENCODE_SERVER.lock().unwrap() = Some(OpenCodeServerProcess {
-            child,
+            pid: child.id(),
+            child: Some(child),
             port: DEFAULT_PORT,
             hostname: DEFAULT_HOSTNAME.to_string(),
             api: OpenCodeApi::V1,
@@ -1006,7 +1149,8 @@ mod tests {
             .spawn()
             .unwrap();
         *OPENCODE_SERVER.lock().unwrap() = Some(OpenCodeServerProcess {
-            child,
+            pid: child.id(),
+            child: Some(child),
             port: DEFAULT_PORT,
             hostname: DEFAULT_HOSTNAME.to_string(),
             api: OpenCodeApi::V1,
@@ -1034,7 +1178,7 @@ pub async fn get_opencode_server_status() -> Result<OpenCodeServerStatus, String
             .map_err(|e| format!("OpenCode server lock error: {e}"))?;
 
         if let Some(proc_info) = guard.as_mut() {
-            managed_running = matches!(proc_info.child.try_wait(), Ok(None));
+            managed_running = proc_info.is_alive();
             if !managed_running {
                 *guard = None;
             }

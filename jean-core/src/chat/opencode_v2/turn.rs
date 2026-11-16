@@ -287,24 +287,14 @@ impl TurnState {
                 reason: error_message(&data),
             }],
             "permission.asked" if in_lineage => {
-                let source = data.get("source").cloned().unwrap_or_default();
-                let tool_call_id =
-                    Some(str_field(&source, "id").to_string()).filter(|id| !id.is_empty());
                 let working_dir = event
                     .get("location")
                     .map(|location| str_field(location, "directory").to_string())
                     .filter(|dir| !dir.is_empty());
-                vec![TurnEmit::PermissionAsked(OpenCodePermissionRequest {
-                    request_id: str_field(&data, "id").to_string(),
-                    opencode_session_id: session.to_string(),
-                    permission: str_field(&data, "action").to_string(),
-                    patterns: strings(data.get("resources")),
-                    always: strings(data.get("save")),
-                    metadata: data.get("metadata").cloned().filter(|v| !v.is_null()),
-                    tool_call_id,
+                vec![TurnEmit::PermissionAsked(permission_request(
+                    &data,
                     working_dir,
-                    api_version: "v2".to_string(),
-                })]
+                ))]
             }
             "permission.replied" if in_lineage => vec![TurnEmit::PermissionReplied {
                 request_id: str_field(&data, "requestID").to_string(),
@@ -408,6 +398,41 @@ impl TurnState {
         vec![TurnEmit::ToolUse { id, name, input }]
     }
 
+    /// A `tool` item of a history assistant message.
+    fn history_tool(&mut self, item: &Value) {
+        let id = str_field(item, "id").to_string();
+        let tool_state = item.get("state").cloned().unwrap_or_default();
+        let mut input = tool_state
+            .get("input")
+            .filter(|input| input.is_object())
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({}));
+        let name = normalize_opencode_tool(str_field(item, "name"), &mut input);
+        let (output, is_error) = match str_field(&tool_state, "status") {
+            "completed" => (Some(tool_output_text(&tool_state)), None),
+            "error" => {
+                let text = tool_output_text(&tool_state);
+                let text = if text.is_empty() {
+                    error_message(&tool_state)
+                } else {
+                    text
+                };
+                (Some(text), Some(true))
+            }
+            _ => (None, None),
+        };
+        self.tool_calls.push(ToolCall {
+            id: id.clone(),
+            name,
+            input,
+            output,
+            parent_tool_use_id: None,
+            is_error,
+            subagent_usage: None,
+        });
+        self.blocks.push(ContentBlock::ToolUse { tool_call_id: id });
+    }
+
     pub fn finish(self) -> TurnResult {
         let content_blocks: Vec<ContentBlock> = self
             .blocks
@@ -431,6 +456,79 @@ impl TurnState {
             usage: self.usage,
         }
     }
+}
+
+/// A 2.x permission request (`permission.asked` data, or an item of the
+/// session's pending permission list) in Jean's shape.
+pub fn permission_request(data: &Value, working_dir: Option<String>) -> OpenCodePermissionRequest {
+    let source = data.get("source").cloned().unwrap_or_default();
+    OpenCodePermissionRequest {
+        request_id: str_field(data, "id").to_string(),
+        opencode_session_id: str_field(data, "sessionID").to_string(),
+        permission: str_field(data, "action").to_string(),
+        patterns: strings(data.get("resources")),
+        always: strings(data.get("save")),
+        metadata: data.get("metadata").cloned().filter(|v| !v.is_null()),
+        tool_call_id: Some(str_field(&source, "id").to_string()).filter(|id| !id.is_empty()),
+        working_dir,
+        api_version: "v2".to_string(),
+    }
+}
+
+/// Rebuild a turn from session history (newest first) after it ran while
+/// Jean was closed. `prompt_id` is the inbox id of the turn's prompt; 2.x
+/// also uses it as the id of the user message. Returns `None` while the
+/// session has not reached idle after the prompt.
+pub fn turn_from_history(messages: &[Value], prompt_id: &str) -> Option<(Outcome, TurnResult)> {
+    let latest = messages.first()?;
+    if str_field(latest, "type") != "idle" {
+        return None;
+    }
+    let prompt_index = messages
+        .iter()
+        .position(|message| str_field(message, "id") == prompt_id);
+    let newer = match prompt_index {
+        Some(index) => &messages[..index],
+        None => {
+            log::warn!("OpenCode: prompt {prompt_id} is not in the history window");
+            messages
+        }
+    };
+    let outcome = match str_field(latest, "outcome") {
+        "succeeded" => Outcome::Succeeded,
+        "interrupted" => Outcome::Interrupted,
+        _ => Outcome::Failed(
+            newer
+                .iter()
+                .find(|message| message.get("error").is_some())
+                .map(error_message)
+                .unwrap_or_else(|| "OpenCode run failed".to_string()),
+        ),
+    };
+    let mut state = TurnState::new("");
+    for message in newer.iter().rev() {
+        if str_field(message, "type") != "assistant" {
+            continue;
+        }
+        if let Some(tokens) = message.get("tokens") {
+            state.usage = Some(usage_from_tokens(tokens));
+        }
+        for item in message
+            .get("content")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let text = str_field(item, "text").to_string();
+            match str_field(item, "type") {
+                "text" => state.blocks.push(ContentBlock::Text { text }),
+                "reasoning" => state.blocks.push(ContentBlock::Thinking { thinking: text }),
+                "tool" => state.history_tool(item),
+                _ => {}
+            }
+        }
+    }
+    Some((outcome, state.finish()))
 }
 
 fn part_kind(event_type: &str) -> PartKind {
@@ -791,5 +889,69 @@ mod tests {
         let result = turn.finish();
         assert_eq!(result.tool_calls[0].name, "Bash");
         assert_eq!(result.tool_calls[0].is_error, Some(true));
+    }
+
+    #[test]
+    fn rebuilds_a_turn_that_ran_while_jean_was_closed() {
+        // Newest first; item shapes from the OpenCode 2.3.0 API schema.
+        let history = vec![
+            json!({ "id": "msg_idle", "type": "idle", "outcome": "succeeded" }),
+            json!({ "id": "msg_a2", "type": "assistant", "content": [{ "type": "text", "text": "done" }], "tokens": { "input": 10, "output": 2, "cache": { "read": 5, "write": 0 } } }),
+            json!({ "id": "msg_a1", "type": "assistant", "content": [
+                { "type": "reasoning", "text": "look first" },
+                { "type": "tool", "id": "call_1", "name": "read", "state": { "status": "completed", "input": { "path": "/a.txt" }, "content": [{ "type": "text", "text": "1: hi" }] }, "time": { "created": 1 } },
+                { "type": "tool", "id": "call_2", "name": "shell", "state": { "status": "error", "input": { "command": "false" }, "error": { "message": "exit 1" } }, "time": { "created": 2 } }
+            ] }),
+            json!({ "id": "msg_prompt", "type": "user", "text": "go" }),
+            json!({ "id": "msg_old", "type": "assistant", "content": [{ "type": "text", "text": "earlier turn" }] }),
+        ];
+        let (outcome, result) = turn_from_history(&history, "msg_prompt").unwrap();
+        assert_eq!(outcome, Outcome::Succeeded);
+        assert_eq!(result.content, "done");
+        assert_eq!(
+            result.content_blocks,
+            vec![
+                ContentBlock::Thinking {
+                    thinking: "look first".to_string()
+                },
+                ContentBlock::ToolUse {
+                    tool_call_id: "call_1".to_string()
+                },
+                ContentBlock::ToolUse {
+                    tool_call_id: "call_2".to_string()
+                },
+                ContentBlock::Text {
+                    text: "done".to_string()
+                },
+            ]
+        );
+        assert_eq!(result.tool_calls[0].output.as_deref(), Some("1: hi"));
+        assert_eq!(result.tool_calls[0].input["file_path"], "/a.txt");
+        assert_eq!(result.tool_calls[0].name, "Read");
+        assert_eq!(result.tool_calls[1].output.as_deref(), Some("exit 1"));
+        assert_eq!(result.tool_calls[1].is_error, Some(true));
+        assert_eq!(result.usage.unwrap().input_tokens, 10);
+    }
+
+    #[test]
+    fn a_turn_is_rebuilt_only_after_the_session_is_idle() {
+        let running = vec![
+            json!({ "id": "msg_a1", "type": "assistant", "content": [{ "type": "text", "text": "part" }] }),
+            json!({ "id": "msg_prompt", "type": "user", "text": "go" }),
+        ];
+        assert!(turn_from_history(&running, "msg_prompt").is_none());
+        // An idle item older than the prompt belongs to an earlier turn.
+        let queued = vec![
+            json!({ "id": "msg_prompt", "type": "user", "text": "go" }),
+            json!({ "id": "msg_idle", "type": "idle", "outcome": "succeeded" }),
+        ];
+        assert!(turn_from_history(&queued, "msg_prompt").is_none());
+        let failed = vec![
+            json!({ "id": "msg_idle", "type": "idle", "outcome": "failed" }),
+            json!({ "id": "msg_a1", "type": "assistant", "content": [], "error": { "message": "quota" } }),
+            json!({ "id": "msg_prompt", "type": "user", "text": "go" }),
+        ];
+        let (outcome, _) = turn_from_history(&failed, "msg_prompt").unwrap();
+        assert_eq!(outcome, Outcome::Failed("quota".to_string()));
     }
 }

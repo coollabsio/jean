@@ -28,6 +28,8 @@ struct OpenCodeCancelEntry {
     flag: Arc<AtomicBool>,
     opencode_session_id: Option<String>,
     working_dir: Option<String>,
+    /// The turn runs on an OpenCode 2.x server that outlives Jean.
+    survivable: bool,
 }
 
 static CANCEL_FLAGS: Lazy<Mutex<HashMap<String, OpenCodeCancelEntry>>> =
@@ -407,6 +409,7 @@ pub fn register_cancel_flag(session_id: String, flag: Arc<AtomicBool>) -> bool {
             flag,
             opencode_session_id: None,
             working_dir: None,
+            survivable: false,
         },
     );
     mark_send_started(&session_id);
@@ -425,6 +428,14 @@ pub fn update_cancel_flag_context(
     if let Some(entry) = flags.get_mut(session_id) {
         entry.opencode_session_id = Some(opencode_session_id);
         entry.working_dir = Some(working_dir);
+    }
+}
+
+/// Mark the session's OpenCode turn as one that survives Jean quitting
+/// (OpenCode 2.x on Unix: the server keeps running and Jean re-attaches).
+pub fn mark_cancel_flag_survivable(session_id: &str) {
+    if let Some(entry) = lock_recover(&CANCEL_FLAGS, "CANCEL_FLAGS").get_mut(session_id) {
+        entry.survivable = true;
     }
 }
 
@@ -651,10 +662,14 @@ pub fn get_actively_managed_sessions() -> HashSet<String> {
 ///
 /// Survivable: detached Claude CLI processes, host-backed Pi/Grok/Kimi ACP hosts,
 /// and Codex app-server turns on Unix (server/host runs independently of Jean).
-/// Non-survivable: OpenCode sessions (managed server dies with Jean), piped
+/// OpenCode 2.x turns marked by `mark_cancel_flag_survivable` also survive.
+/// Non-survivable: OpenCode 1.x sessions (managed server dies with Jean), piped
 /// CLI children (Cursor, Windows Grok/Pi/Kimi), and Codex turns on Windows.
 pub fn has_nonsurvivable_running_sessions() -> bool {
-    if !lock_recover(&CANCEL_FLAGS, "CANCEL_FLAGS").is_empty() {
+    if lock_recover(&CANCEL_FLAGS, "CANCEL_FLAGS")
+        .values()
+        .any(|entry| !entry.survivable)
+    {
         return true;
     }
 
@@ -790,6 +805,7 @@ mod tests {
             usage: None,
             codex_thread_id: None,
             codex_turn_id: None,
+            opencode_turn: None,
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
@@ -861,6 +877,31 @@ mod tests {
 
         unregister_codex_turn("codex-session");
         assert_eq!(get_codex_turn("codex-session"), None);
+
+        clear_registries();
+    }
+
+    #[test]
+    fn only_opencode_2x_turns_marked_survivable_let_jean_quit() {
+        let _guard = lock_recover(&TEST_LOCK, "TEST_LOCK");
+        clear_registries();
+
+        assert!(register_cancel_flag(
+            "opencode-v2".to_string(),
+            Arc::new(AtomicBool::new(false))
+        ));
+        assert!(
+            has_nonsurvivable_running_sessions(),
+            "1.x turns die with Jean"
+        );
+        mark_cancel_flag_survivable("opencode-v2");
+        assert!(!has_nonsurvivable_running_sessions());
+
+        assert!(register_cancel_flag(
+            "opencode-v1".to_string(),
+            Arc::new(AtomicBool::new(false))
+        ));
+        assert!(has_nonsurvivable_running_sessions());
 
         clear_registries();
     }

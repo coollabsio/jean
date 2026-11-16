@@ -116,6 +116,60 @@ impl V2Client {
         }
     }
 
+    /// The newest `limit` history items, newest first.
+    pub fn history(&self, session_id: &str, limit: u32) -> Result<Vec<Value>, String> {
+        let path = format!("/api/session/{session_id}/message?limit={limit}");
+        match self.call(Method::GET, &path, None)? {
+            Value::Array(items) => Ok(items),
+            other => Err(format!("OpenCode message list is not an array: {other}")),
+        }
+    }
+
+    fn list(&self, path: &str) -> Result<Vec<Value>, String> {
+        match self.call(Method::GET, path, None)? {
+            Value::Array(items) => Ok(items),
+            other => Err(format!("OpenCode {path} is not a list: {other}")),
+        }
+    }
+
+    /// Prompts queued in the session inbox and not delivered yet.
+    pub fn inbox(&self, session_id: &str) -> Result<Vec<Value>, String> {
+        self.list(&format!("/api/session/{session_id}/inbox"))
+    }
+
+    /// Permission requests of the session that wait for a reply.
+    pub fn pending_permissions(&self, session_id: &str) -> Result<Vec<Value>, String> {
+        self.list(&format!("/api/session/{session_id}/permission"))
+    }
+
+    /// Forms of the session that wait for a reply.
+    pub fn session_forms(&self, session_id: &str) -> Result<Vec<Value>, String> {
+        self.list(&format!("/api/session/{session_id}/form"))
+    }
+
+    /// Whether the server runs no execution for the session now. The wait
+    /// call returns at once for an idle session and blocks for a busy one,
+    /// so a client timeout means busy. Use a client with a short timeout.
+    pub fn is_idle(&self, session_id: &str) -> Result<bool, String> {
+        let path = format!("/api/experimental/session/{session_id}/wait");
+        let result = self
+            .http
+            .post(format!("{}{path}", self.server.url))
+            .basic_auth(SERVER_USERNAME, self.server.password.as_deref())
+            .send();
+        match result {
+            Ok(response) => {
+                let status = response.status().as_u16();
+                let text = response.text().unwrap_or_default();
+                parse_response(status, &text)
+                    .map(|_| true)
+                    .map_err(|e| format!("OpenCode POST {path} failed: {e}"))
+            }
+            Err(e) if e.is_timeout() => Ok(false),
+            Err(e) => Err(format!("OpenCode POST {path} failed: {e}")),
+        }
+    }
+
     pub fn interrupt(&self, session_id: &str) -> Result<(), String> {
         let path = format!("/api/session/{session_id}/interrupt");
         self.call(Method::POST, &path, None).map(drop)

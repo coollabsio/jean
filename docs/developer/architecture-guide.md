@@ -1057,6 +1057,20 @@ supports both. The 1.x code in `jean-core/src/chat/opencode.rs` is unchanged;
 - **MCP config**: 2.x reads `mcp.servers.<name>` with a `disabled` flag;
   1.x reads `mcp.<name>` with `enabled`. Jean writes the shape of the
   installed CLI (`opencode_cli::is_opencode_v2`) and reads both.
+- **Restarts** (Unix): a 2.x turn survives Jean quitting or crashing.
+  - When the prompt is queued, the run stores `opencode_turn` (session id
+    and prompt inbox id), and the turn no longer blocks quit
+    (`registry::mark_cancel_flag_survivable`).
+  - The managed 2.x server writes to `opencode-server.log`, not to pipes,
+    and its PID file (mode 0600) holds the password. While unfinished 2.x
+    turns exist, quit and startup cleanup keep the server, and the next
+    `ensure_running` adopts it (`adopt_server`).
+  - Recovery marks such runs `Resumable`. `resume_session` calls
+    `opencode_v2::resume_turn`: it shows pending permissions and question
+    forms again, streams the rest of the turn, and rebuilds the whole reply
+    from `GET /api/session/{id}/message` (at most 200 items, the 2.x page
+    limit). If the server that ran the turn is gone (no running execution,
+    nothing queued, no end in history), the turn ends as interrupted.
 - **Versions**: `opencode_cli` lists and installs 1.x and tested 2.x minors
   only (`MAX_TESTED_OPENCODE_2_MINOR`). Update checks never move an OpenCode
   install to another major version, because 1.x and 2.x configs differ.

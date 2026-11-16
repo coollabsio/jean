@@ -5671,92 +5671,20 @@ async fn send_chat_message_inner(
     ) && !unified_response.cancelled
         && !skip_synthetic_history
     {
-        if let Ok(mut file) = std::fs::OpenOptions::new().append(true).open(&output_file) {
-            if !unified_response.content_blocks.is_empty() {
-                // Filter out echoed user prompt: OpenCode includes the user
-                // message as the first text block in its response.
-                // Compare against the *effective* prompt (message_for_backend),
-                // not the raw message — when a hidden provider-switch handoff is
-                // prepended, the backend echoes the submitted prompt including the
-                // handoff. Matching the raw message would let that injected history
-                // leak into the visible assistant transcript/NDJSON.
-                let trimmed_prompt = message_for_backend.trim();
-                let blocks_to_write: Vec<&super::types::ContentBlock> = {
-                    let mut iter = unified_response.content_blocks.iter().peekable();
-                    let first = iter.peek();
-                    let skip_first = matches!(first,
-                        Some(super::types::ContentBlock::Text { text }) if text.trim() == trimmed_prompt
-                    );
-                    if skip_first {
-                        iter.next();
-                    }
-                    iter.collect()
-                };
-                let blocks: Vec<serde_json::Value> = blocks_to_write
-                    .iter()
-                    .map(|cb| match cb {
-                        super::types::ContentBlock::Text { text } => {
-                            serde_json::json!({"type": "text", "text": text})
-                        }
-                        super::types::ContentBlock::ToolUse { tool_call_id } => {
-                            if let Some(tc) = unified_response
-                                .tool_calls
-                                .iter()
-                                .find(|t| t.id == *tool_call_id)
-                            {
-                                serde_json::json!({
-                                    "type": "tool_use",
-                                    "id": tc.id,
-                                    "name": tc.name,
-                                    "input": tc.input
-                                })
-                            } else {
-                                serde_json::json!({
-                                    "type": "tool_use",
-                                    "id": tool_call_id,
-                                    "name": "",
-                                    "input": null
-                                })
-                            }
-                        }
-                        super::types::ContentBlock::Thinking { thinking } => {
-                            serde_json::json!({"type": "thinking", "thinking": thinking})
-                        }
-                        super::types::ContentBlock::UserInput { text } => {
-                            serde_json::json!({"type": "user_input", "text": text})
-                        }
-                    })
-                    .collect();
-                let synthetic =
-                    serde_json::json!({"type": "assistant", "message": {"content": blocks}});
-                let _ = writeln!(file, "{synthetic}");
-
-                for tc in &unified_response.tool_calls {
-                    if let Some(output) = &tc.output {
-                        let tool_result = serde_json::json!({
-                            "type": "user",
-                            "message": {
-                                "content": [{
-                                    "type": "tool_result",
-                                    "tool_use_id": tc.id,
-                                    "content": output
-                                }]
-                            }
-                        });
-                        let _ = writeln!(file, "{tool_result}");
-                    }
-                }
-            } else {
-                let synthetic = serde_json::json!({
-                    "type": "assistant",
-                    "message": {
-                        "content": [{"type": "text", "text": unified_response.content}]
-                    }
-                });
-                let _ = writeln!(file, "{synthetic}");
-            }
-            let _ = file.flush();
-        }
+        // Filter out echoed user prompt: OpenCode includes the user message
+        // as the first text block in its response. Compare against the
+        // *effective* prompt (message_for_backend), not the raw message —
+        // when a hidden provider-switch handoff is prepended, the backend
+        // echoes the submitted prompt including the handoff. Matching the raw
+        // message would let that injected history leak into the visible
+        // assistant transcript/NDJSON.
+        append_synthetic_reply(
+            &output_file,
+            &unified_response.content,
+            &unified_response.content_blocks,
+            &unified_response.tool_calls,
+            message_for_backend.trim(),
+        );
     }
 
     // Clean up input file (no longer needed)
@@ -8871,6 +8799,170 @@ impl Drop for ResumeGuard {
     }
 }
 
+/// Re-attach to an OpenCode 2.x turn that ran while Jean was closed, then
+/// save its reply like a normal turn and emit `chat:done` / `chat:error`.
+#[allow(clippy::too_many_arguments)]
+fn resume_opencode_turn(
+    app: &AppHandle,
+    session_id: &str,
+    worktree_id: &str,
+    run_id: &str,
+    turn: &super::types::OpenCodeTurnRef,
+    execution_mode: Option<&str>,
+    output_file: &std::path::Path,
+    cancelled: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
+    use super::run_log::RunLogWriter;
+    let working_dir = crate::projects::storage::load_projects_data(app)
+        .ok()
+        .and_then(|data| data.find_worktree(worktree_id).map(|w| w.path.clone()))
+        .unwrap_or_default();
+    let result = crate::opencode_server::acquire_server(app).and_then(|server| {
+        let result = super::opencode_v2::resume_turn(
+            app,
+            &server,
+            super::opencode_v2::TurnRequest {
+                session_id,
+                worktree_id,
+                run_id,
+                working_dir: std::path::Path::new(&working_dir),
+                existing_opencode_session_id: Some(&turn.session_id),
+                model: None,
+                execution_mode,
+                reasoning_effort: None,
+                prompt: "",
+                system_prompt: None,
+            },
+            turn,
+            cancelled,
+        );
+        crate::opencode_server::release();
+        result
+    });
+    let mut writer = match RunLogWriter::resume(app, session_id, run_id) {
+        Ok(writer) => writer,
+        Err(e) => {
+            log::error!("Resume OpenCode: run log unavailable for run {run_id}: {e}");
+            return;
+        }
+    };
+    let response = match result {
+        Ok(response) => response,
+        Err(e) => {
+            log::error!("Resume OpenCode turn failed for run {run_id}: {e}");
+            if let Err(e) = writer.crash() {
+                log::error!("Failed to mark OpenCode run as crashed: {e}");
+            }
+            super::opencode::emit_chat_error(app, session_id, worktree_id, &e);
+            return;
+        }
+    };
+    let assistant_message_id = uuid::Uuid::new_v4().to_string();
+    if response.cancelled {
+        let _ = writer.cancel(Some(&assistant_message_id), None);
+    } else {
+        append_synthetic_reply(
+            output_file,
+            &response.content,
+            &response.content_blocks,
+            &response.tool_calls,
+            "",
+        );
+        if let Err(e) = writer.complete(&assistant_message_id, None, response.usage.clone()) {
+            log::error!("Failed to mark resumed OpenCode run completed: {e}");
+        }
+    }
+    if let Err(e) = with_existing_metadata_mut(app, session_id, |metadata| {
+        metadata.opencode_session_id = Some(response.session_id.clone());
+    }) {
+        log::warn!("Failed to persist the recovered OpenCode session id: {e}");
+    }
+    super::opencode::emit_chat_done(
+        app,
+        session_id,
+        worktree_id,
+        !response.cancelled && execution_mode == Some("plan") && !response.content.is_empty(),
+    );
+}
+
+/// Append a reply as synthetic history lines (an assistant line plus tool
+/// results), so history reload rebuilds it for backends that are not tailed
+/// from a JSONL stream. A first text block equal to `echoed_prompt` is
+/// dropped (OpenCode echoes the prompt).
+pub(super) fn append_synthetic_reply(
+    output_file: &std::path::Path,
+    content: &str,
+    content_blocks: &[super::types::ContentBlock],
+    tool_calls: &[super::types::ToolCall],
+    echoed_prompt: &str,
+) {
+    let Ok(mut file) = std::fs::OpenOptions::new().append(true).open(output_file) else {
+        return;
+    };
+    if content_blocks.is_empty() {
+        let synthetic = serde_json::json!({
+            "type": "assistant",
+            "message": { "content": [{"type": "text", "text": content}] }
+        });
+        let _ = writeln!(file, "{synthetic}");
+        let _ = file.flush();
+        return;
+    }
+    let skip_first = matches!(
+        content_blocks.first(),
+        Some(super::types::ContentBlock::Text { text }) if text.trim() == echoed_prompt
+    );
+    let blocks: Vec<serde_json::Value> = content_blocks
+        .iter()
+        .skip(usize::from(skip_first))
+        .map(|cb| match cb {
+            super::types::ContentBlock::Text { text } => {
+                serde_json::json!({"type": "text", "text": text})
+            }
+            super::types::ContentBlock::ToolUse { tool_call_id } => {
+                match tool_calls.iter().find(|t| t.id == *tool_call_id) {
+                    Some(tc) => serde_json::json!({
+                        "type": "tool_use",
+                        "id": tc.id,
+                        "name": tc.name,
+                        "input": tc.input
+                    }),
+                    None => serde_json::json!({
+                        "type": "tool_use",
+                        "id": tool_call_id,
+                        "name": "",
+                        "input": null
+                    }),
+                }
+            }
+            super::types::ContentBlock::Thinking { thinking } => {
+                serde_json::json!({"type": "thinking", "thinking": thinking})
+            }
+            super::types::ContentBlock::UserInput { text } => {
+                serde_json::json!({"type": "user_input", "text": text})
+            }
+        })
+        .collect();
+    let synthetic = serde_json::json!({"type": "assistant", "message": {"content": blocks}});
+    let _ = writeln!(file, "{synthetic}");
+    for tc in tool_calls {
+        if let Some(output) = &tc.output {
+            let tool_result = serde_json::json!({
+                "type": "user",
+                "message": {
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": tc.id,
+                        "content": output
+                    }]
+                }
+            });
+            let _ = writeln!(file, "{tool_result}");
+        }
+    }
+    let _ = file.flush();
+}
+
 /// Resume a session that has resumable runs (detached processes still running).
 ///
 /// Called by the backend at startup for its own runs, and by a native client
@@ -8922,7 +9014,8 @@ pub async fn resume_session(
         .runs
         .iter()
         .filter(|r| {
-            r.status == RunStatus::Resumable && (r.pid.is_some() || r.codex_thread_id.is_some())
+            r.status == RunStatus::Resumable
+                && (r.pid.is_some() || r.codex_thread_id.is_some() || r.opencode_turn.is_some())
         })
         .cloned()
         .collect();
@@ -8947,6 +9040,49 @@ pub async fn resume_session(
     // Process each resumable run
     for run in resumable_runs {
         let run_id = run.run_id.clone();
+
+        // === OpenCode 2.x re-attach path ===
+        if let Some(turn) = run.opencode_turn.clone() {
+            if let Some(metadata_run) = metadata.find_run_mut(&run_id) {
+                metadata_run.status = RunStatus::Running;
+            }
+            save_metadata(&app, &metadata)?;
+            let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            if !super::registry::register_cancel_flag(session_id.clone(), flag.clone()) {
+                log::warn!("Resume OpenCode session {session_id} was cancelled before re-attach");
+                if let Ok(mut writer) = RunLogWriter::resume(&app, &session_id, &run_id) {
+                    let _ = writer.cancel(None, None);
+                }
+                return Ok(ResumeSessionResponse {
+                    resumed: false,
+                    run_count: 0,
+                });
+            }
+            let output_file = session_dir.join(format!("{run_id}.jsonl"));
+            let execution_mode = run.execution_mode.clone();
+            let (app, session_id, worktree_id) =
+                (app.clone(), session_id.clone(), worktree_id.clone());
+            // Blocking HTTP and event-stream reads: not on a tokio worker.
+            std::thread::spawn(move || {
+                let _report = super::delegation::ReportRunEnd::new(app.clone(), session_id.clone());
+                resume_opencode_turn(
+                    &app,
+                    &session_id,
+                    &worktree_id,
+                    &run_id,
+                    &turn,
+                    execution_mode.as_deref(),
+                    &output_file,
+                    &flag,
+                );
+                super::registry::cleanup_owned_session_registrations(
+                    &session_id,
+                    None,
+                    Some(&flag),
+                );
+            });
+            continue;
+        }
 
         // === Codex crash recovery path ===
         if let Some(ref codex_tid) = run.codex_thread_id {
@@ -11472,6 +11608,7 @@ mod tests {
             usage: None,
             codex_thread_id: codex_thread_id.map(str::to_string),
             codex_turn_id: None,
+            opencode_turn: None,
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
