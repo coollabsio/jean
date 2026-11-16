@@ -566,7 +566,7 @@ pub struct CodexPermissionRequestEvent {
 /// OpenCode emits `permission.asked` / `permission.v2.asked` SSE events when a
 /// tool needs approval (e.g. external_directory access outside the worktree).
 /// Jean surfaces these to the frontend and replies via the OpenCode Permission API.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OpenCodePermissionRequest {
     /// OpenCode permission request ID (used in POST /permission/{id}/reply)
     pub request_id: String,
@@ -657,7 +657,7 @@ pub struct DeniedMessageContext {
 
 /// A content block in a message - text, tool use, or thinking
 /// Used to preserve the order of content in Claude's response
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentBlock {
     Text {

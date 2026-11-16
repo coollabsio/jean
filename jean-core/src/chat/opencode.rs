@@ -86,6 +86,54 @@ struct DoneEvent {
     waiting_for_plan: bool,
 }
 
+pub(super) fn emit_chat_done(
+    app: &AppHandle,
+    session_id: &str,
+    worktree_id: &str,
+    waiting_for_plan: bool,
+) {
+    let _ = app.emit_all(
+        "chat:done",
+        &DoneEvent {
+            session_id: session_id.to_string(),
+            worktree_id: worktree_id.to_string(),
+            waiting_for_plan,
+        },
+    );
+}
+
+pub(super) fn emit_chat_error(app: &AppHandle, session_id: &str, worktree_id: &str, error: &str) {
+    let _ = app.emit_all(
+        "chat:error",
+        &ErrorEvent {
+            session_id: session_id.to_string(),
+            worktree_id: worktree_id.to_string(),
+            error: error.to_string(),
+        },
+    );
+}
+
+pub(super) fn emit_backend_retry(
+    app: &AppHandle,
+    session_id: &str,
+    worktree_id: &str,
+    attempt: u64,
+    delay_ms: u64,
+    reason: String,
+) {
+    let _ = app.emit_all(
+        "chat:backend_retry",
+        &BackendRetryEvent {
+            session_id: session_id.to_string(),
+            worktree_id: worktree_id.to_string(),
+            backend: "opencode",
+            attempt,
+            delay_ms,
+            reason,
+        },
+    );
+}
+
 /// `chat:backend_retry`: the backend waits `delay_ms` before it retries a
 /// failed provider request (rate limit, overload).
 #[derive(serde::Serialize, Clone)]
@@ -847,7 +895,7 @@ fn has_subscribers_for_working_dir(
         .any(|entry| entry.working_dir == working_dir)
 }
 
-fn emit_chat_chunk(
+pub(super) fn emit_chat_chunk(
     app: &AppHandle,
     session_id: &str,
     worktree_id: &str,
@@ -869,7 +917,12 @@ fn emit_chat_chunk(
     );
 }
 
-fn emit_chat_thinking(app: &AppHandle, session_id: &str, worktree_id: &str, content: &str) {
+pub(super) fn emit_chat_thinking(
+    app: &AppHandle,
+    session_id: &str,
+    worktree_id: &str,
+    content: &str,
+) {
     if content.is_empty() {
         return;
     }
@@ -884,7 +937,7 @@ fn emit_chat_thinking(app: &AppHandle, session_id: &str, worktree_id: &str, cont
     );
 }
 
-fn emit_chat_tool_use(
+pub(super) fn emit_chat_tool_use(
     app: &AppHandle,
     session_id: &str,
     worktree_id: &str,
@@ -913,7 +966,7 @@ fn emit_chat_tool_use(
     );
 }
 
-fn emit_chat_tool_result(
+pub(super) fn emit_chat_tool_result(
     app: &AppHandle,
     session_id: &str,
     worktree_id: &str,
@@ -945,7 +998,9 @@ fn fetch_opencode_question_input(
     working_dir: &str,
     tool_call_id: &str,
 ) -> Option<serde_json::Value> {
-    let base_url = crate::opencode_server::get_current_url()?;
+    let base_url = crate::opencode_server::current_server()
+        .filter(|server| server.api == crate::opencode_server::OpenCodeApi::V1)?
+        .url;
     let working_dir = working_dir.to_string();
     let tool_call_id = tool_call_id.to_string();
 
@@ -1023,7 +1078,11 @@ fn rename_json_key(value: &mut serde_json::Value, from: &str, to: &str) {
 /// names (`Read`, `Edit`, `Bash`, …) with snake_case parameters (`file_path`,
 /// `old_string`, …). This function translates both in-place so a single set of
 /// frontend rendering logic handles tools from either backend.
-fn normalize_opencode_tool(name: &str, input: &mut serde_json::Value) -> String {
+pub(crate) fn normalize_opencode_tool(name: &str, input: &mut serde_json::Value) -> String {
+    // 2.x names the file parameter `path` and the shell tool `shell`.
+    if matches!(name, "read" | "edit" | "write") {
+        rename_json_key(input, "path", "file_path");
+    }
     match name {
         "read" => {
             rename_json_key(input, "filePath", "file_path");
@@ -1040,7 +1099,7 @@ fn normalize_opencode_tool(name: &str, input: &mut serde_json::Value) -> String 
             rename_json_key(input, "filePath", "file_path");
             "Write".into()
         }
-        "bash" => "Bash".into(),
+        "bash" | "shell" => "Bash".into(),
         "glob" => "Glob".into(),
         "grep" => {
             // OpenCode uses "include" for file filter; Claude uses "glob"
@@ -1117,7 +1176,7 @@ fn choose_model(all_providers: &serde_json::Value) -> Option<(String, String)> {
     None
 }
 
-fn parse_provider_model(model: Option<&str>) -> Option<(String, String)> {
+pub(super) fn parse_provider_model(model: Option<&str>) -> Option<(String, String)> {
     let raw = model?.trim();
     if raw.is_empty() {
         return None;
@@ -1471,7 +1530,7 @@ pub(crate) fn find_provider_for_model(
 
 /// Override provider defaults explicitly so a resumed Full access session cannot
 /// retain permissive rules after the user selects a restricted policy.
-fn permission_rules_for_mode(mode: &str) -> Option<serde_json::Value> {
+pub(super) fn permission_rules_for_mode(mode: &str) -> Option<serde_json::Value> {
     match mode {
         "yolo" => Some(serde_json::json!([
             { "permission": "*", "pattern": "*", "action": "allow" },
@@ -1521,14 +1580,14 @@ fn verify_permission_rules_applied(
     }
 }
 
-fn agent_for_execution_mode(execution_mode: Option<&str>) -> &'static str {
+pub(super) fn agent_for_execution_mode(execution_mode: Option<&str>) -> &'static str {
     match execution_mode.unwrap_or("build") {
         "plan" => "plan",
         _ => "build",
     }
 }
 
-fn variant_for_effort(reasoning_effort: Option<&str>) -> Option<&'static str> {
+pub(super) fn variant_for_effort(reasoning_effort: Option<&str>) -> Option<&'static str> {
     match reasoning_effort {
         Some("xhigh") => Some("max"),
         Some("high") => Some("high"),
@@ -2548,7 +2607,7 @@ fn process_shared_sse_event(
 /// - session metadata selected_execution_mode is yolo
 ///
 /// Mirrors Codex auto-accept so YOLO mode never freezes on external_directory asks.
-fn should_auto_approve_opencode_permissions(
+pub(super) fn should_auto_approve_opencode_permissions(
     app: &AppHandle,
     jean_session_id: &str,
     turn_execution_mode: Option<&str>,
@@ -2800,6 +2859,22 @@ fn handle_opencode_permission_replied(
         }
     };
 
+    let reply = properties
+        .get("reply")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    emit_permission_replied(app, jean_session_id, worktree_id, request_id, reply);
+}
+
+pub(super) fn emit_permission_replied(
+    app: &AppHandle,
+    session_id: String,
+    worktree_id: String,
+    request_id: &str,
+    reply: String,
+) {
     #[derive(serde::Serialize, Clone)]
     struct OpenCodePermissionRepliedEvent {
         session_id: String,
@@ -2808,16 +2883,10 @@ fn handle_opencode_permission_replied(
         reply: String,
     }
 
-    let reply = properties
-        .get("reply")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-
     let _ = app.emit_all(
         "chat:opencode_permission_replied",
         &OpenCodePermissionRepliedEvent {
-            session_id: jean_session_id,
+            session_id,
             worktree_id,
             request_id: request_id.to_string(),
             reply,
@@ -2983,7 +3052,7 @@ pub fn execute_opencode_http(
         });
     }
 
-    let base_url = crate::opencode_server::acquire(app)?;
+    let server = crate::opencode_server::acquire_server(app)?;
 
     // RAII guard: decrements the server usage count when this function exits.
     // The server only shuts down when the last consumer releases.
@@ -2994,6 +3063,27 @@ pub fn execute_opencode_http(
         }
     }
     let _server_guard = ServerReleaseGuard;
+
+    if server.api == crate::opencode_server::OpenCodeApi::V2 {
+        return super::opencode_v2::execute_turn(
+            app,
+            &server,
+            super::opencode_v2::TurnRequest {
+                session_id,
+                worktree_id,
+                run_id,
+                working_dir,
+                existing_opencode_session_id,
+                model,
+                execution_mode,
+                reasoning_effort,
+                prompt,
+                system_prompt,
+            },
+            cancelled,
+        );
+    }
+    let base_url = server.url;
 
     // 30 min timeout — OpenCode agentic tasks can run for extended periods
     let client = reqwest::blocking::Client::builder()
@@ -3585,7 +3675,7 @@ fn cancelled_response_from_sse(
     }
 }
 
-fn merge_consecutive_thinking(blocks: Vec<ContentBlock>) -> Vec<ContentBlock> {
+pub(crate) fn merge_consecutive_thinking(blocks: Vec<ContentBlock>) -> Vec<ContentBlock> {
     let mut result: Vec<ContentBlock> = Vec::with_capacity(blocks.len());
     for block in blocks {
         if let ContentBlock::Thinking { thinking } = &block {
@@ -3869,7 +3959,7 @@ pub fn respond_opencode_permission(
         return Err("OpenCode permission request_id is required".to_string());
     }
 
-    let base_url = crate::opencode_server::acquire(app)?;
+    let server = crate::opencode_server::acquire_server(app)?;
 
     struct ServerReleaseGuard;
     impl Drop for ServerReleaseGuard {
@@ -3878,6 +3968,17 @@ pub fn respond_opencode_permission(
         }
     }
     let _server_guard = ServerReleaseGuard;
+
+    if server.api == crate::opencode_server::OpenCodeApi::V2 {
+        let session_id = opencode_session_id
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or("OpenCode 2.x permission reply requires opencode_session_id")?;
+        let message = message.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        return super::opencode_v2::V2Client::new(&server, Duration::from_secs(30))?
+            .reply_permission(session_id, request_id, reply, message);
+    }
+    let base_url = server.url;
 
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(30))

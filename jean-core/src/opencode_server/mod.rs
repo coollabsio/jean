@@ -47,7 +47,41 @@ struct OpenCodeServerProcess {
     child: Child,
     port: u16,
     hostname: String,
+    api: OpenCodeApi,
+    password: Option<String>,
 }
+
+/// HTTP API generation of an OpenCode server. OpenCode 2.x replaced the
+/// 1.x API (bare paths) with a new API under `/api/*`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpenCodeApi {
+    V1,
+    V2,
+}
+
+/// A running OpenCode server that Jean can talk to.
+#[derive(Clone, PartialEq, Eq)]
+pub struct OpenCodeServer {
+    pub url: String,
+    pub api: OpenCodeApi,
+    /// HTTP Basic password (user `opencode`). 2.x servers only.
+    pub password: Option<String>,
+}
+
+impl std::fmt::Debug for OpenCodeServer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpenCodeServer")
+            .field("url", &self.url)
+            .field("api", &self.api)
+            .field("password", &self.password.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
+}
+
+/// OpenCode 2.x reads the server password from this variable. Without it,
+/// 2.x generates a random password and requires it on every `/api` call.
+const SERVER_PASSWORD_ENV: &str = "OPENCODE_SERVER_PASSWORD";
+pub const SERVER_USERNAME: &str = "opencode";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct OpenCodeServerStatus {
@@ -182,50 +216,92 @@ fn spawn_stdio_logger(
 /// What answers on an OpenCode server URL.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ServerHealth {
-    /// OpenCode 1.x API: `/global/health` returned `{"healthy": true}`.
-    Healthy,
-    /// A server answered, but not with the OpenCode 1.x API. OpenCode 2.x
-    /// replaced that API and serves its web UI HTML on `/global/health`.
+    Healthy(OpenCodeApi),
+    /// A 2.x server that rejects the password Jean has (or has none).
+    Locked,
+    /// A server answered, but not with a supported OpenCode API.
     Unsupported,
-    /// No answer yet, or a 1.x server that is not healthy yet.
+    /// No answer yet, or a server that is not healthy yet.
     Unreachable,
 }
 
-fn classify_health_response(success: bool, body: &str) -> ServerHealth {
+/// Classify `GET /global/health`. 1.x answers JSON; 2.x serves its web UI
+/// HTML there, so a non-JSON answer needs the 2.x probe (`None`).
+fn classify_v1_health(success: bool, body: &str) -> Option<ServerHealth> {
     if !success {
-        return ServerHealth::Unreachable;
+        return Some(ServerHealth::Unreachable);
     }
     match serde_json::from_str::<serde_json::Value>(body)
         .ok()
         .and_then(|v| v.get("healthy").and_then(serde_json::Value::as_bool))
     {
-        Some(true) => ServerHealth::Healthy,
-        Some(false) => ServerHealth::Unreachable,
-        None => ServerHealth::Unsupported,
+        Some(true) => Some(ServerHealth::Healthy(OpenCodeApi::V1)),
+        Some(false) => Some(ServerHealth::Unreachable),
+        None => None,
     }
 }
 
-fn probe_health(url: &str) -> ServerHealth {
-    let health_url = format!("{url}/global/health");
-    let Ok(response) = reqwest::blocking::Client::new()
-        .get(health_url)
+/// Classify the 2.x `GET /api/info` answer (`{"version":"2.3.0",...}`).
+fn classify_v2_info(status: u16, body: &str) -> ServerHealth {
+    match status {
+        200 => {
+            let major = serde_json::from_str::<serde_json::Value>(body)
+                .ok()
+                .and_then(|v| v.get("version")?.as_str().map(str::to_string))
+                .and_then(|version| version_major(&version));
+            if major == Some(2) {
+                ServerHealth::Healthy(OpenCodeApi::V2)
+            } else {
+                ServerHealth::Unsupported
+            }
+        }
+        401 => ServerHealth::Locked,
+        _ => ServerHealth::Unsupported,
+    }
+}
+
+fn version_major(version: &str) -> Option<u64> {
+    version
+        .trim()
+        .trim_start_matches('v')
+        .split('.')
+        .next()?
+        .parse()
+        .ok()
+}
+
+fn probe_health(url: &str, password: Option<&str>) -> ServerHealth {
+    let client = reqwest::blocking::Client::new();
+    let Ok(response) = client
+        .get(format!("{url}/global/health"))
         .timeout(Duration::from_millis(1200))
         .send()
     else {
         return ServerHealth::Unreachable;
     };
     let success = response.status().is_success();
-    classify_health_response(success, &response.text().unwrap_or_default())
+    if let Some(health) = classify_v1_health(success, &response.text().unwrap_or_default()) {
+        return health;
+    }
+    let mut request = client
+        .get(format!("{url}/api/info"))
+        .timeout(Duration::from_millis(1200));
+    if let Some(password) = password {
+        request = request.basic_auth(SERVER_USERNAME, Some(password));
+    }
+    match request.send() {
+        Ok(response) => {
+            let status = response.status().as_u16();
+            classify_v2_info(status, &response.text().unwrap_or_default())
+        }
+        Err(_) => ServerHealth::Unreachable,
+    }
 }
 
-fn is_healthy(url: &str) -> bool {
-    probe_health(url) == ServerHealth::Healthy
-}
-
-/// Poll until the server is healthy or answers as an unsupported server.
-fn wait_for_server(url: &str, attempts: u32) -> ServerHealth {
+/// Poll until the server answers with anything but `Unreachable`.
+fn wait_for_server(url: &str, password: Option<&str>, attempts: u32) -> ServerHealth {
     for _ in 0..attempts {
-        let health = probe_health(url);
+        let health = probe_health(url, password);
         if health != ServerHealth::Unreachable {
             return health;
         }
@@ -236,10 +312,54 @@ fn wait_for_server(url: &str, attempts: u32) -> ServerHealth {
 
 fn unsupported_server_error(url: &str) -> String {
     format!(
-        "The OpenCode server at {url} does not serve the OpenCode 1.x API. \
-         OpenCode 2.x replaced that API and Jean does not support it yet. \
-         Install OpenCode 1.x in Settings > Backends > OpenCode > Change version."
+        "The OpenCode server at {url} does not serve a supported OpenCode API (1.x or 2.x). \
+         Install a supported version in Settings > Backends > OpenCode > Change version."
     )
+}
+
+fn locked_server_error(url: &str) -> String {
+    format!(
+        "The OpenCode 2.x server at {url} requires a password. Stop it so Jean can start \
+         its own server, or start Jean with {SERVER_PASSWORD_ENV} set to that server's password."
+    )
+}
+
+fn unmanaged_server(url: &str) -> Result<Option<OpenCodeServer>, String> {
+    let password = std::env::var(SERVER_PASSWORD_ENV).ok();
+    match probe_health(url, password.as_deref()) {
+        ServerHealth::Healthy(api) => Ok(Some(OpenCodeServer {
+            url: url.to_string(),
+            api,
+            password: if api == OpenCodeApi::V2 {
+                password
+            } else {
+                None
+            },
+        })),
+        ServerHealth::Locked => Err(locked_server_error(url)),
+        ServerHealth::Unsupported => Err(unsupported_server_error(url)),
+        ServerHealth::Unreachable => Ok(None),
+    }
+}
+
+/// Major version of the OpenCode CLI binary, from `opencode --version`
+/// (`1.19.5` on 1.x, `opencode v2.3.0` on 2.x).
+fn cli_major_version(cli_path: &std::path::Path) -> Option<u64> {
+    let output = crate::platform::cli_command(&cli_path.to_string_lossy(), None)
+        .arg("--version")
+        .output()
+        .ok()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    version_major(stdout.split_whitespace().last()?)
+}
+
+fn random_password() -> String {
+    use rand::Rng;
+    rand::thread_rng()
+        .sample_iter(&rand::distributions::Alphanumeric)
+        .take(32)
+        .map(char::from)
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -314,7 +434,13 @@ pub fn cleanup_orphaned_server(app: &AppHandle) {
     // Jean is dead. Check if the server is still running AND healthy on our port
     // (health check guards against PID recycling — an unrelated process won't respond).
     let url = server_url(DEFAULT_HOSTNAME, record.port);
-    if crate::platform::is_process_alive(record.server_pid) && is_healthy(&url) {
+    let responds = |url: &str| {
+        matches!(
+            probe_health(url, None),
+            ServerHealth::Healthy(_) | ServerHealth::Locked
+        )
+    };
+    if crate::platform::is_process_alive(record.server_pid) && responds(&url) {
         log::info!(
             "[OPENCODE CLEANUP] Killing orphaned OpenCode server (PID {}) from crashed Jean (PID {})",
             record.server_pid,
@@ -323,7 +449,7 @@ pub fn cleanup_orphaned_server(app: &AppHandle) {
         let _ = crate::platform::kill_process_tree(record.server_pid);
         std::thread::sleep(Duration::from_millis(300));
         // Verify kill succeeded
-        if is_healthy(&url) {
+        if responds(&url) {
             log::warn!(
                 "[OPENCODE CLEANUP] Server still healthy after tree kill, trying direct kill"
             );
@@ -356,36 +482,46 @@ fn config_content_with_auto_compact(inherited: Option<&str>, auto: Option<bool>)
     Some(config.to_string())
 }
 
-pub fn ensure_running(app: &AppHandle) -> Result<String, String> {
+fn managed_server(proc_info: &OpenCodeServerProcess) -> OpenCodeServer {
+    OpenCodeServer {
+        url: server_url(&proc_info.hostname, proc_info.port),
+        api: proc_info.api,
+        password: proc_info.password.clone(),
+    }
+}
+
+pub fn ensure_running(app: &AppHandle) -> Result<OpenCodeServer, String> {
     // Cache the AppHandle for stop/release paths that don't have it.
     let _ = APP_HANDLE.set(app.clone());
     let hostname = DEFAULT_HOSTNAME.to_string();
     let port = DEFAULT_PORT;
     let url = server_url(&hostname, port);
 
-    // If an unmanaged server is already running, use it.
-    match probe_health(&url) {
-        ServerHealth::Healthy => return Ok(url),
-        ServerHealth::Unsupported => return Err(unsupported_server_error(&url)),
-        ServerHealth::Unreachable => {}
-    }
-
     let mut guard = OPENCODE_SERVER
         .lock()
         .map_err(|e| format!("OpenCode server lock error: {e}"))?;
 
-    // If we manage a process and it's still alive, return it.
+    // If we manage a process and it's still alive, return it. Check it before
+    // the port probe: only the managed record knows a 2.x server's password.
     if let Some(proc_info) = guard.as_mut() {
         match proc_info.child.try_wait() {
             Ok(None) => {
-                let running_url = server_url(&proc_info.hostname, proc_info.port);
-                if wait_for_server(&running_url, 5) == ServerHealth::Healthy {
-                    return Ok(running_url);
+                let server = managed_server(proc_info);
+                let health = wait_for_server(&server.url, server.password.as_deref(), 5);
+                if health == ServerHealth::Healthy(server.api) {
+                    return Ok(server);
                 }
             }
             Ok(Some(_)) | Err(_) => {
                 *guard = None;
             }
+        }
+    }
+
+    // If an unmanaged server is already running, use it.
+    if guard.is_none() {
+        if let Some(server) = unmanaged_server(&url)? {
+            return Ok(server);
         }
     }
 
@@ -396,6 +532,12 @@ pub fn ensure_running(app: &AppHandle) -> Result<String, String> {
             cli_path.display()
         ));
     }
+
+    let (api, password) = match cli_major_version(&cli_path) {
+        Some(2) => (OpenCodeApi::V2, Some(random_password())),
+        Some(major) if major > 2 => return Err(unsupported_server_error(&url)),
+        _ => (OpenCodeApi::V1, None),
+    };
 
     let mut cmd = crate::platform::cli_command(&cli_path.to_string_lossy(), None);
     cmd.arg("serve")
@@ -418,6 +560,9 @@ pub fn ensure_running(app: &AppHandle) -> Result<String, String> {
         auto_compact,
     ) {
         cmd.env(CONFIG_CONTENT_ENV, content);
+    }
+    if let Some(password) = &password {
+        cmd.env(SERVER_PASSWORD_ENV, password);
     }
 
     #[cfg(unix)]
@@ -455,14 +600,16 @@ pub fn ensure_running(app: &AppHandle) -> Result<String, String> {
         child,
         port,
         hostname: hostname.clone(),
+        api,
+        password: password.clone(),
     });
 
     // Write PID file so a future Jean instance can clean up if we crash.
     write_pid_file(server_pid, port);
 
-    match wait_for_server(&url, 50) {
-        ServerHealth::Healthy => {}
-        ServerHealth::Unsupported => {
+    match wait_for_server(&url, password.as_deref(), 50) {
+        ServerHealth::Healthy(answered) if answered == api => {}
+        ServerHealth::Healthy(_) | ServerHealth::Locked | ServerHealth::Unsupported => {
             stop_managed_server_locked(&mut guard);
             return Err(unsupported_server_error(&url));
         }
@@ -476,15 +623,32 @@ pub fn ensure_running(app: &AppHandle) -> Result<String, String> {
         }
     }
 
-    Ok(url)
+    Ok(OpenCodeServer { url, api, password })
 }
 
-/// Increment usage count and ensure the server is running. Returns the base URL.
-/// Each `acquire` must be paired with a `release` when the caller is done.
+/// Like [`acquire_server`], for callers that speak only the 1.x API.
+/// Returns the base URL, or an error (without holding a usage) on 2.x.
 pub fn acquire(app: &AppHandle) -> Result<String, String> {
+    let server = acquire_server(app)?;
+    match server.api {
+        OpenCodeApi::V1 => Ok(server.url),
+        OpenCodeApi::V2 => {
+            release();
+            Err(
+                "Jean supports only chat on OpenCode 2.x for now. To use this feature, \
+                 install OpenCode 1.x in Settings > Backends > OpenCode > Change version."
+                    .to_string(),
+            )
+        }
+    }
+}
+
+/// Increment usage count and ensure the server is running.
+/// Each `acquire_server` must be paired with a `release` when the caller is done.
+pub fn acquire_server(app: &AppHandle) -> Result<OpenCodeServer, String> {
     begin_usage();
     match ensure_running(app) {
-        Ok(url) => Ok(url),
+        Ok(server) => Ok(server),
         Err(e) => {
             // Roll back on failure so we don't leave a phantom user. Re-arm the
             // idle timer: the epoch bump above disarmed any earlier one.
@@ -573,26 +737,19 @@ fn stop_managed_server_locked(
     true
 }
 
-/// Get the current server URL without incrementing the usage count.
+/// Get the current server without incrementing the usage count.
 /// Returns `None` if no server is running (managed or unmanaged).
-pub fn get_current_url() -> Option<String> {
-    let url = server_url(DEFAULT_HOSTNAME, DEFAULT_PORT);
-
-    // Check managed process first
+pub fn current_server() -> Option<OpenCodeServer> {
     if let Ok(mut guard) = OPENCODE_SERVER.lock() {
         if let Some(proc) = guard.as_mut() {
             if matches!(proc.child.try_wait(), Ok(None)) {
-                return Some(server_url(&proc.hostname, proc.port));
+                return Some(managed_server(proc));
             }
         }
     }
-
-    // Fall back to checking if an unmanaged server is healthy on the default port
-    if is_healthy(&url) {
-        return Some(url);
-    }
-
-    None
+    unmanaged_server(&server_url(DEFAULT_HOSTNAME, DEFAULT_PORT))
+        .ok()
+        .flatten()
 }
 
 /// Stop Jean-managed OpenCode server process during app lifecycle shutdown.
@@ -601,10 +758,10 @@ pub fn shutdown_managed_server() -> Result<bool, String> {
 }
 
 pub async fn start_opencode_server(app: AppHandle) -> Result<OpenCodeServerStatus, String> {
-    let url = ensure_running(&app)?;
+    let server = ensure_running(&app)?;
     Ok(OpenCodeServerStatus {
         running: true,
-        url: Some(url),
+        url: Some(server.url),
         port: Some(DEFAULT_PORT),
         hostname: Some(DEFAULT_HOSTNAME.to_string()),
         managed: true,
@@ -621,25 +778,45 @@ mod tests {
     use super::*;
 
     #[test]
-    fn health_response_accepts_only_the_v1_api() {
-        // OpenCode 1.x health payload.
+    fn health_probe_tells_v1_from_v2_servers() {
         assert_eq!(
-            classify_health_response(true, r#"{"healthy":true,"version":"1.19.5"}"#),
-            ServerHealth::Healthy
+            classify_v1_health(true, r#"{"healthy":true,"version":"1.19.5"}"#),
+            Some(ServerHealth::Healthy(OpenCodeApi::V1))
         );
-        // OpenCode 2.x answers 200 with its web UI HTML (issue #896).
         assert_eq!(
-            classify_health_response(true, "<!doctype html><html lang=\"en\">"),
+            classify_v1_health(true, r#"{"healthy":false}"#),
+            Some(ServerHealth::Unreachable)
+        );
+        assert_eq!(
+            classify_v1_health(false, ""),
+            Some(ServerHealth::Unreachable)
+        );
+        // OpenCode 2.x serves web UI HTML on /global/health.
+        assert_eq!(classify_v1_health(true, "<!doctype html><html>"), None);
+
+        assert_eq!(
+            classify_v2_info(200, r#"{"version":"2.3.0","pid":1}"#),
+            ServerHealth::Healthy(OpenCodeApi::V2)
+        );
+        assert_eq!(
+            classify_v2_info(200, r#"{"version":"3.0.0"}"#),
             ServerHealth::Unsupported
         );
         assert_eq!(
-            classify_health_response(true, r#"{"healthy":false}"#),
-            ServerHealth::Unreachable
+            classify_v2_info(200, "<!doctype html>"),
+            ServerHealth::Unsupported
         );
         assert_eq!(
-            classify_health_response(false, r#"{"healthy":true}"#),
-            ServerHealth::Unreachable
+            classify_v2_info(401, r#"{"_tag":"UnauthorizedError"}"#),
+            ServerHealth::Locked
         );
+    }
+
+    #[test]
+    fn version_major_reads_both_cli_formats() {
+        assert_eq!(version_major("1.19.5"), Some(1));
+        assert_eq!(version_major("v2.3.0"), Some(2));
+        assert_eq!(version_major("garbage"), None);
     }
 
     #[test]
@@ -814,6 +991,8 @@ mod tests {
             child,
             port: DEFAULT_PORT,
             hostname: DEFAULT_HOSTNAME.to_string(),
+            api: OpenCodeApi::V1,
+            password: None,
         });
         IDLE_TIMEOUT_MS.store(1_000, Ordering::SeqCst);
         let running = || OPENCODE_SERVER.lock().unwrap().is_some();
@@ -847,6 +1026,8 @@ mod tests {
             child,
             port: DEFAULT_PORT,
             hostname: DEFAULT_HOSTNAME.to_string(),
+            api: OpenCodeApi::V1,
+            password: None,
         });
         let epoch = IDLE_EPOCH.load(Ordering::SeqCst);
 
@@ -878,7 +1059,7 @@ pub async fn get_opencode_server_status() -> Result<OpenCodeServerStatus, String
     }
 
     let url = server_url(DEFAULT_HOSTNAME, DEFAULT_PORT);
-    let healthy = is_healthy(&url);
+    let healthy = managed_running || matches!(unmanaged_server(&url), Ok(Some(_)));
 
     Ok(OpenCodeServerStatus {
         running: managed_running || healthy,

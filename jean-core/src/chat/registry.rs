@@ -440,15 +440,26 @@ pub fn get_opencode_session_id(session_id: &str) -> Option<String> {
 
 /// Fire-and-forget server-side abort for a running OpenCode session.
 ///
-/// OpenCode exposes `POST /session/{id}/abort`. Jean still keeps a local
+/// OpenCode 1.x exposes `POST /session/{id}/abort`, 2.x
+/// `POST /api/session/{id}/interrupt`. Jean still keeps a local
 /// cancellation flag so the in-process request can return promptly even if
 /// the server abort request is slow or fails.
 pub fn abort_opencode_session(opencode_session_id: String, working_dir: Option<String>) {
     std::thread::spawn(move || {
-        let Some(base_url) = crate::opencode_server::get_current_url() else {
+        let Some(server) = crate::opencode_server::current_server() else {
             log::warn!("OpenCode: no server URL available for abort");
             return;
         };
+        if server.api == crate::opencode_server::OpenCodeApi::V2 {
+            let result =
+                super::opencode_v2::V2Client::new(&server, std::time::Duration::from_secs(5))
+                    .and_then(|client| client.interrupt(&opencode_session_id));
+            if let Err(e) = result {
+                log::warn!("OpenCode interrupt failed: {e}");
+            }
+            return;
+        }
+        let base_url = server.url;
 
         let abort_url = format!("{base_url}/session/{opencode_session_id}/abort");
         log::info!("OpenCode: sending abort to {abort_url}");

@@ -26,6 +26,7 @@ pub(crate) mod muse;
 mod naming;
 mod native_history;
 pub(crate) mod opencode;
+pub(crate) mod opencode_v2;
 pub(crate) mod pi;
 pub mod registry;
 pub mod run_log;
