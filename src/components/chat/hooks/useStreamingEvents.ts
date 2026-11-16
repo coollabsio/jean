@@ -2262,7 +2262,8 @@ export default function useStreamingEvents({
         setCompacting(session_id, true)
         const label = lookupSessionLabel(queryClient, session_id, worktree_id)
         toast.info(
-          label ? `Compacting context: ${label}...` : 'Compacting context...'
+          label ? `Compacting context: ${label}...` : 'Compacting context...',
+          { id: `compact-${session_id}` }
         )
       }
     )
@@ -2290,7 +2291,10 @@ export default function useStreamingEvents({
 
         const label = lookupSessionLabel(queryClient, session_id, worktree_id)
         const prefix = `Context ${metadata.trigger === 'auto' ? 'auto-' : ''}compacted`
-        toast.info(label ? `${prefix}: ${label}` : prefix)
+        // Same id replaces the "Compacting context..." toast.
+        toast.info(label ? `${prefix}: ${label}` : prefix, {
+          id: `compact-${session_id}`,
+        })
       }
     )
 
