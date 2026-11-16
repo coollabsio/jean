@@ -7167,6 +7167,60 @@ mod pr_remote_cleanup_tests {
         assert!(git::remote_exists(path, "fork-keep"));
         assert!(git::remote_exists(path, "origin"));
     }
+
+    fn merged_pr_data(worktree: Worktree) -> ProjectsData {
+        let project: Project = serde_json::from_value(serde_json::json!({
+            "id": "proj",
+            "name": "proj",
+            "path": "/tmp/repo",
+            "default_branch": "main",
+            "added_at": 0,
+        }))
+        .expect("minimal project");
+        ProjectsData {
+            projects: vec![project],
+            worktrees: vec![worktree],
+        }
+    }
+
+    fn worktree_with_pr(pr_number: u32) -> Worktree {
+        let mut worktree = minimal_worktree("wt", None, None);
+        worktree.pr_number = Some(pr_number);
+        worktree
+    }
+
+    #[test]
+    fn merged_pr_deletes_its_worktree() {
+        let data = merged_pr_data(worktree_with_pr(7));
+        assert_eq!(
+            merged_pr_cleanup(&data, "wt", 7),
+            Some(MergedPrCleanup::Delete)
+        );
+    }
+
+    #[test]
+    fn merged_pr_only_unlinks_sessions_on_the_project_checkout() {
+        let mut base = worktree_with_pr(7);
+        base.session_type = SessionType::Base;
+        assert_eq!(
+            merged_pr_cleanup(&merged_pr_data(base), "wt", 7),
+            Some(MergedPrCleanup::ClearPr)
+        );
+
+        let mut on_repo_root = worktree_with_pr(7);
+        on_repo_root.path = "/tmp/repo".to_string();
+        assert_eq!(
+            merged_pr_cleanup(&merged_pr_data(on_repo_root), "wt", 7),
+            Some(MergedPrCleanup::ClearPr)
+        );
+    }
+
+    #[test]
+    fn merged_pr_skips_missing_or_relinked_worktrees() {
+        let data = merged_pr_data(worktree_with_pr(8));
+        assert_eq!(merged_pr_cleanup(&data, "wt", 7), None);
+        assert_eq!(merged_pr_cleanup(&data, "gone", 8), None);
+    }
 }
 
 /// Clear PR information from a worktree
@@ -7216,6 +7270,70 @@ pub async fn clear_worktree_pr(app: AppHandle, worktree_id: String) -> Result<()
 
     log::trace!("Successfully cleared PR info for worktree {worktree_id}");
     Ok(())
+}
+
+/// What to do with a worktree after its linked PR was merged.
+#[derive(Debug, PartialEq)]
+enum MergedPrCleanup {
+    /// Remove the worktree (same as a manual delete).
+    Delete,
+    /// The session uses the project checkout itself: only unlink the PR.
+    ClearPr,
+}
+
+fn merged_pr_cleanup(
+    data: &super::types::ProjectsData,
+    worktree_id: &str,
+    pr_number: u32,
+) -> Option<MergedPrCleanup> {
+    let worktree = data.find_worktree(worktree_id)?;
+    // The worktree was re-linked to another PR while the status was fetched.
+    if worktree.pr_number != Some(pr_number) {
+        return None;
+    }
+    let uses_project_checkout = worktree.session_type == SessionType::Base
+        || data
+            .find_project(&worktree.project_id)
+            .is_some_and(|project| project.path == worktree.path);
+    Some(if uses_project_checkout {
+        MergedPrCleanup::ClearPr
+    } else {
+        MergedPrCleanup::Delete
+    })
+}
+
+/// Delete a worktree whose linked PR was merged, when the user enabled
+/// `auto_delete_worktree_on_pr_merged`. Called by the PR status poller.
+pub async fn cleanup_worktree_for_merged_pr(
+    app: AppHandle,
+    worktree_id: String,
+    pr_number: u32,
+) -> Result<(), String> {
+    let enabled = crate::load_preferences(app.clone())
+        .await
+        .map(|prefs| prefs.auto_delete_worktree_on_pr_merged)
+        .unwrap_or(false);
+    if !enabled {
+        return Ok(());
+    }
+
+    let data = load_projects_data(&app)?;
+    match merged_pr_cleanup(&data, &worktree_id, pr_number) {
+        Some(MergedPrCleanup::Delete) => {
+            log::info!("PR #{pr_number} merged: deleting worktree {worktree_id}");
+            delete_worktree(app, worktree_id, None).await
+        }
+        Some(MergedPrCleanup::ClearPr) => {
+            log::info!("PR #{pr_number} merged: unlinking it from base session {worktree_id}");
+            clear_worktree_pr(app.clone(), worktree_id).await?;
+            let _ = app.emit_all(
+                "cache:invalidate",
+                &serde_json::json!({ "keys": ["projects"] }),
+            );
+            Ok(())
+        }
+        None => Ok(()),
+    }
 }
 
 /// Update cached status for a worktree

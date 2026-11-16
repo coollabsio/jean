@@ -1375,6 +1375,7 @@ export interface AppPreferences {
   http_server_localhost_only: boolean // Legacy localhost-only fallback when no bind host is set
   http_server_token_required: boolean // Require token for web access (default true)
   auto_pull_base_branch: boolean // Auto-pull base branch before creating a new worktree
+  auto_delete_worktree_on_pr_merged?: boolean // Delete a worktree when its linked PR is merged
   debug_mode_enabled: boolean // Show debug panel in chat sessions
   agents_enabled?: boolean // Experimental: show the Agents tab
   default_enabled_mcp_servers: string[] // MCP server names enabled by default (empty = none)
@@ -2814,6 +2815,7 @@ export const defaultPreferences: AppPreferences = {
   http_server_localhost_only: true, // Default to localhost-only for security
   http_server_token_required: true, // Default: require token for security
   auto_pull_base_branch: true, // Default: enabled
+  auto_delete_worktree_on_pr_merged: true, // Default: enabled
   debug_mode_enabled: false, // Default: disabled
   agents_enabled: false, // Default: disabled (experimental)
   default_enabled_mcp_servers: [], // Default: no MCP servers enabled

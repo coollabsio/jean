@@ -3632,6 +3632,25 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   }}
                 />
               </InlineField>
+
+              <InlineField
+                label="Delete worktree when PR is merged"
+                description="Remove the worktree after its linked pull request is merged"
+                help="Base sessions are kept: only the merged PR link is removed."
+              >
+                <Switch
+                  checked={
+                    preferences?.auto_delete_worktree_on_pr_merged ?? true
+                  }
+                  onCheckedChange={checked => {
+                    if (preferences) {
+                      patchPreferences.mutate({
+                        auto_delete_worktree_on_pr_merged: checked,
+                      })
+                    }
+                  }}
+                />
+              </InlineField>
             </div>
           </SettingsSection>
 

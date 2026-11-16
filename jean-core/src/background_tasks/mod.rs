@@ -21,7 +21,7 @@ use tauri::AppHandle;
 
 use crate::http_server::EmitExt;
 use crate::projects::git_status::{try_get_branch_status, ActiveWorktreeInfo, GitBranchStatus};
-use crate::projects::pr_status::{get_pr_status, MergeableStatus, PrStatus};
+use crate::projects::pr_status::{get_pr_status, MergeableStatus, PrDisplayStatus, PrStatus};
 
 pub mod commands;
 
@@ -976,10 +976,28 @@ fn emit_git_status(app: &AppHandle, status: GitBranchStatus) -> Result<(), Strin
         .map_err(|e| format!("Failed to emit git:status-update event: {e}"))
 }
 
-/// Emit a PR status event to the frontend
+/// Emit a PR status event to the frontend, then clean up the worktree if
+/// its PR was merged (when the user enabled it).
 fn emit_pr_status(app: &AppHandle, status: PrStatus) -> Result<(), String> {
     app.emit_all("pr:status-update", &status)
-        .map_err(|e| format!("Failed to emit pr:status-update event: {e}"))
+        .map_err(|e| format!("Failed to emit pr:status-update event: {e}"))?;
+
+    if status.display_status == PrDisplayStatus::Merged {
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let worktree_id = status.worktree_id;
+            if let Err(e) = crate::projects::cleanup_worktree_for_merged_pr(
+                app,
+                worktree_id.clone(),
+                status.pr_number,
+            )
+            .await
+            {
+                log::warn!("Failed to clean up worktree {worktree_id} after PR merge: {e}");
+            }
+        });
+    }
+    Ok(())
 }
 
 #[cfg(test)]
