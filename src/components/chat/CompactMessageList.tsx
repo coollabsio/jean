@@ -39,7 +39,7 @@ import { ReplyBubble, ReplyBubbles } from './ReplyBubble'
 import { getProviderChangeBeforeMessage } from './message-settings-labels'
 import { ProviderChangeSeparator } from './ProviderChangeSeparator'
 import { AskUserQuestion } from './AskUserQuestion'
-import { SecretRequestCard } from './SecretRequestCard'
+import { SecretRequestGroup } from './SecretRequestCard'
 import { SecretListCard } from './SecretListCard'
 import {
   isSecretListTool,
@@ -699,17 +699,15 @@ function CompactQuestionMessage({
           />
         )
       })}
-      {secretRequests.map(({ id, request }) => (
-        <SecretRequestCard
-          key={id}
+      {secretRequests.length > 0 && (
+        <SecretRequestGroup
           sessionId={sessionId}
-          toolCallId={id}
-          request={request}
+          requests={secretRequests}
           answered={hasFollowUpMessage}
           disabled={isSending}
           onSend={onSendAnswer}
         />
-      ))}
+      )}
       {showsSecretList && <SecretListCard sessionId={sessionId} />}
       {durationMs != null && durationMs > 0 && (
         <span className="mt-1 block min-h-4 text-xs leading-4 text-muted-foreground/40 tabular-nums font-mono">

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ToolCall } from '@/types/chat'
 import {
+  combinedSecretAnswers,
   isSecretSavedMessage,
   secretDeclinedMessage,
   secretRequest,
@@ -83,5 +84,27 @@ describe('isSecretSavedMessage', () => {
     ).toBe(true)
     expect(isSecretSavedMessage(secretDeclinedMessage('API token'))).toBe(false)
     expect(isSecretSavedMessage('Please save the token')).toBe(false)
+  })
+})
+
+describe('combinedSecretAnswers', () => {
+  const saved = (label: string) =>
+    secretSavedMessage(label, { path: `/s/${label}`, retention: 'day' })
+
+  it('waits until every request has an answer', () => {
+    expect(combinedSecretAnswers(['a', 'b'], { a: saved('A') })).toBeNull()
+    expect(combinedSecretAnswers([], {})).toBeNull()
+  })
+
+  it('joins all answers with saved ones first so the chat hides the message', () => {
+    const message = combinedSecretAnswers(['a', 'b', 'c'], {
+      a: secretDeclinedMessage('A'),
+      b: saved('B'),
+      c: saved('C'),
+    })
+    expect(message).toBe(
+      [saved('B'), saved('C'), secretDeclinedMessage('A')].join('\n\n')
+    )
+    expect(isSecretSavedMessage(message ?? '')).toBe(true)
   })
 })

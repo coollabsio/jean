@@ -86,3 +86,23 @@ export function isSecretSavedMessage(content: string): boolean {
 export function secretDeclinedMessage(label: string): string {
   return `I declined to give "${label}".`
 }
+
+/**
+ * One user message for all secret requests of an assistant message, or null
+ * while a request has no answer. Saved answers go first, so the chat hides the
+ * message (see `isSecretSavedMessage`).
+ */
+export function combinedSecretAnswers(
+  requestIds: string[],
+  answers: Partial<Record<string, string>>
+): string | null {
+  const texts: string[] = []
+  for (const id of requestIds) {
+    const text = answers[id]
+    if (text === undefined) return null
+    texts.push(text)
+  }
+  if (texts.length === 0) return null
+  const saved = texts.filter(isSecretSavedMessage)
+  return [...saved, ...texts.filter(text => !saved.includes(text))].join('\n\n')
+}

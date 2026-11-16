@@ -1,4 +1,6 @@
 import {
+  useCallback,
+  useEffect,
   useId,
   useRef,
   useState,
@@ -6,7 +8,14 @@ import {
   type FormEvent,
 } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { CheckIcon, Lock, Minus, ShieldCheck } from '@/components/icons/reicon'
+import {
+  CheckIcon,
+  Eye,
+  EyeOff,
+  Lock,
+  Minus,
+  ShieldCheck,
+} from '@/components/icons/reicon'
 import { toast } from 'sonner'
 import { invoke } from '@/lib/transport'
 import { Button } from '@/components/ui/button'
@@ -14,6 +23,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import {
+  combinedSecretAnswers,
   secretDeclinedMessage,
   secretRetentionText,
   secretSavedMessage,
@@ -31,9 +41,76 @@ const TOGGLE_ITEM_CLASS =
   'flex-none rounded-sm px-2.5 text-xs data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm'
 
 /**
+ * All secret requests of one assistant message. Each card saves its own value,
+ * but the chat gets one message only after every card is saved or declined:
+ * a message per card would end the request for the other cards.
+ */
+export function SecretRequestGroup({
+  sessionId,
+  requests,
+  answered,
+  disabled,
+  onSend,
+}: {
+  sessionId: string
+  requests: { id: string; request: SecretRequest }[]
+  answered: boolean
+  disabled: boolean
+  onSend: ((text: string) => void) | undefined
+}) {
+  const [answers, setAnswers] = useState<Partial<Record<string, string>>>({})
+  const sent = useRef(false)
+  const ids = requests.map(({ id }) => id)
+  const message = combinedSecretAnswers(ids, answers)
+
+  useEffect(() => {
+    if (!message || answered || sent.current || !onSend) return
+    sent.current = true
+    onSend(message)
+  }, [message, answered, onSend])
+
+  const resolve = useCallback((id: string, text: string | null) => {
+    setAnswers(current => {
+      if (text === null) {
+        if (!(id in current)) return current
+        const { [id]: _removed, ...rest } = current
+        return rest
+      }
+      return current[id] === text ? current : { ...current, [id]: text }
+    })
+  }, [])
+
+  const open = requests.length - Object.keys(answers).length
+  const waiting =
+    !answered && requests.length > 1 && open > 0 && open < requests.length
+
+  return (
+    <>
+      {requests.map(({ id, request }) => (
+        <SecretRequestCard
+          key={id}
+          sessionId={sessionId}
+          toolCallId={id}
+          request={request}
+          answered={answered}
+          disabled={disabled || !onSend}
+          onResolve={resolve}
+        />
+      ))}
+      {waiting && (
+        <p className="text-xs text-muted-foreground">
+          Jean sends your answers when all {requests.length} requests are saved
+          or declined. {open} left.
+        </p>
+      )}
+    </>
+  )
+}
+
+/**
  * Card for a Jean MCP `request_secret` call. The value goes only to
- * `save_secret_request`, which writes an owner-only file; the chat gets the
- * file path as the next user message. The value stays in local state only.
+ * `save_secret_request`, which writes an owner-only file; the group sends the
+ * file path to the chat as the next user message. The value stays in local state only.
  * The file belongs to this tool call, so the card can show it and delete it.
  */
 export function SecretRequestCard({
@@ -42,7 +119,7 @@ export function SecretRequestCard({
   request,
   answered,
   disabled,
-  onSend,
+  onResolve,
 }: {
   sessionId: string
   toolCallId: string
@@ -50,7 +127,8 @@ export function SecretRequestCard({
   /** A user message already follows the request */
   answered: boolean
   disabled: boolean
-  onSend: ((text: string) => void) | undefined
+  /** The answer for the chat, or null when the user deleted the saved value */
+  onResolve: (toolCallId: string, text: string | null) => void
 }) {
   const inputId = useId()
   const queryClient = useQueryClient()
@@ -67,14 +145,23 @@ export function SecretRequestCard({
   const [retention, setRetention] = useState<SecretRetention>('forever')
   const [submitting, setSubmitting] = useState(false)
   const [declined, setDeclined] = useState(false)
+  const [revealed, setRevealed] = useState(false)
   // Enter and click can both submit before a render
   const inFlight = useRef(false)
+
+  // Also covers a value saved before a reload
+  useEffect(() => {
+    if (saved && !answered) {
+      onResolve(toolCallId, secretSavedMessage(request.label, saved))
+    }
+  }, [saved, answered, onResolve, toolCallId, request.label])
 
   const forget = async () => {
     try {
       await invoke('forget_secret_request', { sessionId, toolCallId })
       await queryClient.cancelQueries({ queryKey })
       queryClient.setQueryData(queryKey, null)
+      onResolve(toolCallId, null)
       toast.success(`Deleted "${request.label}"`)
     } catch (error) {
       toast.error(`Could not delete the secret: ${String(error)}`)
@@ -113,7 +200,7 @@ export function SecretRequestCard({
     )
   }
 
-  const blocked = disabled || submitting || !onSend
+  const blocked = disabled || submitting
 
   const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -132,7 +219,6 @@ export function SecretRequestCard({
       // A status fetch started before the save would overwrite the result
       await queryClient.cancelQueries({ queryKey })
       queryClient.setQueryData(queryKey, result)
-      onSend(secretSavedMessage(request.label, result))
     } catch (error) {
       toast.error(`Could not save the secret: ${String(error)}`)
     } finally {
@@ -145,8 +231,24 @@ export function SecretRequestCard({
     if (blocked) return
     setSecret('')
     setDeclined(true)
-    onSend(secretDeclinedMessage(request.label))
+    onResolve(toolCallId, secretDeclinedMessage(request.label))
   }
+
+  const masked = revealed ? '' : '[-webkit-text-security:disc]'
+  const revealButton = (
+    <Button
+      type="button"
+      size="icon"
+      variant="ghost"
+      className="size-8 shrink-0"
+      aria-label={revealed ? 'Hide the value' : 'Show the value'}
+      aria-pressed={revealed}
+      aria-controls={inputId}
+      onClick={() => setRevealed(value => !value)}
+    >
+      {revealed ? <EyeOff aria-hidden /> : <Eye aria-hidden />}
+    </Button>
+  )
 
   const fieldProps = {
     autoComplete: 'off',
@@ -199,7 +301,7 @@ export function SecretRequestCard({
         {request.multiline ? (
           <Textarea
             id={inputId}
-            className="max-h-64 min-h-28 w-full font-mono text-xs [-webkit-text-security:disc]"
+            className={`max-h-64 min-h-28 w-full font-mono text-xs ${masked}`}
             {...fieldProps}
           />
         ) : (
@@ -207,13 +309,16 @@ export function SecretRequestCard({
             id={inputId}
             // A password field makes browsers offer to save a login
             type="text"
-            className="min-w-0 flex-1 [-webkit-text-security:disc]"
+            className={`min-w-0 flex-1 ${masked}`}
             {...fieldProps}
           />
         )}
-        <Button type="submit" disabled={blocked || !secret.trim()}>
-          Save securely
-        </Button>
+        <div className="flex shrink-0 items-center gap-1">
+          {revealButton}
+          <Button type="submit" disabled={blocked || !secret.trim()}>
+            Save securely
+          </Button>
+        </div>
       </div>
       <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
         <span>Keep</span>
