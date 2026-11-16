@@ -683,6 +683,12 @@ fn one_shot_in_session(
 mod tests {
     use super::*;
 
+    /// Model for the live tests: `OPENCODE_V2_MODEL` (`provider/model`),
+    /// or the free `opencode/big-pickle`.
+    fn live_model() -> String {
+        std::env::var("OPENCODE_V2_MODEL").unwrap_or_else(|_| "opencode/big-pickle".to_string())
+    }
+
     /// Runs real turns against a live 2.x server, through the same session,
     /// stream, prompt and wait code as `execute_turn`. Needs network access
     /// for the free `opencode/big-pickle` model:
@@ -699,13 +705,14 @@ mod tests {
         let dir = std::path::PathBuf::from(std::env::var("OPENCODE_V2_DIR").unwrap());
         std::fs::write(dir.join("live.txt"), "pineapple\n").unwrap();
         let client = V2Client::new(&server, Duration::from_secs(60)).unwrap();
+        let model = live_model();
         let request = |existing, prompt, mode| TurnRequest {
             session_id: "jean",
             worktree_id: "wt",
             run_id: "run",
             working_dir: &dir,
             existing_opencode_session_id: existing,
-            model: Some("opencode/big-pickle"),
+            model: Some(model.as_str()),
             execution_mode: Some(mode),
             reasoning_effort: None,
             prompt,
@@ -822,12 +829,139 @@ mod tests {
         assert!(client.inbox(&session).unwrap().is_empty());
         assert!(client.pending_permissions(&session).unwrap().is_empty());
         assert!(client.session_forms(&session).unwrap().is_empty());
-        assert!(client.history(&session, RESUME_HISTORY_LIMIT).unwrap().is_empty());
+        assert!(client
+            .history(&session, RESUME_HISTORY_LIMIT)
+            .unwrap()
+            .is_empty());
         let probe = V2Client::new(&server, IDLE_PROBE_TIMEOUT).unwrap();
         assert!(probe.is_idle(&session).unwrap());
         // A turn whose prompt never ran, on an idle session: lost.
         assert!(execution_was_lost(&server, &client, &session).unwrap());
         client.delete_session(&session).unwrap();
+    }
+
+    /// Jean quits during a turn and re-attaches with `resume_turn`: while
+    /// the turn still runs, after it ended, and while a permission waits.
+    /// Same environment as `live_v2_turn`.
+    #[test]
+    #[ignore]
+    fn live_v2_restart() {
+        let server = OpenCodeServer {
+            url: std::env::var("OPENCODE_V2_URL").unwrap(),
+            api: crate::opencode_server::OpenCodeApi::V2,
+            password: std::env::var("OPENCODE_V2_PASSWORD").ok(),
+        };
+        let dir = std::path::PathBuf::from(std::env::var("OPENCODE_V2_DIR").unwrap());
+        let data = tempfile::tempdir().unwrap();
+        let app = AppHandle::new(data.path().to_path_buf(), data.path().to_path_buf()).unwrap();
+        let client = V2Client::new(&server, Duration::from_secs(60)).unwrap();
+        let probe = V2Client::new(&server, IDLE_PROBE_TIMEOUT).unwrap();
+        let model = live_model();
+        let request = |existing, prompt, mode| TurnRequest {
+            session_id: "jean",
+            worktree_id: "wt",
+            run_id: "run",
+            working_dir: &dir,
+            existing_opencode_session_id: existing,
+            model: Some(model.as_str()),
+            execution_mode: Some(mode),
+            reasoning_effort: None,
+            prompt,
+            system_prompt: None,
+        };
+        // Start the turn as Jean does, then "quit": no stream, no waiting.
+        let start = |prompt, mode| {
+            let session = prepare_session(&client, &request(None, prompt, mode)).unwrap();
+            let prompt_id = client.prompt(&session, prompt, "steer").unwrap();
+            OpenCodeTurnRef {
+                session_id: session,
+                prompt_id,
+            }
+        };
+        let wait_until = |what: &str, check: &dyn Fn() -> bool| {
+            let deadline = Instant::now() + Duration::from_secs(90);
+            while !check() {
+                assert!(Instant::now() < deadline, "timed out waiting for {what}");
+                std::thread::sleep(Duration::from_millis(500));
+            }
+        };
+        let resume = |turn: &OpenCodeTurnRef, mode| {
+            let req = TurnRequest {
+                existing_opencode_session_id: Some(&turn.session_id),
+                ..request(None, "", mode)
+            };
+            resume_turn(&app, &server, req, turn, &Arc::new(AtomicBool::new(false))).unwrap()
+        };
+
+        // 1. The turn still runs when Jean comes back.
+        let turn = start(
+            "Run the shell command `sleep 15; echo SLEPT-OK` with your shell tool, then reply with its output only.",
+            "yolo",
+        );
+        wait_until("the shell tool to start", &|| {
+            client
+                .history(&turn.session_id, 50)
+                .unwrap()
+                .iter()
+                .any(|m| {
+                    m["content"]
+                        .as_array()
+                        .is_some_and(|c| c.iter().any(|i| i["type"] == "tool"))
+                })
+        });
+        assert!(
+            !probe.is_idle(&turn.session_id).unwrap(),
+            "wait blocks while the session is busy"
+        );
+        let response = resume(&turn, "yolo");
+        assert!(!response.cancelled);
+        assert!(
+            response.content.contains("SLEPT-OK"),
+            "{}",
+            response.content
+        );
+        assert!(
+            response.tool_calls.iter().any(|t| t.name == "Bash"
+                && t.output.as_deref().unwrap_or("").contains("SLEPT-OK")),
+            "{:?}",
+            response.tool_calls
+        );
+
+        // 2. The turn ended while Jean was closed.
+        let turn = start("Reply with the word KIWI only.", "yolo");
+        wait_until("the turn to end", &|| {
+            probe.is_idle(&turn.session_id).unwrap()
+        });
+        let response = resume(&turn, "yolo");
+        assert!(!response.cancelled);
+        assert!(response.content.contains("KIWI"), "{}", response.content);
+        assert!(response.usage.is_some(), "usage rebuilt from history");
+
+        // 3. A permission asked while Jean was closed still gets its reply.
+        let turn = start(
+            "Run the shell command `echo PERM-OK` with your shell tool, then reply with its output only.",
+            "build",
+        );
+        wait_until("the permission request", &|| {
+            !client
+                .pending_permissions(&turn.session_id)
+                .unwrap()
+                .is_empty()
+        });
+        let replier = {
+            let (server, session) = (server.clone(), turn.session_id.clone());
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_secs(3));
+                let client = V2Client::new(&server, Duration::from_secs(30)).unwrap();
+                let pending = client.pending_permissions(&session).unwrap();
+                let id = pending[0]["id"].as_str().unwrap();
+                client.reply_permission(&session, id, "once", None).unwrap();
+            })
+        };
+        let response = resume(&turn, "build");
+        replier.join().unwrap();
+        assert!(!response.cancelled);
+        assert!(response.content.contains("PERM-OK"), "{}", response.content);
     }
 
     /// Steering, question forms and one-shots against a live 2.x server.
@@ -842,12 +976,13 @@ mod tests {
         };
         let dir = std::path::PathBuf::from(std::env::var("OPENCODE_V2_DIR").unwrap());
         let client = V2Client::new(&server, Duration::from_secs(60)).unwrap();
+        let model = live_model();
         let new_session = || {
             client
                 .create_session(json!({
                     "location": { "directory": dir.to_string_lossy() },
                     "agent": "build",
-                    "model": { "id": "big-pickle", "providerID": "opencode" },
+                    "model": v2_model(Some(&model), None),
                 }))
                 .unwrap()
         };
@@ -966,7 +1101,7 @@ mod tests {
         let text = run_one_shot(
             &server,
             "Reply with the word OK only.",
-            "opencode/big-pickle",
+            &model,
             None,
             &dir,
             None,
@@ -978,7 +1113,7 @@ mod tests {
         let text = run_one_shot(
             &server,
             "Give a short title for a commit that fixes a typo.",
-            "opencode/big-pickle",
+            &model,
             Some(schema),
             &dir,
             None,
