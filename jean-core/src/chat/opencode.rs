@@ -1601,7 +1601,7 @@ fn should_retry_structured_output_as_text(error: &str) -> bool {
     error.contains("Thinking mode does not support this tool_choice")
 }
 
-fn structured_output_text_prompt(prompt: &str, schema: &str) -> String {
+pub(super) fn structured_output_text_prompt(prompt: &str, schema: &str) -> String {
     format!(
         "{prompt}\n\nReturn only the JSON object matching this schema. Do not use markdown fences:\n{schema}"
     )
@@ -3713,6 +3713,7 @@ pub fn execute_one_shot_opencode(
     let model = model.to_string();
     let prompt = prompt.to_string();
     let reasoning = reasoning_effort.map(|s| s.to_string());
+    let schema_text = json_schema.map(str::to_string);
     // Parse the JSON schema string into a Value for the native `format` field
     let schema_value: Option<serde_json::Value> = json_schema
         .map(|s| serde_json::from_str(s))
@@ -3727,15 +3728,30 @@ pub fn execute_one_shot_opencode(
     // on a dedicated OS thread to avoid panicking reqwest::blocking inside
     // the Tokio async runtime that Tauri async commands use.
     let handle = std::thread::spawn(move || {
-        let base_url = crate::opencode_server::acquire(&app)?;
-        let result = one_shot_opencode_blocking(
-            &base_url,
-            &prompt,
-            &model,
-            schema_value.as_ref(),
-            &dir,
-            reasoning.as_deref(),
-        );
+        let server = crate::opencode_server::acquire_server(&app)?;
+        let result = if server.api == crate::opencode_server::OpenCodeApi::V2 {
+            super::opencode_v2::run_one_shot(
+                &server,
+                &prompt,
+                &model,
+                schema_text.as_deref(),
+                std::path::Path::new(&dir),
+                reasoning.as_deref(),
+            )
+            .map(|text| match schema_text {
+                Some(_) => super::muse::extract_json_object(&text).unwrap_or(text),
+                None => text,
+            })
+        } else {
+            one_shot_opencode_blocking(
+                &server.url,
+                &prompt,
+                &model,
+                schema_value.as_ref(),
+                &dir,
+                reasoning.as_deref(),
+            )
+        };
         crate::opencode_server::release();
         result
     });
@@ -4063,7 +4079,7 @@ pub fn answer_opencode_question(
     tool_call_id: &str,
     answers: Vec<Vec<String>>,
 ) -> Result<(), String> {
-    let base_url = crate::opencode_server::acquire(app)?;
+    let server = crate::opencode_server::acquire_server(app)?;
 
     // RAII guard: decrements server usage count on exit
     struct ServerReleaseGuard;
@@ -4073,6 +4089,11 @@ pub fn answer_opencode_question(
         }
     }
     let _server_guard = ServerReleaseGuard;
+
+    if server.api == crate::opencode_server::OpenCodeApi::V2 {
+        return super::opencode_v2::answer_question(&server, working_dir, tool_call_id, &answers);
+    }
+    let base_url = server.url;
 
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(30))

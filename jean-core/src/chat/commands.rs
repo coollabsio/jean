@@ -10521,21 +10521,13 @@ async fn steer_text_into_opencode_turn(
         .map(|r| r.run_id.clone())
         .ok_or_else(|| format!("No running OpenCode run for session: {session_id}"))?;
 
-    // Wait until the main `/message` turn is actively streaming before injecting.
-    // A `prompt_async` sent before the turn is live starts a SECOND concurrent
-    // turn on the same OpenCode session, which resets the in-flight `/message`
-    // connection (the "error sending request for url" failure). If the turn never
-    // starts within the window, bail so the caller requeues instead of colliding.
-    if !crate::chat::opencode::wait_opencode_turn_started(
-        &opencode_session_id,
-        std::time::Duration::from_secs(15),
-    ) {
-        return Err(format!(
-            "OpenCode turn not yet active for session {session_id}; cannot steer"
-        ));
-    }
-
-    let base_url = crate::opencode_server::acquire(app)?;
+    // Server probes use blocking HTTP, which must not run on the async runtime.
+    let acquire_app = app.clone();
+    let server = tauri::async_runtime::spawn_blocking(move || {
+        crate::opencode_server::acquire_server(&acquire_app)
+    })
+    .await
+    .map_err(|e| format!("OpenCode server task failed: {e}"))??;
 
     struct ServerReleaseGuard;
     impl Drop for ServerReleaseGuard {
@@ -10545,39 +10537,63 @@ async fn steer_text_into_opencode_turn(
     }
     let _server_guard = ServerReleaseGuard;
 
-    let prompt_url = format!("{base_url}/session/{opencode_session_id}/prompt_async");
-    let directory = worktree_path.to_string();
-    let payload = opencode_text_prompt_payload(message);
-
-    tauri::async_runtime::spawn_blocking(move || {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .map_err(|e| format!("Failed to build OpenCode steer client: {e}"))?;
-
-        let response = client
-            .post(&prompt_url)
-            .query(&[("directory", directory)])
-            .json(&payload)
-            .send()
-            .map_err(|e| format!("Failed to steer OpenCode session: {e}"))?;
-
-        if response.status().is_success() {
-            Ok(())
-        } else {
-            let status = response.status();
-            let body = response.text().unwrap_or_default();
-            Err(format!(
-                "OpenCode steer failed: status={status}, body={body}"
-            ))
+    if server.api == crate::opencode_server::OpenCodeApi::V2 {
+        let text = message.to_string();
+        let target = opencode_session_id.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            crate::chat::opencode_v2::steer(&server, &target, &text)
+        })
+        .await
+        .map_err(|e| format!("OpenCode steer task failed: {e}"))??;
+    } else {
+        // Wait until the main `/message` turn is actively streaming before injecting.
+        // A `prompt_async` sent before the turn is live starts a SECOND concurrent
+        // turn on the same OpenCode session, which resets the in-flight `/message`
+        // connection (the "error sending request for url" failure). If the turn never
+        // starts within the window, bail so the caller requeues instead of colliding.
+        if !crate::chat::opencode::wait_opencode_turn_started(
+            &opencode_session_id,
+            std::time::Duration::from_secs(15),
+        ) {
+            return Err(format!(
+                "OpenCode turn not yet active for session {session_id}; cannot steer"
+            ));
         }
-    })
-    .await
-    .map_err(|e| format!("OpenCode steer task failed: {e}"))??;
 
-    // Tell the running OpenCode turn to wait for `session.idle` before finalizing,
-    // so this injected prompt's streamed output is captured into the run.
-    crate::chat::opencode::mark_opencode_steered(&opencode_session_id);
+        let prompt_url = format!("{}/session/{opencode_session_id}/prompt_async", server.url);
+        let directory = worktree_path.to_string();
+        let payload = opencode_text_prompt_payload(message);
+
+        tauri::async_runtime::spawn_blocking(move || {
+            let client = reqwest::blocking::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .map_err(|e| format!("Failed to build OpenCode steer client: {e}"))?;
+
+            let response = client
+                .post(&prompt_url)
+                .query(&[("directory", directory)])
+                .json(&payload)
+                .send()
+                .map_err(|e| format!("Failed to steer OpenCode session: {e}"))?;
+
+            if response.status().is_success() {
+                Ok(())
+            } else {
+                let status = response.status();
+                let body = response.text().unwrap_or_default();
+                Err(format!(
+                    "OpenCode steer failed: status={status}, body={body}"
+                ))
+            }
+        })
+        .await
+        .map_err(|e| format!("OpenCode steer task failed: {e}"))??;
+
+        // Tell the running OpenCode turn to wait for `session.idle` before finalizing,
+        // so this injected prompt's streamed output is captured into the run.
+        crate::chat::opencode::mark_opencode_steered(&opencode_session_id);
+    }
 
     match run_log::RunLogWriter::resume(app, session_id, &run_id) {
         Ok(mut writer) => {

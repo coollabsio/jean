@@ -34,6 +34,8 @@ pub enum TurnEmit {
     FormCreated {
         session_id: String,
         form_id: String,
+        /// A `question` tool form, answered through Jean's question UI.
+        question: bool,
     },
 }
 
@@ -54,8 +56,10 @@ pub struct TurnState {
     root: String,
     /// Root session plus every subagent session created under it.
     lineage: HashSet<String>,
-    prompt_id: Option<String>,
-    prompt_delivered: bool,
+    /// Inbox ids of every message this turn sent (prompt and steers).
+    sent: Vec<String>,
+    /// Sent messages the server has not delivered yet.
+    undelivered: HashSet<String>,
     blocks: Vec<ContentBlock>,
     /// (assistant message id, ordinal, kind) → index into `blocks`.
     open_parts: HashMap<(String, u64, PartKind), usize>,
@@ -127,8 +131,8 @@ impl TurnState {
         Self {
             root: root_session_id.to_string(),
             lineage: HashSet::from([root_session_id.to_string()]),
-            prompt_id: None,
-            prompt_delivered: false,
+            sent: Vec::new(),
+            undelivered: HashSet::new(),
             blocks: Vec::new(),
             open_parts: HashMap::new(),
             tool_names: HashMap::new(),
@@ -138,36 +142,39 @@ impl TurnState {
         }
     }
 
-    /// The inbox id of the prompt this turn sent. The turn cannot end before
-    /// the server delivers it, so a late end event of an earlier execution
-    /// does not end this turn.
-    pub fn expect_prompt(&mut self, inbox_id: String) {
-        self.prompt_id = Some(inbox_id);
+    /// Track a message this turn sent (the prompt or a steer). The turn
+    /// cannot end before the server delivers every tracked message, so a
+    /// late end event of an earlier execution does not end it, and a steer
+    /// sent near the end is part of the turn.
+    pub fn expect_delivery(&mut self, inbox_id: String) {
+        self.undelivered.insert(inbox_id.clone());
+        self.sent.push(inbox_id);
     }
 
     pub fn outcome(&self) -> Option<&Outcome> {
-        if self.prompt_delivered {
-            self.outcome.as_ref()
-        } else {
-            None
+        if self.sent.is_empty() || !self.undelivered.is_empty() {
+            return None;
         }
+        self.outcome.as_ref()
     }
 
     /// Catch up from `GET /api/session/{id}/message` (newest first) after the
-    /// event stream reconnects, in case the end events fell in the gap.
+    /// event stream reconnects, in case delivery or end events fell in the gap.
     pub fn resync(&mut self, messages: &[Value]) {
-        let Some(prompt_id) = self.prompt_id.as_deref() else {
-            return;
-        };
-        let Some(prompt_at) = messages
+        let positions: Vec<usize> = messages
             .iter()
-            .position(|message| str_field(message, "id") == prompt_id)
-        else {
+            .enumerate()
+            .filter(|(_, message)| self.sent.iter().any(|id| id == str_field(message, "id")))
+            .map(|(index, message)| {
+                self.undelivered.remove(str_field(message, "id"));
+                index
+            })
+            .collect();
+        let Some(newest_ours) = positions.into_iter().min() else {
             return;
         };
-        self.prompt_delivered = true;
         let latest = &messages[0];
-        if prompt_at == 0 || str_field(latest, "type") != "idle" {
+        if !self.undelivered.is_empty() || newest_ours == 0 || str_field(latest, "type") != "idle" {
             return;
         }
         self.outcome = match str_field(latest, "outcome") {
@@ -196,8 +203,7 @@ impl TurnState {
                 vec![]
             }
             "session.inbox.delivered" if is_root => {
-                if self.prompt_id.as_deref() == Some(str_field(&data, "inboxID")) {
-                    self.prompt_delivered = true;
+                if self.undelivered.remove(str_field(&data, "inboxID")) {
                     // An end event seen so far belongs to an earlier execution.
                     self.outcome = None;
                 }
@@ -308,9 +314,11 @@ impl TurnState {
                 let form = data.get("form").cloned().unwrap_or_default();
                 let form_session = str_field(&form, "sessionID");
                 if self.lineage.contains(form_session) {
+                    let kind = form.get("metadata").map(|m| str_field(m, "kind"));
                     vec![TurnEmit::FormCreated {
                         session_id: form_session.to_string(),
                         form_id: str_field(&form, "id").to_string(),
+                        question: kind == Some("question"),
                     }]
                 } else {
                     vec![]
@@ -514,7 +522,7 @@ mod tests {
     #[test]
     fn builds_a_tool_turn_from_recorded_events() {
         let mut turn = TurnState::new("ses_root");
-        turn.expect_prompt("msg_p".to_string());
+        turn.expect_delivery("msg_p".to_string());
         let emits: Vec<TurnEmit> = recorded_tool_turn()
             .iter()
             .flat_map(|e| turn.apply(e))
@@ -570,7 +578,7 @@ mod tests {
     #[test]
     fn an_end_event_before_the_prompt_is_delivered_does_not_end_the_turn() {
         let mut turn = TurnState::new("ses_root");
-        turn.expect_prompt("msg_p".to_string());
+        turn.expect_delivery("msg_p".to_string());
         turn.apply(&event(
             "session.execution.succeeded",
             json!({ "sessionID": "ses_root" }),
@@ -644,7 +652,7 @@ mod tests {
     #[test]
     fn resync_ends_a_turn_whose_end_events_were_missed() {
         let mut turn = TurnState::new("ses_root");
-        turn.expect_prompt("msg_p".to_string());
+        turn.expect_delivery("msg_p".to_string());
         // Newest first, as returned by GET /api/session/{id}/message.
         let running = vec![
             json!({ "id": "msg_a", "type": "assistant" }),
@@ -671,9 +679,65 @@ mod tests {
     }
 
     #[test]
+    fn a_steer_delivered_after_the_end_extends_the_turn() {
+        let mut turn = TurnState::new("ses_root");
+        let root = |kind: &str, extra: Value| {
+            let mut data = json!({ "sessionID": "ses_root" });
+            data.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            event(kind, data)
+        };
+        turn.expect_delivery("msg_p".to_string());
+        turn.apply(&root("session.execution.started", json!({})));
+        turn.apply(&root(
+            "session.inbox.delivered",
+            json!({ "inboxID": "msg_p" }),
+        ));
+        turn.expect_delivery("msg_s".to_string());
+        turn.apply(&root("session.execution.succeeded", json!({})));
+        assert_eq!(turn.outcome(), None, "steer not delivered yet");
+
+        turn.apply(&root("session.execution.started", json!({})));
+        turn.apply(&root(
+            "session.inbox.delivered",
+            json!({ "inboxID": "msg_s" }),
+        ));
+        assert_eq!(turn.outcome(), None, "second execution still running");
+        turn.apply(&root("session.execution.succeeded", json!({})));
+        assert_eq!(turn.outcome(), Some(&Outcome::Succeeded));
+    }
+
+    #[test]
+    fn question_forms_are_told_apart() {
+        let mut turn = TurnState::new("ses_root");
+        let form = |kind: &str| {
+            event(
+                "form.created",
+                json!({ "form": { "id": "frm_1", "sessionID": "ses_root", "metadata": { "kind": kind } } }),
+            )
+        };
+        assert_eq!(
+            turn.apply(&form("question")),
+            vec![TurnEmit::FormCreated {
+                session_id: "ses_root".to_string(),
+                form_id: "frm_1".to_string(),
+                question: true,
+            }]
+        );
+        assert!(matches!(
+            turn.apply(&form("mcp")).as_slice(),
+            [TurnEmit::FormCreated {
+                question: false,
+                ..
+            }]
+        ));
+    }
+
+    #[test]
     fn delivery_clears_an_end_event_of_an_earlier_execution() {
         let mut turn = TurnState::new("ses_root");
-        turn.expect_prompt("msg_p".to_string());
+        turn.expect_delivery("msg_p".to_string());
         turn.apply(&event(
             "session.execution.succeeded",
             json!({ "sessionID": "ses_root" }),

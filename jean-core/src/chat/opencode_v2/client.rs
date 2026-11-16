@@ -135,6 +135,36 @@ impl V2Client {
         self.call(Method::POST, &path, Some(body)).map(drop)
     }
 
+    /// Pending forms of every session in `directory`.
+    pub fn forms(&self, directory: &str) -> Result<Vec<Value>, String> {
+        let response = self
+            .http
+            .get(format!("{}/api/form", self.server.url))
+            .basic_auth(SERVER_USERNAME, self.server.password.as_deref())
+            .query(&[("location[directory]", directory)])
+            .send()
+            .map_err(|e| format!("OpenCode GET /api/form failed: {e}"))?;
+        let status = response.status().as_u16();
+        let text = response.text().unwrap_or_default();
+        match parse_response(status, &text)
+            .map_err(|e| format!("OpenCode GET /api/form failed: {e}"))?
+        {
+            Value::Array(forms) => Ok(forms),
+            other => Err(format!("OpenCode form list is not an array: {other}")),
+        }
+    }
+
+    pub fn reply_form(&self, session_id: &str, form_id: &str, answer: Value) -> Result<(), String> {
+        let path = format!("/api/session/{session_id}/form/{form_id}/reply");
+        self.call(Method::POST, &path, Some(json!({ "answer": answer })))
+            .map(drop)
+    }
+
+    pub fn delete_session(&self, session_id: &str) -> Result<(), String> {
+        let path = format!("/api/session/{session_id}");
+        self.call(Method::DELETE, &path, None).map(drop)
+    }
+
     pub fn cancel_form(&self, session_id: &str, form_id: &str) -> Result<(), String> {
         let path = format!("/api/session/{session_id}/form/{form_id}");
         self.call(Method::DELETE, &path, None).map(drop)

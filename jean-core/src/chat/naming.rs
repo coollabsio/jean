@@ -818,7 +818,7 @@ fn generate_names_opencode_inner(
     model: &str,
     request: &NamingRequest,
 ) -> Result<NamingOutput, String> {
-    let base_url = crate::opencode_server::acquire(app)?;
+    let server = crate::opencode_server::acquire_server(app)?;
 
     struct ServerReleaseGuard;
     impl Drop for ServerReleaseGuard {
@@ -827,6 +827,19 @@ fn generate_names_opencode_inner(
         }
     }
     let _server_guard = ServerReleaseGuard;
+
+    if server.api == crate::opencode_server::OpenCodeApi::V2 {
+        let text = crate::chat::opencode_v2::run_one_shot(
+            &server,
+            prompt,
+            model,
+            None,
+            &request.worktree_path,
+            request.reasoning_effort.as_deref(),
+        )?;
+        return parse_opencode_naming_text(&text);
+    }
+    let base_url = server.url;
 
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(300))
@@ -927,16 +940,20 @@ fn generate_names_opencode_inner(
         .json()
         .map_err(|e| format!("Failed to parse OpenCode naming response: {e}"))?;
     let text = extract_text_from_opencode_parts(&response_json);
+    parse_opencode_naming_text(&text)
+}
+
+fn parse_opencode_naming_text(text: &str) -> Result<NamingOutput, String> {
     log::trace!("OpenCode generated naming response: {text}");
 
     let json_text = text
         .trim()
         .strip_prefix("```json")
         .or_else(|| text.trim().strip_prefix("```"))
-        .unwrap_or(&text)
+        .unwrap_or(text)
         .trim()
         .strip_suffix("```")
-        .unwrap_or(&text)
+        .unwrap_or(text)
         .trim();
     let json_text = extract_json_object(json_text).unwrap_or(json_text);
 

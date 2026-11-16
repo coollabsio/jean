@@ -3,16 +3,20 @@
 //! `session.execution.*` event on `/api/event`.
 
 mod client;
+mod forms;
+mod steer;
 mod stream;
 mod turn;
 
 pub use client::V2Client;
+pub use forms::answer_question;
+pub use steer::steer;
 
 use super::opencode::{
     agent_for_execution_mode, emit_backend_retry, emit_chat_chunk, emit_chat_done, emit_chat_error,
     emit_chat_thinking, emit_chat_tool_result, emit_chat_tool_use, emit_permission_replied,
     parse_provider_model, permission_rules_for_mode, should_auto_approve_opencode_permissions,
-    variant_for_effort, OpenCodeResponse,
+    structured_output_text_prompt, variant_for_effort, OpenCodeResponse,
 };
 use super::types::OpenCodePermissionRequestEvent;
 use crate::http_server::EmitExt;
@@ -34,6 +38,8 @@ const DISCONNECT_LIMIT: Duration = Duration::from_secs(30);
 /// Same limit as the blocking 1.x `/message` request.
 const TURN_TIMEOUT: Duration = Duration::from_secs(1800);
 const INTERRUPT_SETTLE: Duration = Duration::from_secs(3);
+/// Same limit as the 1.x one-shot request.
+const ONE_SHOT_TIMEOUT: Duration = Duration::from_secs(600);
 
 pub struct TurnRequest<'a> {
     pub session_id: &'a str,
@@ -159,10 +165,17 @@ pub fn execute_turn(
     }
 
     let inbox_id = client.prompt(&opencode_session_id, &text, "steer")?;
-    state.expect_prompt(inbox_id);
+    state.expect_delivery(inbox_id);
+    let _active_turn = steer::ActiveTurn::register(&opencode_session_id);
     log::info!(
         "OpenCode 2.x: prompt queued jean_session={} opencode_session={opencode_session_id}",
         req.session_id
+    );
+    super::commands::trigger_opencode_queue_steer(
+        app.clone(),
+        req.worktree_id.to_string(),
+        working_dir.clone(),
+        req.session_id.to_string(),
     );
 
     let outcome = match wait_for_outcome(
@@ -171,6 +184,7 @@ pub fn execute_turn(
         &mut state,
         &opencode_session_id,
         cancelled,
+        TURN_TIMEOUT,
         |emit| handle_emit(app, &client, &req, emit),
     )? {
         Some(outcome) => outcome,
@@ -238,9 +252,10 @@ fn wait_for_outcome(
     state: &mut TurnState,
     opencode_session_id: &str,
     cancelled: &AtomicBool,
+    timeout: Duration,
     mut on_emit: impl FnMut(TurnEmit),
 ) -> Result<Option<Outcome>, String> {
-    let deadline = Instant::now() + TURN_TIMEOUT;
+    let deadline = Instant::now() + timeout;
     let mut disconnected_since: Option<Instant> = None;
     loop {
         if cancelled.load(Ordering::SeqCst) {
@@ -251,7 +266,7 @@ fn wait_for_outcome(
             interrupt_and_settle(client, events, state, opencode_session_id);
             return Err(format!(
                 "OpenCode 2.x turn did not finish within {} minutes",
-                TURN_TIMEOUT.as_secs() / 60
+                timeout.as_secs() / 60
             ));
         }
         match events.rx.recv_timeout(Duration::from_millis(100)) {
@@ -277,8 +292,15 @@ fn wait_for_outcome(
                 return Err("OpenCode event stream stopped".to_string())
             }
         }
-        if let Some(outcome) = state.outcome() {
-            return Ok(Some(outcome.clone()));
+        for steer_id in steer::take_steers(opencode_session_id) {
+            state.expect_delivery(steer_id);
+        }
+        if let Some(outcome) = state.outcome().cloned() {
+            let late = steer::close_unless_steered(opencode_session_id);
+            if late.is_empty() {
+                return Ok(Some(outcome));
+            }
+            late.into_iter().for_each(|id| state.expect_delivery(id));
         }
     }
 }
@@ -374,17 +396,108 @@ fn handle_emit(app: &AppHandle, client: &V2Client, req: &TurnRequest<'_>, emit: 
             &request_id,
             reply,
         ),
+        // The question tool call already reached the question UI as a tool
+        // use; its answer replies to this form (`answer_question`).
+        TurnEmit::FormCreated { question: true, .. } => {}
         TurnEmit::FormCreated {
             session_id: form_session,
             form_id,
-        } => {
-            // Jean has no UI for 2.x forms yet. Cancel so the turn does not stall.
-            log::warn!("OpenCode: cancelling unsupported 2.x form {form_id}");
-            if let Err(e) = client.cancel_form(&form_session, &form_id) {
-                log::warn!("OpenCode: form cancel failed: {e}");
+            question: false,
+        } => cancel_form(client, &form_session, &form_id),
+    }
+}
+
+/// Jean has no UI for non-question 2.x forms. Cancel so the turn does not stall.
+fn cancel_form(client: &V2Client, session_id: &str, form_id: &str) {
+    log::warn!("OpenCode: cancelling unsupported 2.x form {form_id}");
+    if let Err(e) = client.cancel_form(session_id, form_id) {
+        log::warn!("OpenCode: form cancel failed: {e}");
+    }
+}
+
+/// One prompt in a temporary read-only (`plan`) session, for magic prompts
+/// and naming. Returns the reply text. 2.x has no structured output, so a
+/// JSON schema becomes a strict-JSON instruction in the prompt; callers
+/// extract the JSON from the text.
+pub fn run_one_shot(
+    server: &OpenCodeServer,
+    prompt: &str,
+    model: &str,
+    json_schema: Option<&str>,
+    working_dir: &Path,
+    reasoning_effort: Option<&str>,
+) -> Result<String, String> {
+    let client = V2Client::new(server, Duration::from_secs(60))?;
+    let mut body = json!({
+        "location": { "directory": working_dir.to_string_lossy() },
+        "agent": "plan",
+    });
+    if let Some(model) = v2_model(Some(model), reasoning_effort) {
+        body["model"] = model;
+    }
+    let session_id = client.create_session(body)?;
+    let result = one_shot_in_session(&client, server, &session_id, prompt, json_schema);
+    if let Err(e) = client.delete_session(&session_id) {
+        log::warn!("OpenCode: could not delete one-shot session {session_id}: {e}");
+    }
+    result
+}
+
+fn one_shot_in_session(
+    client: &V2Client,
+    server: &OpenCodeServer,
+    session_id: &str,
+    prompt: &str,
+    json_schema: Option<&str>,
+) -> Result<String, String> {
+    let text = match json_schema {
+        Some(schema) => structured_output_text_prompt(prompt, schema),
+        None => prompt.to_string(),
+    };
+    let not_cancelled = AtomicBool::new(false);
+    let mut state = TurnState::new(session_id);
+    let events = stream::open(server);
+    wait_connected(&events, &not_cancelled)?;
+    state.expect_delivery(client.prompt(session_id, &text, "steer")?);
+    let outcome = wait_for_outcome(
+        client,
+        &events,
+        &mut state,
+        session_id,
+        &not_cancelled,
+        ONE_SHOT_TIMEOUT,
+        |emit| match emit {
+            // Nobody can answer: a one-shot has no UI.
+            TurnEmit::PermissionAsked(request) => {
+                if let Err(e) = client.reply_permission(
+                    &request.opencode_session_id,
+                    &request.request_id,
+                    "reject",
+                    Some("Not available in a one-shot request"),
+                ) {
+                    log::warn!("OpenCode: one-shot permission reject failed: {e}");
+                }
             }
+            TurnEmit::FormCreated {
+                session_id,
+                form_id,
+                ..
+            } => cancel_form(client, &session_id, &form_id),
+            _ => {}
+        },
+    )?;
+    match outcome {
+        Some(Outcome::Succeeded) => {}
+        Some(Outcome::Failed(error)) => return Err(error),
+        Some(Outcome::Interrupted) | None => {
+            return Err("OpenCode one-shot was interrupted".to_string())
         }
     }
+    let content = state.finish().content;
+    if content.trim().is_empty() {
+        return Err("Empty response from OpenCode".to_string());
+    }
+    Ok(content)
 }
 
 #[cfg(test)]
@@ -428,7 +541,7 @@ mod tests {
                 wait_connected(&events, &cancelled).unwrap(),
                 "stream connected"
             );
-            state.expect_prompt(client.prompt(&session, req.prompt, "steer").unwrap());
+            state.expect_delivery(client.prompt(&session, req.prompt, "steer").unwrap());
             if let Some(delay) = cancel_after {
                 let flag = cancelled.clone();
                 std::thread::spawn(move || {
@@ -437,11 +550,16 @@ mod tests {
                 });
             }
             let mut emits = Vec::new();
-            let outcome =
-                wait_for_outcome(&client, &events, &mut state, &session, &cancelled, |e| {
-                    emits.push(e)
-                })
-                .unwrap();
+            let outcome = wait_for_outcome(
+                &client,
+                &events,
+                &mut state,
+                &session,
+                &cancelled,
+                TURN_TIMEOUT,
+                |e| emits.push(e),
+            )
+            .unwrap();
             (session, outcome, emits, state.finish())
         };
 
@@ -472,7 +590,7 @@ mod tests {
             .unwrap()
             .to_string();
         let mut missed = TurnState::new(&session);
-        missed.expect_prompt(prompt_id);
+        missed.expect_delivery(prompt_id);
         missed.resync(&history);
         assert_eq!(
             missed.outcome(),
@@ -505,6 +623,139 @@ mod tests {
         let long = request(None, "Write a 1500 word essay about rivers.", "build");
         let (_, outcome, _, _) = run(&long, Some(Duration::from_secs(4)));
         assert_eq!(outcome, None, "Jean cancel returns before the turn ends");
+    }
+
+    /// Steering, question forms and one-shots against a live 2.x server.
+    /// Same environment as `live_v2_turn`.
+    #[test]
+    #[ignore]
+    fn live_v2_interactions() {
+        let server = OpenCodeServer {
+            url: std::env::var("OPENCODE_V2_URL").unwrap(),
+            api: crate::opencode_server::OpenCodeApi::V2,
+            password: std::env::var("OPENCODE_V2_PASSWORD").ok(),
+        };
+        let dir = std::path::PathBuf::from(std::env::var("OPENCODE_V2_DIR").unwrap());
+        let client = V2Client::new(&server, Duration::from_secs(60)).unwrap();
+        let new_session = || {
+            client
+                .create_session(json!({
+                    "location": { "directory": dir.to_string_lossy() },
+                    "agent": "build",
+                    "model": { "id": "big-pickle", "providerID": "opencode" },
+                }))
+                .unwrap()
+        };
+        let not_cancelled = AtomicBool::new(false);
+
+        // A steer sent while the turn runs becomes part of it.
+        let session = new_session();
+        let mut state = TurnState::new(&session);
+        let events = stream::open(&server);
+        assert!(wait_connected(&events, &not_cancelled).unwrap());
+        state.expect_delivery(
+            client
+                .prompt(
+                    &session,
+                    "Count slowly from 1 to 30, one number per line.",
+                    "steer",
+                )
+                .unwrap(),
+        );
+        let _active = steer::ActiveTurn::register(&session);
+        std::thread::sleep(Duration::from_secs(2));
+        steer::steer(
+            &server,
+            &session,
+            "When you are done counting, write the word MANGO.",
+        )
+        .unwrap();
+        let outcome = wait_for_outcome(
+            &client,
+            &events,
+            &mut state,
+            &session,
+            &not_cancelled,
+            TURN_TIMEOUT,
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(outcome, Some(Outcome::Succeeded));
+        let content = state.finish().content;
+        assert!(
+            content.contains("MANGO"),
+            "steer output is in the turn: {content}"
+        );
+        assert!(
+            steer::steer(&server, &session, "late").is_err(),
+            "no steer after the turn closed"
+        );
+
+        // A question form is answered through answer_question.
+        let session = new_session();
+        let mut state = TurnState::new(&session);
+        let events = stream::open(&server);
+        assert!(wait_connected(&events, &not_cancelled).unwrap());
+        state.expect_delivery(client.prompt(&session, "Use your question tool to ask me which color I prefer, with the options Red and Blue. Then reply with my answer only.", "steer").unwrap());
+        let mut asked = None;
+        let outcome = wait_for_outcome(
+            &client,
+            &events,
+            &mut state,
+            &session,
+            &not_cancelled,
+            TURN_TIMEOUT,
+            |emit| {
+                if let TurnEmit::ToolUse { id, name, .. } = &emit {
+                    if name == "question" {
+                        asked = Some(id.clone());
+                    }
+                }
+                if let TurnEmit::FormCreated { question: true, .. } = emit {
+                    let id = asked.clone().expect("question tool use before its form");
+                    answer_question(
+                        &server,
+                        &dir.to_string_lossy(),
+                        &id,
+                        &[vec!["Blue".to_string()]],
+                    )
+                    .unwrap();
+                }
+            },
+        )
+        .unwrap();
+        assert_eq!(outcome, Some(Outcome::Succeeded));
+        let content = state.finish().content;
+        assert!(
+            content.contains("Blue"),
+            "answer reached the model: {content}"
+        );
+
+        // One-shot with and without a JSON schema.
+        let text = run_one_shot(
+            &server,
+            "Reply with the word OK only.",
+            "opencode/big-pickle",
+            None,
+            &dir,
+            None,
+        )
+        .unwrap();
+        assert!(text.contains("OK"), "{text}");
+        let schema =
+            r#"{"type":"object","properties":{"title":{"type":"string"}},"required":["title"]}"#;
+        let text = run_one_shot(
+            &server,
+            "Give a short title for a commit that fixes a typo.",
+            "opencode/big-pickle",
+            Some(schema),
+            &dir,
+            None,
+        )
+        .unwrap();
+        let parsed: Value =
+            serde_json::from_str(&crate::chat::muse::extract_json_object(&text).unwrap()).unwrap();
+        assert!(parsed["title"].is_string(), "{text}");
     }
 
     #[test]
