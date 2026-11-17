@@ -10,6 +10,7 @@ import {
   restoreReturnedQueuedMessage,
   upsertTurnAssistantMessage,
   useSendMessage,
+  waitForUserTurnOutcome,
 } from './chat'
 import { useChatStore } from '@/store/chat-store'
 import type { ChatMessage, QueuedMessage, Session } from '@/types/chat'
@@ -500,5 +501,28 @@ describe('restoreReturnedQueuedMessage', () => {
     const state = useChatStore.getState()
     expect(state.inputDrafts['session-1']).toBe('queued prompt')
     expect(state.pendingImages['session-1']).toEqual([image])
+  })
+})
+
+describe('waitForUserTurnOutcome', () => {
+  it('returns a verdict that was already recorded', async () => {
+    resetSendTracking()
+    recordUserTurnOutcome('wait-early', 'persisted')
+
+    expect(await waitForUserTurnOutcome('wait-early', 200)).toBe('persisted')
+  })
+
+  it('waits for a verdict that arrives after the invoke rejects', async () => {
+    resetSendTracking()
+    const pending = waitForUserTurnOutcome('wait-late', 500)
+    setTimeout(() => recordUserTurnOutcome('wait-late', 'persisted'), 120)
+
+    expect(await pending).toBe('persisted')
+  })
+
+  it('falls back to not_accepted when the verdict never arrives', async () => {
+    resetSendTracking()
+
+    expect(await waitForUserTurnOutcome('wait-none', 60)).toBe('not_accepted')
   })
 })
