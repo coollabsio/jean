@@ -27,6 +27,7 @@ import { attachOrphanCompositionEndGuard } from '@/lib/terminal-composition-guar
 import { LocalTerminalLinkProvider } from '@/lib/terminal-local-links'
 import { registerOsc52ClipboardHandler } from '@/lib/terminal-osc52'
 import { ensureTerminalFontLoaded } from '@/lib/terminal-font-loading'
+import { resolveCustomTerminalFont } from '@/lib/terminal-font-family'
 import {
   invoke,
   isTransportConnected,
@@ -126,6 +127,8 @@ const terminalFontFamilyMap: Record<TerminalFont, string> = {
     '"Source Code Pro", ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace',
   'sf-mono': '"SF Mono", Menlo, Monaco, Consolas, monospace',
   system: 'ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace',
+  // Used only when the custom value is blank; see getTerminalFontFamily.
+  custom: 'ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace',
 }
 
 function getConfiguredRenderer(): TerminalRenderer {
@@ -167,6 +170,12 @@ function getTerminalFontFamily(): string {
     preferencesQueryKeys.preferences()
   )
   const font = preferences?.terminal_font ?? defaultPreferences.terminal_font
+  if (font === 'custom') {
+    return (
+      resolveCustomTerminalFont(preferences?.terminal_font_custom) ??
+      terminalFontFamilyMap.system
+    )
+  }
   return (
     terminalFontFamilyMap[
       font ?? defaultPreferences.terminal_font ?? 'system'

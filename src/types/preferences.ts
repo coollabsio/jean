@@ -28,6 +28,7 @@ export type TerminalFont =
   | 'source-code-pro'
   | 'sf-mono'
   | 'system'
+  | 'custom'
 
 export const notificationSoundOptions: {
   value: NotificationSound
@@ -1334,6 +1335,7 @@ export interface AppPreferences {
   terminal: TerminalApp // Terminal app: 'terminal' | 'warp' | 'ghostty' | 'kitty' | 'iterm2' | 'powershell' | 'windows-terminal'
   terminal_renderer?: TerminalRenderer // Embedded terminal renderer: 'xterm' or 'ghostty-web' (experimental)
   terminal_font?: TerminalFont // Embedded terminal font
+  terminal_font_custom?: string // Font family used when terminal_font is 'custom'
   terminal_font_size?: number // Embedded terminal font size in pixels
   editor: EditorApp // Editor app: 'zed' | 'vscode' | 'vscodium' | 'cursor' | 'xcode' | 'intellij'
   open_in: OpenInDefault // Default Open In action: 'editor' | 'terminal' | 'finder' | 'github'
@@ -2703,6 +2705,7 @@ export const terminalFontOptions: { value: TerminalFont; label: string }[] = [
   { value: 'source-code-pro', label: 'Source Code Pro' },
   { value: 'sf-mono', label: 'SF Mono / Menlo' },
   { value: 'system', label: 'System Monospace' },
+  { value: 'custom', label: 'Custom font…' },
 ]
 
 // Syntax highlighting themes (from shiki bundled themes)
@@ -2776,6 +2779,7 @@ export const defaultPreferences: AppPreferences = {
   terminal: isServerWindows() ? 'powershell' : 'terminal',
   terminal_renderer: 'xterm',
   terminal_font: 'jetbrains-mono',
+  terminal_font_custom: '',
   terminal_font_size: 13,
   editor: 'zed',
   open_in: 'editor',
