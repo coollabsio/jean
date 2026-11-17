@@ -7,8 +7,9 @@ out keep Jean's built-in values, so a theme can be as small as one colour.
 ## Importing a theme
 
 Settings → Appearance → **Custom theme** → **Import**, then pick one or more
-`.json` files: Jean themes (see [Format](#format)) or VS Code colour themes
-(see [VS Code themes](#vs-code-themes)). If some files fail, Jean imports the
+`.json` files: Jean themes (see [Format](#format)), VS Code colour themes
+(see [VS Code themes](#vs-code-themes)) or T3 Code skins (see
+[T3 Code skins](#t3-code-skins)). If some files fail, Jean imports the
 others and shows one error for each failed file. The last imported theme
 applies straight away, and the dropdown switches between imported themes and
 **None** (the built-in colours). Importing a file with the
@@ -86,6 +87,22 @@ import:
   extends another file is converted from its own `colors` only).
 
 A file without `name` gets its file name, without `-color-theme.json`.
+
+## T3 Code skins
+
+A file with a numeric `version`, an `appearance` (`light` or `dark`) and a
+`colors` object is a T3 Code skin, for example from
+[t3skins.dev](https://www.t3skins.dev/). Jean converts it on import:
+
+- **Light and dark.** `colors` fills the `appearance` mode. `variants.dark` (or
+  `variants.light`) fills the other mode.
+- **Colours.** Jean maps skin colours such as `canvas`, `text`, `surface`,
+  `accent`, `focus` and `sidebar` to its tokens. The full table is
+  `T3_COLOUR_MAP` in `src/lib/t3-skins.ts`. Tokens with no match keep Jean's
+  built-in values. Values that are not hex colours are skipped.
+- **Not supported:** the `css` field (custom CSS and background images) is
+  dropped, because Jean themes contain colours only. Terminal, search-match and
+  code colours are not used.
 
 ## Tokens
 

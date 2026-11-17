@@ -4,6 +4,7 @@ import {
   type ThemeColourToken,
   type ThemeColours,
 } from './custom-themes'
+import { convertT3Skin, isT3Skin } from './t3-skins'
 
 type Mode = 'light' | 'dark'
 
@@ -247,7 +248,8 @@ export interface ThemeFile {
 }
 
 /**
- * Turn imported files into Jean themes. Jean theme files must be strict JSON;
+ * Turn imported files into Jean themes. Jean theme files and T3 Code skins
+ * must be strict JSON;
  * VS Code colour themes may be JSONC and are converted. A light and a dark VS
  * Code theme from the same family become one theme. Each file that fails adds
  * one message to `errors` and does not stop the others.
@@ -263,7 +265,13 @@ export function importThemeFiles(files: ThemeFile[]): {
   for (const { fileName, text } of files) {
     try {
       const input = parseThemeJson(text)
-      if (isVsCodeTheme(input)) {
+      if (isT3Skin(input)) {
+        themes.push(
+          parseCustomTheme(
+            convertT3Skin(input, fileName.replace(/\.json$/i, ''))
+          )
+        )
+      } else if (isVsCodeTheme(input)) {
         converted.push(
           convertVsCodeTheme(
             input,

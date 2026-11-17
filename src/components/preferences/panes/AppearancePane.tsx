@@ -378,7 +378,7 @@ export const AppearancePane: React.FC = () => {
 
           <InlineField
             label="Custom theme"
-            description="Imported Jean or VS Code theme that recolours light and dark mode"
+            description="Imported Jean, VS Code or T3 Code theme that recolours light and dark mode"
           >
             <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
               <Select
