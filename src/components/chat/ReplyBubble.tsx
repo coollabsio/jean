@@ -18,9 +18,16 @@ export const USER_PILL_BUBBLE_CLASS = [
   '[&_[data-attachments]>*]:border-transparent [&_[data-attachments]>*]:bg-[color-mix(in_oklab,var(--bubble-bg)_80%,black)]',
 ].join(' ')
 
-/** Chat user prompt: a subtle bordered card. */
+/** Chat user prompt: a filled card matching the agent pill bubble.
+ *
+ * Assistant output sits on the page background, so a `bg-muted/20` card was
+ * almost indistinguishable from it (issue #330). A neutral fill is used rather
+ * than the primary tint: primary is the app's attention colour (yellow), and
+ * tinting every prompt with it would read as a warning. Inversion was avoided
+ * so the muted tokens inside badges, pills and code blocks stay readable.
+ */
 export const USER_CARD_BUBBLE_CLASS =
-  'min-w-0 break-words [overflow-wrap:anywhere] rounded-lg border border-border/20 bg-muted/20 px-3 py-2 text-foreground'
+  'min-w-0 break-words [overflow-wrap:anywhere] rounded-lg border border-border/50 bg-muted/60 px-3 py-2 text-foreground'
 
 /** Assistant reply: a pill bubble, aligned left. */
 export function ReplyBubble({ children }: { children: ReactNode }) {
