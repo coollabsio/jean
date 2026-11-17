@@ -166,6 +166,8 @@ import { useAgentMentionCandidates } from './hooks/useAgentMentionCandidates'
 import { LOCAL_SERVER_ID } from '@/types/server-resource'
 import { SessionDebugPanel } from './SessionDebugPanel'
 import { ChatToolbar } from './ChatToolbar'
+import { CacheBurstWarningDialog } from './CacheBurstWarningDialog'
+import { shouldWarnAboutCacheBurst } from './cache-burst-warning'
 import { SendCancelButton } from './toolbar/SendCancelButton'
 import { ReviewResultsPanel } from './ReviewResultsPanel'
 import { ReviewMethodModal } from './ReviewMethodModal'
@@ -767,6 +769,8 @@ const ChatWindowContent = memo(function ChatWindowContent({
 
   const { data: preferences } = usePreferences()
   const patchPreferences = usePatchPreferences()
+  const [pendingEffortLevel, setPendingEffortLevel] =
+    useState<EffortLevel | null>(null)
   const sessionModalOpen = useUIStore(state => state.sessionChatModalOpen)
   const focusChatShortcut = formatShortcutDisplay(
     (preferences?.keybindings?.focus_chat_input ??
@@ -3682,6 +3686,25 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                     </div>
                                   ) : (
                                     <div className={cn(zenMode && 'shrink-0')}>
+                                      <CacheBurstWarningDialog
+                                        open={pendingEffortLevel !== null}
+                                        onOpenChange={open => {
+                                          if (!open) setPendingEffortLevel(null)
+                                        }}
+                                        onConfirm={dontShowAgain => {
+                                          if (dontShowAgain && preferences) {
+                                            patchPreferences.mutate({
+                                              cache_burst_warning: false,
+                                            })
+                                          }
+                                          if (pendingEffortLevel) {
+                                            handleToolbarEffortLevelChange(
+                                              pendingEffortLevel
+                                            )
+                                          }
+                                          setPendingEffortLevel(null)
+                                        }}
+                                      />
                                       <ChatToolbar
                                         isSending={isSending}
                                         hasPendingQuestions={
@@ -3811,9 +3834,22 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                         onThinkingLevelChange={
                                           handleToolbarThinkingLevelChange
                                         }
-                                        onEffortLevelChange={
-                                          handleToolbarEffortLevelChange
-                                        }
+                                        onEffortLevelChange={level => {
+                                          if (
+                                            shouldWarnAboutCacheBurst(
+                                              preferences?.cache_burst_warning ??
+                                                true,
+                                              (session?.messages?.length ?? 0) >
+                                                0,
+                                              selectedEffortLevel,
+                                              level
+                                            )
+                                          ) {
+                                            setPendingEffortLevel(level)
+                                            return
+                                          }
+                                          handleToolbarEffortLevelChange(level)
+                                        }}
                                         onSetExecutionMode={
                                           handleToolbarSetExecutionMode
                                         }

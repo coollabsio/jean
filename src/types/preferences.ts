@@ -1481,6 +1481,7 @@ export interface AppPreferences {
   jean_mcp_max_depth: number // Max recursive spawn depth via Jean MCP (default 3)
   jean_mcp_rate_limit_per_minute: number // Per-source rate limit for session-spawning tools (default 20)
   commandcode_max_turns: number // Max agent turns per Command Code run (default 30)
+  cache_burst_warning: boolean // Warn before changing effort level in an existing session (default on)
   agent_browser_enabled: boolean // Install agent-browser and add its MCP server to CLI configs (default true)
   /**
    * Hostname for new browser tabs and port open buttons when a jean.json port
@@ -2910,6 +2911,7 @@ export const defaultPreferences: AppPreferences = {
   jean_mcp_max_depth: 3,
   jean_mcp_rate_limit_per_minute: 20,
   commandcode_max_turns: 30,
+  cache_burst_warning: true,
   agent_browser_enabled: true, // Default: on
   browser_default_host: null, // Unset: tabs and port buttons use localhost
 }
