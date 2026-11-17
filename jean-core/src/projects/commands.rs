@@ -7252,6 +7252,10 @@ pub async fn update_worktree_cached_status(
         .find(|w| w.id == worktree_id)
         .ok_or_else(|| format!("Worktree not found: {worktree_id}"))?;
 
+    let previous_pr_status = worktree.cached_pr_status.clone();
+    let next_pr_status = pr_status.clone();
+    let worktree_session_type = worktree.session_type.clone();
+
     // Pollers send the same values repeatedly. Avoid touching the timestamp,
     // serializing the full projects file, and invalidating project queries
     // when no cached value actually changed.
@@ -7347,7 +7351,108 @@ pub async fn update_worktree_cached_status(
 
     save_projects_data(&app, &data)?;
 
+    // The PR can be merged on GitHub, outside Jean. When the poller flips the
+    // cached status to merged, honour the opt-in cleanup preference.
+    let auto_delete_enabled = crate::load_preferences_sync(&app)
+        .map(|prefs| prefs.auto_delete_merged_worktrees)
+        .unwrap_or(false);
+    if should_auto_delete_merged_worktree(
+        auto_delete_enabled,
+        previous_pr_status.as_deref(),
+        next_pr_status.as_deref(),
+        &worktree_session_type,
+    ) {
+        match cleanup_merged_worktree(&app, &worktree_id) {
+            Ok(()) => log::trace!("Auto-deleted merged worktree {worktree_id}"),
+            Err(error) => {
+                log::info!("Skipped auto-delete for merged worktree {worktree_id}: {error}")
+            }
+        }
+    }
+
     Ok(true)
+}
+
+/// Only fire on the transition into `merged`, for real worktrees, when the
+/// user opted in. Local changes are checked separately before deleting.
+fn should_auto_delete_merged_worktree(
+    enabled: bool,
+    previous: Option<&str>,
+    next: Option<&str>,
+    session_type: &crate::projects::types::SessionType,
+) -> bool {
+    enabled
+        && *session_type == crate::projects::types::SessionType::Worktree
+        && next.is_some_and(|status| status.eq_ignore_ascii_case("merged"))
+        && !previous.is_some_and(|status| status.eq_ignore_ascii_case("merged"))
+}
+
+/// Remove a worktree whose PR was merged outside Jean.
+///
+/// Refuses to touch a worktree with uncommitted changes; everything else
+/// mirrors the cleanup done after an in-app merge.
+fn cleanup_merged_worktree(app: &AppHandle, worktree_id: &str) -> Result<(), String> {
+    let (project_path, worktree_path, branch, project_id) = {
+        let data = load_projects_data(app)?;
+        let worktree = data
+            .worktrees
+            .iter()
+            .find(|w| w.id == worktree_id)
+            .ok_or_else(|| format!("Worktree not found: {worktree_id}"))?;
+        let project = data
+            .projects
+            .iter()
+            .find(|p| p.id == worktree.project_id)
+            .ok_or_else(|| format!("Project not found: {}", worktree.project_id))?;
+        (
+            project.path.clone(),
+            worktree.path.clone(),
+            worktree.branch.clone(),
+            worktree.project_id.clone(),
+        )
+    };
+
+    let status = std::process::Command::new("git")
+        .args(["-C", &worktree_path, "status", "--porcelain"])
+        .output()
+        .map_err(|error| format!("failed to check git status: {error}"))?;
+    if !status.status.success() {
+        return Err("git status failed".to_string());
+    }
+    if !String::from_utf8_lossy(&status.stdout).trim().is_empty() {
+        return Err("worktree has uncommitted changes".to_string());
+    }
+
+    crate::chat::registry::cancel_processes_for_worktree(app, worktree_id);
+    app.emit_all(
+        "worktree:deleting",
+        &WorktreeDeletingEvent {
+            id: worktree_id.to_string(),
+            project_id: project_id.clone(),
+        },
+    )
+    .ok();
+
+    git::remove_worktree(&project_path, &worktree_path)?;
+    if let Err(error) = git::delete_branch(&project_path, &branch) {
+        log::warn!("Failed to delete branch after auto-cleanup: {error}");
+    }
+
+    let mut data = load_projects_data(app)?;
+    data.remove_worktree(worktree_id);
+    save_projects_data(app, &data)?;
+
+    app.emit_all(
+        "worktree:deleted",
+        &WorktreeDeletedEvent {
+            id: worktree_id.to_string(),
+            project_id,
+            teardown_output: None,
+        },
+    )
+    .ok();
+
+    Ok(())
 }
 
 /// Get detailed git diff for a worktree
@@ -14383,6 +14488,48 @@ mod tests {
     use crate::chat::types::Backend;
     use crate::projects::types::ProjectsData;
     use std::path::Path;
+
+    #[test]
+    fn auto_delete_only_on_merge_transition_for_worktrees() {
+        use crate::projects::types::SessionType;
+
+        assert!(should_auto_delete_merged_worktree(
+            true,
+            Some("open"),
+            Some("merged"),
+            &SessionType::Worktree
+        ));
+        assert!(should_auto_delete_merged_worktree(
+            true,
+            None,
+            Some("MERGED"),
+            &SessionType::Worktree
+        ));
+        assert!(!should_auto_delete_merged_worktree(
+            true,
+            Some("merged"),
+            Some("merged"),
+            &SessionType::Worktree
+        ));
+        assert!(!should_auto_delete_merged_worktree(
+            false,
+            Some("open"),
+            Some("merged"),
+            &SessionType::Worktree
+        ));
+        assert!(!should_auto_delete_merged_worktree(
+            true,
+            Some("open"),
+            Some("merged"),
+            &SessionType::Base
+        ));
+        assert!(!should_auto_delete_merged_worktree(
+            true,
+            Some("open"),
+            Some("closed"),
+            &SessionType::Worktree
+        ));
+    }
 
     #[test]
     fn commit_message_uses_selected_codex_model_when_claude_model_is_stale() {

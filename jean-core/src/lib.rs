@@ -459,6 +459,8 @@ pub struct AppPreferences {
     pub jean_mcp_rate_limit_per_minute: u32, // Per-source rate limit for session-spawning tools (default 20)
     #[serde(default = "default_commandcode_max_turns")]
     pub commandcode_max_turns: u32, // Max agent turns per Command Code run (default 30)
+    #[serde(default)]
+    pub auto_delete_merged_worktrees: bool, // Remove a worktree once its PR is merged (default off)
     #[serde(default = "default_agent_browser_enabled")]
     pub agent_browser_enabled: bool, // Install agent-browser and add its MCP server to CLI configs (default true)
     /// Hostname for new browser tabs and port open buttons when a jean.json
@@ -3659,6 +3661,7 @@ impl Default for AppPreferences {
             jean_mcp_max_depth: default_jean_mcp_max_depth(),
             jean_mcp_rate_limit_per_minute: default_jean_mcp_rate_limit(),
             commandcode_max_turns: default_commandcode_max_turns(),
+            auto_delete_merged_worktrees: false,
             agent_browser_enabled: default_agent_browser_enabled(),
             browser_default_host: None,
         }

@@ -3632,6 +3632,22 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   }}
                 />
               </InlineField>
+              <InlineField
+                label="Delete worktrees after their PR merges"
+                description="Remove the worktree and its branch when the attached PR is merged on GitHub"
+                help="Skipped when the worktree has uncommitted changes. Off by default."
+              >
+                <Switch
+                  checked={preferences?.auto_delete_merged_worktrees ?? false}
+                  onCheckedChange={checked => {
+                    if (preferences) {
+                      patchPreferences.mutate({
+                        auto_delete_merged_worktrees: checked,
+                      })
+                    }
+                  }}
+                />
+              </InlineField>
             </div>
           </SettingsSection>
 
