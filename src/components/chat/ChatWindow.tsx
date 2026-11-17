@@ -102,6 +102,7 @@ import {
   resolveMagicPromptBackend,
   resolveMagicPromptProvider,
   resolveProviderModelId,
+  fromProviderAliasModel,
   toProviderAliasModel,
   type CliBackend,
   type CodexProviderProfile,
@@ -1030,10 +1031,14 @@ const ChatWindowContent = memo(function ChatWindowContent({
   )
   // A custom provider offers only the opus/sonnet/haiku aliases, so the
   // first-party default (`claude-opus-5-5`) becomes its alias (`opus`).
+  // The other way, an alias saved under a provider that is not active now
+  // becomes the first-party id (`opus` -> `claude-opus-5-5`).
   const selectedModel =
-    selectedBackend === 'claude' && isCustomProvider
-      ? toProviderAliasModel(resolvedModel)
-      : resolvedModel
+    selectedBackend !== 'claude'
+      ? resolvedModel
+      : isCustomProvider
+        ? toProviderAliasModel(resolvedModel)
+        : fromProviderAliasModel(resolvedModel)
   const buildNewContextLabel = resolveApprovalLabel(
     'build',
     preferences,

@@ -28,6 +28,7 @@ import {
   PI_DEFAULT_MAGIC_PROMPT_MODELS,
   resolveMagicPromptBackend,
   resolveMagicPromptProvider,
+  fromProviderAliasModel,
   toProviderAliasModel,
 } from './preferences'
 
@@ -308,6 +309,19 @@ describe('toProviderAliasModel', () => {
     expect(toProviderAliasModel('opus')).toBe('opus')
     expect(toProviderAliasModel('claude-fable-5-2')).toBe('claude-fable-5-2')
     expect(toProviderAliasModel('glm-4.7')).toBe('glm-4.7')
+  })
+})
+
+describe('fromProviderAliasModel', () => {
+  it('maps a provider alias to the newest first-party id of its family', () => {
+    expect(fromProviderAliasModel('opus')).toBe('claude-opus-5-5')
+    expect(fromProviderAliasModel('sonnet')).toBe('claude-sonnet-5-5')
+  })
+
+  it('keeps aliases in the model list, full ids, and other models', () => {
+    expect(fromProviderAliasModel('haiku')).toBe('haiku')
+    expect(fromProviderAliasModel('claude-opus-4-8')).toBe('claude-opus-4-8')
+    expect(fromProviderAliasModel('glm-4.7')).toBe('glm-4.7')
   })
 })
 

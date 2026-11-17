@@ -2027,6 +2027,24 @@ export function toProviderAliasModel(model: string): string {
 }
 
 /**
+ * First-party Claude id for a provider alias (`opus` -> `claude-opus-5-5`).
+ * A session saved under a custom provider keeps the alias. Without the
+ * provider, the alias is not in the model list, so the toolbar shows the raw
+ * alias and the wrong reasoning control. Other models are returned unchanged.
+ */
+export function fromProviderAliasModel(model: string): string {
+  if (!CLAUDE_ALIASES.some(alias => alias.value === model)) return model
+  if (modelOptions.some(option => option.value === model)) return model
+  return (
+    modelOptions.find(
+      option =>
+        CLAUDE_FAMILY_VERSION_PATTERN.exec(option.value)?.[1]?.toLowerCase() ===
+        model
+    )?.value ?? model
+  )
+}
+
+/**
  * Upstream model id the Claude CLI requests for `model` under `provider`.
  * A custom provider maps the opus/sonnet/haiku aliases through its profile
  * env (`ANTHROPIC_DEFAULT_OPUS_MODEL` for `opus`). Returns undefined when
