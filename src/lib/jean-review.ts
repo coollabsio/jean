@@ -1,6 +1,9 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { invoke } from '@/lib/transport'
-import { resolveCodeReviewConfigs } from '@/lib/code-review-configs'
+import {
+  resolveCodeReviewConfigs,
+  resolveCodeReviewFixMode,
+} from '@/lib/code-review-configs'
 import { chatQueryKeys } from '@/services/chat'
 import { useChatStore } from '@/store/chat-store'
 import { useProjectsStore } from '@/store/projects-store'
@@ -34,7 +37,7 @@ export function buildJeanReviewPrompt(
 /**
  * Jean review: create a "Review" session and send the review prompt as a
  * normal chat message, so the run is visible and can be continued.
- * Uses the first configured code-review reviewer (backend/model/effort).
+ * Uses the first configured code-review reviewer (backend/model/effort/mode).
  */
 export async function startJeanReviewSession({
   worktreeId,
@@ -75,7 +78,10 @@ export async function startJeanReviewSession({
     config?.reasoning_effort ??
     preferences?.magic_prompt_efforts?.code_review_effort ??
     undefined
-  const executionMode = 'plan'
+  const executionMode = resolveCodeReviewFixMode(
+    config,
+    preferences?.magic_prompt_modes?.code_review_fix_mode
+  )
   const prompt = buildJeanReviewPrompt(
     preferences?.magic_prompts?.code_review,
     baseRef
