@@ -1,0 +1,26 @@
+name: Verify MCP stdio
+
+on:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  rust-tests:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './jean-core -> target'
+          shared-key: verify-mcp-stdio
+
+      - name: MCP stdio tests
+        run: cargo test --manifest-path jean-core/Cargo.toml jean_mcp_stdio::tests -- --nocapture
