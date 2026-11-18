@@ -339,6 +339,11 @@ export function useMessageSending({
         /** Queue even when auto-steer is enabled (primary modifier held). */
         forceQueue?: boolean
         /**
+         * Queue the prompt frozen: it keeps its queue position but is never
+         * auto-sent (or steered) until the user releases it.
+         */
+        freeze?: boolean
+        /**
          * Runs after the input is captured and cleared, before the message is
          * sent. Session/worktree targets are captured at call time, so the send
          * still goes to this session if the user navigates away meanwhile.
@@ -732,6 +737,23 @@ export function useMessageSending({
       }
 
       markAtBottom()
+
+      if (options?.freeze) {
+        const frozenMessage = {
+          ...queuedMessage,
+          frozen: true,
+          // A frozen prompt must never be steered by a running turn either.
+          noSteer: true,
+        }
+        enqueueMessage(activeSessionId, frozenMessage)
+        persistEnqueue(
+          activeWorktreeId,
+          activeWorktreePath,
+          activeSessionId,
+          frozenMessage
+        )
+        return
+      }
 
       const isSendingNow = checkIsSendingNow(activeSessionId)
       console.log(

@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useAutoResize } from '@/hooks/use-auto-resize'
+import { useQueuedPromptActions } from '@/components/chat/hooks/useQueuedPromptActions'
 import { invoke } from '@/lib/transport'
 import { generateId } from '@/lib/uuid'
 import { toast } from 'sonner'
@@ -90,6 +91,7 @@ interface ChatInputProps {
     options?: {
       forceSteer?: boolean
       forceQueue?: boolean
+      freeze?: boolean
       beforeSend?: () => Promise<void>
     }
   ) => void
@@ -142,6 +144,7 @@ export const ChatInput = memo(function ChatInput({
   mentionCandidates,
 }: ChatInputProps) {
   const isMobile = useIsMobile()
+  const { handleReleaseFrozen } = useQueuedPromptActions(activeSessionId)
   const { data: preferences } = usePreferences()
   const zenMode = useUIStore(state => state.zenMode)
   const resizeTextarea = useAutoResize(inputRef)
@@ -659,6 +662,49 @@ export const ChatInput = memo(function ChatInput({
             setSlashTriggerIndex(null)
             setSlashQuery('')
             return
+        }
+      }
+
+      // Mod+Shift+Enter freezes the prompt in the queue instead of sending it.
+      if (
+        e.key === 'Enter' &&
+        e.shiftKey &&
+        (e.metaKey || e.ctrlKey) &&
+        !e.altKey &&
+        !isMobile
+      ) {
+        e.preventDefault()
+        if (activeSessionId) {
+          useChatStore
+            .getState()
+            .setInputDraft(activeSessionId, valueRef.current)
+        }
+        onSubmit(e, { freeze: true })
+        return
+      }
+
+      // Alt+1…9 releases the nth frozen prompt while the composer is empty.
+      if (
+        e.altKey &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.shiftKey &&
+        !isMobile &&
+        /^[1-9]$/.test(e.key) &&
+        !valueRef.current.trim() &&
+        activeSessionId
+      ) {
+        const frozen =
+          useChatStore
+            .getState()
+            .messageQueues[
+              activeSessionId
+            ]?.filter(message => message.frozen) ?? []
+        const target = frozen[Number(e.key) - 1]
+        if (target) {
+          e.preventDefault()
+          void handleReleaseFrozen(activeSessionId, target.id)
+          return
         }
       }
 

@@ -2590,6 +2590,8 @@ const ChatWindowContent = memo(function ChatWindowContent({
     handleEditQueuedMessage,
     handleCancelQueuedEdit,
     handleSendQueuedNow,
+    handleSetFrozen,
+    handleReleaseFrozen,
   } = useQueuedPromptActions(activeSessionId)
 
   // Pending attachment removal, slash command execution
@@ -3444,6 +3446,8 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                     onSendNow={handleSendQueuedNow}
                                     onEdit={handleEditQueuedMessage}
                                     onCancelEdit={handleCancelQueuedEdit}
+                                    onSetFrozen={handleSetFrozen}
+                                    onReleaseFrozen={handleReleaseFrozen}
                                   />
                                 )}
                               {/* Input area - unified container with textarea and toolbar */}

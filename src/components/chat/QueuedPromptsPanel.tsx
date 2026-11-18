@@ -1,5 +1,12 @@
 import { memo, useCallback, useRef, useState } from 'react'
-import { Clock, Paperclip, Pencil, Play, X } from '@/components/icons/reicon'
+import {
+  Clock,
+  Lock,
+  Paperclip,
+  Pencil,
+  Play,
+  X,
+} from '@/components/icons/reicon'
 import {
   Collapsible,
   CollapsibleContent,
@@ -28,6 +35,10 @@ interface QueuedPromptsPanelProps {
   /** Load the prompt (text + attachments) into the chat input to edit it */
   onEdit: (sessionId: string, messageId: string) => void
   onCancelEdit: (sessionId: string) => void
+  /** Hold a queued prompt so it never auto-sends */
+  onSetFrozen: (sessionId: string, messageId: string, frozen: boolean) => void
+  /** Release a frozen prompt and send it */
+  onReleaseFrozen: (sessionId: string, messageId: string) => void
 }
 
 function attachmentCount(msg: QueuedMessage): number {
@@ -68,6 +79,8 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
   onSendNow,
   onEdit,
   onCancelEdit,
+  onSetFrozen,
+  onReleaseFrozen,
 }: QueuedPromptsPanelProps) {
   // Expanded state is remembered per session (collapsed by default)
   const isOpen = useChatStore(
@@ -119,7 +132,10 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
         case 'Enter': {
           e.preventDefault()
           const msg = messages[selectedIndex]
-          if (msg && msg.id !== editingId) onSendNow(sessionId, msg.id)
+          if (msg && msg.id !== editingId) {
+            if (msg.frozen) onReleaseFrozen(sessionId, msg.id)
+            else onSendNow(sessionId, msg.id)
+          }
           break
         }
         case 'Backspace':
@@ -144,12 +160,15 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
       sessionId,
       onRemove,
       onSendNow,
+      onReleaseFrozen,
       scrollRowIntoView,
       setIsOpen,
     ]
   )
 
   if (messages.length === 0) return null
+
+  const frozenMessages = messages.filter(message => message.frozen)
 
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
@@ -167,6 +186,20 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
             <span className="rounded bg-muted/50 px-1.5 py-0.5 text-xs">
               {messages.length}
             </span>
+            {frozenMessages.length > 0 && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="flex items-center gap-1 rounded bg-sky-500/10 px-1.5 py-0.5 text-2xs text-sky-600 dark:text-sky-400">
+                    <Lock className="h-2.5 w-2.5" />
+                    {frozenMessages.length} frozen
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  Held until released. With an empty composer, Alt+1–
+                  {Math.min(frozenMessages.length, 9)} releases one.
+                </TooltipContent>
+              </Tooltip>
+            )}
             {isPaused && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -195,6 +228,9 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
               const isSelected = index === selectedIndex
               const attachments = attachmentCount(msg)
               const isEditing = editingId === msg.id
+              const frozenIndex = msg.frozen
+                ? frozenMessages.findIndex(frozen => frozen.id === msg.id)
+                : -1
               return (
                 // react-doctor-disable-next-line react-doctor/click-events-have-key-events, react-doctor/no-noninteractive-element-interactions -- pointer mirror of the focusable list's arrow-key selection (handleKeyDown)
                 <li
@@ -213,8 +249,15 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
                     isSelected && 'group-focus-within/list:bg-muted/60'
                   )}
                 >
-                  <span className="shrink-0 text-muted-foreground/60 tabular-nums">
-                    #{index + 1}
+                  <span
+                    className={cn(
+                      'shrink-0 tabular-nums',
+                      msg.frozen
+                        ? 'text-sky-600 dark:text-sky-400'
+                        : 'text-muted-foreground/60'
+                    )}
+                  >
+                    {msg.frozen ? `F${frozenIndex + 1}` : `#${index + 1}`}
                   </span>
                   <span
                     className={cn(
@@ -226,6 +269,12 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
                       ? 'Editing in the input below. Submit it to save.'
                       : queuedLabel(msg.message)}
                   </span>
+                  {!isEditing && msg.frozen && (
+                    <span className="flex shrink-0 items-center gap-0.5 rounded bg-sky-500/10 px-1 py-0.5 text-2xs text-sky-600 dark:text-sky-400">
+                      <Lock className="h-2.5 w-2.5" />
+                      Frozen
+                    </span>
+                  )}
                   {!isEditing && attachments > 0 && (
                     <span className="flex shrink-0 items-center gap-0.5 rounded bg-muted/50 px-1 py-0.5 text-2xs text-muted-foreground">
                       <Paperclip className="h-2.5 w-2.5" />
@@ -294,14 +343,42 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
                           </TooltipTrigger>
                           <TooltipContent>Remove from queue</TooltipContent>
                         </Tooltip>
+                        {!msg.frozen && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button
+                                type="button"
+                                aria-label="Hold queued prompt"
+                                onClick={e => {
+                                  e.stopPropagation()
+                                  onSetFrozen(sessionId, msg.id, true)
+                                }}
+                                className="rounded p-0.5 text-muted-foreground hover:bg-muted transition-colors"
+                              >
+                                <Lock className="h-3.5 w-3.5" />
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              Hold until released (never auto-sends)
+                            </TooltipContent>
+                          </Tooltip>
+                        )}
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <button
                               type="button"
-                              aria-label="Send now"
+                              aria-label={
+                                msg.frozen
+                                  ? 'Release frozen prompt'
+                                  : 'Send now'
+                              }
                               onClick={e => {
                                 e.stopPropagation()
-                                onSendNow(sessionId, msg.id)
+                                if (msg.frozen) {
+                                  onReleaseFrozen(sessionId, msg.id)
+                                } else {
+                                  onSendNow(sessionId, msg.id)
+                                }
                               }}
                               className="rounded p-0.5 text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors"
                             >
@@ -309,9 +386,11 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
                             </button>
                           </TooltipTrigger>
                           <TooltipContent>
-                            {isSessionBusy
-                              ? 'Send now (interrupts current run)'
-                              : 'Send now'}
+                            {msg.frozen
+                              ? `Release and send (Alt+${frozenIndex + 1})`
+                              : isSessionBusy
+                                ? 'Send now (interrupts current run)'
+                                : 'Send now'}
                           </TooltipContent>
                         </Tooltip>
                       </>

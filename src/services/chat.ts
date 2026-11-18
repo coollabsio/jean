@@ -2924,6 +2924,22 @@ export async function persistUpdateQueued(
  * Returns false when the message is no longer queued (another client dequeued
  * or removed it) — callers must abort their send-now flow in that case.
  */
+export async function persistSetQueuedFrozen(
+  worktreeId: string,
+  worktreePath: string,
+  sessionId: string,
+  messageId: string,
+  frozen: boolean
+): Promise<boolean> {
+  return invoke<boolean>('set_queued_message_frozen', {
+    worktreeId,
+    worktreePath,
+    sessionId,
+    messageId,
+    frozen,
+  })
+}
+
 export async function persistMoveQueuedFront(
   worktreeId: string,
   worktreePath: string,
