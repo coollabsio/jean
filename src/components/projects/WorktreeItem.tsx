@@ -202,6 +202,7 @@ const WorktreeSessionList = memo(function WorktreeSessionList({
   })
 
   const [labelSessionId, setLabelSessionId] = useState<string | null>(null)
+  const sessionLabels = useChatStore(state => state.sessionLabels)
   const currentLabel = useChatStore(state =>
     labelSessionId ? (state.sessionLabels[labelSessionId] ?? null) : null
   )
@@ -240,6 +241,7 @@ const WorktreeSessionList = memo(function WorktreeSessionList({
               if (row.hidden) return null
               const card = row.item
               const config = statusConfig[card.status]
+              const sessionLabel = sessionLabels[card.session.id]
               const isGeneratingName =
                 namingSessionIds[card.session.id] ?? false
               const rowClassName = cn(
@@ -308,6 +310,14 @@ const WorktreeSessionList = memo(function WorktreeSessionList({
                         label={config.label}
                         className="h-1.5 w-1.5 shrink-0"
                       />
+                      {sessionLabel && (
+                        <span
+                          aria-label={`Label: ${sessionLabel.name}`}
+                          title={sessionLabel.name}
+                          className="size-2 shrink-0 rounded-full ring-1 ring-background"
+                          style={{ backgroundColor: sessionLabel.color }}
+                        />
+                      )}
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <span className="flex min-w-0 items-center gap-1.5 truncate text-xs">

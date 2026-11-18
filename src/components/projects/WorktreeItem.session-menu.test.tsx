@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { fireEvent, render, screen } from '@/test/test-utils'
 import type { Worktree } from '@/types/projects'
 import { useProjectsStore } from '@/store/projects-store'
+import { useChatStore } from '@/store/chat-store'
 import { useSubSessionStore } from '@/store/sub-session-store'
 import { WorktreeItem } from './WorktreeItem'
 
@@ -144,6 +145,7 @@ function middleClick(element: HTMLElement, init: MouseEventInit = {}) {
 describe('WorktreeItem session context menu', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    useChatStore.setState({ sessionLabels: {} })
     mocks.sessions = [
       { id: 's1', name: 'Busy chat', messages: [], message_count: 3 },
       { id: 's2', name: 'Empty chat', messages: [] },
@@ -163,6 +165,20 @@ describe('WorktreeItem session context menu', () => {
     ]) {
       expect(screen.getByRole('menuitem', { name: item })).toBeInTheDocument()
     }
+  })
+
+  it('shows a session label indicator in the sidebar', () => {
+    useChatStore.setState({
+      sessionLabels: {
+        s1: { name: 'Needs testing', color: '#eab308' },
+      },
+    })
+
+    renderExpanded()
+
+    const indicator = screen.getByLabelText('Label: Needs testing')
+    expect(indicator).toBeInTheDocument()
+    expect(indicator).toHaveStyle({ backgroundColor: '#eab308' })
   })
 
   it('confirms before deleting a non-empty session', async () => {
