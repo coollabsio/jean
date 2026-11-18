@@ -6,6 +6,8 @@ import {
   MessageThreadContextMenu,
   suppressDefaultContextMenu,
 } from './message-thread-context-menu'
+import { useUIStore } from '@/store/ui-store'
+import type * as ProjectsModule from '@/services/projects'
 
 const mocks = vi.hoisted(() => ({
   copyToClipboard: vi.fn(),
@@ -13,12 +15,36 @@ const mocks = vi.hoisted(() => ({
   toastError: vi.fn(),
   downloadLocalFile: vi.fn(),
   openLocalFile: vi.fn(),
+  createWorktree: vi.fn(),
+  fetchIssueContext: vi.fn(),
+  fetchPullRequestContext: vi.fn(),
 }))
 
 vi.mock('@/lib/local-file', () => ({
   downloadLocalFile: mocks.downloadLocalFile,
   openLocalFile: mocks.openLocalFile,
   resolveWorktreeFilePath: (path: string) => `/repo/${path}`,
+  getCurrentWorktree: () => ({ id: 'wt-1', path: '/repo' }),
+}))
+
+vi.mock('@/services/projects', async importOriginal => ({
+  githubRepoFromUrl: (await importOriginal<typeof ProjectsModule>())
+    .githubRepoFromUrl,
+  useWorktree: () => ({
+    data: { id: 'wt-1', path: '/repo', project_id: 'proj-1' },
+  }),
+  useGitHubRemotes: () => ({
+    data: [
+      { name: 'origin', url: 'https://github.com/acme/app' },
+      { name: 'fork', url: 'https://github.com/me/app.git' },
+    ],
+  }),
+  useCreateWorktree: () => ({ mutateAsync: mocks.createWorktree }),
+}))
+
+vi.mock('@/services/github', () => ({
+  fetchIssueContext: mocks.fetchIssueContext,
+  fetchPullRequestContext: mocks.fetchPullRequestContext,
 }))
 
 vi.mock('@/lib/clipboard', () => ({
@@ -29,6 +55,8 @@ vi.mock('sonner', () => ({
   toast: {
     success: mocks.toastSuccess,
     error: mocks.toastError,
+    loading: vi.fn(() => 'toast-id'),
+    dismiss: vi.fn(),
   },
 }))
 
@@ -378,5 +406,80 @@ describe('MessageThreadContextMenu', () => {
     expect(item).toHaveAttribute('data-disabled')
 
     window.getSelection = original
+  })
+})
+
+describe('MessageThreadContextMenu GitHub links', () => {
+  beforeEach(() => {
+    mocks.createWorktree.mockReset()
+    mocks.createWorktree.mockResolvedValue({ id: 'new-wt' })
+    mocks.fetchIssueContext.mockReset()
+    mocks.fetchIssueContext.mockResolvedValue({ number: 7, title: 'Bug' })
+    mocks.fetchPullRequestContext.mockReset()
+    mocks.fetchPullRequestContext.mockResolvedValue({ number: 12, title: 'PR' })
+  })
+
+  const renderLink = (href: string) =>
+    render(
+      <MessageThreadContextMenu messageText="body">
+        <div>
+          <a href={href}>the link</a>
+        </div>
+      </MessageThreadContextMenu>
+    )
+
+  it('Cmd+click opens a PR in a new worktree in the background', async () => {
+    renderLink('https://github.com/acme/app/pull/12')
+    fireEvent.contextMenu(screen.getByText('the link'))
+    fireEvent.click(
+      await screen.findByRole('menuitem', { name: /open in new worktree/i }),
+      { metaKey: true }
+    )
+
+    await waitFor(() =>
+      expect(mocks.createWorktree).toHaveBeenCalledWith({
+        projectId: 'proj-1',
+        prContext: { number: 12, title: 'PR' },
+        background: true,
+      })
+    )
+    expect(mocks.fetchPullRequestContext).toHaveBeenCalledWith(
+      '/repo',
+      'proj-1',
+      { number: 12, repo: undefined }
+    )
+    expect(useUIStore.getState().consumeAutoInvestigatePR('new-wt')).toBe(false)
+  })
+
+  it('investigates an issue from a non-primary remote in the foreground', async () => {
+    renderLink('https://github.com/me/app/issues/7#issuecomment-1')
+    fireEvent.contextMenu(screen.getByText('the link'))
+    fireEvent.click(
+      await screen.findByRole('menuitem', {
+        name: /investigate in new worktree/i,
+      })
+    )
+
+    await waitFor(() =>
+      expect(mocks.createWorktree).toHaveBeenCalledWith({
+        projectId: 'proj-1',
+        issueContext: { number: 7, title: 'Bug' },
+        background: false,
+      })
+    )
+    expect(mocks.fetchIssueContext).toHaveBeenCalledWith('/repo', 'proj-1', {
+      number: 7,
+      repo: 'me/app',
+    })
+    expect(useUIStore.getState().consumeAutoInvestigate('new-wt')).toBe(true)
+  })
+
+  it('hides worktree items for a repo that is not a project remote', async () => {
+    renderLink('https://github.com/other/lib/issues/3')
+    fireEvent.contextMenu(screen.getByText('the link'))
+    await screen.findByRole('menuitem', { name: /copy url/i })
+    expect(
+      screen.queryByRole('menuitem', { name: /new worktree/i })
+    ).not.toBeInTheDocument()
   })
 })

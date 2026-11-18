@@ -5,6 +5,7 @@ import { useUIStore, type InvestigationOverride } from '@/store/ui-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { useChatStore } from '@/store/chat-store'
 import {
+  fetchIssueContext,
   fetchPullRequestContext,
   getGitHubDiscussion,
   githubQueryKeys,
@@ -16,7 +17,6 @@ import type {
   DependabotAlert,
   RepositoryAdvisory,
   GitHubDiscussion,
-  IssueContext,
   SecurityAlertContext,
   AdvisoryContext,
 } from '@/types/github'
@@ -33,10 +33,6 @@ import {
 } from '@/hooks/useContextLinkUsage'
 import type { GetContextLinkMatches } from '../ContextLinkBadge'
 import { reusesPrimaryGitHubSource } from '@/lib/remote-worktree-sources'
-
-function githubRepoArgs(repo?: string | null): { repo?: string } {
-  return repo ? { repo } : {}
-}
 
 type Data = ReturnType<typeof useNewWorktreeData>
 
@@ -348,38 +344,11 @@ export function useNewWorktreeHandlers(
       setCreatingFromRepo(issue.repo ?? null)
 
       try {
-        const issueDetail = await invoke<
-          GitHubIssue & {
-            comments: {
-              body: string
-              author: { login: string }
-              created_at: string
-            }[]
-          }
-        >('get_github_issue', {
+        const issueContext = await fetchIssueContext(
           projectPath,
-          projectId: selectedProjectId,
-          issueNumber: issue.number,
-          ...githubRepoArgs(issue.repo),
-        })
-
-        const issueContext: IssueContext = {
-          number: issueDetail.number,
-          title: issueDetail.title,
-          body: issueDetail.body,
-          comments: (issueDetail.comments ?? []).flatMap(c =>
-            c && c.created_at && c.author
-              ? [
-                  {
-                    body: c.body ?? '',
-                    author: { login: c.author.login ?? '' },
-                    createdAt: c.created_at,
-                  },
-                ]
-              : []
-          ),
-          ...githubRepoArgs(issue.repo),
-        }
+          selectedProjectId,
+          issue
+        )
 
         if (background)
           useUIStore.getState().incrementPendingBackgroundCreations()
@@ -432,38 +401,11 @@ export function useNewWorktreeHandlers(
       setCreatingFromRepo(issue.repo ?? null)
 
       try {
-        const issueDetail = await invoke<
-          GitHubIssue & {
-            comments: {
-              body: string
-              author: { login: string }
-              created_at: string
-            }[]
-          }
-        >('get_github_issue', {
+        const issueContext = await fetchIssueContext(
           projectPath,
-          projectId: selectedProjectId,
-          issueNumber: issue.number,
-          ...githubRepoArgs(issue.repo),
-        })
-
-        const issueContext: IssueContext = {
-          number: issueDetail.number,
-          title: issueDetail.title,
-          body: issueDetail.body,
-          comments: (issueDetail.comments ?? []).flatMap(c =>
-            c && c.created_at && c.author
-              ? [
-                  {
-                    body: c.body ?? '',
-                    author: { login: c.author.login ?? '' },
-                    createdAt: c.created_at,
-                  },
-                ]
-              : []
-          ),
-          ...githubRepoArgs(issue.repo),
-        }
+          selectedProjectId,
+          issue
+        )
 
         if (background)
           useUIStore.getState().incrementPendingBackgroundCreations()
@@ -520,38 +462,11 @@ export function useNewWorktreeHandlers(
 
       setIsBulkInvestigating(true)
       await runBulkInvestigation(issues, 'issue', 'issues', async issue => {
-        const issueDetail = await invoke<
-          GitHubIssue & {
-            comments: {
-              body: string
-              author: { login: string }
-              created_at: string
-            }[]
-          }
-        >('get_github_issue', {
+        const issueContext = await fetchIssueContext(
           projectPath,
-          projectId: selectedProjectId,
-          issueNumber: issue.number,
-          ...githubRepoArgs(issue.repo),
-        })
-
-        const issueContext: IssueContext = {
-          number: issueDetail.number,
-          title: issueDetail.title,
-          body: issueDetail.body,
-          comments: (issueDetail.comments ?? []).flatMap(c =>
-            c && c.created_at && c.author
-              ? [
-                  {
-                    body: c.body ?? '',
-                    author: { login: c.author.login ?? '' },
-                    createdAt: c.created_at,
-                  },
-                ]
-              : []
-          ),
-          ...githubRepoArgs(issue.repo),
-        }
+          selectedProjectId,
+          issue
+        )
 
         useUIStore.getState().incrementPendingBackgroundCreations()
         const worktree = await createWorktree.mutateAsync({

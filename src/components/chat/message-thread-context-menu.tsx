@@ -14,11 +14,13 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { copyImageToClipboard, copyToClipboard } from '@/lib/clipboard'
+import { parseGitHubItemUrl } from '@/lib/github-item-link'
 import {
   downloadLocalFile,
   openLocalFile,
   resolveWorktreeFilePath,
 } from '@/lib/local-file'
+import { GitHubLinkMenuItems } from './GitHubLinkMenuItems'
 
 const LONG_PRESS_MS = 500
 const LONG_PRESS_MOVE_TOLERANCE_PX = 10
@@ -210,6 +212,7 @@ export function MessageThreadContextMenu({
       .catch(() => toast.error('Failed to copy'))
   }, [messageText, onCopyMessage])
 
+  const githubLink = linkUrl ? parseGitHubItemUrl(linkUrl) : null
   const canCopyMessage = Boolean(onCopyMessage || messageText.trim())
   const canCopySelection = selection.length > 0
 
@@ -226,7 +229,8 @@ export function MessageThreadContextMenu({
       >
         {children}
       </ContextMenuTrigger>
-      <ContextMenuContent className="w-48">
+      <ContextMenuContent className={githubLink ? 'w-60' : 'w-48'}>
+        {githubLink && <GitHubLinkMenuItems link={githubLink} />}
         {imageSrc && (
           <ContextMenuItem onSelect={handleCopyImage}>
             <Copy className="h-4 w-4" />

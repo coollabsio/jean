@@ -8,6 +8,7 @@ import type {
   GitHubIssueListResult,
   GitHubPullRequest,
   GitHubPullRequestDetail,
+  IssueContext,
   LoadedIssueContext,
   LoadedPullRequestContext,
   PullRequestContext,
@@ -672,6 +673,41 @@ export function useLoadedPRContexts(
     staleTime: 1000 * 60, // 1 minute
     gcTime: 1000 * 60 * 5, // 5 minutes
   })
+}
+
+/**
+ * Fetch an issue with its comments as the context for a new worktree
+ */
+export async function fetchIssueContext(
+  projectPath: string,
+  projectId: string,
+  issue: Pick<GitHubIssue, 'number' | 'repo'>
+): Promise<IssueContext> {
+  const repoArgs = issue.repo ? { repo: issue.repo } : {}
+  const issueDetail = await invoke<GitHubIssueDetail>('get_github_issue', {
+    projectPath,
+    projectId,
+    issueNumber: issue.number,
+    ...repoArgs,
+  })
+
+  return {
+    number: issueDetail.number,
+    title: issueDetail.title,
+    body: issueDetail.body,
+    comments: (issueDetail.comments ?? []).flatMap(c =>
+      c && c.created_at && c.author
+        ? [
+            {
+              body: c.body ?? '',
+              author: { login: c.author.login ?? '' },
+              createdAt: c.created_at,
+            },
+          ]
+        : []
+    ),
+    ...repoArgs,
+  }
 }
 
 /**

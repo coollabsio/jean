@@ -2187,7 +2187,7 @@ export interface ProjectRemote {
 }
 
 /** Extract `owner/repo` from a normalized GitHub remote URL. */
-function githubRepoFromUrl(url: string): string | undefined {
+export function githubRepoFromUrl(url: string): string | undefined {
   const match = url.match(/github\.com\/([^/]+\/[^/]+?)(?:\.git)?\/?$/)
   return match?.[1]
 }
