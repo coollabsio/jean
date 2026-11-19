@@ -136,6 +136,24 @@ fn proxy_to_parent(
     response_timeout: Duration,
     request: Value,
 ) -> Result<Value, String> {
+    if tokio::runtime::Handle::try_current().is_ok() {
+        // run_server() already drives this helper inside Jean's outer runtime.
+        // Entering a second runtime from that context panics, and release builds
+        // use panic = "abort", so the helper died on its first tool call (#934).
+        // Keep the whole exchange, including the pipe runtime's drop, in the
+        // blocking region: dropping a runtime inside async context panics too.
+        tokio::task::block_in_place(|| proxy_to_parent_blocking(socket, response_timeout, request))
+    } else {
+        proxy_to_parent_blocking(socket, response_timeout, request)
+    }
+}
+
+#[cfg(windows)]
+fn proxy_to_parent_blocking(
+    socket: &str,
+    response_timeout: Duration,
+    request: Value,
+) -> Result<Value, String> {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::windows::named_pipe::ClientOptions;
     use tokio::runtime::Builder;
@@ -149,7 +167,7 @@ fn proxy_to_parent(
         .build()
         .map_err(|e| format!("Failed to create Jean MCP pipe runtime: {e}"))?;
 
-    let response = block_on_pipe_io(&runtime, async {
+    let response = runtime.block_on(async {
         let mut pipe = ClientOptions::new()
             .open(socket)
             .map_err(|e| format!("Failed to connect Jean MCP named pipe {socket}: {e}"))?;
@@ -177,22 +195,6 @@ fn proxy_to_parent(
         return Err(error);
     }
     Ok(response.get("result").cloned().unwrap_or(Value::Null))
-}
-
-#[cfg(windows)]
-fn block_on_pipe_io<F: std::future::Future>(
-    runtime: &tokio::runtime::Runtime,
-    future: F,
-) -> F::Output {
-    if tokio::runtime::Handle::try_current().is_ok() {
-        // run_server() is already driven by Jean's outer runtime. Entering a
-        // second runtime from that context panics, and release builds use
-        // panic = "abort", so the helper died on its first tool call (#934).
-        // The outer runtime is multi-threaded, so block_in_place is allowed.
-        tokio::task::block_in_place(|| runtime.block_on(future))
-    } else {
-        runtime.block_on(future)
-    }
 }
 
 #[cfg(not(any(unix, windows)))]
