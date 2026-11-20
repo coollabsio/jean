@@ -1791,6 +1791,32 @@ export function takeUserTurnOutcome(sessionId: string): UserTurnOutcome {
 }
 
 /**
+ * Provider errors (rate limit, API error) can reject the send invoke *before*
+ * the backend's `chat:user-turn` verdict reaches the client. Rolling the
+ * optimistic user message back immediately makes it vanish, then reappear
+ * minutes later when the persisted run is refetched.
+ *
+ * Wait briefly for that verdict so a message that was accepted by the backend
+ * stays visible throughout the error.
+ */
+export async function waitForUserTurnOutcome(
+  sessionId: string,
+  timeoutMs = 3000
+): Promise<UserTurnOutcome> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const outcome = userTurnOutcomes.get(sessionId)
+    if (outcome) {
+      userTurnOutcomes.delete(sessionId)
+      return outcome
+    }
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+  userTurnOutcomes.delete(sessionId)
+  return 'not_accepted'
+}
+
+/**
  * Hook to send a message to Claude (session-based)
  */
 export function useSendMessage() {
@@ -2069,7 +2095,7 @@ export function useSendMessage() {
         queryKey: chatQueryKeys.sessions(worktreeId),
       })
     },
-    onError: (error, variables, context) => {
+    onError: async (error, variables, context) => {
       const { sessionId, worktreeId } = variables
       endOwnSend(sessionId)
       // Check for cancellation - Tauri errors may not be Error instances
@@ -2157,7 +2183,15 @@ export function useSendMessage() {
 
       // The backend recorded the prompt before it failed (crashed run or a
       // provider rejection). History owns it; refetch instead of rolling back.
-      if (takeUserTurnOutcome(sessionId) === 'persisted') {
+      // A provider error can reject the invoke before chat:user-turn is
+      // delivered. Wait briefly for that verdict: rolling back immediately
+      // makes the user message vanish and reappear minutes later when the
+      // persisted run is finally refetched.
+      let outcome = takeUserTurnOutcome(sessionId)
+      if (outcome === 'not_accepted') {
+        outcome = await waitForUserTurnOutcome(sessionId)
+      }
+      if (outcome === 'persisted') {
         logger.warn('Error after the prompt was recorded, refetching', {
           sessionId,
           error: errorMessage,
