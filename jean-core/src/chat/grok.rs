@@ -902,12 +902,45 @@ fn extract_final_result_text(value: &Value) -> Option<String> {
     }
 }
 
+/// Grok ACP has no message-boundary event: a new assistant message arrives as
+/// more `agent_message_chunk` deltas. When the model starts a new sentence
+/// without a leading space, plain concatenation glues the words together
+/// ("constraints.I have"). Add the missing space at a sentence boundary.
+///
+/// Only prose-looking chunks qualify: the chunk must contain whitespace in its
+/// first characters. That keeps identifiers and code such as `foo.Bar` intact.
+fn needs_sentence_separator(existing: &str, chunk: &str) -> bool {
+    let Some(prev) = existing.chars().last() else {
+        return false;
+    };
+    let Some(next) = chunk.chars().next() else {
+        return false;
+    };
+    if prev.is_whitespace() || next.is_whitespace() {
+        return false;
+    }
+    if !matches!(prev, '.' | '!' | '?') || !next.is_uppercase() {
+        return false;
+    }
+    chunk
+        .chars()
+        .take(32)
+        .any(|character| character.is_whitespace())
+}
+
+fn append_streamed_text(existing: &mut String, chunk: &str) {
+    if needs_sentence_separator(existing, chunk) {
+        existing.push(' ');
+    }
+    existing.push_str(chunk);
+}
+
 fn push_text_block(content_blocks: &mut Vec<ContentBlock>, text: &str) {
     if text.is_empty() {
         return;
     }
     if let Some(ContentBlock::Text { text: existing }) = content_blocks.last_mut() {
-        existing.push_str(text);
+        append_streamed_text(existing, text);
         return;
     }
     content_blocks.push(ContentBlock::Text {
@@ -969,7 +1002,7 @@ fn process_message_blocks<ChunkFn, ToolUseFn, ToolResultFn>(
 {
     for block in blocks {
         if let Some(text) = extract_text_from_block(block) {
-            content.push_str(&text);
+            append_streamed_text(content, &text);
             push_text_block(content_blocks, &text);
             on_chunk(&text);
             continue;
@@ -1337,7 +1370,7 @@ where
                         .and_then(extract_text_from_acp_content)
                         .filter(|text| !text.is_empty())
                     {
-                        content.push_str(&text);
+                        append_streamed_text(&mut content, &text);
                         push_text_block(&mut content_blocks, &text);
                         on_chunk(&text);
                     }
@@ -3259,7 +3292,7 @@ pub fn tail_grok_output(
                         }
                     }
                     if !partial.content.is_empty() {
-                        response.content.push_str(&partial.content);
+                        append_streamed_text(&mut response.content, &partial.content);
                         push_text_block(&mut response.content_blocks, &partial.content);
                         push_coalesced_chunk(
                             app,
@@ -4427,7 +4460,7 @@ fn send_grok_acp_prompt(
                         .and_then(extract_text_from_acp_content)
                         .filter(|text| !text.is_empty())
                     {
-                        response.content.push_str(&text);
+                        append_streamed_text(&mut response.content, &text);
                         push_text_block(&mut response.content_blocks, &text);
                         push_coalesced_chunk(
                             app,
@@ -6954,6 +6987,42 @@ mod space_regression_tests {
             "content must keep spaces between tokens: {:?}",
             response.content
         );
+    }
+
+    #[test]
+    fn grok_agent_message_chunks_add_a_space_at_a_new_sentence() {
+        let input = r#"
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"I found the allowlist and grant form. Next I'll read the validation, route handlers, and SQL constraints."}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"I have the tool list and boot gate."}}}}
+"#;
+        let response = parse_grok_stream_inner_with_callbacks(
+            Cursor::new(input.as_bytes()),
+            None,
+            |_| {},
+            |_| {},
+            |_, _| {},
+        )
+        .unwrap();
+
+        assert_eq!(
+            response.content,
+            "I found the allowlist and grant form. Next I'll read the validation, route handlers, and SQL constraints. I have the tool list and boot gate."
+        );
+    }
+
+    #[test]
+    fn streamed_text_separator_leaves_code_and_spaced_chunks_alone() {
+        let mut code = "foo.".to_string();
+        append_streamed_text(&mut code, "Bar()");
+        assert_eq!(code, "foo.Bar()");
+
+        let mut spaced = "done.".to_string();
+        append_streamed_text(&mut spaced, " Next");
+        assert_eq!(spaced, "done. Next");
+
+        let mut plain = "plain".to_string();
+        append_streamed_text(&mut plain, "text");
+        assert_eq!(plain, "plaintext");
     }
 
     #[test]
