@@ -7,7 +7,6 @@ import {
   GitBranch,
   GitPullRequestArrow,
   Globe,
-  ListChecks,
   Maximize,
   MoreHorizontal,
   Play,
@@ -364,7 +363,7 @@ export function WorktreeDropdownMenu({
             onRunPackageScript && (
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger>
-                  <ListChecks className="mr-2 h-4 w-4" />
+                  <Play className="mr-2 h-4 w-4" />
                   <span className="flex-1">Scripts</span>
                   <span className="ml-3 text-2xs text-muted-foreground">
                     package.json

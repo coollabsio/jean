@@ -1,4 +1,4 @@
-import { ListChecks, Play, Star } from '@/components/icons/reicon'
+import { Play, Star } from '@/components/icons/reicon'
 import { Button, raisedToolbar } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -140,7 +140,7 @@ export function ScriptsSubmenu(props: ScriptsButtonProps) {
   return (
     <DropdownMenuSub>
       <DropdownMenuSubTrigger className="gap-2">
-        <ListChecks className="h-4 w-4 text-muted-foreground" />
+        <Play className="h-4 w-4 text-muted-foreground" />
         <span className="flex-1">Scripts</span>
         <span className="ml-3 text-2xs text-muted-foreground">
           package.json

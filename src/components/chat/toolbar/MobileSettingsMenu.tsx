@@ -21,7 +21,6 @@ import {
   GitPullRequestArrow,
   Globe,
   Paperclip,
-  ListChecks,
   Play,
   Plug,
   Settings,
@@ -1039,7 +1038,7 @@ export function MobileSettingsMenu({
               )}
               {packageScripts.length > 0 && (
                 <DropdownMenuItem onSelect={openScriptsPicker}>
-                  <ListChecks className="h-4 w-4" />
+                  <Play className="h-4 w-4" />
                   <span>Scripts</span>
                   <ChevronRight className="ml-auto h-4 w-4 shrink-0 text-foreground" />
                 </DropdownMenuItem>
