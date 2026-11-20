@@ -6,9 +6,9 @@ use crate::http_server::EmitExt;
 use serde_json::Value;
 use std::cell::RefCell;
 use std::collections::HashSet;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
-use std::process::Stdio;
+use std::process::{Child, Stdio};
 use tauri::AppHandle;
 
 #[derive(serde::Serialize, Clone)]
@@ -1077,6 +1077,28 @@ where
     })
 }
 
+/// Send the prompt on stdin, then close it so the CLI reads EOF.
+///
+/// The Cursor CLI reads stdin when it gets no positional prompt and stdin is
+/// not a TTY. A prompt in argv breaks on Windows: `cmd.exe /C` (the `.cmd`
+/// shim wrapper) parses `&`/`|` in it and caps the line at ~8K characters, and
+/// `CreateProcessW` fails over 32K with os error 206 (issue #937).
+///
+/// The write runs on its own thread so a prompt larger than the pipe buffer
+/// cannot block the caller while the CLI waits on its own stdout.
+fn write_prompt_to_stdin(child: &mut Child, prompt: String) -> Result<(), String> {
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or("Failed to open Cursor CLI stdin".to_string())?;
+    std::thread::spawn(move || {
+        if let Err(error) = stdin.write_all(prompt.as_bytes()) {
+            log::warn!("Failed to write prompt to Cursor CLI stdin: {error}");
+        }
+    });
+    Ok(())
+}
+
 pub fn execute_cursor(
     app: &AppHandle,
     session_id: &str,
@@ -1142,8 +1164,8 @@ pub fn execute_cursor(
         effective_mode,
         if is_new_chat { system_prompt } else { None },
     );
-    cmd.arg(&prepared_message)
-        .current_dir(working_dir)
+    cmd.current_dir(working_dir)
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
@@ -1167,6 +1189,7 @@ pub fn execute_cursor(
     }
 
     if !super::registry::register_process(session_id.to_string(), pid) {
+        crate::platform::kill_and_reap(&mut child);
         return Ok(CursorResponse {
             content: String::new(),
             chat_id: chat_id.clone().unwrap_or_default(),
@@ -1177,6 +1200,7 @@ pub fn execute_cursor(
         });
     }
 
+    write_prompt_to_stdin(&mut child, prepared_message)?;
     let stdout = child
         .stdout
         .take()
@@ -1274,13 +1298,17 @@ pub fn execute_one_shot_cursor(
 
     let model = raw_cursor_model(Some(model)).unwrap_or("auto");
     cmd.args(["--model", model])
-        .arg(prompt)
         .current_dir(dir)
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    let output = cmd
-        .output()
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to run Cursor one-shot request: {e}"))?;
+    write_prompt_to_stdin(&mut child, prompt.to_string())?;
+    let output = child
+        .wait_with_output()
         .map_err(|e| format!("Failed to run Cursor one-shot request: {e}"))?;
 
     if !output.status.success() {
@@ -1307,6 +1335,23 @@ pub fn execute_one_shot_cursor(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn prompt_on_stdin_reaches_child_intact_past_argv_limits() {
+        // Larger than the Windows argv cap (32K) and a pipe buffer (64K), with
+        // characters `cmd.exe` would parse as separators.
+        let prompt = "line & | ^ \"quoted\"\n".repeat(10_000);
+        let mut child = std::process::Command::new("cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("spawn cat");
+        write_prompt_to_stdin(&mut child, prompt.clone()).expect("write prompt");
+        let output = child.wait_with_output().expect("wait for cat");
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8(output.stdout).unwrap(), prompt);
+    }
 
     #[test]
     fn strip_ansi_removes_escape_sequences() {
