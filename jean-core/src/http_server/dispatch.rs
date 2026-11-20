@@ -320,6 +320,24 @@ pub async fn dispatch_command(
             // preventing WorktreeSetupCard from appearing on the canvas.
             to_value(result)
         }
+        "start_prompt_on_models" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let prompt: String = from_field(&args, "prompt")?;
+            let targets: Vec<crate::projects::PromptModelTarget> = from_field(&args, "targets")?;
+            let execution_mode: Option<String> =
+                field_opt(&args, "executionMode", "execution_mode")?;
+            let result = Box::pin(crate::projects::start_prompt_on_models(
+                app.clone(),
+                project_id,
+                prompt,
+                targets,
+                execution_mode,
+            ))
+            .await?;
+            // Worktrees sync through worktree:* events (see create_worktree);
+            // each background task invalidates sessions once its prompt is queued.
+            to_value(result)
+        }
         "fork_session_to_worktree" => {
             let source_worktree_id: String =
                 field(&args, "sourceWorktreeId", "source_worktree_id")?;
@@ -2559,6 +2577,10 @@ pub async fn dispatch_command(
             .await?;
             to_value(result)
         }
+        "get_usage_summary" => {
+            let days: Option<u32> = from_field_opt(&args, "days")?;
+            to_value(crate::chat::get_usage_summary(app.clone(), days).await?)
+        }
         "resume_session" => {
             let session_id: String = field(&args, "sessionId", "session_id")?;
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
@@ -2577,10 +2599,6 @@ pub async fn dispatch_command(
         // CLI Management
         // =====================================================================
         "check_claude_cli_installed" => {
-        "get_usage_summary" => {
-            let days: Option<u32> = from_field_opt(&args, "days")?;
-            to_value(crate::chat::get_usage_summary(app.clone(), days).await?)
-        }
             let result = crate::claude_cli::check_claude_cli_installed(app.clone()).await?;
             to_value(result)
         }
@@ -4214,8 +4232,43 @@ pub async fn dispatch_command(
         muse_command if MUSE_CLI_COMMANDS.contains(&muse_command) => {
             Box::pin(dispatch_muse_cli_command(app, muse_command, &args)).await
         }
+        "get_diff_viewed_files" | "set_diff_file_viewed" => {
+            Box::pin(dispatch_diff_viewed_command(app, command, &args)).await
+        }
         _ => Err(format!("Unknown command: {command}")),
     }
+}
+
+async fn dispatch_diff_viewed_command(
+    app: &AppHandle,
+    command: &str,
+    args: &Value,
+) -> Result<Value, String> {
+    let worktree_id: String = field(args, "worktreeId", "worktree_id")?;
+    let diff_type: String = field(args, "diffType", "diff_type")?;
+    if command == "get_diff_viewed_files" {
+        let result = crate::projects::diff_viewed::get_diff_viewed_files(
+            app.clone(),
+            worktree_id,
+            diff_type,
+        )
+        .await?;
+        return to_value(result);
+    }
+    let path: String = from_field(args, "path")?;
+    let hash: String = from_field(args, "hash")?;
+    let viewed: bool = from_field(args, "viewed")?;
+    let result = crate::projects::diff_viewed::set_diff_file_viewed(
+        app.clone(),
+        worktree_id,
+        path,
+        hash,
+        viewed,
+        diff_type,
+    )
+    .await?;
+    emit_cache_invalidation(app, &["diff-viewed"]);
+    to_value(result)
 }
 
 const MUSE_CLI_COMMANDS: &[&str] = &[

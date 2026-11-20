@@ -248,6 +248,7 @@ export const COMMAND_OWNERS: Record<
   decide_agent_approval: { owner: ['agentId'] },
   install_agent_template: { owner: ['agentId'] },
   revert_agent_change: { owner: ['agentId'] },
+  start_prompt_on_models: { owner: ['projectId'] },
   attach_session_reference: { routeBy: ['targetSessionId'] },
   reorder_projects: { fanOut: 'projectIds' },
   set_sessions_last_opened_bulk: { fanOut: 'sessionIds' },

@@ -4,6 +4,7 @@ import {
   ChevronsUpDown,
   GitBranch,
   GitFork,
+  Layers,
   Loader2,
   Plus,
   Settings,
@@ -38,6 +39,7 @@ import {
   type JeanConfig,
   type ProjectRemote,
 } from '@/services/projects'
+import { MultiModelPromptDialog } from './MultiModelPromptDialog'
 
 export interface QuickActionsTabProps {
   hasBaseSession: boolean
@@ -99,6 +101,7 @@ export function QuickActionsTab({
     defaultBranch ?? ''
   )
   const [baseBranchOpen, setBaseBranchOpen] = useState(false)
+  const [multiModelOpen, setMultiModelOpen] = useState(false)
   const setupScript = jeanConfig?.scripts.setup
   const runScripts = normalizeRunScripts(jeanConfig?.scripts.run)
 
@@ -498,10 +501,8 @@ export function QuickActionsTab({
 
         <div
           className={cn(
-            'items-center gap-1 mt-6',
-            hasRemoteOptions || (runScripts.length === 0 && projectId)
-              ? 'flex'
-              : 'hidden'
+            'flex-wrap justify-center items-center gap-1 mt-6',
+            hasRemoteOptions || projectId ? 'flex' : 'hidden'
           )}
         >
           {/* Base session stays available, just not as a headline action */}
@@ -516,6 +517,18 @@ export function QuickActionsTab({
               <span>
                 {hasBaseSession ? 'Switch to Base Session' : 'New Base Session'}
               </span>
+            </button>
+          )}
+
+          {projectId && (
+            <button
+              type="button"
+              onClick={() => setMultiModelOpen(true)}
+              disabled={isCreating}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs text-muted-foreground/40 hover:text-foreground hover:bg-accent cursor-pointer transition-colors disabled:opacity-50"
+            >
+              <Layers className="h-4 w-4" />
+              <span>Prompt multiple models</span>
             </button>
           )}
 
@@ -537,6 +550,14 @@ export function QuickActionsTab({
           )}
         </div>
       </div>
+      {/* Mounted only while open so its model queries stay idle. */}
+      {projectId && multiModelOpen && (
+        <MultiModelPromptDialog
+          open
+          onOpenChange={setMultiModelOpen}
+          projectId={projectId}
+        />
+      )}
     </div>
   )
 }
