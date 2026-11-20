@@ -1835,6 +1835,8 @@ export interface QueuedMessage {
   provider: string | null
   /** Execution mode setting (snapshot at queue time) */
   executionMode: ExecutionMode
+  /** Held in the queue until the user releases it (never auto-sends) */
+  frozen?: boolean
   /** Thinking level setting (snapshot at queue time) */
   thinkingLevel: ThinkingLevel
   /** Effort level for Opus 4.6 adaptive thinking (snapshot at queue time) */

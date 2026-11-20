@@ -4,6 +4,7 @@ import {
   cancelChatMessage,
   persistMoveQueuedFront,
   persistRemoveQueued,
+  persistSetQueuedFrozen,
   persistUpdateQueued,
   steerCodexTurn,
   steerGrokTurn,
@@ -275,10 +276,49 @@ export function useQueuedPromptActions(sessionId: string | null | undefined) {
     [handleRemoveQueuedMessage]
   )
 
+  /** Hold a queued prompt (or return it to the active queue). */
+  const handleSetFrozen = useCallback(
+    async (sessionId: string, messageId: string, frozen: boolean) => {
+      const store = useChatStore.getState()
+      const { worktreeId, worktreePath } = resolveWorktree(sessionId)
+      // Optimistic; revert when the queue moved on (another client sent it).
+      store.setQueuedMessageFrozen(sessionId, messageId, frozen)
+      if (!worktreeId || !worktreePath) return
+      try {
+        const updated = await persistSetQueuedFrozen(
+          worktreeId,
+          worktreePath,
+          sessionId,
+          messageId,
+          frozen
+        )
+        if (!updated) {
+          store.setQueuedMessageFrozen(sessionId, messageId, !frozen)
+          toast.error('That queued prompt is no longer in the queue.')
+        }
+      } catch (error) {
+        store.setQueuedMessageFrozen(sessionId, messageId, !frozen)
+        toast.error(`Failed to update the queued prompt: ${error}`)
+      }
+    },
+    []
+  )
+
+  /** Release a frozen prompt and send it as soon as the session allows. */
+  const handleReleaseFrozen = useCallback(
+    async (sessionId: string, messageId: string) => {
+      await handleSetFrozen(sessionId, messageId, false)
+      await handleSendQueuedNow(sessionId, messageId)
+    },
+    [handleSetFrozen, handleSendQueuedNow]
+  )
+
   return {
     handleRemoveQueuedMessage,
     handleEditQueuedMessage,
     handleCancelQueuedEdit,
     handleSendQueuedNow,
+    handleSetFrozen,
+    handleReleaseFrozen,
   }
 }

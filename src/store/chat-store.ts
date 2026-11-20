@@ -885,6 +885,12 @@ interface ChatUIState {
   startEditingQueuedMessage: (sessionId: string, message: QueuedMessage) => void
   stopEditingQueuedMessage: (sessionId: string) => void
   moveQueuedMessageFront: (sessionId: string, messageId: string) => void
+  /** Freeze or release a queued prompt by id */
+  setQueuedMessageFrozen: (
+    sessionId: string,
+    messageId: string,
+    frozen: boolean
+  ) => void
   clearQueue: (sessionId: string) => void
   getQueueLength: (sessionId: string) => number
   getQueuedMessages: (sessionId: string) => QueuedMessage[]
@@ -3764,6 +3770,24 @@ export const useChatStore = create<ChatUIState>()(
           },
           undefined,
           'updateQueuedMessage'
+        ),
+
+      setQueuedMessageFrozen: (sessionId, messageId, frozen) =>
+        set(
+          state => {
+            const queue = state.messageQueues[sessionId] ?? []
+            if (!queue.some(m => m.id === messageId)) return state
+            return {
+              messageQueues: {
+                ...state.messageQueues,
+                [sessionId]: queue.map(m =>
+                  m.id === messageId ? { ...m, frozen } : m
+                ),
+              },
+            }
+          },
+          undefined,
+          'setQueuedMessageFrozen'
         ),
 
       startEditingQueuedMessage: (sessionId, message) =>

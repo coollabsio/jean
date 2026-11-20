@@ -48,12 +48,20 @@ describe('QueuedPromptsPanel', () => {
     onSendNow?: (sessionId: string, messageId: string) => void
     onEdit?: (sessionId: string, messageId: string) => void
     onCancelEdit?: (sessionId: string) => void
+    onSetFrozen?: (
+      sessionId: string,
+      messageId: string,
+      frozen: boolean
+    ) => void
+    onReleaseFrozen?: (sessionId: string, messageId: string) => void
     isPaused?: boolean
   }) => {
     const onRemove = overrides?.onRemove ?? vi.fn()
     const onSendNow = overrides?.onSendNow ?? vi.fn()
     const onEdit = overrides?.onEdit ?? vi.fn()
     const onCancelEdit = overrides?.onCancelEdit ?? vi.fn()
+    const onSetFrozen = overrides?.onSetFrozen ?? vi.fn()
+    const onReleaseFrozen = overrides?.onReleaseFrozen ?? vi.fn()
     const result = render(
       <QueuedPromptsPanel
         sessionId="session-1"
@@ -64,10 +72,51 @@ describe('QueuedPromptsPanel', () => {
         onSendNow={onSendNow}
         onEdit={onEdit}
         onCancelEdit={onCancelEdit}
+        onSetFrozen={onSetFrozen}
+        onReleaseFrozen={onReleaseFrozen}
       />
     )
-    return { ...result, onRemove, onSendNow, onEdit, onCancelEdit }
+    return {
+      ...result,
+      onRemove,
+      onSendNow,
+      onEdit,
+      onCancelEdit,
+      onSetFrozen,
+      onReleaseFrozen,
+    }
   }
+
+  it('marks frozen prompts and releases them instead of sending', () => {
+    const { onReleaseFrozen, onSendNow } = renderPanel({
+      messages: [
+        createMessage('msg-1', 'Held prompt', { frozen: true }),
+        createMessage('msg-2', 'Active prompt'),
+      ],
+    })
+
+    expect(screen.getByText('F1')).toBeInTheDocument()
+    expect(screen.getByText('1 frozen')).toBeInTheDocument()
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Release frozen prompt' })
+    )
+
+    expect(onReleaseFrozen).toHaveBeenCalledWith('session-1', 'msg-1')
+    expect(onSendNow).not.toHaveBeenCalled()
+  })
+
+  it('holds an active prompt in the queue', () => {
+    const { onSetFrozen } = renderPanel()
+
+    const holdButtons = screen.getAllByRole('button', {
+      name: 'Hold queued prompt',
+    })
+    const holdButton = holdButtons[0]
+    if (holdButton) fireEvent.click(holdButton)
+
+    expect(onSetFrozen).toHaveBeenCalledWith('session-1', 'msg-1', true)
+  })
 
   it('renders count badge and all queued prompts', () => {
     renderPanel()
@@ -188,6 +237,8 @@ describe('QueuedPromptsPanel', () => {
         onSendNow={onSendNow}
         onEdit={vi.fn()}
         onCancelEdit={vi.fn()}
+        onSetFrozen={vi.fn()}
+        onReleaseFrozen={vi.fn()}
       />
     )
 
@@ -239,6 +290,8 @@ describe('QueuedPromptsPanel', () => {
         onSendNow={vi.fn()}
         onEdit={vi.fn()}
         onCancelEdit={vi.fn()}
+        onSetFrozen={vi.fn()}
+        onReleaseFrozen={vi.fn()}
       />
     )
     expect(

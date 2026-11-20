@@ -3352,6 +3352,23 @@ pub async fn dispatch_command(
             .await?;
             to_value(result)
         }
+        "set_queued_message_frozen" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let message_id: String = field(&args, "messageId", "message_id")?;
+            let frozen: bool = field(&args, "frozen", "frozen")?;
+            let result = crate::chat::set_queued_message_frozen(
+                app.clone(),
+                worktree_id,
+                worktree_path,
+                session_id,
+                message_id,
+                frozen,
+            )
+            .await?;
+            to_value(result)
+        }
         "clear_message_queue" => {
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
             let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;

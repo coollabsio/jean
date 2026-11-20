@@ -1571,11 +1571,7 @@ async fn drain_backend_queue(
                 return (None, metadata.queued_messages.clone(), true);
             }
 
-            let dequeued = if metadata.queued_messages.is_empty() {
-                None
-            } else {
-                Some(metadata.queued_messages.remove(0))
-            };
+            let dequeued = take_next_drainable_queued_message(&mut metadata.queued_messages);
             (dequeued, metadata.queued_messages.clone(), false)
         });
 
@@ -10404,11 +10400,7 @@ pub async fn dequeue_message(
     session_id: String,
 ) -> Result<Option<serde_json::Value>, String> {
     let (dequeued, queue) = with_existing_metadata_mut(&app, &session_id, |metadata| {
-        let dequeued = if metadata.queued_messages.is_empty() {
-            None
-        } else {
-            Some(metadata.queued_messages.remove(0))
-        };
+        let dequeued = take_next_drainable_queued_message(&mut metadata.queued_messages);
         let remaining = metadata.queued_messages.clone();
         (dequeued, remaining)
     })?;
@@ -10461,6 +10453,24 @@ pub struct QueuedMessageEdit {
     pub mentions: Option<Vec<Value>>,
 }
 
+/// Queued prompts marked `frozen` wait for an explicit release; the queue
+/// drain and mid-turn steering skip them without losing their position.
+fn queued_message_is_frozen(message: &Value) -> bool {
+    message
+        .get("frozen")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+/// Remove the first queued prompt that is allowed to send, preserving order.
+/// Returns `None` when every remaining prompt is frozen.
+fn take_next_drainable_queued_message(queue: &mut Vec<Value>) -> Option<Value> {
+    let index = queue
+        .iter()
+        .position(|message| !queued_message_is_frozen(message))?;
+    Some(queue.remove(index))
+}
+
 /// Replace a queued message's text and attachments by its `id` field.
 /// Returns `false` when the message is no longer queued.
 fn apply_queued_message_edit(
@@ -10510,6 +10520,43 @@ pub async fn update_queued_message(
 ) -> Result<bool, String> {
     let (updated, queue) = with_existing_metadata_mut(&app, &session_id, |metadata| {
         let updated = apply_queued_message_edit(&mut metadata.queued_messages, &message_id, &edit);
+        (updated, metadata.queued_messages.clone())
+    })?;
+
+    if updated {
+        app.emit_all(
+            "queue:updated",
+            &serde_json::json!({ "sessionId": session_id, "queue": queue }),
+        )
+        .ok();
+    }
+
+    Ok(updated)
+}
+
+/// Freeze or release a queued prompt by its `id` field.
+///
+/// Frozen prompts keep their queue position but are skipped by the queue drain
+/// and by mid-turn steering until the user releases them.
+pub async fn set_queued_message_frozen(
+    app: AppHandle,
+    _worktree_id: String,
+    _worktree_path: String,
+    session_id: String,
+    message_id: String,
+    frozen: bool,
+) -> Result<bool, String> {
+    let (updated, queue) = with_existing_metadata_mut(&app, &session_id, |metadata| {
+        let updated = metadata
+            .queued_messages
+            .iter_mut()
+            .find(|queued| queued.get("id").and_then(Value::as_str) == Some(message_id.as_str()))
+            .and_then(Value::as_object_mut)
+            .map(|queued| {
+                queued.insert("frozen".to_string(), Value::Bool(frozen));
+                true
+            })
+            .unwrap_or(false);
         (updated, metadata.queued_messages.clone())
     })?;
 
@@ -11111,7 +11158,9 @@ async fn drain_queue_into_codex_turn(app: &AppHandle, worktree_id: &str, session
 
         let popped = match with_existing_metadata_mut(app, session_id, |metadata| {
             match metadata.queued_messages.first() {
-                Some(front) if queued_message_is_steerable(front) => {
+                Some(front)
+                    if !queued_message_is_frozen(front) && queued_message_is_steerable(front) =>
+                {
                     let msg = metadata.queued_messages.remove(0);
                     (Some(msg), metadata.queued_messages.clone())
                 }
@@ -11219,7 +11268,10 @@ async fn drain_queue_into_opencode_turn(
 
         let popped = match with_existing_metadata_mut(app, session_id, |metadata| {
             match metadata.queued_messages.first() {
-                Some(front) if queued_message_is_steerable_for_backend(front, "opencode") => {
+                Some(front)
+                    if !queued_message_is_frozen(front)
+                        && queued_message_is_steerable_for_backend(front, "opencode") =>
+                {
                     let msg = metadata.queued_messages.remove(0);
                     (Some(msg), metadata.queued_messages.clone())
                 }
@@ -11349,7 +11401,10 @@ async fn drain_queue_into_host_turn(
 
         let popped = match with_existing_metadata_mut(app, session_id, |metadata| {
             match metadata.queued_messages.first() {
-                Some(front) if queued_message_is_steerable_for_backend(front, backend_key) => {
+                Some(front)
+                    if !queued_message_is_frozen(front)
+                        && queued_message_is_steerable_for_backend(front, backend_key) =>
+                {
                     let msg = metadata.queued_messages.remove(0);
                     (Some(msg), metadata.queued_messages.clone())
                 }
@@ -11438,7 +11493,10 @@ async fn drain_queue_into_grok_turn(app: &AppHandle, worktree_id: &str, session_
 
         let popped = match with_existing_metadata_mut(app, session_id, |metadata| {
             match metadata.queued_messages.first() {
-                Some(front) if queued_message_is_steerable_for_backend(front, "grok") => {
+                Some(front)
+                    if !queued_message_is_frozen(front)
+                        && queued_message_is_steerable_for_backend(front, "grok") =>
+                {
                     let msg = metadata.queued_messages.remove(0);
                     (Some(msg), metadata.queued_messages.clone())
                 }
@@ -12540,6 +12598,35 @@ mod tests {
         assert_eq!(queue[0]["pendingFiles"][0]["id"], "f-1");
         assert_eq!(queue[0]["pendingTextFiles"][0]["id"], "t-1");
         assert!(!apply_queued_message_edit(&mut queue, "missing", &edit));
+    }
+
+    #[test]
+    fn queue_drain_skips_frozen_messages_and_keeps_their_position() {
+        let mut queue = vec![
+            serde_json::json!({ "id": "frozen-1", "frozen": true }),
+            serde_json::json!({ "id": "active-1" }),
+            serde_json::json!({ "id": "frozen-2", "frozen": true }),
+            serde_json::json!({ "id": "active-2" }),
+        ];
+
+        let first = take_next_drainable_queued_message(&mut queue).unwrap();
+        assert_eq!(first["id"], "active-1");
+        let second = take_next_drainable_queued_message(&mut queue).unwrap();
+        assert_eq!(second["id"], "active-2");
+        assert!(take_next_drainable_queued_message(&mut queue).is_none());
+        assert_eq!(queue.len(), 2);
+        assert!(queue.iter().all(queued_message_is_frozen));
+    }
+
+    #[test]
+    fn queue_drain_stops_when_every_message_is_frozen() {
+        let mut queue = vec![
+            serde_json::json!({ "id": "frozen-1", "frozen": true }),
+            serde_json::json!({ "id": "frozen-2", "frozen": true }),
+        ];
+
+        assert!(take_next_drainable_queued_message(&mut queue).is_none());
+        assert_eq!(queue.len(), 2);
     }
 
     #[test]
