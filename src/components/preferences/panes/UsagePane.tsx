@@ -39,6 +39,7 @@ import {
   UsageWindows,
   type UsageWindowSpec,
 } from '@/components/usage/usage-windows'
+import { TokenCostCard } from '@/components/usage/token-cost-card'
 import { cn } from '@/lib/utils'
 
 /** One section per backend: icon, name, plan badge, then usage windows. */
@@ -569,6 +570,8 @@ export const UsagePane: React.FC = () => {
           {renderGrok()}
         </UsageCard>
       ) : null}
+
+      <TokenCostCard />
     </div>
   )
 }

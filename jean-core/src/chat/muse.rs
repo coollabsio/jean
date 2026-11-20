@@ -600,6 +600,7 @@ fn usage_from_msp(usage: &Value) -> UsageData {
             .and_then(Value::as_u64)
             .unwrap_or_else(|| read("cachedTokens")),
         cache_creation_input_tokens: read("cacheWriteTokens"),
+        cost_usd: None,
     }
 }
 

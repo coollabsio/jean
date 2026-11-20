@@ -564,6 +564,8 @@ export interface UsageData {
   cache_read_input_tokens?: number
   /** Cache creation tokens (cached for future requests) */
   cache_creation_input_tokens?: number
+  /** Cost in USD as reported by the CLI (Claude, OpenCode); absent otherwise */
+  cost_usd?: number
 }
 
 // ============================================================================

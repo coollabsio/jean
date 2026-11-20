@@ -85,6 +85,10 @@ pub struct UsageData {
     /// Cache creation tokens (cached for future requests)
     #[serde(default)]
     pub cache_creation_input_tokens: u64,
+    /// Cost in USD as reported by the CLI itself (Claude `total_cost_usd`,
+    /// OpenCode message/step `cost`). None when the backend reports no cost.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
 }
 
 // ============================================================================
@@ -3124,6 +3128,7 @@ mod tests {
             output_tokens: 200,
             cache_read_input_tokens: 50,
             cache_creation_input_tokens: 25,
+            cost_usd: None,
         };
 
         let json = serde_json::to_string(&usage).unwrap();

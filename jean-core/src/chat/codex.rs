@@ -2998,6 +2998,7 @@ fn process_server_notification(
                         .and_then(|v| v.as_u64())
                         .unwrap_or(0),
                     cache_creation_input_tokens: 0,
+                    cost_usd: None,
                 });
             }
         }
@@ -4634,6 +4635,7 @@ fn process_codex_event(
                         .and_then(|v| v.as_u64())
                         .unwrap_or(0),
                     cache_creation_input_tokens: 0,
+                    cost_usd: None,
                 });
             }
             *completed = true;

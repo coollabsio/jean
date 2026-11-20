@@ -2499,7 +2499,7 @@ pub fn tail_claude_output(
                     // Token usage: one `result` per turn; Monitor wake-ups can
                     // produce several turns in one run, so accumulate.
                     if let Some(usage_obj) = msg.get("usage") {
-                        add_result_usage(&mut usage, usage_obj);
+                        add_result_usage(&mut usage, usage_obj, msg.get("total_cost_usd"));
                         if let Some(u) = usage.as_ref() {
                             log::trace!(
                                 "Token usage: input={}, output={}, cache_read={}, cache_create={}",
@@ -3028,18 +3028,26 @@ fn is_claude_session_not_found_text(text: &str) -> bool {
 }
 
 /// Add one `result` message's `usage` object to the run total.
-fn add_result_usage(total: &mut Option<UsageData>, usage_obj: &serde_json::Value) {
+fn add_result_usage(
+    total: &mut Option<UsageData>,
+    usage_obj: &serde_json::Value,
+    cost_usd: Option<&serde_json::Value>,
+) {
     let field = |key: &str| usage_obj.get(key).and_then(|v| v.as_u64()).unwrap_or(0);
     let total = total.get_or_insert(UsageData {
         input_tokens: 0,
         output_tokens: 0,
         cache_read_input_tokens: 0,
         cache_creation_input_tokens: 0,
+        cost_usd: None,
     });
     total.input_tokens += field("input_tokens");
     total.output_tokens += field("output_tokens");
     total.cache_read_input_tokens += field("cache_read_input_tokens");
     total.cache_creation_input_tokens += field("cache_creation_input_tokens");
+    if let Some(cost) = cost_usd.and_then(|v| v.as_f64()) {
+        total.cost_usd = Some(total.cost_usd.unwrap_or(0.0) + cost);
+    }
 }
 
 /// Error text of the synthetic assistant message Claude CLI emits when the
@@ -3363,10 +3371,12 @@ mod tests {
                 "cache_read_input_tokens": 100,
                 "cache_creation_input_tokens": 1
             }),
+            Some(&serde_json::json!(0.25)),
         );
         add_result_usage(
             &mut usage,
             &serde_json::json!({ "input_tokens": 3, "output_tokens": 2 }),
+            Some(&serde_json::json!(0.5)),
         );
 
         let usage = usage.unwrap();
@@ -3374,6 +3384,14 @@ mod tests {
         assert_eq!(usage.output_tokens, 7);
         assert_eq!(usage.cache_read_input_tokens, 100);
         assert_eq!(usage.cache_creation_input_tokens, 1);
+        assert_eq!(usage.cost_usd, Some(0.75));
+    }
+
+    #[test]
+    fn add_result_usage_without_cost_keeps_cost_unset() {
+        let mut usage = None;
+        add_result_usage(&mut usage, &serde_json::json!({ "input_tokens": 1 }), None);
+        assert_eq!(usage.unwrap().cost_usd, None);
     }
 
     #[test]

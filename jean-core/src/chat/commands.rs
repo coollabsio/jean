@@ -8689,6 +8689,9 @@ pub async fn get_session_debug_info(
             acc.output_tokens += u.output_tokens;
             acc.cache_read_input_tokens += u.cache_read_input_tokens;
             acc.cache_creation_input_tokens += u.cache_creation_input_tokens;
+            if let Some(cost) = u.cost_usd {
+                acc.cost_usd = Some(acc.cost_usd.unwrap_or(0.0) + cost);
+            }
             acc
         },
     );

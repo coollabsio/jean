@@ -35,6 +35,7 @@ pub mod secrets;
 pub mod storage;
 pub mod tail;
 pub mod types;
+pub mod usage_summary;
 pub mod wakeup;
 
 pub(crate) use commands::default_model_for_backend;
@@ -43,6 +44,7 @@ pub use commands::*;
 pub use mcp_auth::*;
 pub use native_history::*;
 pub use storage::restore_base_sessions;
+pub use usage_summary::get_usage_summary;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 

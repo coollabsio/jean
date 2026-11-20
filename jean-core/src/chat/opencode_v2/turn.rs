@@ -103,7 +103,8 @@ fn tool_output_text(data: &Value) -> String {
         .unwrap_or_default()
 }
 
-fn usage_from_tokens(tokens: &Value) -> UsageData {
+/// Usage of one step/message: its `tokens` object plus its `cost` sibling.
+fn usage_from_tokens(tokens: &Value, cost: Option<&Value>) -> UsageData {
     let number = |value: &Value, key: &str| value.get(key).and_then(Value::as_u64).unwrap_or(0);
     let cache = tokens.get("cache").cloned().unwrap_or_default();
     UsageData {
@@ -111,6 +112,7 @@ fn usage_from_tokens(tokens: &Value) -> UsageData {
         output_tokens: number(tokens, "output"),
         cache_read_input_tokens: number(&cache, "read"),
         cache_creation_input_tokens: number(&cache, "write"),
+        cost_usd: cost.and_then(Value::as_f64),
     }
 }
 
@@ -277,7 +279,7 @@ impl TurnState {
             }
             "session.step.ended" if is_root => {
                 if let Some(tokens) = data.get("tokens") {
-                    self.usage = Some(usage_from_tokens(tokens));
+                    self.usage = Some(usage_from_tokens(tokens, data.get("cost")));
                 }
                 vec![]
             }
@@ -511,7 +513,7 @@ pub fn turn_from_history(messages: &[Value], prompt_id: &str) -> Option<(Outcome
             continue;
         }
         if let Some(tokens) = message.get("tokens") {
-            state.usage = Some(usage_from_tokens(tokens));
+            state.usage = Some(usage_from_tokens(tokens, message.get("cost")));
         }
         for item in message
             .get("content")

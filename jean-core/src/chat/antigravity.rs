@@ -124,6 +124,7 @@ fn usage(value: &Value) -> Option<UsageData> {
         output_tokens: number("output_tokens", "outputTokens"),
         cache_read_input_tokens: number("cache_read_tokens", "cacheReadTokens"),
         cache_creation_input_tokens: 0,
+        cost_usd: None,
     };
     (result.input_tokens + result.output_tokens + result.cache_read_input_tokens > 0)
         .then_some(result)

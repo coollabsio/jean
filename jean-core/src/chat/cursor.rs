@@ -222,6 +222,7 @@ fn extract_usage(value: &Value) -> Option<UsageData> {
         output_tokens,
         cache_read_input_tokens,
         cache_creation_input_tokens,
+        cost_usd: None,
     })
 }
 

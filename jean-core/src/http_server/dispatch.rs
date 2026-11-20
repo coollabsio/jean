@@ -2577,6 +2577,10 @@ pub async fn dispatch_command(
         // CLI Management
         // =====================================================================
         "check_claude_cli_installed" => {
+        "get_usage_summary" => {
+            let days: Option<u32> = from_field_opt(&args, "days")?;
+            to_value(crate::chat::get_usage_summary(app.clone(), days).await?)
+        }
             let result = crate::claude_cli::check_claude_cli_installed(app.clone()).await?;
             to_value(result)
         }
