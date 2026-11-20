@@ -1,4 +1,9 @@
 use serde::{Deserialize, Serialize};
+use std::fs;
+use std::process::{Output, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
+use tempfile::NamedTempFile;
 
 use crate::platform::path_tool_command;
 
@@ -39,6 +44,11 @@ const ALLOWED_COMMANDS: &[&str] = &[
     "devin",
 ];
 
+// A self-update that legitimately downloads a new version should finish well
+// inside this window. The bound exists so a stuck updater cannot leave the UI
+// spinner pending forever.
+const UPDATE_COMMAND_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+
 /// Reduce `command` to the name matched against [`ALLOWED_COMMANDS`].
 ///
 /// Windows CLI paths reach this as launcher shims — npm installs `claude.cmd`,
@@ -72,7 +82,14 @@ fn allowlist_key(command: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
-    use super::{allowlist_key, ALLOWED_CLI_TYPES, ALLOWED_COMMANDS};
+    use super::{allowlist_key, ALLOWED_CLI_TYPES, ALLOWED_COMMANDS, UPDATE_COMMAND_TIMEOUT};
+    use std::time::Duration;
+
+    #[test]
+    fn update_command_timeout_is_bounded() {
+        assert!(UPDATE_COMMAND_TIMEOUT <= Duration::from_secs(5 * 60));
+        assert!(UPDATE_COMMAND_TIMEOUT > Duration::from_secs(60));
+    }
 
     #[test]
     fn pi_is_an_allowed_cli_type_for_path_updates() {
@@ -143,6 +160,67 @@ mod tests {
     }
 }
 
+/// Run an updater while capturing output through files rather than pipes.
+///
+/// `Command::output()` waits for stdout/stderr EOF. Windows self-updaters often
+/// spawn a detached helper that inherits those handles, so the parent CLI can
+/// print "up to date" and exit while `output()` still waits forever. Files have
+/// no EOF dependency on child handles, and the explicit timeout bounds a truly
+/// stuck command instead of leaving the frontend spinner pending indefinitely.
+fn run_update_command(command: &str, args: &[String]) -> Result<Output, String> {
+    let stdout_file =
+        NamedTempFile::new().map_err(|e| format!("Failed to create stdout file: {e}"))?;
+    let stderr_file =
+        NamedTempFile::new().map_err(|e| format!("Failed to create stderr file: {e}"))?;
+
+    let mut child = path_tool_command(command)
+        .args(args)
+        .stdout(Stdio::from(
+            stdout_file
+                .reopen()
+                .map_err(|e| format!("Failed to open stdout file: {e}"))?,
+        ))
+        .stderr(Stdio::from(
+            stderr_file
+                .reopen()
+                .map_err(|e| format!("Failed to open stderr file: {e}"))?,
+        ))
+        .spawn()
+        .map_err(|e| format!("Failed to spawn update command '{command}': {e}"))?;
+
+    let start = Instant::now();
+    let status = loop {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|e| format!("Failed to poll update command '{command}': {e}"))?
+        {
+            break status;
+        }
+
+        if start.elapsed() >= UPDATE_COMMAND_TIMEOUT {
+            // As with auth checks, a Windows shim can leave descendants behind.
+            #[cfg(windows)]
+            {
+                let _ = crate::platform::kill_process_tree(child.id());
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!(
+                "Update command '{command}' timed out after {} seconds",
+                UPDATE_COMMAND_TIMEOUT.as_secs()
+            ));
+        }
+
+        thread::sleep(Duration::from_millis(100));
+    };
+
+    Ok(Output {
+        status,
+        stdout: fs::read(stdout_file.path()).unwrap_or_default(),
+        stderr: fs::read(stderr_file.path()).unwrap_or_default(),
+    })
+}
+
 /// Run a CLI update command silently in the background.
 /// Captures stdout/stderr and returns the result without opening a terminal window.
 ///
@@ -181,19 +259,13 @@ pub async fn run_cli_path_update(
         ));
     }
 
-    // Run blocking subprocess on the blocking pool to avoid stalling the async runtime.
     // `command` is either a package manager on PATH (`npm`, `bun`, `brew`) or the
     // detected CLI path for a self-update; both reach Windows as `.cmd` shims, so
     // resolve and launch through the shared helper. The allowlist above is checked
     // against the caller's value, never against what resolution turns it into.
-    let result = tokio::task::spawn_blocking(move || {
-        path_tool_command(&command)
-            .args(&args)
-            .output()
-            .map_err(|e| format!("Failed to spawn update command '{command}': {e}"))
-    })
-    .await
-    .map_err(|e| format!("Background task join error: {e}"))??;
+    let result = tokio::task::spawn_blocking(move || run_update_command(&command, &args))
+        .await
+        .map_err(|e| format!("Background task join error: {e}"))??;
 
     let stdout = String::from_utf8_lossy(&result.stdout).to_string();
     let stderr = String::from_utf8_lossy(&result.stderr).to_string();

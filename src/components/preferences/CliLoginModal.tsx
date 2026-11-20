@@ -45,6 +45,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { disposeTerminal, setOnStopped } from '@/lib/terminal-instances'
 import { BackendLabel } from '@/components/ui/backend-label'
 import { generateId } from '@/lib/uuid'
+import { isCliUpdateCompleteOutput } from '@/lib/cli-update-output'
 import { StandaloneTerminalSurface } from '@/components/chat/StandaloneTerminalSurface'
 import { Minus } from '@/components/icons/reicon'
 
@@ -186,25 +187,10 @@ function CliLoginModalContent({
   // Buffer last N lines of terminal output for debug logging on error
   const outputBufferRef = useRef<string[]>([])
   const MAX_OUTPUT_LINES = 50
-
-  useEffect(() => {
-    const unlisten = listen<{ terminal_id: string; data: string }>(
-      'terminal:output',
-      event => {
-        if (event.payload.terminal_id !== terminalId) return
-        if (mcpContext) return // OAuth URLs/callbacks must not enter debug logs.
-        const lines = event.payload.data.split('\n')
-        outputBufferRef.current.push(...lines)
-        if (outputBufferRef.current.length > MAX_OUTPUT_LINES) {
-          outputBufferRef.current =
-            outputBufferRef.current.slice(-MAX_OUTPUT_LINES)
-        }
-      }
-    )
-    return () => {
-      unlisten.then(fn => fn())
-    }
-  }, [terminalId, mcpContext])
+  const updateCompleteCloseRef = useRef(false)
+  const updateCompleteTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined
+  )
 
   // Cleanup terminal on unmount (needed for retry remount)
   useEffect(() => {
@@ -289,6 +275,39 @@ function CliLoginModalContent({
   })
 
   useEffect(() => {
+    const unlisten = listen<{ terminal_id: string; data: string }>(
+      'terminal:output',
+      event => {
+        if (event.payload.terminal_id !== terminalId) return
+        if (mcpContext) return // OAuth URLs/callbacks must not enter debug logs.
+        const lines = event.payload.data.split('\n')
+        outputBufferRef.current.push(...lines)
+        if (outputBufferRef.current.length > MAX_OUTPUT_LINES) {
+          outputBufferRef.current =
+            outputBufferRef.current.slice(-MAX_OUTPUT_LINES)
+        }
+
+        // Windows self-updaters can exit without a terminal:stopped event.
+        // Treat a clear "up to date" line as a secondary completion signal.
+        if (action !== 'login' && !updateCompleteCloseRef.current) {
+          const combined = outputBufferRef.current.join('\n')
+          if (isCliUpdateCompleteOutput(combined)) {
+            updateCompleteCloseRef.current = true
+            updateCompleteTimeoutRef.current = setTimeout(
+              () => onLoginSuccessClose(),
+              1200
+            )
+          }
+        }
+      }
+    )
+    return () => {
+      clearTimeout(updateCompleteTimeoutRef.current)
+      unlisten.then(fn => fn())
+    }
+  }, [terminalId, mcpContext, action])
+
+  useEffect(() => {
     let closeTimeout: ReturnType<typeof setTimeout> | undefined
     setOnStopped(terminalId, (exitCode, signal) => {
       const output = outputBufferRef.current.join('\n').trim()
@@ -301,6 +320,8 @@ function CliLoginModalContent({
 
       if (exitCode === 0) {
         logger.debug(logBase + logOutput)
+        clearTimeout(updateCompleteTimeoutRef.current)
+        updateCompleteTimeoutRef.current = undefined
         if (minimizedRef.current) {
           toast.success(
             `${cliName} (${target}) ${action === 'install' ? 'installed' : 'updated'} successfully`
@@ -347,7 +368,7 @@ function CliLoginModalContent({
     <Dialog open={!minimized} onOpenChange={handleOpenChange}>
       <DialogContent
         className="!w-screen !h-dvh !max-w-screen !rounded-none sm:!w-[calc(100vw-64px)] sm:!max-w-[calc(100vw-64px)] sm:!h-[calc(100vh-64px)] sm:!rounded-lg flex flex-col"
-        showCloseButton={action === 'login'}
+        showCloseButton
       >
         {action !== 'login' && (
           <Button
@@ -356,7 +377,7 @@ function CliLoginModalContent({
             size="icon-sm"
             onClick={handleMinimize}
             aria-label={`Minimize ${cliName} update`}
-            className="absolute right-5 top-4"
+            className="absolute right-14 top-4"
           >
             <Minus className="size-4" />
           </Button>
