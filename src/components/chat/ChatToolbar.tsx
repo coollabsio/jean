@@ -35,6 +35,7 @@ import { DesktopToolbarControls } from '@/components/chat/toolbar/DesktopToolbar
 import { DockBurgerButton } from '@/components/chat/toolbar/DockBurgerButton'
 import { ExecutionModeDropdown } from '@/components/chat/toolbar/ExecutionModeDropdown'
 import { SendCancelButton } from '@/components/chat/toolbar/SendCancelButton'
+import { SessionUsageChip } from '@/components/chat/SessionUsageChip'
 import { ContextViewerDialog } from '@/components/chat/toolbar/ContextViewerDialog'
 import { RevertLastCommitDialog } from '@/components/shared/RevertLastCommitDialog'
 import {
@@ -150,6 +151,8 @@ export const ChatToolbar = memo(function ChatToolbar({
   onRunCommand,
   onRunPackageScript,
   onToggleFavoritePackageScript,
+  sessionLatestUsage,
+  sessionTotalUsage,
 }: ChatToolbarProps) {
   const {
     statuses: mcpStatuses,
@@ -644,7 +647,11 @@ export const ChatToolbar = memo(function ChatToolbar({
             />
           </div>
 
-          <div className="ml-auto shrink-0 py-1 pl-2">
+          <div className="ml-auto flex shrink-0 items-center gap-2 py-1 pl-2">
+            <SessionUsageChip
+              latest={sessionLatestUsage}
+              total={sessionTotalUsage}
+            />
             <SendCancelButton
               isSending={isSending}
               canSend={canSend}
