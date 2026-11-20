@@ -241,6 +241,9 @@ pub fn managed_cli_dir(app: &AppHandle) -> Result<PathBuf, String> {
 fn managed_bin_path(cli_dir: &Path) -> PathBuf {
     #[cfg(windows)]
     {
+        if let Some(native) = native_agent_browser_binary(cli_dir) {
+            return native;
+        }
         cli_dir
             .join("node_modules")
             .join(".bin")
@@ -253,6 +256,31 @@ fn managed_bin_path(cli_dir: &Path) -> PathBuf {
             .join(".bin")
             .join("agent-browser")
     }
+}
+
+/// The package's native executable, when the install shipped one.
+///
+/// The npm `.bin` entry on Windows is a `.cmd` shim that starts `node`, which
+/// makes every MCP client depend on `cmd.exe` batch launching. Pointing MCP at
+/// the native binary avoids that hop and the clients that cannot spawn `.cmd`.
+#[cfg(any(windows, test))]
+fn native_agent_browser_binary(cli_dir: &Path) -> Option<PathBuf> {
+    let modules = cli_dir.join("node_modules");
+    let arch = match std::env::consts::ARCH {
+        "aarch64" => "arm64",
+        _ => "x64",
+    };
+    let candidates = [
+        modules
+            .join("agent-browser")
+            .join("bin")
+            .join(format!("agent-browser-win32-{arch}.exe")),
+        modules
+            .join("@agent-browser")
+            .join("cli-win32-x64-msvc")
+            .join("agent-browser.exe"),
+    ];
+    candidates.into_iter().find(|path| path.is_file())
 }
 
 /// Path to Jean-managed `agent-browser` if the npm install is present.
@@ -1659,6 +1687,42 @@ mod tests {
         assert!(s.contains("node_modules"));
         assert!(s.contains(".bin"));
         assert!(s.contains("agent-browser"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn managed_bin_path_prefers_the_native_windows_binary() {
+        let dir = TempDir::new().unwrap();
+        let bin_dir = dir
+            .path()
+            .join("node_modules")
+            .join("agent-browser")
+            .join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let arch = match std::env::consts::ARCH {
+            "aarch64" => "arm64",
+            _ => "x64",
+        };
+        let exe = bin_dir.join(format!("agent-browser-win32-{arch}.exe"));
+        std::fs::write(&exe, b"").unwrap();
+
+        assert_eq!(managed_bin_path(dir.path()), exe);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn managed_bin_path_falls_back_to_the_platform_package() {
+        let dir = TempDir::new().unwrap();
+        let package_dir = dir
+            .path()
+            .join("node_modules")
+            .join("@agent-browser")
+            .join("cli-win32-x64-msvc");
+        std::fs::create_dir_all(&package_dir).unwrap();
+        let exe = package_dir.join("agent-browser.exe");
+        std::fs::write(&exe, b"").unwrap();
+
+        assert_eq!(managed_bin_path(dir.path()), exe);
     }
 
     #[test]
