@@ -8,7 +8,10 @@ use tauri::AppHandle;
 
 use super::config::resolve_cli_binary;
 
-const AUTH_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
+// The Windows install is a `.cmd` shim that starts PowerShell and then Node.
+// A cold start can take several seconds, especially when several auth checks
+// are queued, so 5s was enough to produce false "timed out" results.
+const AUTH_CHECK_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CursorCliStatus {
@@ -86,11 +89,23 @@ fn looks_authenticated(output: &str) -> bool {
     }
 
     lower.lines().any(|line| {
-        line.contains("user email")
-            && line.contains('@')
-            && !line.contains("not logged in")
-            && !line.contains("unknown")
-            && !line.ends_with(':')
+        let line = line
+            .trim()
+            .trim_start_matches(['✓', '✔'])
+            .trim()
+            .to_ascii_lowercase();
+
+        // Cursor's `status` command has used both "✓ Login successful!" and
+        // "✓ Logged in" for an authenticated session. Do not treat variants of
+        // "not logged in" as success.
+        line == "logged in"
+            || line.contains("login successful")
+            || line.contains("login success")
+            || (line.contains("user email")
+                && line.contains('@')
+                && !line.contains("not logged in")
+                && !line.contains("unknown")
+                && !line.ends_with(':'))
     })
 }
 
@@ -206,6 +221,13 @@ fn run_command_with_timeout(
         }
 
         if start.elapsed() >= timeout {
+            // On Windows the shim is cmd.exe -> PowerShell -> Node. Killing only
+            // the direct child leaves the PowerShell/Node processes running and
+            // holding the pipes, which makes every later auth check slower.
+            #[cfg(windows)]
+            {
+                let _ = crate::platform::kill_process_tree(child.id());
+            }
             let _ = child.kill();
             let _ = child.wait();
             return Ok(TimedCommandResult::TimedOut);
@@ -309,7 +331,7 @@ pub async fn check_cursor_cli_auth(app: AppHandle) -> Result<CursorAuthStatus, S
     for args in [["status"].as_slice(), ["about"].as_slice()] {
         let output = match run_command_with_timeout(
             {
-                let mut command = crate::platform::wsl_aware_command(&binary_str, None);
+                let mut command = crate::platform::cli_command(&binary_str, None);
                 command.args(args);
                 command
             },
@@ -511,6 +533,20 @@ mod tests {
     fn strip_ansi_removes_escape_sequences() {
         let input = "\u{1b}[2K\u{1b}[G✓ Logged in as test@example.com";
         assert_eq!(strip_ansi(input), "✓ Logged in as test@example.com");
+    }
+
+    #[test]
+    fn auth_parser_accepts_status_success_variants() {
+        assert!(looks_authenticated("✓ Logged in as test@example.com"));
+        assert!(looks_authenticated("✓ Login successful!\nLogged in"));
+        assert!(looks_authenticated("✓ Logged in"));
+        assert!(!looks_authenticated("✗ Not logged in"));
+        assert!(!looks_authenticated("Please log in to continue"));
+    }
+
+    #[test]
+    fn auth_check_timeout_allows_windows_shim_startup() {
+        assert!(AUTH_CHECK_TIMEOUT >= Duration::from_secs(15));
     }
 
     #[test]
