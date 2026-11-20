@@ -3583,6 +3583,22 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   }}
                 />
               </InlineField>
+              <InlineField
+                label="Cache burst warning"
+                description="Warn before changing reasoning effort in a conversation with a cached prompt"
+                help="Switching effort can purge the cache and make the next message cost more."
+              >
+                <Switch
+                  checked={preferences?.cache_burst_warning ?? true}
+                  onCheckedChange={checked => {
+                    if (preferences) {
+                      patchPreferences.mutate({
+                        cache_burst_warning: checked,
+                      })
+                    }
+                  }}
+                />
+              </InlineField>
             </div>
           </SettingsSection>
 
