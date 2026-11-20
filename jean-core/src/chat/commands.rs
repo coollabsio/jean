@@ -5650,13 +5650,13 @@ async fn send_chat_message_inner(
     // reconstruct content after the live stream completes.
     // Skip when cancelled: cancelled turns stay in run metadata/logs for diagnostics
     // but are intentionally excluded from visible chat history on reload.
-    // Unix Grok/Kimi hosts already write ACP stream JSONL + a result marker — synthetic
-    // assistant lines would double content when parse_grok_run_to_message reloads.
+    // Unix Grok/Kimi/Muse/PI hosts already write their stream JSONL + a result marker —
+    // synthetic assistant lines would double content when the run log is parsed again.
     let skip_synthetic_history = unified_response.backend == Backend::Devin
         || (cfg!(unix)
             && matches!(
                 unified_response.backend,
-                Backend::Grok | Backend::Kimi | Backend::Muse
+                Backend::Grok | Backend::Kimi | Backend::Muse | Backend::Pi
             ));
     if matches!(
         unified_response.backend,
