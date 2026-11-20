@@ -309,6 +309,9 @@ export function applyCacheInvalidationKeys(
       case 'secret-request':
         queryClient.invalidateQueries({ queryKey: ['secret-request'] })
         break
+      case 'diff-viewed':
+        queryClient.invalidateQueries({ queryKey: ['diff-viewed'] })
+        break
     }
   }
 }

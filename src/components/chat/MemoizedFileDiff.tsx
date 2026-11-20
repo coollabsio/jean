@@ -13,6 +13,7 @@ import type {
 } from '@pierre/diffs'
 import type { EditorOptions } from '@pierre/diffs/edit'
 import { getFileLineStats } from '@/lib/diff-stats'
+import { Checkbox } from '@/components/ui/checkbox'
 import { cn } from '@/lib/utils'
 import { convertProjectFileSrc } from '@/lib/transport'
 import { parseServerResourceKey } from '@/lib/server-resource'
@@ -55,6 +56,9 @@ export interface MemoizedFileDiffProps {
   editorOptions?: EditorOptions<DiffComment>
   onLineSelected: (range: SelectedLineRange | null) => void
   onRemoveComment: (id: string) => void
+  /** Shows a "Viewed" checkbox in the header when provided. */
+  onViewedChange?: (fileName: string, viewed: boolean) => void
+  viewed?: boolean
 }
 
 /** Get file status badge color */
@@ -91,6 +95,8 @@ export const MemoizedFileDiff = memo(
     editorOptions,
     onLineSelected,
     onRemoveComment,
+    onViewedChange,
+    viewed = false,
   }: MemoizedFileDiffProps) {
     const [forceShow, setForceShow] = useState(false)
     const [isLoadingDiff, startLoadingDiff] = useTransition()
@@ -172,6 +178,18 @@ export const MemoizedFileDiff = memo(
             )}
             {stats.deletions > 0 && (
               <span className="text-destructive">-{stats.deletions}</span>
+            )}
+            {onViewedChange && (
+              <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+                <Checkbox
+                  checked={viewed}
+                  onCheckedChange={checked =>
+                    onViewedChange(fileName, checked === true)
+                  }
+                  aria-label={`Mark ${fileName} as viewed`}
+                />
+                Viewed
+              </label>
             )}
           </div>
         </div>
@@ -282,7 +300,9 @@ export const MemoizedFileDiff = memo(
       prevProps.edit === nextProps.edit &&
       prevProps.editorOptions === nextProps.editorOptions &&
       prevProps.onLineSelected === nextProps.onLineSelected &&
-      prevProps.onRemoveComment === nextProps.onRemoveComment
+      prevProps.onRemoveComment === nextProps.onRemoveComment &&
+      prevProps.onViewedChange === nextProps.onViewedChange &&
+      prevProps.viewed === nextProps.viewed
     )
   }
 )

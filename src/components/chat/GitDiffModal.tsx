@@ -57,6 +57,11 @@ import { cn } from '@/lib/utils'
 import { generateId } from '@/lib/uuid'
 import { getFilename } from '@/lib/path-utils'
 import { getFileLineStats } from '@/lib/diff-stats'
+import { computeViewedPaths, hashFileDiff } from '@/lib/diff-viewed'
+import {
+  useDiffViewedFiles,
+  useSetDiffFileViewed,
+} from '@/services/diff-viewed'
 import {
   Tooltip,
   TooltipTrigger,
@@ -104,6 +109,7 @@ import { DEFAULT_KEYBINDINGS, eventMatchesShortcut } from '@/types/keybindings'
 // PERFORMANCE: Stable empty array reference for files without comments
 // This prevents unnecessary re-renders since the reference never changes
 const EMPTY_ANNOTATIONS: DiffLineAnnotation<DiffComment>[] = []
+const EMPTY_VIEWED = new Set<string>()
 
 // Re-export for consumers that imported from this file
 export type { DiffComment, MemoizedFileDiffProps } from './MemoizedFileDiff'
@@ -745,6 +751,51 @@ export function GitDiffModal({
   // Check if there are any files to display
   const hasFiles = flattenedFiles.length > 0
 
+  const viewedDiffType =
+    activeDiffType === 'uncommitted' || activeDiffType === 'branch'
+      ? activeDiffType
+      : null
+  const viewedWorktreeId = diffRequest?.worktreeId
+  const { data: viewedData } = useDiffViewedFiles(
+    viewedWorktreeId,
+    viewedDiffType
+  )
+  const { mutate: setFileViewed } = useSetDiffFileViewed()
+  const fileHashes = useMemo(
+    () =>
+      flattenedFiles.map(file => ({
+        path: file.fileName,
+        hash: hashFileDiff(file.fileDiff),
+      })),
+    [flattenedFiles]
+  )
+  const viewedPaths = useMemo(
+    () =>
+      viewedDiffType
+        ? computeViewedPaths(fileHashes, viewedData, viewedDiffType)
+        : EMPTY_VIEWED,
+    [fileHashes, viewedData, viewedDiffType]
+  )
+  const handleViewedChange = useCallback(
+    (path: string, viewed: boolean) => {
+      const hash = fileHashes.find(file => file.path === path)?.hash
+      if (!viewedWorktreeId || !viewedDiffType || !hash) return
+      setFileViewed({
+        worktreeId: viewedWorktreeId,
+        diffType: viewedDiffType,
+        path,
+        hash,
+        viewed,
+      })
+    },
+    [fileHashes, viewedWorktreeId, viewedDiffType, setFileViewed]
+  )
+  const viewedCount = viewedDiffType && viewedWorktreeId && (
+    <div className="px-2 pt-1.5 text-2xs text-muted-foreground">
+      {viewedPaths.size}/{flattenedFiles.length} viewed
+    </div>
+  )
+
   const canCommitFromDiff =
     activeDiffType === 'uncommitted' &&
     !!diff &&
@@ -1105,6 +1156,7 @@ export function GitDiffModal({
     const isCheckedForCommit =
       activeDiffType === 'uncommitted' &&
       gitDiffSelectedFiles.has(file.fileName)
+    const isViewed = viewedPaths.has(file.fileName)
 
     const fileButton = (
       // react-doctor-disable-next-line react-doctor/no-static-element-interactions, react-doctor/click-events-have-key-events -- pointer mirror of the modal's document-level arrow/j/k file navigation
@@ -1116,7 +1168,8 @@ export function GitDiffModal({
           'w-full flex items-center gap-2 py-2 text-left transition-colors cursor-pointer',
           'hover:bg-muted/50',
           isSelected && 'bg-accent',
-          isCheckedForCommit && !isSelected && 'bg-primary/10'
+          isCheckedForCommit && !isSelected && 'bg-primary/10',
+          isViewed && 'opacity-60'
         )}
       >
         {activeDiffType === 'uncommitted' && (
@@ -1146,6 +1199,12 @@ export function GitDiffModal({
           )}
         />
         <span className="truncate flex-1">{displayName}</span>
+        {isViewed && (
+          <Check
+            aria-label="Viewed"
+            className="h-3 w-3 shrink-0 text-muted-foreground"
+          />
+        )}
         <div className="flex items-center gap-1 shrink-0">
           {file.additions > 0 && (
             <span className="text-success">+{file.additions}</span>
@@ -1199,6 +1258,7 @@ export function GitDiffModal({
     const isCheckedForCommit =
       activeDiffType === 'uncommitted' &&
       gitDiffSelectedFiles.has(file.fileName)
+    const isViewed = viewedPaths.has(file.fileName)
 
     return (
       // react-doctor-disable-next-line react-doctor/no-static-element-interactions, react-doctor/click-events-have-key-events -- pointer mirror of the modal's document-level arrow/j/k file navigation
@@ -1211,7 +1271,8 @@ export function GitDiffModal({
           'w-full flex items-center gap-2 py-2.5 text-left transition-colors cursor-pointer',
           'hover:bg-muted/50',
           isSelected && 'bg-accent',
-          isCheckedForCommit && !isSelected && 'bg-primary/10'
+          isCheckedForCommit && !isSelected && 'bg-primary/10',
+          isViewed && 'opacity-60'
         )}
       >
         {activeDiffType === 'uncommitted' && (
@@ -1241,6 +1302,12 @@ export function GitDiffModal({
           )}
         />
         <span className="truncate flex-1 text-sm">{displayName}</span>
+        {isViewed && (
+          <Check
+            aria-label="Viewed"
+            className="h-3 w-3 shrink-0 text-muted-foreground"
+          />
+        )}
         <div className="flex items-center gap-1 shrink-0 text-xs">
           {file.additions > 0 && (
             <span className="text-success">+{file.additions}</span>
@@ -1568,6 +1635,7 @@ export function GitDiffModal({
                                 onChange={setGitDiffViewMode}
                               />
                             </div>
+                            {viewedCount}
                           </div>
                         )}
                         <div>
@@ -1649,6 +1717,12 @@ export function GitDiffModal({
                                 'github-light'
                               }
                               diffStyle={diffStyle}
+                              viewed={viewedPaths.has(selectedFile.fileName)}
+                              onViewedChange={
+                                viewedDiffType && viewedWorktreeId
+                                  ? handleViewedChange
+                                  : undefined
+                              }
                               onLineSelected={getLineSelectedCallback(
                                 selectedFile.fileName
                               )}
@@ -1706,6 +1780,7 @@ export function GitDiffModal({
                                   onChange={setGitDiffViewMode}
                                 />
                               </div>
+                              {viewedCount}
                             </div>
                           )}
                           <div>
@@ -1763,6 +1838,12 @@ export function GitDiffModal({
                                   'github-light'
                                 }
                                 diffStyle={diffStyle}
+                                viewed={viewedPaths.has(selectedFile.fileName)}
+                                onViewedChange={
+                                  viewedDiffType && viewedWorktreeId
+                                    ? handleViewedChange
+                                    : undefined
+                                }
                                 onLineSelected={getLineSelectedCallback(
                                   selectedFile.fileName
                                 )}

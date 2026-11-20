@@ -1,5 +1,6 @@
 pub mod checkpoints;
 mod commands;
+pub mod diff_viewed;
 pub mod git;
 pub mod git_log;
 pub mod git_status;
