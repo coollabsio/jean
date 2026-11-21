@@ -6828,7 +6828,9 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
 "#;
         let response = parse_grok_stream_inner(BufReader::new(input.as_bytes()), None).unwrap();
 
-        assert_eq!(response.content, "Waiting 10 seconds.I'm Grok 4.5");
+        // A new sentence in the next delta gets the space the model omitted;
+        // the blocks below still keep the steer out of the assistant text.
+        assert_eq!(response.content, "Waiting 10 seconds. I'm Grok 4.5");
         assert!(
             !response.content.contains("who are you"),
             "steered prompt must not leak into assistant content blob: {}",
