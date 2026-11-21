@@ -136,6 +136,24 @@ fn proxy_to_parent(
     response_timeout: Duration,
     request: Value,
 ) -> Result<Value, String> {
+    if tokio::runtime::Handle::try_current().is_ok() {
+        // run_server() already drives this helper inside Jean's outer runtime.
+        // Entering a second runtime from that context panics, and release builds
+        // use panic = "abort", so the helper died on its first tool call (#934).
+        // Keep the whole exchange, including the pipe runtime's drop, in the
+        // blocking region: dropping a runtime inside async context panics too.
+        tokio::task::block_in_place(|| proxy_to_parent_blocking(socket, response_timeout, request))
+    } else {
+        proxy_to_parent_blocking(socket, response_timeout, request)
+    }
+}
+
+#[cfg(windows)]
+fn proxy_to_parent_blocking(
+    socket: &str,
+    response_timeout: Duration,
+    request: Value,
+) -> Result<Value, String> {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::windows::named_pipe::ClientOptions;
     use tokio::runtime::Builder;
@@ -255,5 +273,25 @@ mod tests {
         assert_eq!(text.lines().count(), 1);
         let response: serde_json::Value = serde_json::from_str(text.trim_end()).unwrap();
         assert_eq!(response["id"], 1);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn proxy_inside_outer_runtime_returns_error_instead_of_aborting() {
+        // Reproduces the real helper context: run_server() is driven by an
+        // outer multi-thread runtime and the stdio loop is synchronous.
+        let outer = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let result = outer.block_on(async {
+            super::proxy_to_parent(
+                r"\\.\pipe\jean-mcp-does-not-exist-regression",
+                std::time::Duration::from_millis(100),
+                json!({"name": "get_run_environments", "arguments": {}}),
+            )
+        });
+        let error = result.expect_err("nonexistent pipe should fail");
+        assert!(error.contains("Failed to connect"), "{error}");
     }
 }
