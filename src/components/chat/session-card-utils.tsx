@@ -846,8 +846,12 @@ export function getResumeCommand(session: Session): string | null {
   if (session.backend === 'opencode' && session.opencode_session_id) {
     return `opencode -s ${session.opencode_session_id}`
   }
-  if (session.backend === 'cursor' && session.cursor_chat_id) {
-    return `cursor-agent --resume ${session.cursor_chat_id}`
+  if (session.backend === 'cursor') {
+    // Without a captured chat id, Cursor's own --continue resumes the most
+    // recent chat for this workspace instead of starting a fresh one.
+    return session.cursor_chat_id
+      ? `cursor-agent --resume ${session.cursor_chat_id}`
+      : 'cursor-agent --continue'
   }
   if (session.backend === 'pi' && session.pi_session_id) {
     return `pi --session ${session.pi_session_id}`
@@ -918,10 +922,14 @@ export function getResumeArgs(
       ),
     }
   }
-  if (session.backend === 'cursor' && session.cursor_chat_id) {
+  if (session.backend === 'cursor') {
+    // Without a captured chat id, Cursor's own --continue resumes the most
+    // recent chat for this workspace instead of starting a fresh one.
     return {
       command: preferResolvedCliCommand(cmd, 'cursor-agent', resolved),
-      args: ['--resume', session.cursor_chat_id],
+      args: session.cursor_chat_id
+        ? ['--resume', session.cursor_chat_id]
+        : ['--continue'],
     }
   }
   if (session.backend === 'pi' && session.pi_session_id) {

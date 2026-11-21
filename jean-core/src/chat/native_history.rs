@@ -429,22 +429,80 @@ fn list_cursor_sessions(
     let Some(home) = dirs::home_dir() else {
         return Ok(Vec::new());
     };
+    let mut results = Vec::new();
+
+    // The Cursor CLI keeps one directory per workspace hash:
+    //   ~/.cursor/chats/<workspace-hash>/<chat-id>/meta.json
+    // Match `meta.cwd` instead of recomputing the hash, so a change in
+    // Cursor's hashing cannot hide history again.
+    let chats_root = home.join(".cursor").join("chats");
+    if let Ok(workspaces) = fs::read_dir(&chats_root) {
+        for workspace in workspaces.flatten() {
+            let Ok(chats) = fs::read_dir(workspace.path()) else {
+                continue;
+            };
+            for chat in chats.flatten() {
+                let meta_path = chat.path().join("meta.json");
+                if let Some(session) = parse_cursor_cli_chat(&meta_path, worktree_path) {
+                    push_if_matches(&mut results, session, query);
+                }
+            }
+        }
+    }
+
+    // Cursor IDE agent transcripts, kept for installs that never used the CLI.
     let transcripts_root = home
         .join(".cursor")
         .join("projects")
         .join(escape_cursor_project_dir(worktree_path))
         .join("agent-transcripts");
-    if !transcripts_root.exists() {
-        return Ok(Vec::new());
-    }
-
-    let mut results = Vec::new();
-    for path in collect_jsonl_files(&transcripts_root, None)? {
-        if let Some(session) = parse_cursor_session_file(&path, worktree_path) {
-            push_if_matches(&mut results, session, query);
+    if transcripts_root.exists() {
+        for path in collect_jsonl_files(&transcripts_root, None)? {
+            if let Some(session) = parse_cursor_session_file(&path, worktree_path) {
+                push_if_matches(&mut results, session, query);
+            }
         }
     }
+
     sort_and_limit(results, limit)
+}
+
+/// A Cursor CLI chat from `~/.cursor/chats/<hash>/<chat-id>/meta.json`.
+fn parse_cursor_cli_chat(meta_path: &Path, worktree_path: &str) -> Option<NativeCliHistorySession> {
+    let value: Value = serde_json::from_str(&fs::read_to_string(meta_path).ok()?).ok()?;
+    let cwd = value.get("cwd").and_then(Value::as_str)?;
+    if !same_path(cwd, worktree_path) {
+        return None;
+    }
+    // A chat directory is created before the first message; keep it out of
+    // history until it has a conversation.
+    if value.get("hasConversation").and_then(Value::as_bool) == Some(false) {
+        return None;
+    }
+
+    let id = meta_path.parent()?.file_name()?.to_str()?.to_string();
+    let title = value
+        .get("title")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+        .unwrap_or("Cursor chat")
+        .to_string();
+    let updated_at = value
+        .get("updatedAtMs")
+        .and_then(Value::as_u64)
+        .map(|millis| millis / 1000)
+        .unwrap_or_else(|| file_updated_at(meta_path));
+
+    Some(NativeCliHistorySession {
+        backend: "cursor".to_string(),
+        id: id.clone(),
+        title,
+        cwd: cwd.to_string(),
+        updated_at,
+        resume_args: vec!["--resume".to_string(), id],
+        source_path: meta_path.to_string_lossy().to_string(),
+    })
 }
 
 fn list_opencode_sessions(
@@ -1122,7 +1180,13 @@ fn claude_project_dir(projects_root: &Path, worktree_path: &str) -> Option<PathB
 }
 
 fn escape_cursor_project_dir(path: &str) -> String {
-    path.trim_start_matches('/').replace('/', "-")
+    let trimmed = path.trim_start_matches('/');
+    if cfg!(windows) {
+        // Cursor's Windows project folders look like `d-gpanel`: lowercased,
+        // with the drive colon and both separators collapsed to dashes.
+        return trimmed.to_lowercase().replace([':', '\\', '/'], "-");
+    }
+    trimmed.replace('/', "-")
 }
 
 fn same_path(a: &str, b: &str) -> bool {
@@ -1268,6 +1332,54 @@ mod tests {
 
         metadata.primary_surface = Some("chat".to_string());
         assert!(validate_native_cli_tracking_metadata(&metadata, "codex").is_err());
+    }
+
+    #[test]
+    fn parses_cursor_cli_chat_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let chat = dir.path().join("workspace-hash").join("chat-123");
+        std::fs::create_dir_all(&chat).unwrap();
+        std::fs::write(
+            chat.join("meta.json"),
+            serde_json::json!({
+                "schemaVersion": 1,
+                "cwd": "/tmp/worktree",
+                "title": "G Panel Parity",
+                "hasConversation": true,
+                "updatedAtMs": 1_795_231_089_543u64,
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let session = parse_cursor_cli_chat(&chat.join("meta.json"), "/tmp/worktree").unwrap();
+        assert_eq!(session.backend, "cursor");
+        assert_eq!(session.id, "chat-123");
+        assert_eq!(session.title, "G Panel Parity");
+        assert_eq!(session.resume_args, vec!["--resume", "chat-123"]);
+        assert_eq!(session.updated_at, 1_795_231_089);
+    }
+
+    #[test]
+    fn skips_empty_cursor_cli_chats_and_other_worktrees() {
+        let dir = tempfile::tempdir().unwrap();
+        let chat = dir.path().join("hash").join("empty-chat");
+        std::fs::create_dir_all(&chat).unwrap();
+        let meta = chat.join("meta.json");
+
+        std::fs::write(
+            &meta,
+            serde_json::json!({"cwd": "/tmp/worktree", "hasConversation": false}).to_string(),
+        )
+        .unwrap();
+        assert!(parse_cursor_cli_chat(&meta, "/tmp/worktree").is_none());
+
+        std::fs::write(
+            &meta,
+            serde_json::json!({"cwd": "/tmp/other", "hasConversation": true}).to_string(),
+        )
+        .unwrap();
+        assert!(parse_cursor_cli_chat(&meta, "/tmp/worktree").is_none());
     }
 
     #[test]

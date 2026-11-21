@@ -1,0 +1,16 @@
+name: Verify Cursor history
+on: [push]
+permissions:
+  contents: read
+jobs:
+  rust-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./jean-core -> target"
+          shared-key: verify-cursor-history
+      - name: Native history tests
+        run: "cargo test --manifest-path jean-core/Cargo.toml 'chat::native_history::' -- --nocapture"
