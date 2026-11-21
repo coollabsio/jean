@@ -206,6 +206,26 @@ fn merge_assistant_text(response: &mut PiResponse, text: &str) {
     push_text_block(&mut response.content_blocks, text);
 }
 
+/// Older Jean builds appended a whole-turn `assistant` snapshot (see
+/// `append_synthetic_reply`) after PI's own stream. Its text equals the text
+/// already streamed, and it uses `tool_use` blocks, which PI never emits.
+/// Merging it again duplicates the turn, so detect and skip it.
+fn is_replayed_turn_snapshot(response: &PiResponse, message: &Value) -> bool {
+    let mut snapshot_text = String::new();
+    for block in iter_content_blocks(message) {
+        match block.get("type").and_then(Value::as_str) {
+            Some("tool_use") => return true,
+            Some("text") => {
+                if let Some(text) = block.get("text").and_then(Value::as_str) {
+                    snapshot_text.push_str(text);
+                }
+            }
+            _ => {}
+        }
+    }
+    !snapshot_text.is_empty() && response.content.ends_with(&snapshot_text)
+}
+
 fn message_usage_from_value(value: &Value) -> Option<UsageData> {
     value.get("message").and_then(usage_from_value)
 }
@@ -398,7 +418,13 @@ fn merge_pi_line(response: &mut PiResponse, value: &Value) {
         }
         "assistant" => {
             if let Some(message) = value.get("message") {
-                merge_assistant_message(response, message);
+                if is_replayed_turn_snapshot(response, message) {
+                    if let Some(next_usage) = usage_from_value(message) {
+                        response.usage = Some(next_usage);
+                    }
+                } else {
+                    merge_assistant_message(response, message);
+                }
             } else if let Some(text) = text_delta_from_value(value) {
                 response.content.push_str(text);
                 push_text_block(&mut response.content_blocks, text);
@@ -1647,6 +1673,38 @@ mod tests {
         assert!(matches!(
             &response.content_blocks[0],
             ContentBlock::Text { text } if text == "Hey! What can I help with?"
+        ));
+    }
+
+    #[test]
+    fn does_not_duplicate_synthetic_whole_turn_snapshot_after_tool() {
+        let stream = r#"
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"Investigating."}}
+{"type":"tool_execution_start","toolCallId":"call_1","toolName":"bash","args":{"command":"ls"}}
+{"type":"tool_execution_end","toolCallId":"call_1","result":{"stdout":"ok"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"Done."}}
+{"type":"result"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Investigating."},{"type":"tool_use","id":"call_1","name":"Bash","input":{"command":"ls"}},{"type":"text","text":"Done."}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"call_1","content":"ok"}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Investigating.Done."}]}}
+"#;
+
+        let response = parse_pi_json_stream_inner(stream);
+
+        assert_eq!(response.content, "Investigating.Done.");
+        assert_eq!(response.tool_calls.len(), 1);
+        assert_eq!(response.content_blocks.len(), 3);
+        assert!(matches!(
+            &response.content_blocks[0],
+            ContentBlock::Text { text } if text == "Investigating."
+        ));
+        assert!(matches!(
+            &response.content_blocks[1],
+            ContentBlock::ToolUse { tool_call_id } if tool_call_id == "call_1"
+        ));
+        assert!(matches!(
+            &response.content_blocks[2],
+            ContentBlock::Text { text } if text == "Done."
         ));
     }
 
