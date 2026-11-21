@@ -33,6 +33,39 @@ describe('native client resume sessions', () => {
     })
   })
 
+  it('falls back to --continue for Cursor sessions without a captured chat id', () => {
+    const cursorSession: Session = {
+      ...session,
+      name: 'Cursor session',
+      backend: 'cursor',
+      codex_thread_id: undefined,
+    }
+
+    expect(getResumeArgs(cursorSession)).toEqual({
+      command: 'cursor-agent',
+      args: ['--continue'],
+    })
+    expect(getResumeCommand(cursorSession)).toBe('cursor-agent --continue')
+  })
+
+  it('resumes the captured Cursor chat id when present', () => {
+    const cursorSession: Session = {
+      ...session,
+      name: 'Cursor session',
+      backend: 'cursor',
+      codex_thread_id: undefined,
+      cursor_chat_id: 'chat-123',
+    }
+
+    expect(getResumeArgs(cursorSession)).toEqual({
+      command: 'cursor-agent',
+      args: ['--resume', 'chat-123'],
+    })
+    expect(getResumeCommand(cursorSession)).toBe(
+      'cursor-agent --resume chat-123'
+    )
+  })
+
   it('builds a separate Jean terminal session for the native client', () => {
     expect(
       buildNativeClientSessionInput(session, 'worktree-1', '/tmp/worktree-1')
