@@ -6,7 +6,7 @@ use crate::http_server::EmitExt;
 use serde_json::Value;
 use std::cell::RefCell;
 use std::collections::HashSet;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
 use std::process::Stdio;
 use tauri::AppHandle;
@@ -118,6 +118,17 @@ fn parse_enabled_mcp_names(mcp_config: Option<&str>) -> HashSet<String> {
         .and_then(|json| json.get("mcpServers").and_then(Value::as_object).cloned())
         .map(|servers| servers.keys().cloned().collect())
         .unwrap_or_default()
+}
+
+/// Windows caps a `CreateProcessW` command line at 32,767 characters, and the
+/// `cmd.exe` wrapper used for `.cmd` CLIs caps it at 8,191. A long prompt passed
+/// as an argument therefore fails with `os error 206` before Cursor starts.
+/// Cursor's build-prompt reads stdin when no positional prompt is given, so
+/// long prompts go there instead. Keep a wide margin for the shim path and flags.
+const WINDOWS_ARGV_PROMPT_LIMIT: usize = 7_000;
+
+fn prompt_uses_stdin(message: &str, is_windows: bool) -> bool {
+    is_windows && message.len() > WINDOWS_ARGV_PROMPT_LIMIT
 }
 
 fn build_cursor_message(
@@ -1142,10 +1153,16 @@ pub fn execute_cursor(
         effective_mode,
         if is_new_chat { system_prompt } else { None },
     );
-    cmd.arg(&prepared_message)
-        .current_dir(working_dir)
+    let stdin_prompt = prompt_uses_stdin(&prepared_message, cfg!(target_os = "windows"));
+    if !stdin_prompt {
+        cmd.arg(&prepared_message);
+    }
+    cmd.current_dir(working_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    if stdin_prompt {
+        cmd.stdin(Stdio::piped());
+    }
 
     // Jean session/depth context for Jean MCP server (when called back).
     cmd.env("JEAN_SESSION_ID", session_id);
@@ -1160,6 +1177,18 @@ pub fn execute_cursor(
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("Failed to spawn Cursor CLI: {e}"))?;
+
+    if stdin_prompt {
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or("Failed to open Cursor CLI stdin for the prompt")?;
+        stdin.write_all(prepared_message.as_bytes()).map_err(|e| {
+            let _ = child.kill();
+            format!("Failed to send prompt to Cursor CLI: {e}")
+        })?;
+        // Dropping stdin closes the pipe so the CLI reads EOF.
+    }
 
     let pid = child.id();
     if let Some(cb) = pid_callback {
@@ -2106,5 +2135,18 @@ mod tests {
             build_cursor_message("Add tests", "plan", Some("")),
             "Add tests"
         );
+    }
+
+    #[test]
+    fn long_prompts_use_stdin_only_on_windows() {
+        assert!(!prompt_uses_stdin("Add tests", true));
+        assert!(!prompt_uses_stdin("Add tests", false));
+
+        let long = "x".repeat(WINDOWS_ARGV_PROMPT_LIMIT + 1);
+        assert!(prompt_uses_stdin(&long, true));
+        assert!(!prompt_uses_stdin(&long, false));
+
+        let at_limit = "x".repeat(WINDOWS_ARGV_PROMPT_LIMIT);
+        assert!(!prompt_uses_stdin(&at_limit, true));
     }
 }
