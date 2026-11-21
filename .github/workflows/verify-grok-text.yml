@@ -24,3 +24,5 @@ jobs:
 
       - name: Grok tests
         run: cargo test --manifest-path jean-core/Cargo.toml chat::grok:: -- --nocapture
+
+# re-register
