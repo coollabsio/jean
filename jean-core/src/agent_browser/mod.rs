@@ -663,12 +663,43 @@ fn stage_package(npm_path: &str, staging: &Path, version: &str) -> Result<(), St
         &["rebuild", NPM_PACKAGE, "--prefix", &prefix],
         None,
     )?;
+    relativize_bin_link(staging)?;
     if !managed_bin_path(staging).is_file() {
         return Err(format!(
             "npm did not create {}",
             managed_bin_path(staging).display()
         ));
     }
+    Ok(())
+}
+
+/// agent-browser's postinstall points the bin link at the native binary with
+/// an absolute path. Inside `staging` that path breaks when `replace_dir`
+/// renames the folder, so it is rewritten relative to the link.
+#[cfg(unix)]
+fn relativize_bin_link(staging: &Path) -> Result<(), String> {
+    let link = managed_bin_path(staging);
+    let Ok(target) = std::fs::read_link(&link) else {
+        return Ok(());
+    };
+    // Node writes the target as a real path, so `staging` may not match it
+    // when one of its parents is a symlink.
+    let real_staging = std::fs::canonicalize(staging).unwrap_or_else(|_| staging.to_path_buf());
+    let Ok(inside) = target
+        .strip_prefix(&real_staging)
+        .or_else(|_| target.strip_prefix(staging))
+    else {
+        return Ok(());
+    };
+    // The link is in `<staging>/node_modules/.bin`.
+    let relative = Path::new("../..").join(inside);
+    std::fs::remove_file(&link)
+        .and_then(|()| std::os::unix::fs::symlink(&relative, &link))
+        .map_err(|e| format!("Failed to relink {}: {e}", link.display()))
+}
+
+#[cfg(not(unix))]
+fn relativize_bin_link(_staging: &Path) -> Result<(), String> {
     Ok(())
 }
 
@@ -1752,6 +1783,56 @@ mod tests {
         assert_eq!(fs::read_to_string(live.join("version")).unwrap(), "new");
         assert!(!staging.exists());
         assert!(!dir.path().join("agent-browser-cli.old").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bin_link_into_staging_still_resolves_after_the_install_moves() {
+        let dir = TempDir::new().unwrap();
+        let live = dir.path().join("agent-browser-cli");
+        let staging = dir.path().join("agent-browser-cli.staging");
+        let native = staging.join("node_modules/agent-browser/bin/agent-browser-linux-x64");
+        fs::create_dir_all(native.parent().unwrap()).unwrap();
+        fs::write(&native, "binary").unwrap();
+        let link = managed_bin_path(&staging);
+        fs::create_dir_all(link.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&native, &link).unwrap();
+
+        relativize_bin_link(&staging).unwrap();
+        replace_dir(&staging, &live).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(managed_bin_path(&live)).unwrap(),
+            "binary"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bin_link_with_real_path_target_resolves_when_staging_is_reached_through_a_symlink() {
+        let dir = TempDir::new().unwrap();
+        let real_parent = dir.path().join("real");
+        let alias_parent = dir.path().join("alias");
+        fs::create_dir_all(&real_parent).unwrap();
+        std::os::unix::fs::symlink(&real_parent, &alias_parent).unwrap();
+        let staging = alias_parent.join("agent-browser-cli.staging");
+        let live = alias_parent.join("agent-browser-cli");
+        let real_native = real_parent.canonicalize().unwrap().join(
+            "agent-browser-cli.staging/node_modules/agent-browser/bin/agent-browser-linux-x64",
+        );
+        fs::create_dir_all(real_native.parent().unwrap()).unwrap();
+        fs::write(&real_native, "binary").unwrap();
+        let link = managed_bin_path(&staging);
+        fs::create_dir_all(link.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&real_native, &link).unwrap();
+
+        relativize_bin_link(&staging).unwrap();
+        replace_dir(&staging, &live).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(managed_bin_path(&live)).unwrap(),
+            "binary"
+        );
     }
 
     #[test]
