@@ -299,6 +299,13 @@ export function MagicModal() {
   const hasSentryContexts = (sentryContexts?.length ?? 0) > 0
   const hasPrContexts = (prContexts?.length ?? 0) > 0
   const hasAdvisoryContexts = (advisoryContexts?.length ?? 0) > 0
+  // Loaded items that "Investigate separately" splits into one session each
+  const separateInvestigateCount =
+    investigateType === 'issue'
+      ? (issueContexts?.length ?? 0)
+      : investigateType === 'pr'
+        ? (prContexts?.length ?? 0)
+        : 0
 
   const sessionModalOpen = useUIStore(state => state.sessionChatModalOpen)
   // Whether MagicModal was opened from ProjectCanvasView (no active chat session)
@@ -561,28 +568,33 @@ export function MagicModal() {
     }
   }, [])
 
-  const dispatchInvestigateCommand = useCallback(() => {
-    if (!investigateType) return
-    const detail =
-      investigateSelectionMode === 'custom'
-        ? {
-            command: 'investigate',
-            type: investigateType,
-            override: {
-              backend: customInvestigateBackend,
-              model: customInvestigateModel,
-            },
-          }
-        : { command: 'investigate', type: investigateType }
-    window.dispatchEvent(new CustomEvent('magic-command', { detail }))
-    handleInvestigateDialogOpenChange(false)
-  }, [
-    investigateType,
-    investigateSelectionMode,
-    customInvestigateBackend,
-    customInvestigateModel,
-    handleInvestigateDialogOpenChange,
-  ])
+  const dispatchInvestigateCommand = useCallback(
+    (separate = false) => {
+      if (!investigateType) return
+      const detail = {
+        command: 'investigate',
+        type: investigateType,
+        separate,
+        ...(investigateSelectionMode === 'custom'
+          ? {
+              override: {
+                backend: customInvestigateBackend,
+                model: customInvestigateModel,
+              },
+            }
+          : {}),
+      }
+      window.dispatchEvent(new CustomEvent('magic-command', { detail }))
+      handleInvestigateDialogOpenChange(false)
+    },
+    [
+      investigateType,
+      investigateSelectionMode,
+      customInvestigateBackend,
+      customInvestigateModel,
+      handleInvestigateDialogOpenChange,
+    ]
+  )
 
   useEffect(() => {
     if (!investigateDefaults || investigateSelectionMode === 'custom') return
@@ -2020,10 +2032,13 @@ ${resolveInstructions}`
     (e: React.KeyboardEvent) => {
       if (e.key === 'Enter') {
         e.preventDefault()
-        dispatchInvestigateCommand()
+        // Mod+Enter: one session per loaded issue/PR
+        dispatchInvestigateCommand(
+          (e.metaKey || e.ctrlKey) && separateInvestigateCount > 1
+        )
       }
     },
-    [dispatchInvestigateCommand]
+    [dispatchInvestigateCommand, separateInvestigateCount]
   )
 
   const renderOption = (option: MagicOptionItem, mobile = false) => {
@@ -2356,7 +2371,19 @@ ${resolveInstructions}`
               >
                 Cancel
               </Button>
-              <Button onClick={dispatchInvestigateCommand}>Investigate</Button>
+              {separateInvestigateCount > 1 && (
+                <Button
+                  variant="outline"
+                  onClick={() => dispatchInvestigateCommand(true)}
+                >
+                  Investigate Separately ({separateInvestigateCount})
+                </Button>
+              )}
+              <Button onClick={() => dispatchInvestigateCommand()}>
+                {separateInvestigateCount > 1
+                  ? 'Investigate Together'
+                  : 'Investigate'}
+              </Button>
             </DialogFooter>
           </div>
         </DialogContent>

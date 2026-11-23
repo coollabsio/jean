@@ -38,7 +38,8 @@ interface MagicCommandHandlers {
   handleInvestigateWorkflowRun: (detail: WorkflowRunDetail) => void
   handleInvestigate: (
     type: 'issue' | 'pr' | 'advisory' | 'sentry-issue',
-    override?: InvestigateOverride
+    override?: InvestigateOverride,
+    options?: { separate?: boolean }
   ) => void
   handleReviewComments: (
     prompt: string | string[],
@@ -213,17 +214,17 @@ export function useMagicCommands({
             (rest as { override?: InvestigateOverride }).override
           )
           break
-        case 'investigate':
-          handlers.handleInvestigate(
-            (
-              rest as {
-                type: 'issue' | 'pr' | 'advisory' | 'sentry-issue'
-                override?: InvestigateOverride
-              }
-            ).type ?? 'issue',
-            (rest as { override?: InvestigateOverride }).override
-          )
+        case 'investigate': {
+          const detail = rest as {
+            type?: 'issue' | 'pr' | 'advisory' | 'sentry-issue'
+            override?: InvestigateOverride
+            separate?: boolean
+          }
+          handlers.handleInvestigate(detail.type ?? 'issue', detail.override, {
+            separate: detail.separate,
+          })
           break
+        }
         case 'investigate-workflow-run':
           handlers.handleInvestigateWorkflowRun(rest as WorkflowRunDetail)
           break

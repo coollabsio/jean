@@ -163,6 +163,74 @@ describe('useInvestigateHandlers', () => {
     }
   )
 
+  it.each([
+    ['issue', 'list_loaded_issue_contexts'],
+    ['pr', 'list_loaded_pr_contexts'],
+  ] as const)(
+    'investigates each loaded %s in its own new session when separate',
+    async (type, command) => {
+      vi.mocked(invoke).mockImplementation(async name =>
+        name === command
+          ? ([{ number: 7 }, { number: 9 }] as never)
+          : (undefined as never)
+      )
+      const { result, sendMessage } = renderHandlers()
+
+      await act(async () => {
+        await result.current.handleInvestigate(type, undefined, {
+          separate: true,
+        })
+      })
+
+      expect(invoke).toHaveBeenCalledWith('attach_loaded_context_to_session', {
+        sessionId: 'comment-session-1',
+        kind: type,
+        number: 7,
+        projectPath: '/tmp/worktree',
+      })
+      expect(invoke).toHaveBeenCalledWith('attach_loaded_context_to_session', {
+        sessionId: 'comment-session-2',
+        kind: type,
+        number: 9,
+        projectPath: '/tmp/worktree',
+      })
+      const sent = vi
+        .mocked(sendMessage.mutate)
+        .mock.calls.map(
+          ([args]) => args as { sessionId: string; message: string }
+        )
+      expect(sent.map(args => args.sessionId)).toEqual([
+        'comment-session-1',
+        'comment-session-2',
+      ])
+      expect(sent[0]?.message).toContain('#7')
+      expect(sent[0]?.message).not.toContain('#9')
+      expect(sent[1]?.message).toContain('#9')
+      expect(sent[1]?.message).not.toContain('#7')
+    }
+  )
+
+  it('keeps one combined investigation in the active session for a single loaded issue', async () => {
+    vi.mocked(invoke).mockImplementation(async name =>
+      name === 'list_loaded_issue_contexts'
+        ? ([{ number: 7 }] as never)
+        : (undefined as never)
+    )
+    const { result, sendMessage, createSession } = renderHandlers()
+
+    await act(async () => {
+      await result.current.handleInvestigate('issue', undefined, {
+        separate: true,
+      })
+    })
+
+    expect(createSession.mutateAsync).not.toHaveBeenCalled()
+    expect(sendMessage.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'base-session' }),
+      expect.any(Object)
+    )
+  })
+
   it('writes the rendered investigate prompt into a running native CLI pty', async () => {
     useUIStore.getState().setSessionPrimarySurface('base-session', 'terminal')
     useUIStore.getState().setSessionTerminalId('base-session', 'term-1')

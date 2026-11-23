@@ -36,7 +36,7 @@ import type {
   Session,
   McpServerInfo,
 } from '@/types/chat'
-import type { AppPreferences } from '@/types/preferences'
+import type { AppPreferences, CliBackend } from '@/types/preferences'
 import type { InvestigateOverride } from './useMagicCommands'
 
 // Re-export for the caller
@@ -158,6 +158,166 @@ export function useInvestigateHandlers({
     [queryClient]
   )
 
+  /**
+   * Create one new session per prompt in the worktree and send the prompt
+   * there. Each session opens as soon as it is created and runs in parallel
+   * with the others. `prepare` runs before the send (e.g. to scope a context).
+   */
+  const sendPromptsInNewSessions = useCallback(
+    async ({
+      worktreeId,
+      worktreePath,
+      prompts,
+      backend,
+      model,
+      provider,
+      customProfileName,
+      executionMode,
+      thinkingLevel,
+      effortLevel,
+    }: {
+      worktreeId: string
+      worktreePath: string
+      prompts: {
+        prompt: string
+        prepare?: (sessionId: string) => Promise<void>
+      }[]
+      backend: CliBackend
+      model: string
+      provider: string | null
+      customProfileName: string | undefined
+      executionMode: ExecutionMode
+      thinkingLevel: ThinkingLevel | undefined
+      effortLevel: EffortLevel | null | undefined
+    }) => {
+      const sendInSession = (sessionId: string, prompt: string) => {
+        const {
+          addSendingSession,
+          setLastSentMessage,
+          setError,
+          setExecutionMode,
+          setExecutingMode,
+          setEffortLevel,
+        } = useChatStore.getState()
+
+        setLastSentMessage(sessionId, prompt)
+        setError(sessionId, null)
+        addSendingSession(sessionId)
+        setExecutionMode(sessionId, executionMode)
+        setExecutingMode(sessionId, executionMode)
+        if (effortLevel) setEffortLevel(sessionId, effortLevel)
+
+        setSessionProvider.mutate({
+          sessionId,
+          worktreeId,
+          worktreePath,
+          provider,
+        })
+        setSessionBackend.mutate({
+          sessionId,
+          worktreeId,
+          worktreePath,
+          backend,
+        })
+        setSessionModel.mutate({
+          sessionId,
+          worktreeId,
+          worktreePath,
+          model,
+        })
+
+        sendMessage.mutate(
+          {
+            sessionId,
+            worktreeId,
+            worktreePath,
+            message: prompt,
+            model,
+            executionMode,
+            thinkingLevel,
+            effortLevel,
+            mcpConfig: buildMcpConfigJson(
+              mcpServersDataRef.current ?? [],
+              enabledMcpServersRef.current,
+              backend
+            ),
+            customProfileName,
+            parallelExecutionPrompt:
+              preferences?.magic_prompts?.parallel_execution ??
+              DEFAULT_PARALLEL_EXECUTION_PROMPT,
+            chromeEnabled: preferences?.chrome_enabled ?? false,
+            aiLanguage: preferences?.ai_language,
+            backend,
+          },
+          { onSettled: () => inputRef.current?.focus() }
+        )
+      }
+
+      // Sequential on purpose: each session must fully create + send before
+      // the next. TanStack Query only guarantees per-call callbacks for the
+      // latest consecutive mutate observer; parallel createSession races
+      // leave earlier sessions empty. Do not Promise.all.
+      const baseSessionId = useChatStore.getState().activeSessionIds[worktreeId]
+      for (const { prompt, prepare } of prompts) {
+        let session: Session
+        try {
+          // react-doctor-disable-next-line react-doctor/async-await-in-loop -- sessions must be created in order; see comment above
+          session = await createSession.mutateAsync({
+            worktreeId,
+            worktreePath,
+          })
+        } catch (error) {
+          console.error('[NEW-SESSIONS] Failed to create session:', error)
+          continue
+        }
+
+        if (prepare) {
+          try {
+            // react-doctor-disable-next-line react-doctor/async-await-in-loop -- context must be scoped before this session's send
+            await prepare(session.id)
+          } catch (error) {
+            console.error('[NEW-SESSIONS] Failed to prepare session:', error)
+          }
+        }
+
+        const {
+          setActiveSession,
+          copySessionSettings,
+          setSelectedBackend,
+          setSelectedModel,
+          setSelectedProvider,
+        } = useChatStore.getState()
+        if (baseSessionId) {
+          copySessionSettings(baseSessionId, session.id)
+        }
+        setSelectedBackend(session.id, backend)
+        setSelectedModel(session.id, model)
+        setSelectedProvider(session.id, provider)
+        primeSessionSelection(session.id, backend, model, provider)
+        setActiveSession(worktreeId, session.id)
+        queryClient.invalidateQueries({
+          queryKey: chatQueryKeys.sessions(worktreeId),
+        })
+        sendInSession(session.id, prompt)
+      }
+    },
+    [
+      sendMessage,
+      createSession,
+      queryClient,
+      preferences?.magic_prompts?.parallel_execution,
+      preferences?.chrome_enabled,
+      preferences?.ai_language,
+      setSessionProvider,
+      setSessionBackend,
+      setSessionModel,
+      inputRef,
+      mcpServersDataRef,
+      enabledMcpServersRef,
+      primeSessionSelection,
+    ]
+  )
+
   const handleInvestigate = useCallback(
     async (
       type:
@@ -167,7 +327,8 @@ export function useInvestigateHandlers({
         | 'advisory'
         | 'linear-issue'
         | 'sentry-issue',
-      override?: InvestigateOverride
+      override?: InvestigateOverride,
+      options?: { separate?: boolean }
     ) => {
       if (!activeSessionId || !activeWorktreeId || !activeWorktreePath) return
 
@@ -251,6 +412,10 @@ export function useInvestigateHandlers({
         resolveCustomProfile(investigateModel, investigateProvider)
 
       let prompt: string
+      // One prompt per loaded issue/PR when investigating separately.
+      let separateTargets:
+        | { kind: 'issue' | 'pr'; number: number; prompt: string }[]
+        | null = null
 
       if (type === 'issue') {
         const contexts = await queryClient.fetchQuery({
@@ -271,16 +436,27 @@ export function useInvestigateHandlers({
           toast.error('No issue context loaded for this session or worktree')
           return
         }
-        const refs = (contexts ?? []).map(c => `#${c.number}`).join(', ')
-        const word = (contexts ?? []).length === 1 ? 'issue' : 'issues'
         const customPrompt = preferences?.magic_prompts?.investigate_issue
         const template =
           customPrompt && customPrompt.trim()
             ? customPrompt
             : DEFAULT_INVESTIGATE_ISSUE_PROMPT
-        prompt = template
-          .replace(/\{issueWord\}/g, word)
-          .replace(/\{issueRefs\}/g, refs)
+        const render = (numbers: number[]) =>
+          template
+            .replace(
+              /\{issueWord\}/g,
+              numbers.length === 1 ? 'issue' : 'issues'
+            )
+            .replace(/\{issueRefs\}/g, numbers.map(n => `#${n}`).join(', '))
+        const numbers = (contexts ?? []).map(c => c.number)
+        prompt = render(numbers)
+        if (options?.separate && numbers.length > 1) {
+          separateTargets = numbers.map(number => ({
+            kind: 'issue',
+            number,
+            prompt: render([number]),
+          }))
+        }
       } else if (type === 'pr') {
         const contexts = await queryClient.fetchQuery({
           queryKey: [
@@ -300,16 +476,24 @@ export function useInvestigateHandlers({
           toast.error('No PR context loaded for this session or worktree')
           return
         }
-        const refs = (contexts ?? []).map(c => `#${c.number}`).join(', ')
-        const word = (contexts ?? []).length === 1 ? 'PR' : 'PRs'
         const customPrompt = preferences?.magic_prompts?.investigate_pr
         const template =
           customPrompt && customPrompt.trim()
             ? customPrompt
             : DEFAULT_INVESTIGATE_PR_PROMPT
-        prompt = template
-          .replace(/\{prWord\}/g, word)
-          .replace(/\{prRefs\}/g, refs)
+        const render = (numbers: number[]) =>
+          template
+            .replace(/\{prWord\}/g, numbers.length === 1 ? 'PR' : 'PRs')
+            .replace(/\{prRefs\}/g, numbers.map(n => `#${n}`).join(', '))
+        const numbers = (contexts ?? []).map(c => c.number)
+        prompt = render(numbers)
+        if (options?.separate && numbers.length > 1) {
+          separateTargets = numbers.map(number => ({
+            kind: 'pr',
+            number,
+            prompt: render([number]),
+          }))
+        }
       } else if (type === 'security-alert') {
         const contexts = await queryClient.fetchQuery({
           queryKey: [
@@ -446,35 +630,6 @@ export function useInvestigateHandlers({
       // and strip any anti-fix wording from the template/custom prompt.
       prompt = applyYoloInvestigationFixDirective(prompt, investigateMode)
 
-      // Native CLI sessions have no chat composer. The prompt is already
-      // rendered the same way; write it into the open PTY instead of sendMessage.
-      if (routeCurrentSessionMagicPrompt(activeSessionId, prompt) !== 'chat') {
-        return
-      }
-
-      const {
-        addSendingSession,
-        setLastSentMessage,
-        setError,
-        setSelectedModel,
-        setSelectedProvider,
-        setExecutingMode,
-      } = useChatStore.getState()
-
-      setLastSentMessage(activeSessionId, prompt)
-      setError(activeSessionId, null)
-      addSendingSession(activeSessionId)
-      setSelectedModel(activeSessionId, investigateModel)
-      setSelectedProvider(activeSessionId, investigateProvider)
-      setExecutingMode(activeSessionId, investigateMode)
-
-      setSessionProvider.mutate({
-        sessionId: activeSessionId,
-        worktreeId: activeWorktreeId,
-        worktreePath: activeWorktreePath,
-        provider: investigateProvider,
-      })
-
       const investigateUseAdaptive = providerSupportsAdaptiveThinking(
         investigateModel,
         investigateProvider,
@@ -510,6 +665,66 @@ export function useInvestigateHandlers({
       const investigateThinkingLevel = usesEffortBackend
         ? undefined
         : selectedThinkingLevelRef.current
+
+      if (separateTargets) {
+        const worktreePath = activeWorktreePath
+        await sendPromptsInNewSessions({
+          worktreeId: activeWorktreeId,
+          worktreePath,
+          prompts: separateTargets.map(target => ({
+            prompt: applyYoloInvestigationFixDirective(
+              target.prompt,
+              investigateMode
+            ),
+            // Scope the session to its own issue/PR instead of every
+            // worktree-level context.
+            prepare: sessionId =>
+              invoke('attach_loaded_context_to_session', {
+                sessionId,
+                kind: target.kind,
+                number: target.number,
+                projectPath: worktreePath,
+              }),
+          })),
+          backend: investigateBackend,
+          model: investigateModel,
+          provider: investigateProvider,
+          customProfileName: resolvedInvestigateProfile,
+          executionMode: investigateMode,
+          thinkingLevel: investigateThinkingLevel,
+          effortLevel: investigateEffort,
+        })
+        return
+      }
+
+      // Native CLI sessions have no chat composer. The prompt is already
+      // rendered the same way; write it into the open PTY instead of sendMessage.
+      if (routeCurrentSessionMagicPrompt(activeSessionId, prompt) !== 'chat') {
+        return
+      }
+
+      const {
+        addSendingSession,
+        setLastSentMessage,
+        setError,
+        setSelectedModel,
+        setSelectedProvider,
+        setExecutingMode,
+      } = useChatStore.getState()
+
+      setLastSentMessage(activeSessionId, prompt)
+      setError(activeSessionId, null)
+      addSendingSession(activeSessionId)
+      setSelectedModel(activeSessionId, investigateModel)
+      setSelectedProvider(activeSessionId, investigateProvider)
+      setExecutingMode(activeSessionId, investigateMode)
+
+      setSessionProvider.mutate({
+        sessionId: activeSessionId,
+        worktreeId: activeWorktreeId,
+        worktreePath: activeWorktreePath,
+        provider: investigateProvider,
+      })
 
       setSessionBackend.mutate({
         sessionId: activeSessionId,
@@ -604,6 +819,7 @@ export function useInvestigateHandlers({
       worktreeProjectId,
       defaultBackend,
       primeSessionSelection,
+      sendPromptsInNewSessions,
     ]
   )
 
@@ -964,180 +1180,47 @@ export function useInvestigateHandlers({
         preferences?.magic_prompt_modes?.review_comments_mode ??
         DEFAULT_MAGIC_PROMPT_MODES.review_comments_mode
 
-      // Helper to send the message once we have a session ID
-      const sendInSession = (sessionId: string, prompt: string) => {
-        const {
-          addSendingSession,
-          setLastSentMessage,
-          setError,
-          setSelectedModel,
-          setSelectedProvider,
-          setExecutionMode,
-          setExecutingMode,
-          setSelectedBackend: setZustandBackend,
-        } = useChatStore.getState()
-
-        setLastSentMessage(sessionId, prompt)
-        setError(sessionId, null)
-        addSendingSession(sessionId)
-        setSelectedModel(sessionId, reviewCommentsModel)
-        setSelectedProvider(sessionId, reviewCommentsProvider)
-        setExecutionMode(sessionId, requestedExecutionMode)
-        setExecutingMode(sessionId, requestedExecutionMode)
-        setZustandBackend(sessionId, reviewCommentsBackend)
-
-        useChatStore.getState().setSelectedModel(sessionId, reviewCommentsModel)
-
-        setSessionProvider.mutate({
-          sessionId,
-          worktreeId,
-          worktreePath,
-          provider: reviewCommentsProvider,
-        })
-        setSessionBackend.mutate({
-          sessionId,
-          worktreeId,
-          worktreePath,
+      const reasoning = resolveSendReasoning(
+        targetUsesEffort({
           backend: reviewCommentsBackend,
-        })
-        setSessionModel.mutate({
-          sessionId,
-          worktreeId,
-          worktreePath,
           model: reviewCommentsModel,
-        })
+          provider: reviewCommentsProvider,
+          customCliProfiles: preferences?.custom_cli_profiles,
+          cliVersion,
+        }),
+        selectedThinkingLevelRef.current,
+        selectedEffortLevelRef.current
+      )
 
-        queryClient.setQueryData(
-          chatQueryKeys.session(sessionId),
-          (old: Session | null | undefined) =>
-            old
-              ? {
-                  ...old,
-                  backend: reviewCommentsBackend,
-                  selected_model: reviewCommentsModel,
-                  selected_provider: reviewCommentsProvider,
-                }
-              : {
-                  id: sessionId,
-                  name: '',
-                  order: 0,
-                  created_at: Math.floor(Date.now() / 1000),
-                  updated_at: Math.floor(Date.now() / 1000),
-                  messages: [],
-                  backend: reviewCommentsBackend,
-                  selected_model: reviewCommentsModel,
-                  selected_provider: reviewCommentsProvider,
-                }
-        )
-
-        sendMessage.mutate(
-          {
-            sessionId,
-            worktreeId,
-            worktreePath,
-            message: prompt,
-            model: reviewCommentsModel,
-            executionMode: requestedExecutionMode,
-            ...resolveSendReasoning(
-              targetUsesEffort({
-                backend: reviewCommentsBackend,
-                model: reviewCommentsModel,
-                provider: reviewCommentsProvider,
-                customCliProfiles: preferences?.custom_cli_profiles,
-                cliVersion,
-              }),
-              selectedThinkingLevelRef.current,
-              selectedEffortLevelRef.current
-            ),
-            mcpConfig: buildMcpConfigJson(
-              mcpServersDataRef.current ?? [],
-              enabledMcpServersRef.current,
-              reviewCommentsBackend
-            ),
-            customProfileName: resolvedProfile,
-            parallelExecutionPrompt:
-              preferences?.magic_prompts?.parallel_execution ??
-              DEFAULT_PARALLEL_EXECUTION_PROMPT,
-            chromeEnabled: preferences?.chrome_enabled ?? false,
-            aiLanguage: preferences?.ai_language,
-            backend: reviewCommentsBackend,
-          },
-          { onSettled: () => inputRef.current?.focus() }
-        )
-      }
-
-      // Sequential on purpose: each session must fully create + send before
-      // the next. TanStack Query only guarantees per-call callbacks for the
-      // latest consecutive mutate observer; parallel createSession races
-      // leave earlier sessions empty. Do not Promise.all.
-      const baseSessionId = useChatStore.getState().activeSessionIds[worktreeId]
-      for (const prompt of prompts) {
-        let session: Session
-        try {
-          // react-doctor-disable-next-line react-doctor/async-await-in-loop -- sessions must be created in order; see comment above
-          session = await createSession.mutateAsync({
-            worktreeId,
-            worktreePath,
-          })
-        } catch (error) {
-          console.error('[REVIEW-COMMENTS] Failed to create session:', error)
-          continue
-        }
-
-        const { setActiveSession, copySessionSettings } =
-          useChatStore.getState()
-        if (baseSessionId) {
-          copySessionSettings(baseSessionId, session.id)
-        }
-        useChatStore
-          .getState()
-          .setSelectedBackend(session.id, reviewCommentsBackend)
-        useChatStore
-          .getState()
-          .setSelectedModel(session.id, reviewCommentsModel)
-        useChatStore
-          .getState()
-          .setSelectedProvider(session.id, reviewCommentsProvider)
-        primeSessionSelection(
-          session.id,
-          reviewCommentsBackend,
-          reviewCommentsModel,
-          reviewCommentsProvider
-        )
-        setActiveSession(worktreeId, session.id)
-        queryClient.invalidateQueries({
-          queryKey: chatQueryKeys.sessions(worktreeId),
-        })
-        sendInSession(session.id, prompt)
-      }
+      await sendPromptsInNewSessions({
+        worktreeId,
+        worktreePath,
+        prompts: prompts.map(prompt => ({ prompt })),
+        backend: reviewCommentsBackend,
+        model: reviewCommentsModel,
+        provider: reviewCommentsProvider,
+        customProfileName: resolvedProfile,
+        executionMode: requestedExecutionMode,
+        thinkingLevel: reasoning.thinkingLevel,
+        effortLevel: reasoning.effortLevel,
+      })
     },
     [
-      sendMessage,
-      createSession,
-      queryClient,
+      sendPromptsInNewSessions,
       preferences?.default_provider,
-      preferences?.magic_prompts?.parallel_execution,
       preferences?.magic_prompt_models?.review_comments_model,
       preferences?.magic_prompt_providers,
       preferences?.magic_prompt_backends,
       preferences?.magic_prompt_modes,
-      preferences?.chrome_enabled,
-      preferences?.ai_language,
-      setSessionProvider,
-      setSessionBackend,
-      setSessionModel,
+      preferences?.custom_cli_profiles,
       resolveCustomProfile,
       cliVersion,
-      inputRef,
       activeWorktreeIdRef,
       activeWorktreePathRef,
       selectedModelRef,
       selectedThinkingLevelRef,
       selectedEffortLevelRef,
-      mcpServersDataRef,
-      enabledMcpServersRef,
       defaultBackend,
-      primeSessionSelection,
     ]
   )
 

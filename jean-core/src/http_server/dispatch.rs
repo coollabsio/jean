@@ -928,6 +928,20 @@ pub async fn dispatch_command(
             .await?;
             to_value(result)
         }
+        "attach_loaded_context_to_session" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let kind: String = from_field(&args, "kind")?;
+            let number: u32 = from_field(&args, "number")?;
+            let project_path: String = field(&args, "projectPath", "project_path")?;
+            crate::projects::attach_loaded_context_to_session(
+                app.clone(),
+                session_id,
+                kind,
+                number,
+                project_path,
+            )?;
+            Ok(Value::Null)
+        }
         "list_loaded_issue_contexts" => {
             let session_id: String = field(&args, "sessionId", "session_id")?;
             let worktree_id: Option<String> = field_opt(&args, "worktreeId", "worktree_id")?;
