@@ -471,6 +471,17 @@ const sectionEntries: PreferenceSearchEntry[] = [
     fallbackAnchorId: 'pref-pane-commandcode',
   },
   {
+    id: 'commandcode-runs',
+    pane: 'commandcode',
+    paneTitle: 'Command Code',
+    type: 'section',
+    title: 'Command Code Runs',
+    sectionTitle: 'Command Code',
+    keywords: ['max agent turns', 'turn budget', 'cmd max turns'],
+    anchorId: 'pref-commandcode-section-runs',
+    fallbackAnchorId: 'pref-pane-commandcode',
+  },
+  {
     id: 'kimi-cli',
     pane: 'kimi',
     paneTitle: 'Kimi Code',
