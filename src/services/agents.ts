@@ -83,35 +83,13 @@ export interface AgentConnector {
   name: string
 }
 
-/** A named worker this agent can spawn. `agentId` null means it is shared. */
-export interface SubagentType {
-  id: number
-  agentId: string | null
-  shared: boolean
-  name: string
-  description: string
-  instructions: string
-  backend: string | null
-  model: string | null
-  effort: string | null
-  thinkingLevel: string | null
-  skills: AgentSkill[]
-  /** plan | build | yolo, or null to keep the normal wake mode */
-  permissionMode: string | null
-  /** read_only, or null for the agent's normal tools */
-  toolMode: string | null
-}
-
 export interface AgentTask {
   id: number
   agentId: string
   sessionId: string
   title: string
-  /** schedule | delegation | message | approval | subagent */
+  /** schedule | delegation | approval */
   kind: string
-  /** Set when this task was spawned from a subagent type. */
-  subagentTypeName?: string | null
-  spawnDepth?: number
   /** running | waiting | done | failed | cancelled */
   status: string
   summary: string | null
@@ -242,20 +220,6 @@ export interface AgentMemoryChange {
   createdAt: number
 }
 
-export interface AgentChange {
-  id: number
-  actorAgentId: string
-  targetAgentId: string
-  /** create | update | delete | revert | schedule_create | schedule_update | schedule_cancel */
-  action: string
-  summary: string
-  before: Record<string, unknown> | null
-  after: Record<string, unknown> | null
-  sessionId: string | null
-  createdAt: number
-  revertedChangeId: number | null
-}
-
 export interface AgentDetails {
   delegations: AgentDelegation[]
   schedules: AgentSchedule[]
@@ -265,9 +229,6 @@ export interface AgentDetails {
   memoryChanges: AgentMemoryChange[]
   tasks: AgentTask[]
   notifications: AgentNotification[]
-  subagentTypes: SubagentType[]
-  /** Self-management audit, newest first. */
-  changes: AgentChange[]
 }
 
 export interface AgentPatch {
@@ -289,32 +250,6 @@ export interface AgentPatch {
   jeanTools?: string[] | null
 }
 
-/** A schedule copied onto an agent when a template is installed. */
-export interface AgentTemplateSchedule {
-  name: string
-  prompt: string
-  /** cron | interval | event */
-  kind: string
-  everySecs?: number | null
-  cron?: string | null
-  timezone?: string | null
-  event?: string | null
-}
-
-/**
- * A repo-shipped role. Installing it creates a normal custom agent.
- * `skillHints` are names to attach later, not skill files.
- */
-export interface AgentTemplate {
-  id: string
-  name: string
-  description: string
-  icon: string
-  rolePrompt: string
-  skillHints: string[]
-  schedules: AgentTemplateSchedule[]
-}
-
 export const agentsQueryKeys = {
   all: ['agents'] as const,
   list: () => [...agentsQueryKeys.all, 'list'] as const,
@@ -322,8 +257,6 @@ export const agentsQueryKeys = {
     [...agentsQueryKeys.all, 'details', agentId] as const,
   workdir: (agentId: string) =>
     [...agentsQueryKeys.all, 'workdir', agentId] as const,
-  templates: (serverId: string) =>
-    [...agentsQueryKeys.all, 'templates', serverId] as const,
 }
 
 type AgentRunKeys = 'backend' | 'model' | 'effort' | 'thinkingLevel' | 'skills'
@@ -475,89 +408,9 @@ function useAgentsMutation<TArgs, TResult>(
   })
 }
 
-export function useCreateAgent() {
-  return useAgentsMutation(
-    async ({
-      serverId,
-      ...args
-    }: {
-      /** Jean server that runs the new agent */
-      serverId: string
-      name: string
-      description: string
-      icon: string
-      rolePrompt: string
-      backend?: string | null
-      model?: string | null
-      effort?: string | null
-      thinkingLevel?: string | null
-      skills?: AgentSkill[]
-    }): Promise<{ key: string; name: string }> => {
-      const agent = await invokeForServer<{ id: string; name: string }>(
-        serverId,
-        'create_agent',
-        args
-      )
-      const key =
-        serverId === LOCAL_SERVER_ID
-          ? agent.id
-          : serverResourceKey({ serverId, resourceId: agent.id })
-      return { key, name: agent.name }
-    }
-  )
-}
-
-/** Predefined roles on one server. The catalog is static for a server build. */
-export function useAgentTemplates(serverId: string, enabled: boolean) {
-  return useQuery({
-    queryKey: agentsQueryKeys.templates(serverId),
-    queryFn: () =>
-      invokeForServer<AgentTemplate[]>(serverId, 'list_agent_templates'),
-    enabled,
-    staleTime: Infinity,
-  })
-}
-
-/** Install a template as a custom agent on `serverId`. */
-export function useInstallAgentTemplate() {
-  return useAgentsMutation(
-    async ({
-      serverId,
-      templateId,
-    }: {
-      serverId: string
-      templateId: string
-    }): Promise<{ key: string; name: string }> => {
-      const agent = await invokeForServer<{ id: string; name: string }>(
-        serverId,
-        'install_agent_template',
-        { templateId }
-      )
-      const key =
-        serverId === LOCAL_SERVER_ID
-          ? agent.id
-          : serverResourceKey({ serverId, resourceId: agent.id })
-      return { key, name: agent.name }
-    }
-  )
-}
-
 export function useUpdateAgent() {
   return useAgentsMutation((args: { agentId: string; patch: AgentPatch }) =>
     invoke<AgentSummary>('update_agent', args)
-  )
-}
-
-export function useDeleteAgent() {
-  return useAgentsMutation((args: { agentId: string }) =>
-    invoke<null>('delete_agent', args)
-  )
-}
-
-export function useRevertAgentChange() {
-  return useAgentsMutation(
-    ({ agentId, changeId }: { agentId: string; changeId: number }) =>
-      invokeAgent<AgentChange>(agentId, 'revert_agent_change', { changeId })
   )
 }
 
@@ -693,44 +546,4 @@ export function useMarkAgentNotificationsRead() {
 
 export function exportAgentMemory(agentId: string): Promise<string> {
   return invoke<string>('export_agent_memory', { agentId })
-}
-
-export interface SubagentTypeInput {
-  id?: number
-  name: string
-  description: string
-  instructions: string
-  shared: boolean
-  backend: string | null
-  model: string | null
-  effort: string | null
-  thinkingLevel: string | null
-  skills: AgentSkill[]
-  permissionMode: string | null
-  toolMode: string | null
-}
-
-export function useSaveSubagentType() {
-  return useAgentsMutation(
-    ({ agentId, ...input }: { agentId: string } & SubagentTypeInput) =>
-      invokeAgent<SubagentType>(agentId, 'save_agent_subagent_type', input)
-  )
-}
-
-export function useDeleteSubagentType() {
-  return useAgentsMutation((args: { agentId: string; typeId: number }) =>
-    invokeAgent<null>(args.agentId, 'delete_agent_subagent_type', {
-      typeId: args.typeId,
-    })
-  )
-}
-
-export function useSpawnSubagent() {
-  return useAgentsMutation(
-    (args: { agentId: string; typeName: string; task: string }) =>
-      invokeAgent<AgentTask>(args.agentId, 'spawn_agent_subagent', {
-        typeName: args.typeName,
-        task: args.task,
-      })
-  )
 }

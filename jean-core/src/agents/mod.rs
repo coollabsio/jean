@@ -1,4 +1,4 @@
-//! Agents infrastructure: persistent agents (Jean and user-made agents) that
+//! Agents infrastructure: persistent agents (the built-in Jean agent) that
 //! run on the backend. State lives in `{app_data}/agents.db` (SQLite):
 //! - delegations: sessions that work for an agent; their results wake it
 //! - events + wakes: queued updates for an agent, with an hourly budget
@@ -17,9 +17,6 @@ mod cron;
 pub mod db;
 mod engine;
 pub mod mcp;
-mod self_manage;
-mod subagents;
-pub mod templates;
 
 use std::sync::Mutex;
 
@@ -169,80 +166,17 @@ fn emit_cache_keys(app: &AppHandle, keys: &[&str]) {
 enum SessionRole {
     /// Conversation with the user, with the end of the previous chat.
     Chat { carry_over: Option<String> },
-    /// Background work (schedule, follow-up, agent request).
+    /// Background work (schedule, follow-up).
     Task,
 }
 
-/// Agent prompt for one run. A subagent task appends that type's instructions.
-pub fn system_prompt_for_run(
-    app: &AppHandle,
-    worktree_id: &str,
-    session_id: Option<&str>,
-    hint: Option<&str>,
-) -> Option<String> {
-    let base = system_prompt_for(app, worktree_id, hint)?;
-    let task = session_id.and_then(|session_id| {
-        with_db(app, |conn| db::task_by_session(conn, session_id))
-            .ok()
-            .flatten()
-    });
-    Some(append_subagent_prompt(&base, task.as_ref()))
-}
-
-/// Extra prompt for a spawned subagent. Ordinary sessions keep `base`.
-pub fn append_subagent_prompt(base: &str, task: Option<&db::Task>) -> String {
-    let Some(task) = task else {
-        return base.to_string();
-    };
-    let Some(name) = task
-        .subagent_type_name
-        .as_deref()
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-    else {
-        return base.to_string();
-    };
-    let mut out = base.to_string();
-    out.push_str("\n## This run is a subagent\n");
-    out.push_str(&format!(
-        "- You are the `{name}` subagent. Do the task, then stop.\n- The instructions below replace the role prompt above for this run.\n- You cannot define subagent types or spawn subagents.\n"
-    ));
-    if task.subagent_tool_mode.as_deref() == Some("read_only") {
-        out.push_str(
-            "- You may only use read-only tools. Do not change projects, sessions, memory, or schedules.\n",
-        );
-    }
-    if let Some(instructions) = task
-        .subagent_instructions
-        .as_deref()
-        .filter(|text| !text.trim().is_empty())
-    {
-        out.push_str("\n## Subagent instructions\n");
-        out.push_str(instructions.trim());
-        out.push('\n');
-    }
-    if let Some(skills) = task
-        .subagent_skills
-        .as_ref()
-        .filter(|skills| !skills.is_empty())
-    {
-        out.push_str("\n## Subagent skills\nUse these skills for this run.\n");
-        for skill in skills {
-            out.push_str(&skill_instruction(&skill.path));
-            out.push('\n');
-        }
-    }
-    out
-}
-
 /// Extra system prompt for runs in an agent worktree: role, how the agent
-/// infrastructure works, other agents, and memory. `None` for normal sessions.
+/// infrastructure works, and memory. `None` for normal sessions.
 pub fn system_prompt_for(app: &AppHandle, worktree_id: &str, hint: Option<&str>) -> Option<String> {
     let agent = agent_for_worktree(app, worktree_id)?;
     let is_task = db::agent_id_from_tasks_worktree(worktree_id).is_some();
-    let (peers, memories, carry_over) = with_db(app, |conn| {
+    let (memories, carry_over) = with_db(app, |conn| {
         Ok((
-            db::list_agents(conn)?,
             db::select_prompt_memories(conn, &agent.id, hint, PROMPT_MEMORY_CHARS)?,
             if is_task {
                 None
@@ -282,7 +216,6 @@ pub fn system_prompt_for(app: &AppHandle, worktree_id: &str, hint: Option<&str>)
     let mcp = crate::jean_mcp_config::current_mode().server_name();
     Some(render_system_prompt(
         &agent,
-        &peers,
         &memories.entries,
         memories.truncated,
         mcp,
@@ -292,7 +225,6 @@ pub fn system_prompt_for(app: &AppHandle, worktree_id: &str, hint: Option<&str>)
 
 fn render_system_prompt(
     agent: &Agent,
-    peers: &[Agent],
     memories: &[db::Memory],
     memories_truncated: bool,
     mcp: &str,
@@ -309,12 +241,10 @@ fn render_system_prompt(
 - Use only the `{mcp}` MCP server tools for project work. Never use another Jean MCP server.
 - When you give work to a session with `send_chat_message`, do not pass `executionMode`: the session then uses its selected mode or the user's default. Pass a mode only when the user asks for one. Jean tracks the session. When that session finishes, fails, or waits for input, you get an automatic update message. Do not poll or wait in a loop: end your turn and continue when the update arrives.
 - Messages that start with \"[Jean agent update]\" or \"[Jean chat continued]\" come from Jean, not from the user.
-- User messages can end with mention lines from `@` mentions: `[Mentioned agent: …]`, `[Mentioned project: …]`, or `[Mentioned remote Jean: …]`, each with its ID. A mention only adds context; it does not start an action. An agent mention means the user wants that agent involved: use `message_agent` with its agentId when that helps. A project mention means the work is about that project: use its projectId with the project tools. A remote Jean mention means the work targets that Jean instance (serverId, url); if your tools cannot reach it, tell the user. `on remote Jean: X` means the item is on another Jean instance, not on yours.
+- User messages can end with mention lines from `@` mentions: `[Mentioned agent: …]`, `[Mentioned project: …]`, or `[Mentioned remote Jean: …]`, each with its ID. A mention only adds context; it does not start an action. A project mention means the work is about that project: use its projectId with the project tools. A remote Jean mention means the work targets that Jean instance (serverId, url); if your tools cannot reach it, tell the user. `on remote Jean: X` means the item is on another Jean instance, not on yours.
 - The user does not see update messages, only your reply. Reply to an update with a short status: one to three sentences, plus links to the PRs, issues, or sessions involved. Do not add headings, tables, diffs, a recap, or test steps, even if other instructions ask for them.
 - Delete, permanent delete, push, merge, and pull request creation need the user's approval. The tool then returns `approvalRequired`. Tell the user what you asked for and end your turn. The result arrives as an update.
 - Use `schedule_create` for later checks (`delayMinutes`), one run at an exact date-time (`runAt` plus `timezone`), repeating intervals (`everyMinutes`, at least 5), cron (`cron` plus `timezone`), or an event (`event`: session_finished, session_failed, pr_merged, approval_resolved). Use `schedule_update`, `schedule_list`, and `schedule_cancel` to manage them. Each run is a separate background task.
-- Use `spawn_subagent` to hand one task to a subagent type from `subagent_type_list`. Pass the type name and the task. The result arrives as an update. Use `subagent_type_save` and `subagent_type_delete` to define types. A subagent cannot define types or spawn further subagents.
-- Use `agent_list` to see agents. Use `agent_update` with no `agentId` to change your name, description, instructions, color, backend, model, effort, or skills. Use `agent_create` to make an agent; it cannot receive more backend, model, effort, thinking, skills, or wake budget than you have. Use `agent_revert` to undo the latest change.
 - Use `notify_user` only for what the user must know: results of goals, questions, failures, needed decisions. Not for routine progress. In a task session, ask questions with `notify_user` (level `action`), not `ask_user`.
 - Use `task_list` to see your background tasks and their results.
 - Use `list_connectors` to see the MCP connectors saved for you and whether this backend applies that limit. It is read-only.
@@ -324,14 +254,9 @@ fn render_system_prompt(
 - Use `journal_add` for what happened, a decision, or an outcome. Use `journal_search` to recall by text or date, including chats that were archived. Journal is history, not a lasting fact.
 - Before destructive actions, confirm with the user. Keep answers short.\n"
     ));
-    if agent.builtin {
-        out.push_str("- You are Jean, the coordinator. You may create, update, and delete any other agent directly. Deleting yourself is refused.\n");
-    } else {
-        out.push_str("- Updating another agent or deleting an agent returns `approvalRequired`. You cannot delete yourself without that approval.\n");
-    }
     match role {
         SessionRole::Chat { carry_over } => {
-            out.push_str("\n## This session: chat with the user\n- The user talks with you here. Background work (schedules, follow-ups of tasks, requests from other agents) runs in separate task sessions. Use `task_list` when the user asks about it.\n- The user sees only your text, not your tool calls. When a step gives a result, write one short line about it.\n- While you work, the user sees a status line. When a turn uses tools, call `set_status` in your first group of tool calls with 2 to 5 plain words about the goal (for example: \"Checking firewall logs\"). Call it again only when the work moves to a new phase, not for each tool call. Do not name tools, commands, or file paths in it.\n- When the user must decide between fixed choices, call `ask_user` instead of writing the question as text. Give the question and two to eight short options. Set `multiple` to true only when the user can pick more than one. Do not add a \"something else\" option: the user can always type an answer. Then end your turn. The answer arrives as the next user message.\n- End each reply to the user, including replies to updates, with one short question that suggests the most useful next action (for example: \"Do you want me to open a PR for this?\"). When there is more than one good path, ask it with `ask_user` and one to three concrete options. Do not ask when the user only said thanks or ended the conversation.\n");
+            out.push_str("\n## This session: chat with the user\n- The user talks with you here. Background work (schedules, follow-ups of tasks) runs in separate task sessions. Use `task_list` when the user asks about it.\n- The user sees only your text, not your tool calls. When a step gives a result, write one short line about it.\n- While you work, the user sees a status line. When a turn uses tools, call `set_status` in your first group of tool calls with 2 to 5 plain words about the goal (for example: \"Checking firewall logs\"). Call it again only when the work moves to a new phase, not for each tool call. Do not name tools, commands, or file paths in it.\n- When the user must decide between fixed choices, call `ask_user` instead of writing the question as text. Give the question and two to eight short options. Set `multiple` to true only when the user can pick more than one. Do not add a \"something else\" option: the user can always type an answer. Then end your turn. The answer arrives as the next user message.\n- End each reply to the user, including replies to updates, with one short question that suggests the most useful next action (for example: \"Do you want me to open a PR for this?\"). When there is more than one good path, ask it with `ask_user` and one to three concrete options. Do not ask when the user only said thanks or ended the conversation.\n");
             out.push_str(AGENT_RECAP_INSTRUCTION);
             if let Some(text) = carry_over.as_deref().filter(|t| !t.trim().is_empty()) {
                 out.push_str("\n## End of your previous chat\nThe previous chat was archived because it was long. Its end:\n");
@@ -353,13 +278,6 @@ fn render_system_prompt(
     if let Some(section) = connectors::prompt_section(agent) {
         out.push('\n');
         out.push_str(&section);
-    }
-    let others: Vec<&Agent> = peers.iter().filter(|p| p.id != agent.id).collect();
-    if !others.is_empty() {
-        out.push_str("\n## Other agents\nAsk them with `message_agent`; their answer arrives as an update.\n");
-        for p in others {
-            out.push_str(&format!("- `{}`: {} — {}\n", p.id, p.name, p.description));
-        }
     }
     let (user_facts, rest): (Vec<&db::Memory>, Vec<&db::Memory>) =
         memories.iter().partition(|memory| memory.scope == "user");
@@ -445,16 +363,14 @@ mod tests {
     }
 
     #[test]
-    fn prompt_has_role_mcp_name_peers_and_memory() {
+    fn prompt_has_role_mcp_name_and_memory() {
         let me = agent("jean", "Jean");
-        let peers = vec![me.clone(), agent("reviewer", "Reviewer")];
         let mems = vec![
             memory(1, Some("jean"), "Never push orbit", true),
             memory(2, None, "Short answers", false),
         ];
         let prompt = render_system_prompt(
             &me,
-            &peers,
             &mems,
             false,
             "jean",
@@ -475,11 +391,6 @@ mod tests {
         assert!(prompt.contains("Use only the `jean` MCP server"));
         assert!(prompt.contains("do not pass `executionMode`"));
         assert!(!prompt.contains("start in plan mode"));
-        assert!(prompt.contains("`agent_create`"));
-        assert!(prompt.contains("approvalRequired"));
-        assert!(prompt.contains("`reviewer`: Reviewer"));
-        assert!(!prompt.contains("`jean`: Jean"));
-        assert!(prompt.contains("spawn_subagent"));
         assert!(prompt.contains("[#1 rule, pinned] Never push orbit"));
         assert!(prompt.contains("[#2 shared rule] Short answers"));
         assert!(!prompt.contains("## Skills"));
@@ -493,56 +404,9 @@ mod tests {
             path: "/skills/review/SKILL.md".into(),
             backend: Some("codex".into()),
         });
-        let prompt = render_system_prompt(&me, &[], &[], false, "jean", &SessionRole::Task);
+        let prompt = render_system_prompt(&me, &[], false, "jean", &SessionRole::Task);
         assert!(prompt.contains("## Skills"));
         assert!(prompt.contains(&skill_instruction("/skills/review/SKILL.md")));
-    }
-
-    fn subagent_task(name: &str, instructions: &str, tool_mode: Option<&str>) -> db::Task {
-        db::Task {
-            id: 1,
-            agent_id: "jean".into(),
-            session_id: "s".into(),
-            title: name.into(),
-            kind: "subagent".into(),
-            status: "running".into(),
-            summary: None,
-            last_event: None,
-            check_after: None,
-            created_at: 0,
-            updated_at: 0,
-            archived_at: None,
-            subagent_type_id: Some(4),
-            subagent_type_name: Some(name.into()),
-            spawn_depth: 1,
-            subagent_instructions: Some(instructions.into()),
-            subagent_backend: Some("codex".into()),
-            subagent_model: Some("gpt-5.5".into()),
-            subagent_effort: None,
-            subagent_thinking_level: None,
-            subagent_permission_mode: Some("plan".into()),
-            subagent_tool_mode: tool_mode.map(str::to_string),
-            subagent_skills: Some(vec![db::AgentSkill {
-                name: "diff".into(),
-                path: "/skills/diff/SKILL.md".into(),
-                backend: Some("codex".into()),
-            }]),
-        }
-    }
-
-    #[test]
-    fn subagent_prompt_appends_instructions_and_blocks_children() {
-        let plain = append_subagent_prompt("base", None);
-        assert_eq!(plain, "base");
-        let task = subagent_task("Investigator", "Report facts only.", Some("read_only"));
-        let prompt = append_subagent_prompt("base role", Some(&task));
-        assert!(prompt.starts_with("base role"));
-        assert!(prompt.contains("## This run is a subagent"));
-        assert!(prompt.contains("`Investigator`"));
-        assert!(prompt.contains("cannot define subagent types"));
-        assert!(prompt.contains("read-only tools"));
-        assert!(prompt.contains("## Subagent instructions\nReport facts only."));
-        assert!(prompt.contains(&skill_instruction("/skills/diff/SKILL.md")));
     }
 
     #[test]
@@ -552,12 +416,12 @@ mod tests {
         let mems: Vec<_> = (0..20)
             .map(|i| memory(i, Some("jean"), &big, false))
             .collect();
-        let prompt = render_system_prompt(&me, &[], &mems, false, "jean-dev", &SessionRole::Task);
+        let prompt = render_system_prompt(&me, &mems, false, "jean-dev", &SessionRole::Task);
         assert!(prompt.contains("background task"));
         assert!(!prompt.contains("previous chat"));
         assert!(prompt.contains("more memories exist"));
         let without_memories =
-            render_system_prompt(&me, &[], &[], false, "jean-dev", &SessionRole::Task);
+            render_system_prompt(&me, &[], false, "jean-dev", &SessionRole::Task);
         assert!(prompt.len() <= without_memories.len() + PROMPT_MEMORY_CHARS + 100);
         assert!(!prompt.contains("(empty)"));
     }

@@ -7,14 +7,7 @@ import {
   type AgentSummary,
 } from '@/services/agents'
 import {
-  agentRowDot,
-  agentServers,
-  filterAgentsByServer,
-  splitCoordinators,
-} from './AgentsSidebar'
-import {
   agentStatusLabel,
-  agentSubtitle,
   findAgent,
   visibleAgentTabs,
   withRunningAgents,
@@ -102,29 +95,6 @@ describe('formatRelative', () => {
 })
 
 describe('describeApproval', () => {
-  it('names agent self-management approvals', () => {
-    const approval: AgentApproval = {
-      id: 4,
-      agentId: 'helper',
-      tool: 'agent_update',
-      args: { agentId: 'reviewer', targetName: 'Reviewer', name: 'Docs' },
-      status: 'pending',
-      result: null,
-      createdAt: 0,
-    }
-    expect(describeApproval(approval)).toBe('Update agent Reviewer')
-    expect(describeApproval({ ...approval, tool: 'agent_delete' })).toBe(
-      'Delete agent Reviewer'
-    )
-    expect(
-      describeApproval({
-        ...approval,
-        tool: 'agent_revert',
-        args: { agentId: 'reviewer' },
-      })
-    ).toBe('Undo the last change to another agent')
-  })
-
   it('names the action and its worktree by name', () => {
     const approval: AgentApproval = {
       id: 1,
@@ -255,21 +225,6 @@ describe('multi-server agents', () => {
     )
     expect(agents.map(a => a.id)).toEqual(['jean', 'srv:jean'])
   })
-
-  it('lists servers once and filters by server', () => {
-    const list = [
-      { ...agent({}), serverId: 'local', serverName: 'Local' },
-      { ...agent({ id: 'srv:jean' }), serverId: 'srv', serverName: 'Remote' },
-    ]
-    expect(agentServers(list)).toEqual([
-      ['local', 'Local'],
-      ['srv', 'Remote'],
-    ])
-    expect(filterAgentsByServer(list, 'all')).toHaveLength(2)
-    expect(filterAgentsByServer(list, 'srv').map(a => a.id)).toEqual([
-      'srv:jean',
-    ])
-  })
 })
 
 describe('enabledAgentServers', () => {
@@ -289,22 +244,6 @@ describe('enabledAgentServers', () => {
 })
 
 describe('agent rows', () => {
-  it('shows what needs the user first, then the latest activity', () => {
-    expect(agentSubtitle(agent({ pendingApprovals: 1 }))).toBe(
-      'Needs your approval'
-    )
-    expect(agentSubtitle(agent({ activity: 'Pushed the fix' }))).toBe(
-      'Pushed the fix'
-    )
-    expect(agentSubtitle(agent({ description: 'Coordinates' }))).toBe(
-      'Coordinates'
-    )
-    expect(agentSubtitle(agent({}))).toBe('No activity yet')
-    expect(
-      agentSubtitle(agent({ status: 'working', activity: 'Old reply' }))
-    ).toBe('Working…')
-  })
-
   it('marks agents whose home chat is running as working', () => {
     const idle = agent({ id: 'a', homeSessionId: 's1' })
     const other = agent({ id: 'c', homeSessionId: 's3' })
@@ -312,18 +251,6 @@ describe('agent rows', () => {
     expect(result?.map(a => a.status)).toEqual(['working', 'idle'])
     const list = [idle]
     expect(withRunningAgents(list, new Set())).toBe(list)
-  })
-
-  it('marks unread messages and things that need the user', () => {
-    expect(agentRowDot(agent({ unreadNotifications: 2 }))).toBe('unread')
-    expect(
-      agentRowDot(agent({ unreadNotifications: 2, pendingApprovals: 1 }))
-    ).toBe('attention')
-    expect(agentRowDot(agent({ status: 'working' }))).toBe('working')
-    expect(
-      agentRowDot(agent({ status: 'working', unreadNotifications: 1 }))
-    ).toBe('unread')
-    expect(agentRowDot(agent({}))).toBe(null)
   })
 })
 
@@ -333,18 +260,6 @@ describe('notificationPreview', () => {
       'Disk check: ok'
     )
     expect(notificationPreview('   ')).toBe('')
-  })
-})
-
-describe('splitCoordinators', () => {
-  it('puts built-in coordinators apart from user agents, keeping order', () => {
-    const { coordinators, custom } = splitCoordinators([
-      agent({ id: 'reviewer', builtin: false }),
-      agent({}),
-      agent({ id: 'docs', builtin: false }),
-    ])
-    expect(coordinators.map(a => a.id)).toEqual(['jean'])
-    expect(custom.map(a => a.id)).toEqual(['reviewer', 'docs'])
   })
 })
 
@@ -389,7 +304,6 @@ describe('visibleAgentTabs', () => {
     expect(visibleAgentTabs(true, agent({}), 'schedules')).toEqual([
       'inbox',
       'tasks',
-      'subagents',
       'schedules',
       'activity',
       'memory',

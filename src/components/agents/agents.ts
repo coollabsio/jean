@@ -77,15 +77,6 @@ export function useSelectedAgent(): {
   }
 }
 
-/** Second line of an agent row: what needs the user, else the latest
- * activity, else the description. */
-export function agentSubtitle(agent: AgentSummary): string {
-  if (agent.pendingApprovals > 0) return 'Needs your approval'
-  if (agent.status === 'waiting') return 'Waiting for your answer'
-  if (agent.status === 'working') return 'Working…'
-  return agent.activity ?? (agent.description || 'No activity yet')
-}
-
 /** Short status text for an agent row and header; null when idle. */
 export function agentStatusLabel(agent: AgentSummary): string | null {
   if (agent.unreadNotifications > 0)
@@ -103,7 +94,6 @@ export function agentStatusLabel(agent: AgentSummary): string | null {
 export type AgentTab =
   | 'inbox'
   | 'tasks'
-  | 'subagents'
   | 'schedules'
   | 'activity'
   | 'memory'
@@ -112,7 +102,6 @@ export type AgentTab =
 const ALL_AGENT_TABS: AgentTab[] = [
   'inbox',
   'tasks',
-  'subagents',
   'schedules',
   'activity',
   'memory',

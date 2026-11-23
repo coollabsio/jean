@@ -47,7 +47,6 @@ export function captureClientViewState(): ClientViewState {
     rail_section: ui.railSection,
     rail_sidebar_visible: ui.railSidebarVisible,
     selected_agent_id: ui.selectedAgentId,
-    agents_server_filter: ui.agentsServerFilter,
     agents_advanced: ui.agentsAdvanced,
     terminal_visible_by_worktree: terminal.terminalVisibleByWorktree,
     terminal_panel_open: terminal.terminalPanelOpen,
@@ -107,7 +106,6 @@ export function applyClientViewState(state: ClientViewState): void {
     railSection: state.rail_section,
     railSidebarVisible: state.rail_sidebar_visible,
     selectedAgentId: state.selected_agent_id,
-    agentsServerFilter: state.agents_server_filter,
     agentsAdvanced: state.agents_advanced,
   })
   useTerminalStore.setState({

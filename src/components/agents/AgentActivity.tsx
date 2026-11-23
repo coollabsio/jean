@@ -9,20 +9,13 @@ import {
   useAgentDetails,
   useAgentsList,
   useDecideAgentApproval,
-  useRevertAgentChange,
   type AgentApproval,
-  type AgentChange,
   type AgentDelegation,
   type AgentSummary,
 } from '@/services/agents'
 import { openSessionInWorktree } from '@/components/chat/open-session'
 import { AgentQuestionCard } from './AgentQuestionCard'
 import { useAgentsEnabledServers } from './agents-feature'
-import {
-  agentChangeActorLabel,
-  agentChangeDetail,
-  latestChangeIdForTarget,
-} from './agent-changes'
 import {
   AgentEmpty,
   AgentList,
@@ -43,20 +36,6 @@ export function describeApproval(
   const args = approval.args ?? {}
   const text = (key: string) =>
     typeof args[key] === 'string' && args[key] ? (args[key] as string) : ''
-  if (
-    approval.tool === 'agent_update' ||
-    approval.tool === 'agent_delete' ||
-    approval.tool === 'agent_revert'
-  ) {
-    const who = text('targetName') || 'another agent'
-    const verb =
-      approval.tool === 'agent_delete'
-        ? 'Delete agent'
-        : approval.tool === 'agent_revert'
-          ? 'Undo the last change to'
-          : 'Update agent'
-    return `${verb} ${who}`
-  }
   if (approval.tool === 'set_connector') {
     const verb = text('action') === 'disable' ? 'Disable' : 'Enable'
     const scope = text('scope')
@@ -282,59 +261,6 @@ function DelegationRow({ delegation }: { delegation: AgentDelegation }) {
   )
 }
 
-function ChangeRow({
-  change,
-  canRevert,
-  agentId,
-}: {
-  change: AgentChange
-  canRevert: boolean
-  agentId: string
-}) {
-  const revert = useRevertAgentChange()
-  const detail = agentChangeDetail(change)
-  return (
-    <li
-      className={cn(
-        AGENT_ROW,
-        'flex flex-col gap-2 sm:flex-row sm:items-center'
-      )}
-    >
-      <div className="min-w-0 flex-1">
-        <p className="text-sm text-foreground">{change.summary}</p>
-        <p className="text-2xs text-muted-foreground">
-          {agentChangeActorLabel(change.actorAgentId)} ·{' '}
-          {formatRelative(change.createdAt)}
-        </p>
-        {detail ? (
-          <p className="truncate text-xs text-muted-foreground">{detail}</p>
-        ) : null}
-      </div>
-      {canRevert && (
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-7 self-start text-xs sm:self-auto"
-          disabled={revert.isPending}
-          onClick={() => {
-            const id = toast.loading('Reverting change…')
-            revert.mutate(
-              { agentId, changeId: change.id },
-              {
-                onSuccess: () => toast.success('Change reverted', { id }),
-                onError: error =>
-                  toast.error(`Failed to revert: ${error}`, { id }),
-              }
-            )
-          }}
-        >
-          Revert
-        </Button>
-      )}
-    </li>
-  )
-}
-
 function Section({
   title,
   description,
@@ -397,26 +323,6 @@ export function AgentActivity({ agent }: { agent: AgentSummary }) {
       >
         {data.delegations.map(delegation => (
           <DelegationRow key={delegation.id} delegation={delegation} />
-        ))}
-      </Section>
-      <Section
-        title="Changes"
-        description="Edits to agents made through self-management. The latest change per agent can be reverted."
-        empty="No self-management changes yet."
-      >
-        {data.changes.map(change => (
-          <ChangeRow
-            key={change.id}
-            change={change}
-            agentId={agent.id}
-            canRevert={
-              change.id ===
-              latestChangeIdForTarget(
-                data.changes,
-                parseServerResourceKey(agent.id)?.resourceId ?? agent.id
-              )
-            }
-          />
         ))}
       </Section>
     </AgentTabBody>

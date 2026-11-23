@@ -6,23 +6,12 @@ import {
   useState,
   type CSSProperties,
 } from 'react'
-import { toast } from 'sonner'
-import { Trash2, X } from '@/components/icons/reicon'
+import { X } from '@/components/icons/reicon'
 import {
   AGENT_ICON_COLORS,
   AgentIcon,
   type AgentIconKey,
 } from '@/components/icons/JeanAgentIcon'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -35,7 +24,6 @@ import { cn } from '@/lib/utils'
 import {
   useAgentsList,
   useAgentWorkdir,
-  useDeleteAgent,
   type AgentSummary,
 } from '@/services/agents'
 import { useChatStore } from '@/store/chat-store'
@@ -52,7 +40,6 @@ import { AgentTasks } from './AgentTasks'
 import { AgentSchedules } from './AgentSchedules'
 import { AgentInbox } from './AgentInbox'
 import { AgentSettings } from './AgentSettings'
-import { AgentSubagentTypes } from './AgentSubagentTypes'
 import { AgentUpdatesButton } from './AgentUpdates'
 import { useAgentsEnabledServers } from './agents-feature'
 
@@ -110,10 +97,8 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
       chat.setActiveSession(agent.worktreeId, agent.homeSessionId)
     }
   }, [agent.worktreeId, agent.homeSessionId])
-  const deleteAgent = useDeleteAgent()
   const agents = useAgentsList(useAgentsEnabledServers()).data
   const multiServer = new Set(agents?.map(item => item.serverId) ?? []).size > 1
-  const [confirmDelete, setConfirmDelete] = useState(false)
   // The header floats over the chat, so messages scroll beneath it
   const headerRef = useRef<HTMLDivElement>(null)
   const [headerHeight, setHeaderHeight] = useState(0)
@@ -128,18 +113,6 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
     return () => observer.disconnect()
   }, [])
 
-  const handleDelete = () =>
-    deleteAgent.mutate(
-      { agentId: agent.id },
-      {
-        onSuccess: () => {
-          useUIStore.getState().setSelectedAgentId('jean')
-          toast.success(`Agent ${agent.name} deleted`)
-        },
-        onError: e => toast.error(`Failed to delete agent: ${e}`),
-      }
-    )
-
   const allTabs: {
     id: AgentTab
     label: string
@@ -149,7 +122,6 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
   }[] = [
     { id: 'inbox', label: 'Inbox', badge: agent.unreadNotifications },
     { id: 'tasks', label: 'Runs', badge: agent.runningTasks, muted: true },
-    { id: 'subagents', label: 'Agent types' },
     { id: 'schedules', label: 'Schedules' },
     // Pending approvals show in the chat, not as a badge here
     { id: 'activity', label: 'Activity' },
@@ -157,8 +129,7 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
     { id: 'settings', label: 'Settings' },
   ]
   const tabs = allTabs.filter(item => shownTabs.includes(item.id))
-  const needsUser =
-    agent.unreadNotifications > 0 || agent.status === 'waiting'
+  const needsUser = agent.unreadNotifications > 0 || agent.status === 'waiting'
   const statusLabel = agentStatusLabel(agent)
 
   return (
@@ -282,17 +253,6 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
                 {agent.serverName}
               </Badge>
             )}
-            {!agent.builtin && (
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                className="text-muted-foreground"
-                onClick={() => setConfirmDelete(true)}
-                aria-label="Delete agent"
-              >
-                <Trash2 />
-              </Button>
-            )}
             <Button
               variant="ghost"
               size="icon-xs"
@@ -306,8 +266,6 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
           <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto">
             {tab === 'inbox' ? (
               <AgentInbox agent={agent} />
-            ) : tab === 'subagents' ? (
-              <AgentSubagentTypes agent={agent} />
             ) : tab === 'schedules' ? (
               <AgentSchedules agent={agent} />
             ) : tab === 'tasks' ? (
@@ -334,27 +292,11 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
               </label>
             </TooltipTrigger>
             <TooltipContent className="max-w-72">
-              Show runs, agent types, activity, memory, settings, and tool calls
-              in chat
+              Show runs, activity, memory, settings, and tool calls in chat
             </TooltipContent>
           </Tooltip>
         </aside>
       )}
-      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete {agent.name}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This deletes the agent, its memory, schedules and pending updates.
-              Sessions it started in your projects stay.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   )
 }

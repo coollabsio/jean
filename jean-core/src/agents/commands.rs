@@ -52,9 +52,6 @@ pub struct AgentDetails {
     pub memory_changes: Vec<db::MemoryChange>,
     pub tasks: Vec<db::Task>,
     pub notifications: Vec<db::Notification>,
-    pub subagent_types: Vec<db::SubagentType>,
-    /// Self-management audit, newest first. Includes changes this agent made.
-    pub changes: Vec<db::AgentChange>,
 }
 
 pub async fn list_agents(app: &AppHandle) -> Result<Vec<AgentSummary>, String> {
@@ -166,8 +163,6 @@ pub fn get_agent_details(app: &AppHandle, agent_id: &str) -> Result<AgentDetails
             memory_changes: db::list_memory_changes(conn, agent_id, 30)?,
             tasks: db::list_tasks(conn, agent_id, 50)?,
             notifications: db::list_notifications(conn, agent_id, 30)?,
-            subagent_types: db::list_subagent_types(conn, agent_id)?,
-            changes: db::list_agent_changes(conn, agent_id, 30)?,
         })
     })
 }
@@ -178,81 +173,20 @@ pub fn mark_notifications_read(app: &AppHandle, agent_id: &str) -> Result<(), St
     Ok(())
 }
 
-pub async fn create_agent(
-    app: &AppHandle,
-    name: &str,
-    description: &str,
-    icon: &str,
-    role_prompt: &str,
-    config: db::AgentRunConfig,
-) -> Result<db::Agent, String> {
-    let agent = super::with_db(app, |conn| {
-        super::self_manage::create_for_actor(
-            conn,
-            None,
-            None,
-            &super::self_manage::CreateInput {
-                name: name.to_string(),
-                description: description.to_string(),
-                icon: icon.to_string(),
-                role_prompt: role_prompt.to_string(),
-                config,
-                schedules: Vec::new(),
-            },
-        )
-    })?;
-    // The home chat is created on first list. Stamp it now so the toolbar
-    // shows this agent's backend and model before the user sends a message.
-    settle_agent_update(app, &agent, true).await;
-    super::notify_changed(app);
-    Ok(agent)
-}
-
-/// Repo-shipped templates. Not built-in agents.
-pub fn list_agent_templates() -> Result<Vec<super::templates::AgentTemplate>, String> {
-    super::templates::load_templates()
-}
-
-/// Install a template as a normal custom agent (editable and deletable).
-/// Jean stays the only built-in. Jean MCP is left unrestricted.
-pub async fn install_agent_template(
-    app: &AppHandle,
-    template_id: &str,
-) -> Result<db::Agent, String> {
-    let agent = super::with_db(app, |conn| {
-        super::templates::install_template(conn, template_id)
-    })?;
-    settle_agent_update(app, &agent, true).await;
-    super::notify_changed(app);
-    Ok(agent)
-}
-
 pub async fn update_agent(
     app: &AppHandle,
     agent_id: &str,
     patch: db::AgentPatch,
 ) -> Result<db::Agent, String> {
     let run_config = patch.changes_run_config();
-    let agent = super::with_db(app, |conn| {
-        super::self_manage::apply_actor_update(
-            conn,
-            super::self_manage::USER_ACTOR,
-            None,
-            agent_id,
-            &patch,
-        )
-    })?;
+    let agent = super::with_db(app, |conn| db::update_agent(conn, agent_id, &patch))?;
     settle_agent_update(app, &agent, run_config).await;
     super::notify_changed(app);
     Ok(agent)
 }
 
 /// Apply a changed run config to the agent's home chat.
-pub(crate) async fn settle_agent_update(
-    app: &AppHandle,
-    agent: &db::Agent,
-    run_config_changed: bool,
-) {
+async fn settle_agent_update(app: &AppHandle, agent: &db::Agent, run_config_changed: bool) {
     if !run_config_changed {
         return;
     }
@@ -263,28 +197,6 @@ pub(crate) async fn settle_agent_update(
         );
     }
     super::notify_sessions(app);
-}
-
-pub fn delete_agent(app: &AppHandle, agent_id: &str) -> Result<(), String> {
-    super::with_db(app, |conn| {
-        super::self_manage::apply_actor_delete(conn, super::self_manage::USER_ACTOR, None, agent_id)
-    })?;
-    super::notify_changed(app);
-    Ok(())
-}
-
-pub async fn revert_agent_change(
-    app: &AppHandle,
-    change_id: i64,
-) -> Result<db::AgentChange, String> {
-    let change = super::with_db(app, |conn| {
-        super::self_manage::revert_change(conn, super::self_manage::USER_ACTOR, None, change_id)
-    })?;
-    if let Some(agent) = super::with_db(app, |conn| db::get_agent(conn, &change.target_agent_id))? {
-        settle_agent_update(app, &agent, true).await;
-    }
-    super::notify_changed(app);
-    Ok(change)
 }
 
 pub async fn decide_approval(
@@ -640,73 +552,6 @@ pub(crate) fn render_memory_markdown(agent_id: &str, memories: &[db::Memory]) ->
         }
     }
     out
-}
-
-/// JSON body for `save_agent_subagent_type`.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SubagentTypeCommandInput {
-    pub id: Option<i64>,
-    pub shared: Option<bool>,
-    pub name: String,
-    pub description: Option<String>,
-    pub instructions: Option<String>,
-    pub backend: Option<String>,
-    pub model: Option<String>,
-    pub effort: Option<String>,
-    pub thinking_level: Option<String>,
-    pub skills: Option<Vec<db::AgentSkill>>,
-    pub permission_mode: Option<String>,
-    pub tool_mode: Option<String>,
-}
-
-impl SubagentTypeCommandInput {
-    pub fn into_write(self) -> db::SubagentTypeWrite {
-        db::SubagentTypeWrite {
-            id: self.id,
-            shared: self.shared.unwrap_or(false),
-            name: self.name,
-            description: self.description.unwrap_or_default(),
-            instructions: self.instructions.unwrap_or_default(),
-            backend: self.backend,
-            model: self.model,
-            effort: self.effort,
-            thinking_level: self.thinking_level,
-            skills: self.skills.unwrap_or_default(),
-            permission_mode: self.permission_mode,
-            tool_mode: self.tool_mode,
-        }
-    }
-}
-
-pub fn save_subagent_type(
-    app: &AppHandle,
-    agent_id: &str,
-    input: SubagentTypeCommandInput,
-) -> Result<db::SubagentType, String> {
-    let saved = super::with_db(app, |conn| {
-        db::save_subagent_type(conn, agent_id, &input.into_write())
-    })?;
-    super::notify_changed(app);
-    Ok(saved)
-}
-
-pub fn delete_subagent_type(app: &AppHandle, agent_id: &str, id: i64) -> Result<(), String> {
-    let deleted = super::with_db(app, |conn| db::delete_subagent_type(conn, agent_id, id))?;
-    if !deleted {
-        return Err(format!("Subagent type not found: {id}"));
-    }
-    super::notify_changed(app);
-    Ok(())
-}
-
-pub async fn spawn_subagent(
-    app: &AppHandle,
-    agent_id: &str,
-    type_name: &str,
-    task: &str,
-) -> Result<db::Task, String> {
-    super::subagents::spawn_subagent(app, agent_id, type_name, task, None).await
 }
 
 #[cfg(test)]

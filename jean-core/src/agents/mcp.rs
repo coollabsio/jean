@@ -1,11 +1,10 @@
-//! Jean MCP tools for agents (schedules, memory, agent messages), the
+//! Jean MCP tools for agents (schedules, memory, journal), the
 //! approval gate for destructive tools, and delegation tracking.
 
 use serde_json::{json, Value};
 use tauri::AppHandle;
 
 use super::db;
-use super::engine::MAX_AGENT_HOPS;
 
 /// Tools an agent may only run after the user approves.
 pub const APPROVAL_TOOLS: &[&str] = &[
@@ -29,47 +28,13 @@ const AGENT_TOOLS: &[&str] = &[
     "memory_supersede",
     "journal_add",
     "journal_search",
-    "message_agent",
     "notify_user",
     "set_status",
     "ask_user",
     "task_list",
     "list_connectors",
-    "agent_list",
-    "agent_create",
-    "agent_update",
-    "agent_delete",
-    "agent_revert",
 ];
 
-/// Subagent type tools. Kept separate so later rebases can move this block.
-const SUBAGENT_TOOLS: &[&str] = &[
-    "subagent_type_list",
-    "subagent_type_save",
-    "subagent_type_delete",
-    "spawn_subagent",
-];
-
-/// Tools a `read_only` subagent may call. Everything else is refused.
-const READ_ONLY_SUBAGENT_TOOLS: &[&str] = &[
-    "list_projects",
-    "list_worktrees",
-    "get_worktree",
-    "get_project_context",
-    "list_github_issues",
-    "list_github_prs",
-    "list_security_issues",
-    "list_security_advisories",
-    "list_linear_issues",
-    "get_current_context",
-    "task_list",
-    "schedule_list",
-    "memory_search",
-    "subagent_type_list",
-    "notify_user",
-    "set_status",
-    "list_connectors",
-];
 /// Source used when the user already approved a tool and it is run again.
 pub const APPROVED_REPLAY_SOURCE: &str = "agent-approval";
 
@@ -79,141 +44,11 @@ const MAX_STATUS_CHARS: usize = 60;
 const MAX_MINUTES: i64 = 60 * 24 * 30;
 
 pub fn is_agent_tool(name: &str) -> bool {
-    AGENT_TOOLS.contains(&name) || SUBAGENT_TOOLS.contains(&name)
-}
-
-/// MCP definitions for subagent types. Appended after the other agent tools.
-pub fn subagent_tool_definitions() -> Value {
-    json!([
-        {"name":"subagent_type_list","description":"Agent sessions only. List subagent types you can spawn: your own, then shared types. A subagent session cannot define types.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
-        {"name":"subagent_type_save","description":"Agent sessions only. Create or update a subagent type: name, description, instructions, and optional backend, model, effort, thinkingLevel, skills, permissionMode (plan, build, yolo), and toolMode (read_only). Only the user can set yolo, or a Cursor backend without plan. Pass id to update. shared true makes it available to every agent. Subagent sessions cannot call this.","inputSchema":{"type":"object","properties":{"id":{"type":"integer"},"name":{"type":"string"},"description":{"type":"string"},"instructions":{"type":"string"},"shared":{"type":"boolean"},"backend":{"type":"string"},"model":{"type":"string"},"effort":{"type":"string"},"thinkingLevel":{"type":"string"},"skills":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"path":{"type":"string"},"backend":{"type":"string"}},"required":["path"]}},"permissionMode":{"type":"string","enum":["plan","build","yolo"]},"toolMode":{"type":"string","enum":["read_only"]}},"required":["name"],"additionalProperties":false}},
-        {"name":"subagent_type_delete","description":"Agent sessions only. Delete one of your subagent types, or a shared type, by id. Subagent sessions cannot call this.","inputSchema":{"type":"object","properties":{"id":{"type":"integer"}},"required":["id"],"additionalProperties":false}},
-        {"name":"spawn_subagent","description":"Agent sessions only. Spawn one subagent of a defined type to do a task. The result arrives as an update message; end your turn after spawning. Respects the running-task cap, hourly wake budget, hop limit, and spawn depth. A subagent cannot spawn another.","inputSchema":{"type":"object","properties":{"type":{"type":"string"},"task":{"type":"string"}},"required":["type","task"],"additionalProperties":false}}
-    ])
-}
-
-/// Refuse a tool when the calling session is a read-only subagent.
-/// `None` means the call may continue (the approval gate still applies).
-pub fn subagent_tool_block(app: &AppHandle, name: &str, source: &str) -> Option<String> {
-    if READ_ONLY_SUBAGENT_TOOLS.contains(&name) {
-        return None;
-    }
-    let task = super::with_db(app, |conn| db::task_by_session(conn, source)).ok()??;
-    read_only_subagent_block(
-        task.subagent_tool_mode.as_deref(),
-        task.subagent_type_name.as_deref().unwrap_or("subagent"),
-        name,
-    )
-}
-
-pub(crate) fn read_only_subagent_block(
-    tool_mode: Option<&str>,
-    type_name: &str,
-    tool: &str,
-) -> Option<String> {
-    if tool_mode != Some("read_only") || READ_ONLY_SUBAGENT_TOOLS.contains(&tool) {
-        return None;
-    }
-    Some(format!(
-        "{tool} is not available to the read-only subagent \"{type_name}\"."
-    ))
-}
-
-fn refuse_subagent_admin(app: &AppHandle, source: &str) -> Result<(), String> {
-    let depth = super::with_db(app, |conn| db::spawn_depth_for_session(conn, source))?;
-    if let Some(reason) = db::subagent_define_block_reason(depth) {
-        return Err(reason);
-    }
-    Ok(())
-}
-
-/// Cursor has no Build mode, so anything but Plan runs as Yolo there.
-fn runs_as_yolo(permission_mode: Option<&str>, backend: Option<&str>) -> bool {
-    match permission_mode {
-        Some("plan") => false,
-        Some("yolo") => true,
-        _ => backend == Some("cursor"),
-    }
-}
-
-/// An agent cannot give a subagent more permission than the user gave it.
-/// Yolo is allowed only when the agent already wakes as Yolo or the user set
-/// it on this type.
-pub(crate) fn yolo_grant_block(
-    agent: &db::Agent,
-    existing: Option<&db::SubagentType>,
-    write: &db::SubagentTypeWrite,
-) -> Option<String> {
-    let permission = write
-        .permission_mode
-        .as_deref()
-        .map(|mode| mode.trim().to_ascii_lowercase())
-        .filter(|mode| !mode.is_empty());
-    let backend = db::normalize_agent_backend(write.backend.as_deref())
-        .ok()
-        .flatten()
-        .or_else(|| agent.backend.clone());
-    if !runs_as_yolo(permission.as_deref(), backend.as_deref())
-        || runs_as_yolo(None, agent.backend.as_deref())
-    {
-        return None;
-    }
-    let already = existing.is_some_and(|kind| {
-        runs_as_yolo(
-            kind.permission_mode.as_deref(),
-            kind.backend.as_deref().or(agent.backend.as_deref()),
-        )
-    });
-    if already {
-        return None;
-    }
-    Some(
-        "Only the user can let a subagent type run as Yolo (permissionMode yolo, or a Cursor backend without plan). Use plan or build, or ask the user to set it on the Subagents tab."
-            .to_string(),
-    )
-}
-
-fn subagent_type_write(args: &Value) -> Result<db::SubagentTypeWrite, String> {
-    let skills = match args.get("skills") {
-        None | Some(Value::Null) => Vec::new(),
-        Some(value) => serde_json::from_value::<Vec<db::AgentSkill>>(value.clone())
-            .map_err(|error| format!("Invalid skills: {error}"))?,
-    };
-    Ok(db::SubagentTypeWrite {
-        id: int_arg(args, "id"),
-        shared: args.get("shared").and_then(Value::as_bool).unwrap_or(false),
-        name: required_str(args, "name")?,
-        description: str_arg(args, "description").unwrap_or_default(),
-        instructions: str_arg(args, "instructions").unwrap_or_default(),
-        backend: str_arg(args, "backend"),
-        model: str_arg(args, "model"),
-        effort: str_arg(args, "effort"),
-        thinking_level: str_arg(args, "thinkingLevel").or_else(|| str_arg(args, "thinking_level")),
-        skills,
-        permission_mode: str_arg(args, "permissionMode")
-            .or_else(|| str_arg(args, "permission_mode")),
-        tool_mode: str_arg(args, "toolMode").or_else(|| str_arg(args, "tool_mode")),
-    })
+    AGENT_TOOLS.contains(&name)
 }
 
 /// MCP definitions of the agent tools (appended to the Jean tool registry).
 pub fn tool_definitions() -> Value {
-    let mut tools = base_tool_definitions()
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-    for extra in [
-        self_management_tool_definitions(),
-        subagent_tool_definitions(),
-    ] {
-        if let Some(extra) = extra.as_array() {
-            tools.extend(extra.iter().cloned());
-        }
-    }
-    Value::Array(tools)
-}
-
-fn base_tool_definitions() -> Value {
     json!([
         {"name":"schedule_create","description":"Agent sessions only. Wake yourself later with a prompt. Choose one: delayMinutes (once), runAt (once at an exact date-time: YYYY-MM-DDTHH:MM local time in timezone, or RFC 3339 with an offset), everyMinutes (repeating, min 5), cron (5 fields) plus timezone, or event (session_finished, session_failed, pr_merged, approval_resolved). The run is a background task.","inputSchema":{"type":"object","properties":{"name":{"type":"string"},"prompt":{"type":"string"},"delayMinutes":{"type":"number","minimum":1},"runAt":{"type":"string"},"everyMinutes":{"type":"number","minimum":5},"cron":{"type":"string"},"timezone":{"type":"string"},"event":{"type":"string","enum":["session_finished","session_failed","pr_merged","approval_resolved"]}},"required":["name","prompt"],"additionalProperties":false}},
         {"name":"schedule_update","description":"Agent sessions only. Change one of your schedules: name, prompt, paused, or its timing (the same fields as schedule_create).","inputSchema":{"type":"object","properties":{"scheduleId":{"type":"integer"},"name":{"type":"string"},"prompt":{"type":"string"},"paused":{"type":"boolean"},"delayMinutes":{"type":"number","minimum":1},"runAt":{"type":"string"},"everyMinutes":{"type":"number","minimum":5},"cron":{"type":"string"},"timezone":{"type":"string"},"event":{"type":"string","enum":["session_finished","session_failed","pr_merged","approval_resolved"]}},"required":["scheduleId"],"additionalProperties":false}},
@@ -226,22 +61,11 @@ fn base_tool_definitions() -> Value {
         {"name":"memory_supersede","description":"Agent sessions only. Correct a fact. The old text drops out of search and prompts and stays in the change record. Use memory_update for rules and open work.","inputSchema":{"type":"object","properties":{"memoryId":{"type":"integer"},"content":{"type":"string","maxLength":1000}},"required":["memoryId","content"],"additionalProperties":false}},
         {"name":"journal_add","description":"Agent sessions only. Record what happened, a decision, or an outcome. This is dated history, not a lasting fact. Use memory_save for rules and facts.","inputSchema":{"type":"object","properties":{"content":{"type":"string","maxLength":2000},"occurredAt":{"type":"integer","description":"Unix seconds. Default: now."},"projectId":{"type":"string"}},"required":["content"],"additionalProperties":false}},
         {"name":"journal_search","description":"Agent sessions only. Recall your journal by text and/or date, including chats that were archived. from/to are unix seconds on occurred_at. Other agents' journals are not included.","inputSchema":{"type":"object","properties":{"query":{"type":"string"},"from":{"type":"integer"},"to":{"type":"integer"},"limit":{"type":"integer","minimum":1,"maximum":50}},"additionalProperties":false}},
-        {"name":"message_agent","description":"Agent sessions only. Send a request to another agent. Its answer arrives automatically as an update message; end your turn after sending.","inputSchema":{"type":"object","properties":{"agentId":{"type":"string"},"message":{"type":"string"}},"required":["agentId","message"],"additionalProperties":false}},
         {"name":"notify_user","description":"Agent sessions only. Tell the user something they must know: a result of a goal, a question, a failure, or a needed decision (level 'action'). Shows on the agent page and as a notification. Not for routine progress.","inputSchema":{"type":"object","properties":{"message":{"type":"string","maxLength":2000},"level":{"type":"string","enum":["info","action","error"]}},"required":["message"],"additionalProperties":false}},
         {"name":"set_status","description":"Agent sessions only. Show the user a short status of what you do now, in 2 to 5 plain words (for example: 'Checking firewall logs'). Do not name tools, commands, or file paths. It shows only while your turn runs.","inputSchema":{"type":"object","properties":{"text":{"type":"string","maxLength":60}},"required":["text"],"additionalProperties":false}},
         {"name":"ask_user","description":"Agent chat sessions only. Ask the user a question that needs a decision. The chat shows it with the options as buttons. multiple false: the user picks one option and it is sent at once. multiple true: the user picks one or more and sends them. The answer arrives as the next user message. End your turn after calling it.","inputSchema":{"type":"object","properties":{"question":{"type":"string","maxLength":500},"options":{"type":"array","items":{"type":"string","maxLength":200},"minItems":2,"maxItems":MAX_QUESTION_OPTIONS},"multiple":{"type":"boolean","description":"Default false."}},"required":["question","options"],"additionalProperties":false}},
-        {"name":"task_list","description":"Agent sessions only. List your recent background tasks (schedule runs, follow-ups, agent requests) with status and one-line result.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":50}},"additionalProperties":false}},
+        {"name":"task_list","description":"Agent sessions only. List your recent background tasks (schedule runs, follow-ups) with status and one-line result.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":50}},"additionalProperties":false}},
         {"name":"list_connectors","description":"Agent sessions only. Read-only. List the MCP connectors saved for this agent, whether a limit is saved, and whether this session's backend can apply that limit. Does not change the limit or sign in.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}}
-    ])
-}
-
-fn self_management_tool_definitions() -> Value {
-    json!([
-        {"name":"agent_list","description":"Agent sessions only. List agents (id, name, description, color, backend, model). Your own entry also includes instructions and skills.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
-        {"name":"agent_create","description":"Agent sessions only. Create an agent. It cannot be given a backend, model, effort, thinking level, skill, or wake budget beyond yours. Optional schedules use the same timing fields as schedule_create. Jean, the coordinator, may set any valid config.","inputSchema":{"type":"object","properties":{"name":{"type":"string"},"description":{"type":"string"},"icon":{"type":"string","enum":["blue","green","pink","purple","orange","yellow"]},"color":{"type":"string","enum":["blue","green","pink","purple","orange","yellow"]},"instructions":{"type":"string"},"backend":{"type":["string","null"]},"model":{"type":["string","null"]},"effort":{"type":["string","null"]},"thinkingLevel":{"type":["string","null"]},"skills":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"path":{"type":"string"},"backend":{"type":"string"}},"required":["path"],"additionalProperties":false}},"schedules":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"prompt":{"type":"string"},"delayMinutes":{"type":"number"},"runAt":{"type":"string"},"everyMinutes":{"type":"number"},"cron":{"type":"string"},"timezone":{"type":"string"},"event":{"type":"string"}},"required":["name","prompt"],"additionalProperties":false}}},"required":["name"],"additionalProperties":false}},
-        {"name":"agent_update","description":"Agent sessions only. Update yourself (omit agentId): name, description, instructions, color, backend, model, effort, thinkingLevel, or skills. Updating a different agent returns approvalRequired unless you are Jean. You cannot grant another agent more than you have.","inputSchema":{"type":"object","properties":{"agentId":{"type":"string"},"name":{"type":"string"},"description":{"type":"string"},"icon":{"type":"string"},"color":{"type":"string"},"instructions":{"type":"string"},"backend":{"type":["string","null"]},"model":{"type":["string","null"]},"effort":{"type":["string","null"]},"thinkingLevel":{"type":["string","null"]},"skills":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"path":{"type":"string"},"backend":{"type":"string"}},"required":["path"],"additionalProperties":false}}},"additionalProperties":false}},
-        {"name":"agent_delete","description":"Agent sessions only. Delete an agent. Returns approvalRequired unless you are Jean. Built-in agents cannot be deleted.","inputSchema":{"type":"object","properties":{"agentId":{"type":"string"}},"required":["agentId"],"additionalProperties":false}},
-        {"name":"agent_revert","description":"Agent sessions only. Undo the latest change to an agent (omit agentId for yourself): a field change, a schedule change, a create, or a delete. Reverting your own creation, or another agent's change, returns approvalRequired unless you are Jean.","inputSchema":{"type":"object","properties":{"agentId":{"type":"string"}},"additionalProperties":false}}
     ])
 }
 
@@ -399,21 +223,7 @@ pub async fn run(app: &AppHandle, name: &str, args: &Value, source: &str) -> Res
             let prompt = required_str(args, "prompt")?;
             let timing = timing_from_tool_args(args, db::now())?;
             let schedule = super::with_db(app, |conn| {
-                let tx = conn
-                    .transaction()
-                    .map_err(|e| format!("Agents db error: {e}"))?;
-                let schedule =
-                    db::insert_schedule(&tx, &agent.id, &title, &prompt, &timing, false)?;
-                super::self_manage::record_schedule_change(
-                    &tx,
-                    &agent.id,
-                    "schedule_create",
-                    None,
-                    Some(&schedule),
-                    Some(source),
-                )?;
-                tx.commit().map_err(|e| format!("Agents db error: {e}"))?;
-                Ok(schedule)
+                db::insert_schedule(conn, &agent.id, &title, &prompt, &timing, false)
             })?;
             json!({ "schedule": schedule })
         }
@@ -423,33 +233,20 @@ pub async fn run(app: &AppHandle, name: &str, args: &Value, source: &str) -> Res
             let prompt = str_arg(args, "prompt");
             let paused = args.get("paused").and_then(Value::as_bool);
             let schedule = super::with_db(app, |conn| {
-                let tx = conn
-                    .transaction()
-                    .map_err(|e| format!("Agents db error: {e}"))?;
-                let before = db::get_schedule(&tx, &agent.id, id)?
+                let before = db::get_schedule(conn, &agent.id, id)?
                     .ok_or_else(|| format!("No active schedule #{id}"))?;
                 let timing = update_timing_args(args, &before)?
                     .map(|merged| timing_from_tool_args(&merged, db::now()))
                     .transpose()?;
-                let schedule = db::update_schedule(
-                    &tx,
+                db::update_schedule(
+                    conn,
                     &agent.id,
                     id,
                     name.as_deref(),
                     prompt.as_deref(),
                     paused,
                     timing.as_ref(),
-                )?;
-                super::self_manage::record_schedule_change(
-                    &tx,
-                    &agent.id,
-                    "schedule_update",
-                    Some(&before),
-                    Some(&schedule),
-                    Some(source),
-                )?;
-                tx.commit().map_err(|e| format!("Agents db error: {e}"))?;
-                Ok(schedule)
+                )
             })?;
             json!({ "schedule": schedule })
         }
@@ -459,25 +256,7 @@ pub async fn run(app: &AppHandle, name: &str, args: &Value, source: &str) -> Res
         }
         "schedule_cancel" => {
             let id = required_int(args, "scheduleId")?;
-            let cancelled = super::with_db(app, |conn| {
-                let tx = conn
-                    .transaction()
-                    .map_err(|e| format!("Agents db error: {e}"))?;
-                let before = db::get_schedule(&tx, &agent.id, id)?;
-                let cancelled = db::cancel_schedule(&tx, &agent.id, id)?;
-                if cancelled {
-                    super::self_manage::record_schedule_change(
-                        &tx,
-                        &agent.id,
-                        "schedule_cancel",
-                        before.as_ref(),
-                        None,
-                        Some(source),
-                    )?;
-                }
-                tx.commit().map_err(|e| format!("Agents db error: {e}"))?;
-                Ok(cancelled)
-            })?;
+            let cancelled = super::with_db(app, |conn| db::cancel_schedule(conn, &agent.id, id))?;
             if !cancelled {
                 return Err(format!("No active schedule #{id}"));
             }
@@ -603,43 +382,6 @@ pub async fn run(app: &AppHandle, name: &str, args: &Value, source: &str) -> Res
             })?;
             json!({ "entries": entries })
         }
-        "message_agent" => {
-            let target_id = required_str(args, "agentId")?;
-            let message = required_str(args, "message")?;
-            if target_id == agent.id {
-                return Err("You cannot message yourself".to_string());
-            }
-            super::with_db(app, |conn| {
-                let target = db::get_agent(conn, &target_id)?
-                    .ok_or_else(|| format!("Unknown agent: {target_id}"))?;
-                let hop = db::active_hop_for_session(conn, source)? + 1;
-                if hop > MAX_AGENT_HOPS {
-                    return Err(format!(
-                        "Agent message chain is too long (max {MAX_AGENT_HOPS} hops). Answer with what you have."
-                    ));
-                }
-                let body = format!(
-                    "Request from agent {} (`{}`):\n\n{}\n\nYour final reply in this turn is sent back to {} automatically.",
-                    agent.name, agent.id, message, agent.name
-                );
-                let title = format!("Request from {}", agent.name);
-                db::add_event(
-                    conn,
-                    &db::NewEvent {
-                        agent_id: &target.id,
-                        kind: "message",
-                        title: &title,
-                        body: &body,
-                        hop,
-                        reply_to_agent: Some(&agent.id),
-                        reply_to_session: Some(source),
-                        ..Default::default()
-                    },
-                )?;
-                Ok(())
-            })?;
-            json!({ "agentId": target_id, "status": "sent", "note": "The answer arrives as an update message. End your turn now." })
-        }
         "notify_user" => {
             let message = required_str(args, "message")?;
             let level = str_arg(args, "level").unwrap_or_else(|| "info".to_string());
@@ -680,63 +422,11 @@ pub async fn run(app: &AppHandle, name: &str, args: &Value, source: &str) -> Res
             let tasks = super::with_db(app, |conn| db::list_tasks(conn, &agent.id, limit))?;
             json!({ "tasks": tasks })
         }
-        // Subagent types. Separate from the tools above so this block can move.
-        "subagent_type_list" => {
-            let types = super::with_db(app, |conn| db::list_subagent_types(conn, &agent.id))?;
-            json!({ "types": types })
-        }
-        "subagent_type_save" => {
-            refuse_subagent_admin(app, source)?;
-            let write = subagent_type_write(args)?;
-            let existing = match write.id {
-                Some(id) => super::with_db(app, |conn| db::get_subagent_type(conn, id))?,
-                None => None,
-            };
-            if let Some(reason) = yolo_grant_block(&agent, existing.as_ref(), &write) {
-                return Err(reason);
-            }
-            let saved =
-                super::with_db(app, |conn| db::save_subagent_type(conn, &agent.id, &write))?;
-            json!({ "type": saved })
-        }
-        "subagent_type_delete" => {
-            refuse_subagent_admin(app, source)?;
-            let id = required_int(args, "id")?;
-            let deleted =
-                super::with_db(app, |conn| db::delete_subagent_type(conn, &agent.id, id))?;
-            if !deleted {
-                return Err(format!("Subagent type not found: {id}"));
-            }
-            json!({ "id": id, "deleted": true })
-        }
-        "spawn_subagent" => {
-            let type_name = required_str(args, "type")?;
-            let task = required_str(args, "task")?;
-            let spawned =
-                super::subagents::spawn_subagent(app, &agent.id, &type_name, &task, Some(source))
-                    .await?;
-            json!({
-                "task": spawned,
-                "status": "spawned",
-                "note": "The result arrives as an update message. End your turn now."
-            })
-        }
-        "agent_list" | "agent_create" | "agent_update" | "agent_delete" | "agent_revert" => {
-            super::self_manage::run_tool(app, name, args, source, &agent, false).await?
-        }
         "list_connectors" => {
             return Ok(super::connectors::report_for_session(app, &agent, source).await);
         }
         _ => return Err(format!("Unknown agent tool: {name}")),
     };
-    super::notify_changed(app);
-    Ok(result)
-}
-
-/// Run an agent tool the user approved. Only the approval handler calls this;
-/// the actor comes from the stored approval, never from an MCP caller.
-pub async fn run_approved(app: &AppHandle, name: &str, args: &Value) -> Result<Value, String> {
-    let result = super::self_manage::run_approved(app, name, args).await?;
     super::notify_changed(app);
     Ok(result)
 }
@@ -915,12 +605,10 @@ mod tests {
             .iter()
             .map(|t| t["name"].as_str().unwrap())
             .collect();
-        assert_eq!(&names[..AGENT_TOOLS.len()], AGENT_TOOLS);
-        assert_eq!(&names[AGENT_TOOLS.len()..], SUBAGENT_TOOLS);
+        assert_eq!(names, AGENT_TOOLS);
         for tool in APPROVAL_TOOLS {
             assert!(!is_agent_tool(tool));
         }
-        assert!(is_agent_tool("spawn_subagent"));
     }
 
     #[test]
@@ -941,102 +629,5 @@ mod tests {
             );
         }
         assert!(question_from_args(&json!({ "options": ["A", "B"] })).is_err());
-    }
-
-    #[test]
-    fn read_only_subagent_blocks_writes_and_spawn() {
-        assert!(read_only_subagent_block(Some("read_only"), "Diff", "list_projects").is_none());
-        assert!(read_only_subagent_block(Some("read_only"), "Diff", "memory_search").is_none());
-        let blocked =
-            read_only_subagent_block(Some("read_only"), "Diff", "spawn_subagent").unwrap();
-        assert!(blocked.contains("spawn_subagent"));
-        assert!(blocked.contains("Diff"));
-        assert!(read_only_subagent_block(Some("read_only"), "Diff", "delete_worktree").is_some());
-        assert!(read_only_subagent_block(None, "Diff", "delete_worktree").is_none());
-        assert!(read_only_subagent_block(None, "Diff", "spawn_subagent").is_none());
-    }
-
-    #[test]
-    fn agent_cannot_grant_a_subagent_yolo() {
-        let agent = |backend: &str| db::Agent {
-            id: "reviewer".into(),
-            name: "Reviewer".into(),
-            description: String::new(),
-            icon: "blue".into(),
-            role_prompt: String::new(),
-            worktree_id: "__agent_reviewer__".into(),
-            max_wakes_per_hour: 12,
-            builtin: false,
-            backend: Some(backend.into()),
-            model: None,
-            effort: None,
-            thinking_level: None,
-            skills: Vec::new(),
-            mcp_servers: None,
-            jean_tools: None,
-        };
-        let write = |args: Value| subagent_type_write(&args).unwrap();
-        let claude = agent("claude");
-        for args in [
-            json!({"name": "Fixer", "permissionMode": "YOLO"}),
-            json!({"name": "Fixer", "backend": "cursor"}),
-            json!({"name": "Fixer", "backend": "cursor", "permissionMode": "build"}),
-        ] {
-            let reason = yolo_grant_block(&claude, None, &write(args)).unwrap();
-            assert!(reason.contains("Only the user"));
-        }
-        for args in [
-            json!({"name": "Fixer"}),
-            json!({"name": "Fixer", "permissionMode": "build"}),
-            json!({"name": "Fixer", "backend": "cursor", "permissionMode": "plan"}),
-        ] {
-            assert_eq!(yolo_grant_block(&claude, None, &write(args)), None);
-        }
-        let cursor = agent("cursor");
-        assert_eq!(
-            yolo_grant_block(&cursor, None, &write(json!({"name": "Fixer"}))),
-            None
-        );
-
-        let user_yolo = db::SubagentType {
-            id: 7,
-            agent_id: Some("reviewer".into()),
-            shared: false,
-            name: "Fixer".into(),
-            description: String::new(),
-            instructions: String::new(),
-            backend: None,
-            model: None,
-            effort: None,
-            thinking_level: None,
-            skills: Vec::new(),
-            permission_mode: Some("yolo".into()),
-            tool_mode: None,
-            created_at: 0,
-            updated_at: 0,
-        };
-        let edit = write(json!({"id": 7, "name": "Fixer", "permissionMode": "yolo"}));
-        assert_eq!(yolo_grant_block(&claude, Some(&user_yolo), &edit), None);
-    }
-
-    #[test]
-    fn subagent_type_write_reads_optional_overrides() {
-        let write = subagent_type_write(&json!({
-            "name": "Investigator",
-            "instructions": "Report facts",
-            "shared": true,
-            "backend": "codex",
-            "model": "gpt-5.5",
-            "permissionMode": "plan",
-            "toolMode": "read_only",
-            "skills": [{"name": "diff", "path": "/skills/diff/SKILL.md"}]
-        }))
-        .unwrap();
-        assert!(write.shared);
-        assert_eq!(write.backend.as_deref(), Some("codex"));
-        assert_eq!(write.permission_mode.as_deref(), Some("plan"));
-        assert_eq!(write.tool_mode.as_deref(), Some("read_only"));
-        assert_eq!(write.skills.len(), 1);
-        assert!(subagent_type_write(&json!({"description": "x"})).is_err());
     }
 }

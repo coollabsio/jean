@@ -135,8 +135,6 @@ interface UIState {
   selectedAgentId: string
   /** When the user last left the Agents page (ms, 0 = never this session) */
   agentsLeftAt: number
-  /** Agents sidebar server filter: 'all' or a server ID */
-  agentsServerFilter: string
   /** Agent pages show every tab and tool activity (off: Chat and Schedules) */
   agentsAdvanced: boolean
   /** Per agent: timestamp (unix s) of the newest update reply the user saw */
@@ -272,7 +270,6 @@ interface UIState {
   /** restoreSidebar: show the sidebar as the section last left it (desktop rail) */
   setRailSection: (section: RailSection, restoreSidebar?: boolean) => void
   setSelectedAgentId: (agentId: string) => void
-  setAgentsServerFilter: (serverId: string) => void
   setAgentsAdvanced: (advanced: boolean) => void
   markAgentUpdatesSeen: (agentId: string, timestamp: number) => void
   setAgentUpdatesSeenAt: (seenAt: Record<string, number>) => void
@@ -451,7 +448,6 @@ export const useUIStore = create<UIState>()(
       railSidebarVisible: {},
       selectedAgentId: 'jean',
       agentsLeftAt: 0,
-      agentsServerFilter: 'all',
       agentsAdvanced: false,
       agentUpdatesSeenAt: {},
       leftSidebarSize: 250, // Default width in pixels
@@ -651,16 +647,6 @@ export const useUIStore = create<UIState>()(
               : { agentUpdatesSeenAt: seenAt },
           undefined,
           'setAgentUpdatesSeenAt'
-        ),
-
-      setAgentsServerFilter: serverId =>
-        set(
-          state =>
-            state.agentsServerFilter === serverId
-              ? state
-              : { agentsServerFilter: serverId },
-          undefined,
-          'setAgentsServerFilter'
         ),
 
       toggleRightSidebar: () =>

@@ -4348,11 +4348,7 @@ const AGENT_COMMANDS: &[&str] = &[
     "get_agent_workdir",
     "list_agents",
     "get_agent_details",
-    "create_agent",
-    "list_agent_templates",
-    "install_agent_template",
     "update_agent",
-    "delete_agent",
     "decide_agent_approval",
     "cancel_agent_schedule",
     "create_agent_schedule",
@@ -4366,12 +4362,6 @@ const AGENT_COMMANDS: &[&str] = &[
     "save_agent_journal",
     "search_agent_journal",
     "mark_agent_notifications_read",
-    // Subagent types. Own block so a later rebase can move these names.
-    "list_agent_subagent_types",
-    "save_agent_subagent_type",
-    "delete_agent_subagent_type",
-    "spawn_agent_subagent",
-    "revert_agent_change",
     "get_agent_connector_catalog",
 ];
 
@@ -4393,50 +4383,10 @@ async fn dispatch_agents_command(
                 let agent_id: String = field(args, "agentId", "agent_id")?;
                 to_value(crate::agents::commands::get_agent_details(app, &agent_id)?)
             }
-            "create_agent" => {
-                let name: String = from_field(args, "name")?;
-                let description: Option<String> = from_field_opt(args, "description")?;
-                let icon: Option<String> = from_field_opt(args, "icon")?;
-                let role_prompt: Option<String> = field_opt(args, "rolePrompt", "role_prompt")?;
-                let backend: Option<String> = from_field_opt(args, "backend")?;
-                let model: Option<String> = from_field_opt(args, "model")?;
-                let effort: Option<String> = from_field_opt(args, "effort")?;
-                let thinking_level: Option<String> =
-                    field_opt(args, "thinkingLevel", "thinking_level")?;
-                let skills: Option<Vec<crate::agents::db::AgentSkill>> =
-                    from_field_opt(args, "skills")?;
-                to_value(
-                    crate::agents::commands::create_agent(
-                        app,
-                        &name,
-                        description.as_deref().unwrap_or(""),
-                        icon.as_deref().unwrap_or("blue"),
-                        role_prompt.as_deref().unwrap_or(""),
-                        crate::agents::db::AgentRunConfig {
-                            backend,
-                            model,
-                            effort,
-                            thinking_level,
-                            skills: skills.unwrap_or_default(),
-                        },
-                    )
-                    .await?,
-                )
-            }
-            "list_agent_templates" => to_value(crate::agents::commands::list_agent_templates()?),
-            "install_agent_template" => {
-                let template_id: String = field(args, "templateId", "template_id")?;
-                to_value(crate::agents::commands::install_agent_template(app, &template_id).await?)
-            }
             "update_agent" => {
                 let agent_id: String = field(args, "agentId", "agent_id")?;
                 let patch: crate::agents::db::AgentPatch = from_field(args, "patch")?;
                 to_value(crate::agents::commands::update_agent(app, &agent_id, patch).await?)
-            }
-            "delete_agent" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                crate::agents::commands::delete_agent(app, &agent_id)?;
-                Ok(Value::Null)
             }
             "decide_agent_approval" => {
                 let approval_id: i64 = field(args, "approvalId", "approval_id")?;
@@ -4573,41 +4523,6 @@ async fn dispatch_agents_command(
             "export_agent_memory" => {
                 let agent_id: String = field(args, "agentId", "agent_id")?;
                 to_value(crate::agents::commands::export_memory(app, &agent_id)?)
-            }
-            // Subagent types. Own arms so a later rebase can move this block.
-            "list_agent_subagent_types" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                to_value(crate::agents::with_db(app, |conn| {
-                    crate::agents::db::list_subagent_types(conn, &agent_id)
-                })?)
-            }
-            "save_agent_subagent_type" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                let input: crate::agents::commands::SubagentTypeCommandInput =
-                    serde_json::from_value(args.clone())
-                        .map_err(|error| format!("Invalid subagent type: {error}"))?;
-                to_value(crate::agents::commands::save_subagent_type(
-                    app, &agent_id, input,
-                )?)
-            }
-            "delete_agent_subagent_type" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                let id: i64 = field(args, "typeId", "type_id")?;
-                crate::agents::commands::delete_subagent_type(app, &agent_id, id)?;
-                Ok(Value::Null)
-            }
-            "spawn_agent_subagent" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                let type_name: String = field(args, "typeName", "type_name")?;
-                let task: String = from_field(args, "task")?;
-                to_value(
-                    crate::agents::commands::spawn_subagent(app, &agent_id, &type_name, &task)
-                        .await?,
-                )
-            }
-            "revert_agent_change" => {
-                let change_id: i64 = field(args, "changeId", "change_id")?;
-                to_value(crate::agents::commands::revert_agent_change(app, change_id).await?)
             }
             "get_agent_connector_catalog" => to_value(crate::agents::connectors::catalog_payload()),
             _ => Err(format!("Unknown command: {command}")),

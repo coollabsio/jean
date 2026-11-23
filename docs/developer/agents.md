@@ -1,7 +1,6 @@
 # Agents
 
-Agents are persistent AI workers (Jean, the coordinator, plus agents the user
-creates) that manage projects through the Jean MCP tools. They run on the
+Agents are persistent AI workers (Jean, the built-in coordinator) that manage projects through the Jean MCP tools. They run on the
 backend, so they keep working with no client open. The feature is experimental and closed
 to new users: **Settings → General → Experimental → Agents** (`agents_enabled`,
 default off) shows only when `agents_enabled` is already true. Users who turn
@@ -73,15 +72,15 @@ defaults. Migration v3 adds the columns; do not edit v1 or v2.
 | `thinking_level` | `off`, `adaptive`, `think`, `megathink`, `ultrathink`, or NULL | No thinking override |
 | `skills` | JSON array of `{name, path, backend?}`, default `[]` | No extra skills |
 
-`create_agent` takes the fields directly. `update_agent`'s patch uses a
+`update_agent`'s patch uses a
 missing field for "leave it", JSON `null` for "clear back to the default", and
-`skills: []` to clear skills. Both commands go through
+`skills: []` to clear skills. It goes through
 `dispatch_agents_command` in `jean-core/src/http_server/dispatch.rs`. Native
 IPC calls that same function via `dispatch_core_command`; there is no separate
 `generate_handler!` entry for agent commands.
 
-In the UI, `AgentRunFields` edits these fields for the New agent dialog, the
-Settings tab, and subagent types. It reuses the chat toolbar's
+In the UI, `AgentRunFields` edits these fields for the
+Settings tab. It reuses the chat toolbar's
 `DesktopBackendModelPicker` and `ReasoningLevelDropdown`, so agents and chats
 pick backends, models, effort, and thinking the same way. Each picker has a
 **Default** entry (`AGENT_DEFAULT_OPTION`); the draft stores it as an empty
@@ -215,8 +214,7 @@ Event routines wake through the same queue as cron: `fire_event_schedules`
 inserts a `schedule` event with no target, and the tick delivers it as a new
 task. Delivery already stops at `max_wakes_per_hour` and at two running tasks.
 A spent budget leaves the event queued; it is not dropped and it is not
-delivered early. These routines do not add a hop. If the woken task calls
-`message_agent`, that call still uses `MAX_AGENT_HOPS`.
+delivered early. These routines do not add a hop.
 
 The same occurrence is stored in `schedule_event_keys`, so a merged PR does
 not queue twice. Session keys include the second they happened,
@@ -235,9 +233,6 @@ Not included, on purpose:
 - **Usage-limit reset.** Codex stores `reset_at` on a usage snapshot, but Jean
   does not emit an event when a window resets. Watching that would be a new
   poller, not a hook on something that already happens.
-- **A message from another agent.** `message_agent` already queues a `message`
-  event for the target and records a hop. A second routine would wake that
-  agent twice for one request.
 - **An external webhook.** Jean has no inbound agent webhook. Adding one would
   be a new server and a new trust boundary, not a small hook.
 
@@ -275,7 +270,7 @@ When a chat rotates (40 messages and 10 minutes idle), the end is still saved as
 ## MCP tools (`agents/mcp.rs`)
 
 Agent-only tools: `schedule_create/update/list/cancel`, `memory_save/search/update/forget/supersede`, `journal_add/search`,
-`message_agent`, `notify_user` (emits `agents:notification` for the toast),
+`notify_user` (emits `agents:notification` for the toast),
 `set_status`, `task_list`. `set_status` returns only `shown`: the agent chat
 reads the latest call from the streamed tool calls and shows its 2-5 word text
 in the status line (`agent-status.ts`). A Jean-tool allowlist cannot
@@ -284,15 +279,13 @@ get it per thread through a config override
 (`jean_mcp_config::codex_session_config_override`), because the persistent
 `~/.codex/config.toml` entry only has a fixed label.
 
-**Agent messages in the chat:** an agent chat shows each `message_agent` and
+**Agent messages in the chat:** an agent chat shows each
 `send_chat_message` call as one "Messaged <target>" line, not as the full
 text. When an agent session calls `send_chat_message`, the message starts with
 `[Message from agent <name> (`<id>`)]` (`agents::agent_message_text`), so the
 receiving session shows one "Message from <agent>" line. The tool result also
 has `worktreeId`, `worktreePath`, `sessionName` and `worktreeName`. A click on
-a line opens the conversation dialog (`AgentMessageLink.tsx`). For
-`message_agent`, the dialog finds the target's first `Request from <sender>`
-task created after the send (`findRequestTask` in `agent-messages.ts`).
+a line opens the conversation dialog (`AgentMessageLink.tsx`).
 
 **Approval gate:** `delete_worktree`, `permanently_delete_worktree`,
 `push_worktree`, `merge_pull_request`, `create_pull_request`,
@@ -315,35 +308,11 @@ normal user message, so it works on every backend. The card is read-only once
 the user writes a message after it (`nextUserAnswers`, automatic updates do not
 count).
 
-**Agent-to-agent:** `message_agent` adds a `message` event (no target, so it
-runs as a task of the target agent) with `reply_to_agent` and
-`reply_to_session`. On delivery, a delegation (sender → target task, origin =
-sender's session) is recorded, so the answer returns to the session that asked.
-`MAX_AGENT_HOPS` limits chains.
-
-## Agent templates
-
-Predefined roles live in `jean-core/src/agents/templates.yaml`. That file is
-the catalog. It is not copied into `agents.db` on startup, and a template is
-not a built-in agent. Only `jean` is built-in.
-
-`list_agent_templates` returns the catalog. `install_agent_template` creates
-one custom agent through `create_for_actor` (the same path as `create_agent`)
-and copies the template's default schedules. The new row has `builtin` false,
-so the user can edit and delete it. Skill hints are short names shown before
-install. They are not file paths and they are not saved as skills. Install
-leaves `mcp_servers` and `jean_tools` unset, so Jean MCP stays available.
-
-The New agent dialog has Blank and From template. From template calls
-`install_agent_template` on the server selected in the dialog.
-
 ## Commands
 
 Registered in `http_server/dispatch.rs` (`AGENT_COMMANDS`, served by
 `dispatch_agents_command`), so native IPC and web access both work:
-`list_agents`, `get_agent_details`, `create_agent`, `list_agent_templates`,
-`install_agent_template`, `update_agent`,
-`delete_agent`, `decide_agent_approval`, `create_agent_schedule`,
+`list_agents`, `get_agent_details`, `update_agent`, `decide_agent_approval`, `create_agent_schedule`,
 `update_agent_schedule`, `cancel_agent_schedule`,
 `save/search/update/delete/supersede/export_agent_memory`, `save/search_agent_journal`, `mark_agent_notifications_read`,
 `get_agent_workdir`.
@@ -352,64 +321,6 @@ plus the fields for that kind (`delaySecs`, `everySecs`, `cron` + `timezone`,
 or `event`). `update_agent_schedule` patches `name`, `prompt`, `paused`, and,
 when `kind` is set, replaces the timing. Pause does not delete the routine.
 Changes emit `cache:invalidate` with key `agents`.
-
-## Subagent types
-
-An agent can define named workers and spawn one to do a single task. The
-spawned session is a normal task under `__agent_tasks_<id>__`. Its result
-returns through the existing delegation path: when the session finishes, the
-origin session receives a `[Jean agent update]`. Claude Task and Codex
-multi-agent runs stay in the chat `AgentWidget`; these subagents show on the
-agent's Tasks tab with their type name.
-
-Migration `subagent_types_migration_sql()` in `agents/db.rs` is its own step
-in `MIGRATIONS` (currently the last one; a later rebase may renumber it). Do
-not fold it into an older step. It creates `subagent_types` and adds nullable
-snapshot columns on `tasks`. Existing task rows keep `spawn_depth` 0 and a
-null type, so schedules and agent messages behave as before.
-
-| Field | Stored as | Unset means |
-|---|---|---|
-| `agent_id` | agent id, or NULL | NULL is shared with every agent |
-| `name` | text, unique per scope, case-insensitive | required |
-| `description` | text | empty |
-| `instructions` | role prompt, max 8000 characters | the parent agent's role prompt |
-| `backend`, `model`, `effort`, `thinking_level`, `skills` | same values as the agent | inherit the parent agent |
-| `permission_mode` | `plan`, `build`, or `yolo` | the normal agent wake mode (not Plan, Yolo for Cursor) |
-| `tool_mode` | `read_only`, or NULL | the agent's tools. Delete, push, merge, and pull request creation still wait for approval |
-
-Resolution prefers the agent's own type over a shared type with the same name.
-The resolved backend, model, effort, thinking level, skills, instructions, and
-modes are copied onto the task row at spawn. Later edits to the type do not
-change a task that is already running. The session is created with that
-backend and model. The instructions are written into the task message and
-appended to the system prompt for that session.
-
-`spawn_subagent` (MCP) and `spawn_agent_subagent` (UI) both refuse the spawn
-when any of these is already spent:
-
-- `MAX_RUNNING_TASKS` (2) running tasks for that agent
-- the agent's hourly wake budget (`max_wakes_per_hour`)
-- `MAX_AGENT_HOPS` (the caller's hop plus one)
-- `MAX_SUBAGENT_SPAWN_DEPTH` (1). A spawned subagent is depth 1 and cannot
-  spawn, and it cannot call `subagent_type_save` or `subagent_type_delete`
-
-A `read_only` subagent can list and search. It cannot spawn, message agents,
-change memory or schedules, or call mutating project tools. `read_only` limits
-the Jean MCP tools only. The backend's own file and shell tools follow
-`permission_mode`, so use `plan` to stop edits too. The approval gate still
-applies when `tool_mode` is unset.
-
-Only the user can make a type run as Yolo: `permission_mode` `yolo`, or a
-Cursor backend without `plan`. `subagent_type_save` refuses that unless the
-agent already wakes as Yolo or the user set it on that type before.
-
-MCP tools, in their own block in `agents/mcp.rs`: `subagent_type_list`,
-`subagent_type_save`, `subagent_type_delete`, `spawn_subagent`. Commands, in
-their own block in `dispatch_agents_command`: `list_agent_subagent_types`,
-`save_agent_subagent_type`, `delete_agent_subagent_type`,
-`spawn_agent_subagent`. The agent page Subagents tab creates, edits, and
-deletes types and can spawn one. `get_agent_details` includes `subagentTypes`.
 
 ## Stack size note
 
@@ -552,69 +463,3 @@ Needs sign-in wins over Enabled so the sign-in button stays visible. Sign-in
 is shown for Claude and Codex, which are the backends `prepare_mcp_login`
 supports. Codex can sign in and still cannot apply the allowlist; the badge
 says unsupported.
-
-## Self-management
-
-An agent can change itself, and Jean can change any agent, through MCP.
-Migration v7 (`migration_v7_agent_self_management` in `agents/db.rs`) adds
-`agent_changes`. Do not edit v1–v6. A later stack may renumber this step.
-
-| Tool | Who can run it immediately | Otherwise |
-|---|---|---|
-| `agent_list` | Any agent. Other agents' instructions and skills are omitted. | |
-| `agent_update` | The agent itself, or Jean (any agent). Fields: name, description, instructions, color, backend, model, effort, thinking level, skills, paused. | Updating a different agent stores an approval. The Activity tab shows it. Nothing is written until the user approves. |
-| `agent_create` | Any agent, within the caps below. Optional `schedules` use the same timing fields as `schedule_create`. | |
-| `agent_delete` | Jean, for any agent except itself. | Every other delete, including deleting yourself, waits for approval. Built-in agents are refused, not queued. |
-| `agent_revert` | Jean, for anyone. Another agent, for its own latest change, except undoing its own creation (that deletes it). | Those deletes wait for approval. |
-| `schedule_*` | The calling agent's own schedules, as before. Each change is audited. | Schedules of another agent stay on that agent's tools. |
-
-Jean is the built-in coordinator (`builtin`, id `jean`). The user, through the
-Agents UI, follows Jean's rule: create, update, and delete apply immediately
-and are audited with actor `user`.
-
-### No privilege escalation
-
-A created agent, and an update of a different agent, cannot be given more than
-the actor has right now:
-
-- Backend and model must match the actor, or stay unset. Keeping the target's
-  current value is allowed.
-- Effort and thinking cannot rank above the actor's. Unset means no grant.
-  Ranks: effort `off < none < adaptive < minimal < low < medium < high < xhigh < max < ultracode`;
-  thinking `off < adaptive < think < megathink < ultrathink`.
-- A skill can be added only when the actor already has that path. Skills the
-  target already has can stay.
-- The new agent's `max_wakes_per_hour` is clamped to the actor's, and it
-  copies the actor's `mcp_servers` and `jean_tools` limits. Jean is not
-  clamped and can set any valid config.
-
-An agent may raise its own effort, model, backend, or skills. Children created
-after that are capped at the new values. `max_wakes_per_hour` is not an MCP
-field, so an agent cannot raise its own wake budget. `mcp_servers` and
-`jean_tools` are not MCP fields either; only the Agents UI changes them.
-
-### Caps
-
-20 user-created agents (Jean is not counted). 5 creates per rolling hour.
-The hourly count is `agent_changes` rows with `action = 'create'`, so deleting
-an agent does not free the hour. Reverting a delete also checks both caps.
-UI creates share the same counters.
-
-### Audit and revert
-
-Every create, update, delete, and schedule change stores `before` and `after`
-JSON and a one-line summary. The Activity tab lists them (newest first) for
-the agent and for changes it made. Revert applies the `before` snapshot of the
-latest change for that agent:
-
-- update → previous fields
-- create → delete (schedules go with the agent)
-- delete → insert the snapshot again
-- schedule create → cancel; cancel → reactivate; update → previous schedule
-
-Only that latest change can be reverted. A revert that waits for approval
-stores the change ID; if a newer change lands first, the approved revert fails
-and changes nothing. Revert writes its own audit row, so
-reverting again undoes the revert. The Agents list, header, and settings form
-refresh from `cache:invalidate` key `agents`. Settings keep a draft the user
-is editing; an untouched form takes the server values.

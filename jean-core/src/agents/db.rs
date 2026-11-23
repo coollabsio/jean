@@ -375,16 +375,6 @@ pub struct AgentSkill {
     pub backend: Option<String>,
 }
 
-/// Optional run configuration. Unset fields mean "use current defaults".
-#[derive(Debug, Default, Clone)]
-pub struct AgentRunConfig {
-    pub backend: Option<String>,
-    pub model: Option<String>,
-    pub effort: Option<String>,
-    pub thinking_level: Option<String>,
-    pub skills: Vec<AgentSkill>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Agent {
@@ -609,16 +599,6 @@ pub fn normalize_agent_skills(skills: &[AgentSkill]) -> Result<Vec<AgentSkill>, 
     Ok(out)
 }
 
-fn normalize_run_config(config: &AgentRunConfig) -> Result<AgentRunConfig, String> {
-    Ok(AgentRunConfig {
-        backend: normalize_agent_backend(config.backend.as_deref())?,
-        model: normalize_agent_model(config.model.as_deref())?,
-        effort: normalize_agent_effort(config.effort.as_deref())?,
-        thinking_level: normalize_agent_thinking(config.thinking_level.as_deref())?,
-        skills: normalize_agent_skills(&config.skills)?,
-    })
-}
-
 fn skills_json(skills: &[AgentSkill]) -> Result<String, String> {
     serde_json::to_string(skills).map_err(|e| format!("Failed to store agent skills: {e}"))
 }
@@ -759,65 +739,6 @@ pub fn is_agent_worktree_id(worktree_id: &str) -> bool {
         || (worktree_id.starts_with("__agent_") && worktree_id.ends_with("__"))
 }
 
-/// Lowercase slug from a display name: "Release Manager" -> "release-manager".
-pub fn slugify(name: &str) -> String {
-    let mut slug = String::new();
-    for c in name.trim().to_lowercase().chars() {
-        if c.is_ascii_alphanumeric() {
-            slug.push(c);
-        } else if !slug.ends_with('-') && !slug.is_empty() {
-            slug.push('-');
-        }
-    }
-    slug.trim_end_matches('-').chars().take(40).collect()
-}
-
-pub fn create_agent(
-    conn: &Connection,
-    name: &str,
-    description: &str,
-    icon: &str,
-    role_prompt: &str,
-    config: &AgentRunConfig,
-) -> Result<Agent, String> {
-    let name = name.trim();
-    if name.is_empty() {
-        return Err("Agent name cannot be empty".to_string());
-    }
-    let base = slugify(name);
-    if base.is_empty() {
-        return Err("Agent name needs at least one letter or digit".to_string());
-    }
-    let config = normalize_run_config(config)?;
-    let mut id = base.clone();
-    let mut n = 2;
-    while get_agent(conn, &id)?.is_some() {
-        id = format!("{base}-{n}");
-        n += 1;
-    }
-    let ts = now();
-    conn.execute(
-        "INSERT INTO agents (id, name, description, icon, role_prompt, worktree_id, backend, model, effort, thinking_level, skills, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12)",
-        params![
-            id,
-            name,
-            description.trim(),
-            icon,
-            role_prompt.trim(),
-            agent_worktree_id(&id),
-            config.backend,
-            config.model,
-            config.effort,
-            config.thinking_level,
-            skills_json(&config.skills)?,
-            ts
-        ],
-    )
-    .map_err(err)?;
-    get_agent(conn, &id)?.ok_or_else(|| "Agent was not created".to_string())
-}
-
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentPatch {
@@ -936,197 +857,6 @@ pub fn update_agent(conn: &Connection, id: &str, patch: &AgentPatch) -> Result<A
     )
     .map_err(err)?;
     Ok(agent)
-}
-
-pub fn delete_agent(conn: &Connection, id: &str) -> Result<(), String> {
-    let agent = get_agent(conn, id)?.ok_or_else(|| format!("Agent not found: {id}"))?;
-    if agent.builtin {
-        return Err("Built-in agents cannot be deleted".to_string());
-    }
-    conn.execute("DELETE FROM memories WHERE agent_id = ?1", [id])
-        .map_err(err)?;
-    conn.execute("DELETE FROM memory_changes WHERE owner_agent_id = ?1", [id])
-        .map_err(err)?;
-    conn.execute("DELETE FROM journal WHERE agent_id = ?1", [id])
-        .map_err(err)?;
-    conn.execute("DELETE FROM agents WHERE id = ?1", [id])
-        .map_err(err)?;
-    Ok(())
-}
-
-/// Insert an agent row from a stored snapshot (revert of a delete).
-/// The id and worktree are kept. Built-in agents are not recreated.
-pub fn insert_agent_snapshot(conn: &Connection, agent: &Agent) -> Result<Agent, String> {
-    if agent.builtin {
-        return Err("Built-in agents cannot be recreated".to_string());
-    }
-    if get_agent(conn, &agent.id)?.is_some() {
-        return Err(format!("Agent {} already exists", agent.id));
-    }
-    let ts = now();
-    conn.execute(
-        "INSERT INTO agents (id, name, description, icon, role_prompt, worktree_id,
-         max_wakes_per_hour, builtin, backend, model, effort, thinking_level, skills, mcp_servers,
-         jean_tools, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15)",
-        params![
-            agent.id,
-            agent.name,
-            agent.description,
-            agent.icon,
-            agent.role_prompt,
-            agent.worktree_id,
-            agent.max_wakes_per_hour,
-            agent.backend,
-            agent.model,
-            agent.effort,
-            agent.thinking_level,
-            skills_json(&agent.skills)?,
-            optional_json(&agent.mcp_servers, "connectors")?,
-            optional_json(&agent.jean_tools, "Jean tools")?,
-            ts
-        ],
-    )
-    .map_err(err)?;
-    get_agent(conn, &agent.id)?.ok_or_else(|| "Agent snapshot was not restored".to_string())
-}
-
-pub fn count_user_agents(conn: &Connection) -> Result<i64, String> {
-    conn.query_row("SELECT COUNT(*) FROM agents WHERE builtin=0", [], |row| {
-        row.get(0)
-    })
-    .map_err(err)
-}
-
-/// One audited self-management change. `before` / `after` are JSON snapshots.
-#[derive(Debug, Clone, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentChange {
-    pub id: i64,
-    pub actor_agent_id: String,
-    pub target_agent_id: String,
-    pub action: String,
-    pub summary: String,
-    pub before: Option<Value>,
-    pub after: Option<Value>,
-    pub session_id: Option<String>,
-    pub created_at: i64,
-    /// The change this row undid, when `action` is `revert`.
-    pub reverted_change_id: Option<i64>,
-}
-
-const AGENT_CHANGE_COLUMNS: &str = "id, actor_agent_id, target_agent_id, action, before_json, after_json, summary, session_id, created_at, reverted_change_id";
-
-fn json_opt(raw: Option<String>) -> Option<Value> {
-    raw.and_then(|text| serde_json::from_str(&text).ok())
-}
-
-fn agent_change_from_row(row: &rusqlite::Row) -> rusqlite::Result<AgentChange> {
-    let before: Option<String> = row.get(4)?;
-    let after: Option<String> = row.get(5)?;
-    Ok(AgentChange {
-        id: row.get(0)?,
-        actor_agent_id: row.get(1)?,
-        target_agent_id: row.get(2)?,
-        action: row.get(3)?,
-        summary: row.get(6)?,
-        before: json_opt(before),
-        after: json_opt(after),
-        session_id: row.get(7)?,
-        created_at: row.get(8)?,
-        reverted_change_id: row.get(9)?,
-    })
-}
-
-pub struct NewAgentChange<'a> {
-    pub actor_agent_id: &'a str,
-    pub target_agent_id: &'a str,
-    pub action: &'a str,
-    pub summary: &'a str,
-    pub before_json: Option<String>,
-    pub after_json: Option<String>,
-    pub session_id: Option<&'a str>,
-    pub reverted_change_id: Option<i64>,
-    pub created_at: i64,
-}
-
-pub fn insert_agent_change(
-    conn: &Connection,
-    change: &NewAgentChange<'_>,
-) -> Result<AgentChange, String> {
-    conn.execute(
-        "INSERT INTO agent_changes (
-            actor_agent_id, target_agent_id, action, before_json, after_json, summary,
-            session_id, created_at, reverted_change_id
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        params![
-            change.actor_agent_id,
-            change.target_agent_id,
-            change.action,
-            change.before_json,
-            change.after_json,
-            change.summary,
-            change.session_id,
-            change.created_at,
-            change.reverted_change_id
-        ],
-    )
-    .map_err(err)?;
-    get_agent_change(conn, conn.last_insert_rowid())?
-        .ok_or_else(|| "Agent change was not stored".to_string())
-}
-
-pub fn get_agent_change(conn: &Connection, id: i64) -> Result<Option<AgentChange>, String> {
-    conn.query_row(
-        &format!("SELECT {AGENT_CHANGE_COLUMNS} FROM agent_changes WHERE id=?1"),
-        [id],
-        agent_change_from_row,
-    )
-    .optional()
-    .map_err(err)
-}
-
-pub fn latest_agent_change(
-    conn: &Connection,
-    target_agent_id: &str,
-) -> Result<Option<AgentChange>, String> {
-    conn.query_row(
-        &format!(
-            "SELECT {AGENT_CHANGE_COLUMNS} FROM agent_changes
-             WHERE target_agent_id=?1 ORDER BY id DESC LIMIT 1"
-        ),
-        [target_agent_id],
-        agent_change_from_row,
-    )
-    .optional()
-    .map_err(err)
-}
-
-pub fn list_agent_changes(
-    conn: &Connection,
-    agent_id: &str,
-    limit: i64,
-) -> Result<Vec<AgentChange>, String> {
-    let mut stmt = conn
-        .prepare(&format!(
-            "SELECT {AGENT_CHANGE_COLUMNS} FROM agent_changes
-             WHERE target_agent_id=?1 OR actor_agent_id=?1
-             ORDER BY id DESC LIMIT ?2"
-        ))
-        .map_err(err)?;
-    let rows = stmt
-        .query_map(params![agent_id, limit], agent_change_from_row)
-        .map_err(err)?;
-    rows.collect::<Result<_, _>>().map_err(err)
-}
-
-pub fn count_creates_since(conn: &Connection, since: i64) -> Result<i64, String> {
-    conn.query_row(
-        "SELECT COUNT(*) FROM agent_changes WHERE action='create' AND created_at>=?1",
-        [since],
-        |row| row.get(0),
-    )
-    .map_err(err)
 }
 
 // ============================================================================
@@ -1297,14 +1027,11 @@ pub struct AgentEvent {
     pub kind: String,
     pub body: String,
     pub hop: i64,
-    pub reply_to_agent: Option<String>,
     pub created_at: i64,
     /// Title of the task session made for this event.
     pub title: Option<String>,
     /// Session that gets this update. `None` = a new task session.
     pub target_session_id: Option<String>,
-    /// Session of `reply_to_agent` that waits for the answer.
-    pub reply_to_session: Option<String>,
 }
 
 /// A queued update for an agent.
@@ -1316,14 +1043,12 @@ pub struct NewEvent<'a> {
     pub body: &'a str,
     pub hop: i64,
     pub target_session_id: Option<&'a str>,
-    pub reply_to_agent: Option<&'a str>,
-    pub reply_to_session: Option<&'a str>,
 }
 
 pub fn add_event(conn: &Connection, e: &NewEvent) -> Result<i64, String> {
     conn.execute(
-        "INSERT INTO events (agent_id, kind, title, body, hop, target_session_id, reply_to_agent, reply_to_session, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        "INSERT INTO events (agent_id, kind, title, body, hop, target_session_id, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             e.agent_id,
             e.kind,
@@ -1331,8 +1056,6 @@ pub fn add_event(conn: &Connection, e: &NewEvent) -> Result<i64, String> {
             e.body,
             e.hop,
             e.target_session_id,
-            e.reply_to_agent,
-            e.reply_to_session,
             now()
         ],
     )
@@ -1343,7 +1066,7 @@ pub fn add_event(conn: &Connection, e: &NewEvent) -> Result<i64, String> {
 pub fn pending_events(conn: &Connection, agent_id: &str) -> Result<Vec<AgentEvent>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, agent_id, kind, body, hop, reply_to_agent, created_at, title, target_session_id, reply_to_session
+            "SELECT id, agent_id, kind, body, hop, created_at, title, target_session_id
              FROM events WHERE agent_id=?1 AND delivered_at IS NULL ORDER BY id LIMIT 50",
         )
         .map_err(err)?;
@@ -1355,11 +1078,9 @@ pub fn pending_events(conn: &Connection, agent_id: &str) -> Result<Vec<AgentEven
                 kind: row.get(2)?,
                 body: row.get(3)?,
                 hop: row.get(4)?,
-                reply_to_agent: row.get(5)?,
-                created_at: row.get(6)?,
-                title: row.get(7)?,
-                target_session_id: row.get(8)?,
-                reply_to_session: row.get(9)?,
+                created_at: row.get(5)?,
+                title: row.get(6)?,
+                target_session_id: row.get(7)?,
             })
         })
         .map_err(err)?;
@@ -1763,26 +1484,6 @@ pub fn list_schedules(conn: &Connection, agent_id: &str) -> Result<Vec<Schedule>
     rows.collect::<Result<_, _>>().map_err(err)
 }
 
-/// Turn a cancelled schedule back on. Fails when it is missing or the agent
-/// is already at the active-schedule cap.
-pub fn reactivate_schedule(conn: &Connection, agent_id: &str, id: i64) -> Result<Schedule, String> {
-    if active_schedule_count(conn, agent_id)? >= MAX_SCHEDULES_PER_AGENT {
-        return Err(format!(
-            "Too many active schedules ({MAX_SCHEDULES_PER_AGENT}). Cancel one first."
-        ));
-    }
-    let changed = conn
-        .execute(
-            "UPDATE schedules SET active=1 WHERE id=?1 AND agent_id=?2 AND active=0",
-            params![id, agent_id],
-        )
-        .map_err(err)?;
-    if changed == 0 {
-        return Err(format!("No cancelled schedule #{id}"));
-    }
-    get_schedule(conn, agent_id, id)?.ok_or_else(|| format!("No schedule #{id}"))
-}
-
 /// Returns false when no active schedule of this agent has that ID.
 pub fn cancel_schedule(conn: &Connection, agent_id: &str, id: i64) -> Result<bool, String> {
     let changed = conn
@@ -2078,12 +1779,6 @@ pub fn pending_approval_count(conn: &Connection, agent_id: &str) -> Result<i64, 
 
 /// Most tasks of one agent that run at the same time.
 pub const MAX_RUNNING_TASKS: i64 = 2;
-/// A spawned subagent is depth 1. It cannot spawn or define further types.
-pub const MAX_SUBAGENT_SPAWN_DEPTH: i64 = 1;
-pub const MAX_SUBAGENT_TYPES_PER_SCOPE: i64 = 32;
-const MAX_SUBAGENT_NAME_CHARS: usize = 64;
-const MAX_SUBAGENT_DESCRIPTION_CHARS: usize = 500;
-const MAX_SUBAGENT_INSTRUCTIONS_CHARS: usize = 8000;
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -2092,7 +1787,7 @@ pub struct Task {
     pub agent_id: String,
     pub session_id: String,
     pub title: String,
-    /// schedule | delegation | message | approval | subagent
+    /// schedule | delegation | message | approval
     pub kind: String,
     /// running | waiting (on delegated work) | done | failed | cancelled
     pub status: String,
@@ -2102,40 +1797,11 @@ pub struct Task {
     pub created_at: i64,
     pub updated_at: i64,
     pub archived_at: Option<i64>,
-    /// Set when this task is a spawned subagent. Null on older rows.
-    #[serde(default)]
-    pub subagent_type_id: Option<i64>,
-    #[serde(default)]
-    pub subagent_type_name: Option<String>,
-    /// 0 for ordinary tasks. A subagent spawned by the agent is 1.
-    #[serde(default)]
-    pub spawn_depth: i64,
-    /// Role prompt snapshotted at spawn. Null when this is not a subagent.
-    #[serde(default)]
-    pub subagent_instructions: Option<String>,
-    #[serde(default)]
-    pub subagent_backend: Option<String>,
-    #[serde(default)]
-    pub subagent_model: Option<String>,
-    #[serde(default)]
-    pub subagent_effort: Option<String>,
-    #[serde(default)]
-    pub subagent_thinking_level: Option<String>,
-    /// plan | build | yolo. Null keeps the normal agent wake mode.
-    #[serde(default)]
-    pub subagent_permission_mode: Option<String>,
-    /// read_only, or null for the agent's normal tools (approval gate still applies).
-    #[serde(default)]
-    pub subagent_tool_mode: Option<String>,
-    /// Skills snapshotted at spawn. Null when this is not a subagent.
-    #[serde(default)]
-    pub subagent_skills: Option<Vec<AgentSkill>>,
 }
 
-const TASK_COLUMNS: &str = "id, agent_id, session_id, title, kind, status, summary, last_event, check_after, created_at, updated_at, archived_at, subagent_type_id, subagent_type_name, spawn_depth, subagent_instructions, subagent_backend, subagent_model, subagent_effort, subagent_thinking_level, subagent_permission_mode, subagent_tool_mode, subagent_skills";
+const TASK_COLUMNS: &str = "id, agent_id, session_id, title, kind, status, summary, last_event, check_after, created_at, updated_at, archived_at";
 
 fn task_from_row(row: &rusqlite::Row) -> rusqlite::Result<Task> {
-    let skills_json: Option<String> = row.get(22)?;
     Ok(Task {
         id: row.get(0)?,
         agent_id: row.get(1)?,
@@ -2149,17 +1815,6 @@ fn task_from_row(row: &rusqlite::Row) -> rusqlite::Result<Task> {
         created_at: row.get(9)?,
         updated_at: row.get(10)?,
         archived_at: row.get(11)?,
-        subagent_type_id: row.get(12)?,
-        subagent_type_name: row.get(13)?,
-        spawn_depth: row.get(14)?,
-        subagent_instructions: row.get(15)?,
-        subagent_backend: row.get(16)?,
-        subagent_model: row.get(17)?,
-        subagent_effort: row.get(18)?,
-        subagent_thinking_level: row.get(19)?,
-        subagent_permission_mode: row.get(20)?,
-        subagent_tool_mode: row.get(21)?,
-        subagent_skills: skills_json.as_deref().map(parse_skills),
     })
 }
 
@@ -3366,464 +3021,6 @@ pub fn search_journal(
     }
 }
 
-// ============================================================================
-// Subagent types
-// ============================================================================
-
-const SUBAGENT_PERMISSION_MODES: &[&str] = &["plan", "build", "yolo"];
-const SUBAGENT_TOOL_MODES: &[&str] = &["read_only"];
-
-/// A named worker an agent can spawn. `agent_id` NULL means every agent can use it.
-#[derive(Debug, Clone, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct SubagentType {
-    pub id: i64,
-    pub agent_id: Option<String>,
-    /// True when `agent_id` is NULL (visible to every agent).
-    pub shared: bool,
-    pub name: String,
-    pub description: String,
-    pub instructions: String,
-    pub backend: Option<String>,
-    pub model: Option<String>,
-    pub effort: Option<String>,
-    pub thinking_level: Option<String>,
-    pub skills: Vec<AgentSkill>,
-    pub permission_mode: Option<String>,
-    pub tool_mode: Option<String>,
-    pub created_at: i64,
-    pub updated_at: i64,
-}
-
-/// Fields the UI and MCP tools write. Empty overrides mean "inherit the agent".
-#[derive(Debug, Clone)]
-pub struct SubagentTypeWrite {
-    pub id: Option<i64>,
-    pub shared: bool,
-    pub name: String,
-    pub description: String,
-    pub instructions: String,
-    pub backend: Option<String>,
-    pub model: Option<String>,
-    pub effort: Option<String>,
-    pub thinking_level: Option<String>,
-    pub skills: Vec<AgentSkill>,
-    pub permission_mode: Option<String>,
-    pub tool_mode: Option<String>,
-}
-
-/// Run configuration after type overrides are applied on top of the agent.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ResolvedSubagentRun {
-    pub type_id: i64,
-    pub type_name: String,
-    pub description: String,
-    pub instructions: String,
-    pub backend: Option<String>,
-    pub model: Option<String>,
-    pub effort: Option<String>,
-    pub thinking_level: Option<String>,
-    pub skills: Vec<AgentSkill>,
-    pub permission_mode: Option<String>,
-    pub tool_mode: Option<String>,
-}
-
-/// Limits checked before a subagent session is created.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SubagentSpawnLimits {
-    pub caller_depth: i64,
-    pub caller_hop: i64,
-    pub running_tasks: i64,
-    pub wakes_remaining: i64,
-    pub max_hops: i64,
-}
-
-const SUBAGENT_TYPE_COLUMNS: &str = "id, agent_id, name, description, instructions, backend, model, effort, thinking_level, skills, permission_mode, tool_mode, created_at, updated_at";
-
-fn subagent_type_from_row(row: &rusqlite::Row) -> rusqlite::Result<SubagentType> {
-    let agent_id: Option<String> = row.get(1)?;
-    let skills_json: String = row.get(9)?;
-    Ok(SubagentType {
-        id: row.get(0)?,
-        shared: agent_id.is_none(),
-        agent_id,
-        name: row.get(2)?,
-        description: row.get(3)?,
-        instructions: row.get(4)?,
-        backend: row.get(5)?,
-        model: row.get(6)?,
-        effort: row.get(7)?,
-        thinking_level: row.get(8)?,
-        skills: parse_skills(&skills_json),
-        permission_mode: row.get(10)?,
-        tool_mode: row.get(11)?,
-        created_at: row.get(12)?,
-        updated_at: row.get(13)?,
-    })
-}
-
-fn normalize_subagent_name(name: &str) -> Result<String, String> {
-    let name = name.trim();
-    if name.is_empty() {
-        return Err("Subagent type name cannot be empty".to_string());
-    }
-    if name.chars().count() > MAX_SUBAGENT_NAME_CHARS {
-        return Err(format!(
-            "Subagent type name is longer than {MAX_SUBAGENT_NAME_CHARS} characters"
-        ));
-    }
-    if name.contains(['\n', '\r']) {
-        return Err("Subagent type name cannot contain newlines".to_string());
-    }
-    Ok(name.to_string())
-}
-
-fn normalize_bounded_text(value: &str, max: usize, label: &str) -> Result<String, String> {
-    let value = value.trim();
-    if value.chars().count() > max {
-        return Err(format!("{label} is longer than {max} characters"));
-    }
-    Ok(value.to_string())
-}
-
-fn scope_id(owner_agent_id: &str, shared: bool) -> Option<&str> {
-    if shared {
-        None
-    } else {
-        Some(owner_agent_id)
-    }
-}
-
-fn subagent_type_count(conn: &Connection, scope: Option<&str>) -> Result<i64, String> {
-    match scope {
-        Some(agent_id) => conn.query_row(
-            "SELECT COUNT(*) FROM subagent_types WHERE agent_id=?1",
-            [agent_id],
-            |row| row.get(0),
-        ),
-        None => conn.query_row(
-            "SELECT COUNT(*) FROM subagent_types WHERE agent_id IS NULL",
-            [],
-            |row| row.get(0),
-        ),
-    }
-    .map_err(err)
-}
-
-fn ensure_subagent_type_capacity(conn: &Connection, scope: Option<&str>) -> Result<(), String> {
-    if subagent_type_count(conn, scope)? >= MAX_SUBAGENT_TYPES_PER_SCOPE {
-        return Err(format!(
-            "Too many subagent types ({MAX_SUBAGENT_TYPES_PER_SCOPE}). Delete one first."
-        ));
-    }
-    Ok(())
-}
-
-fn unique_type_error(error: rusqlite::Error, name: &str) -> String {
-    let message = error.to_string();
-    if message.contains("UNIQUE") {
-        format!("A subagent type named \"{name}\" already exists in this scope")
-    } else {
-        err(error)
-    }
-}
-
-pub fn get_subagent_type(conn: &Connection, id: i64) -> Result<Option<SubagentType>, String> {
-    conn.query_row(
-        &format!("SELECT {SUBAGENT_TYPE_COLUMNS} FROM subagent_types WHERE id=?1"),
-        [id],
-        subagent_type_from_row,
-    )
-    .optional()
-    .map_err(err)
-}
-
-/// Types this agent can spawn: its own, then shared. Own names win at resolve time.
-pub fn list_subagent_types(conn: &Connection, agent_id: &str) -> Result<Vec<SubagentType>, String> {
-    let mut stmt = conn
-        .prepare(&format!(
-            "SELECT {SUBAGENT_TYPE_COLUMNS} FROM subagent_types
-             WHERE agent_id=?1 OR agent_id IS NULL
-             ORDER BY (agent_id IS NULL), name COLLATE NOCASE, id"
-        ))
-        .map_err(err)?;
-    let rows = stmt
-        .query_map(params![agent_id], subagent_type_from_row)
-        .map_err(err)?;
-    rows.collect::<Result<_, _>>().map_err(err)
-}
-
-/// Own type with this name, or the shared type when the agent has none.
-pub fn find_subagent_type(
-    conn: &Connection,
-    agent_id: &str,
-    name: &str,
-) -> Result<Option<SubagentType>, String> {
-    conn.query_row(
-        &format!(
-            "SELECT {SUBAGENT_TYPE_COLUMNS} FROM subagent_types
-             WHERE name=?2 COLLATE NOCASE AND (agent_id=?1 OR agent_id IS NULL)
-             ORDER BY (agent_id IS NULL), id
-             LIMIT 1"
-        ),
-        params![agent_id, name.trim()],
-        subagent_type_from_row,
-    )
-    .optional()
-    .map_err(err)
-}
-
-pub fn save_subagent_type(
-    conn: &Connection,
-    owner_agent_id: &str,
-    write: &SubagentTypeWrite,
-) -> Result<SubagentType, String> {
-    if get_agent(conn, owner_agent_id)?.is_none() {
-        return Err(format!("Agent not found: {owner_agent_id}"));
-    }
-    let name = normalize_subagent_name(&write.name)?;
-    let description = normalize_bounded_text(
-        &write.description,
-        MAX_SUBAGENT_DESCRIPTION_CHARS,
-        "Description",
-    )?;
-    let instructions = normalize_bounded_text(
-        &write.instructions,
-        MAX_SUBAGENT_INSTRUCTIONS_CHARS,
-        "Instructions",
-    )?;
-    let backend = normalize_agent_backend(write.backend.as_deref())?;
-    let model = normalize_agent_model(write.model.as_deref())?;
-    let effort = normalize_agent_effort(write.effort.as_deref())?;
-    let thinking_level = normalize_agent_thinking(write.thinking_level.as_deref())?;
-    let permission_mode = normalize_choice(
-        write.permission_mode.as_deref(),
-        SUBAGENT_PERMISSION_MODES,
-        "permission mode",
-    )?;
-    let tool_mode = normalize_choice(write.tool_mode.as_deref(), SUBAGENT_TOOL_MODES, "tool mode")?;
-    let skills = normalize_agent_skills(&write.skills)?;
-    let stored_skills = skills_json(&skills)?;
-    let scope = scope_id(owner_agent_id, write.shared);
-    let ts = now();
-
-    if let Some(id) = write.id {
-        let existing =
-            get_subagent_type(conn, id)?.ok_or_else(|| format!("Subagent type not found: {id}"))?;
-        if existing
-            .agent_id
-            .as_deref()
-            .is_some_and(|id| id != owner_agent_id)
-        {
-            return Err("That subagent type belongs to another agent".to_string());
-        }
-        let moving_scope = existing.agent_id.as_deref() != scope;
-        if moving_scope {
-            ensure_subagent_type_capacity(conn, scope)?;
-        }
-        conn.execute(
-            "UPDATE subagent_types
-             SET agent_id=?2, name=?3, description=?4, instructions=?5, backend=?6, model=?7,
-                 effort=?8, thinking_level=?9, skills=?10, permission_mode=?11, tool_mode=?12,
-                 updated_at=?13
-             WHERE id=?1",
-            params![
-                id,
-                scope,
-                name,
-                description,
-                instructions,
-                backend,
-                model,
-                effort,
-                thinking_level,
-                stored_skills,
-                permission_mode,
-                tool_mode,
-                ts
-            ],
-        )
-        .map_err(|error| unique_type_error(error, &name))?;
-        return get_subagent_type(conn, id)?
-            .ok_or_else(|| "Subagent type was not saved".to_string());
-    }
-
-    ensure_subagent_type_capacity(conn, scope)?;
-    conn.execute(
-        "INSERT INTO subagent_types (
-            agent_id, name, description, instructions, backend, model, effort, thinking_level,
-            skills, permission_mode, tool_mode, created_at, updated_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12)",
-        params![
-            scope,
-            name,
-            description,
-            instructions,
-            backend,
-            model,
-            effort,
-            thinking_level,
-            stored_skills,
-            permission_mode,
-            tool_mode,
-            ts
-        ],
-    )
-    .map_err(|error| unique_type_error(error, &name))?;
-    let id = conn.last_insert_rowid();
-    get_subagent_type(conn, id)?.ok_or_else(|| "Subagent type was not saved".to_string())
-}
-
-pub fn delete_subagent_type(
-    conn: &Connection,
-    owner_agent_id: &str,
-    id: i64,
-) -> Result<bool, String> {
-    let changed = conn
-        .execute(
-            "DELETE FROM subagent_types WHERE id=?1 AND (agent_id=?2 OR agent_id IS NULL)",
-            params![id, owner_agent_id],
-        )
-        .map_err(err)?;
-    Ok(changed > 0)
-}
-
-fn prefer_override(over: &Option<String>, base: &Option<String>) -> Option<String> {
-    over.clone()
-        .filter(|value| !value.trim().is_empty())
-        .or_else(|| base.clone())
-}
-
-/// Type fields replace the agent. Unset type fields keep the agent's value.
-/// Empty type skills keep the agent's skills. Empty instructions keep the role prompt.
-pub fn resolve_subagent_run(agent: &Agent, kind: &SubagentType) -> ResolvedSubagentRun {
-    let instructions = if kind.instructions.trim().is_empty() {
-        agent.role_prompt.clone()
-    } else {
-        kind.instructions.clone()
-    };
-    ResolvedSubagentRun {
-        type_id: kind.id,
-        type_name: kind.name.clone(),
-        description: kind.description.clone(),
-        instructions,
-        backend: prefer_override(&kind.backend, &agent.backend),
-        model: prefer_override(&kind.model, &agent.model),
-        effort: prefer_override(&kind.effort, &agent.effort),
-        thinking_level: prefer_override(&kind.thinking_level, &agent.thinking_level),
-        skills: if kind.skills.is_empty() {
-            agent.skills.clone()
-        } else {
-            kind.skills.clone()
-        },
-        permission_mode: kind.permission_mode.clone(),
-        tool_mode: kind.tool_mode.clone(),
-    }
-}
-
-/// Why this spawn must be refused. `None` means the existing budgets allow it.
-pub fn subagent_spawn_block_reason(limits: SubagentSpawnLimits) -> Option<String> {
-    if limits.caller_depth >= MAX_SUBAGENT_SPAWN_DEPTH {
-        return Some("Subagents cannot spawn further subagents.".to_string());
-    }
-    if limits.caller_hop + 1 > limits.max_hops {
-        return Some(format!(
-            "Agent message chain is too long (max {} hops). Answer with what you have.",
-            limits.max_hops
-        ));
-    }
-    if limits.running_tasks >= MAX_RUNNING_TASKS {
-        return Some(format!(
-            "This agent already has {MAX_RUNNING_TASKS} running tasks. Wait for one to finish."
-        ));
-    }
-    if limits.wakes_remaining <= 0 {
-        return Some(
-            "Hourly wake budget is spent. Wait until an earlier wake leaves the last hour."
-                .to_string(),
-        );
-    }
-    None
-}
-
-/// Subagent sessions cannot create, edit, or delete types.
-pub fn subagent_define_block_reason(caller_depth: i64) -> Option<String> {
-    if caller_depth >= MAX_SUBAGENT_SPAWN_DEPTH {
-        Some("Subagents cannot define or delete subagent types.".to_string())
-    } else {
-        None
-    }
-}
-
-pub fn spawn_depth_for_session(conn: &Connection, session_id: &str) -> Result<i64, String> {
-    Ok(task_by_session(conn, session_id)?
-        .map(|task| task.spawn_depth)
-        .unwrap_or(0))
-}
-
-/// Wake and prompt values for a task. Ordinary tasks keep the agent.
-/// A subagent task uses the snapshot taken when it was spawned.
-pub fn agent_for_task_wake(agent: &Agent, task: Option<&Task>) -> Agent {
-    let Some(task) = task.filter(|task| task.subagent_type_name.is_some()) else {
-        return agent.clone();
-    };
-    let mut wake = agent.clone();
-    wake.backend = task.subagent_backend.clone();
-    wake.model = task.subagent_model.clone();
-    wake.effort = task.subagent_effort.clone();
-    wake.thinking_level = task.subagent_thinking_level.clone();
-    if let Some(skills) = &task.subagent_skills {
-        wake.skills = skills.clone();
-    }
-    if let Some(instructions) = task
-        .subagent_instructions
-        .as_deref()
-        .filter(|text| !text.trim().is_empty())
-    {
-        wake.role_prompt = instructions.to_string();
-    }
-    wake
-}
-
-pub fn create_subagent_task(
-    conn: &Connection,
-    agent_id: &str,
-    session_id: &str,
-    title: &str,
-    resolved: &ResolvedSubagentRun,
-    spawn_depth: i64,
-) -> Result<Task, String> {
-    let ts = now();
-    let skills = skills_json(&resolved.skills)?;
-    conn.execute(
-        "INSERT INTO tasks (
-            agent_id, session_id, title, kind, status, created_at, updated_at,
-            subagent_type_id, subagent_type_name, spawn_depth, subagent_instructions,
-            subagent_backend, subagent_model, subagent_effort, subagent_thinking_level,
-            subagent_permission_mode, subagent_tool_mode, subagent_skills
-         ) VALUES (?1, ?2, ?3, 'subagent', 'running', ?4, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
-        params![
-            agent_id,
-            session_id,
-            title,
-            ts,
-            resolved.type_id,
-            resolved.type_name,
-            spawn_depth,
-            resolved.instructions,
-            resolved.backend,
-            resolved.model,
-            resolved.effort,
-            resolved.thinking_level,
-            resolved.permission_mode,
-            resolved.tool_mode,
-            skills,
-        ],
-    )
-    .map_err(err)?;
-    task_by_session(conn, session_id)?.ok_or_else(|| "Subagent task was not created".to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use rusqlite::params;
@@ -3834,6 +3031,16 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         init(&conn).unwrap();
         conn
+    }
+
+    fn other_agent(conn: &Connection) -> Agent {
+        conn.execute(
+            "INSERT INTO agents (id, name, worktree_id, created_at, updated_at)
+             VALUES ('other', 'Other', '__agent_other__', 1, 1)",
+            [],
+        )
+        .unwrap();
+        get_agent(conn, "other").unwrap().unwrap()
     }
 
     #[test]
@@ -3849,76 +3056,6 @@ mod tests {
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
         assert_eq!(version, MIGRATIONS.len() as i64);
-    }
-
-    #[test]
-    fn create_agent_makes_unique_slug_ids_and_reserved_worktrees() {
-        let conn = db();
-        let a = create_agent(
-            &conn,
-            "Release Manager",
-            "",
-            "blue",
-            "Ship it",
-            &AgentRunConfig::default(),
-        )
-        .unwrap();
-        let b = create_agent(
-            &conn,
-            "Release  manager!",
-            "",
-            "blue",
-            "",
-            &AgentRunConfig::default(),
-        )
-        .unwrap();
-        assert_eq!(a.id, "release-manager");
-        assert_eq!(b.id, "release-manager-2");
-        assert_eq!(a.worktree_id, "__agent_release-manager__");
-        assert!(is_agent_worktree_id(&a.worktree_id));
-        assert!(is_agent_worktree_id(JEAN_AGENT_WORKTREE_ID));
-        assert!(!is_agent_worktree_id("4f1c-real-worktree"));
-        assert_eq!(
-            agent_by_worktree(&conn, "__agent_release-manager__")
-                .unwrap()
-                .unwrap()
-                .id,
-            a.id
-        );
-        assert!(create_agent(&conn, "  !! ", "", "blue", "", &AgentRunConfig::default()).is_err());
-    }
-
-    #[test]
-    fn builtin_agent_cannot_be_deleted_but_custom_can() {
-        let conn = db();
-        assert!(delete_agent(&conn, JEAN_AGENT_ID).is_err());
-        let a = create_agent(
-            &conn,
-            "Reviewer",
-            "",
-            "green",
-            "",
-            &AgentRunConfig::default(),
-        )
-        .unwrap();
-        save_memory(
-            &conn,
-            &NewMemory {
-                agent_id: Some(&a.id),
-                scope: None,
-                project_id: None,
-                kind: "fact",
-                content: "x",
-                pinned: false,
-                source_session_id: None,
-                expires_at: None,
-            },
-            None,
-        )
-        .unwrap();
-        delete_agent(&conn, &a.id).unwrap();
-        assert!(get_agent(&conn, &a.id).unwrap().is_none());
-        assert!(list_memories(&conn, &a.id).unwrap().is_empty());
     }
 
     #[test]
@@ -4105,8 +3242,7 @@ mod tests {
     #[test]
     fn memory_search_scopes_fts_and_expiry() {
         let conn = db();
-        let other =
-            create_agent(&conn, "Other", "", "blue", "", &AgentRunConfig::default()).unwrap();
+        let other = other_agent(&conn);
         save(
             &conn,
             &mem(Some(JEAN_AGENT_ID), "Orbit deploys need approval"),
@@ -4157,8 +3293,7 @@ mod tests {
     #[test]
     fn memory_update_and_forget_respect_ownership() {
         let conn = db();
-        let other =
-            create_agent(&conn, "Other", "", "blue", "", &AgentRunConfig::default()).unwrap();
+        let other = other_agent(&conn);
         let m = save(&conn, &mem(Some(&other.id), "other fact")).unwrap();
         assert!(update_memory(
             &conn,
@@ -4271,8 +3406,7 @@ mod tests {
     #[test]
     fn user_facts_are_visible_to_every_agent_and_private_memory_is_not() {
         let conn = db();
-        let other =
-            create_agent(&conn, "Other", "", "blue", "", &AgentRunConfig::default()).unwrap();
+        let other = other_agent(&conn);
         save(&conn, &fact(Some(JEAN_AGENT_ID), "user", "Name is Ada")).unwrap();
         assert!(save(
             &conn,
@@ -4328,8 +3462,7 @@ mod tests {
         touch(&conn, weak.id, 900);
         let noise = save(&conn, &mem(Some(JEAN_AGENT_ID), "Buy oat milk")).unwrap();
         touch(&conn, noise.id, 1000);
-        let other =
-            create_agent(&conn, "Other", "", "blue", "", &AgentRunConfig::default()).unwrap();
+        let other = other_agent(&conn);
         save(&conn, &mem(Some(&other.id), "Orbit deploy secret plan")).unwrap();
 
         let selected =
@@ -4599,8 +3732,7 @@ mod tests {
     #[test]
     fn journal_recall_by_text_and_date_stays_on_one_agent() {
         let conn = db();
-        let other =
-            create_agent(&conn, "Other", "", "blue", "", &AgentRunConfig::default()).unwrap();
+        let other = other_agent(&conn);
         add_journal(
             &conn,
             &NewJournal {
@@ -4827,18 +3959,15 @@ mod tests {
         assert_eq!(jean.backend, None);
         assert!(jean.skills.is_empty());
 
-        let created = create_agent(
+        let other = other_agent(&conn);
+        let created = update_agent(
             &conn,
-            "Reviewer",
-            "reviews",
-            "blue",
-            "Be thorough",
-            &AgentRunConfig {
-                backend: Some(" Codex ".into()),
-                model: Some(" gpt-5.5 ".into()),
-                effort: Some("HIGH".into()),
-                thinking_level: None,
-                skills: vec![
+            &other.id,
+            &AgentPatch {
+                backend: Some(Some(" Codex ".into())),
+                model: Some(Some(" gpt-5.5 ".into())),
+                effort: Some(Some("HIGH".into())),
+                skills: Some(vec![
                     AgentSkill {
                         name: " review ".into(),
                         path: " /skills/review/SKILL.md ".into(),
@@ -4854,7 +3983,8 @@ mod tests {
                         path: "/skills/notes/SKILL.md".into(),
                         backend: None,
                     },
-                ],
+                ]),
+                ..Default::default()
             },
         )
         .unwrap();
@@ -4895,14 +4025,11 @@ mod tests {
         assert_eq!(cleared.effort.as_deref(), Some("high"));
         assert!(cleared.skills.is_empty());
 
-        let err = create_agent(
+        let err = update_agent(
             &conn,
-            "Bad",
-            "",
-            "blue",
-            "",
-            &AgentRunConfig {
-                backend: Some("not-a-backend".into()),
+            &created.id,
+            &AgentPatch {
+                backend: Some(Some("not-a-backend".into())),
                 ..Default::default()
             },
         )
@@ -5231,282 +4358,5 @@ mod tests {
             .unwrap();
         assert_eq!(stored.name, "before");
         assert_eq!(stored.prompt, "check");
-    }
-
-    fn reviewer(conn: &Connection) -> Agent {
-        create_agent(
-            conn,
-            "Reviewer",
-            "reviews",
-            "blue",
-            "Be thorough",
-            &AgentRunConfig {
-                backend: Some("claude".into()),
-                model: Some("claude-sonnet".into()),
-                effort: Some("low".into()),
-                thinking_level: Some("think".into()),
-                skills: vec![AgentSkill {
-                    name: "parent".into(),
-                    path: "/skills/parent/SKILL.md".into(),
-                    backend: Some("claude".into()),
-                }],
-            },
-        )
-        .unwrap()
-    }
-
-    #[test]
-    fn subagent_type_migration_keeps_existing_tasks() {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
-        let step = MIGRATIONS
-            .iter()
-            .position(|sql| *sql == subagent_types_migration_sql())
-            .unwrap();
-        for (index, sql) in MIGRATIONS.iter().enumerate().take(step) {
-            conn.execute_batch(&format!(
-                "BEGIN; {sql} PRAGMA user_version = {}; COMMIT;",
-                index + 1
-            ))
-            .unwrap();
-        }
-        conn.execute(
-            "INSERT INTO agents (id, name, worktree_id, created_at, updated_at)
-             VALUES ('jean', 'Jean', '__jean_agent__', 1, 1)",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO tasks (agent_id, session_id, title, kind, status, created_at, updated_at)
-             VALUES ('jean', 'old-task', 'legacy', 'schedule', 'done', 1, 1)",
-            [],
-        )
-        .unwrap();
-        init(&conn).unwrap();
-        let task = task_by_session(&conn, "old-task").unwrap().unwrap();
-        assert_eq!(task.spawn_depth, 0);
-        assert_eq!(task.subagent_type_name, None);
-        assert_eq!(task.subagent_skills, None);
-        assert!(list_subagent_types(&conn, JEAN_AGENT_ID)
-            .unwrap()
-            .is_empty());
-        let version: i64 = conn
-            .pragma_query_value(None, "user_version", |row| row.get(0))
-            .unwrap();
-        assert_eq!(version, MIGRATIONS.len() as i64);
-    }
-
-    #[test]
-    fn subagent_types_resolve_own_over_shared_and_inherit_unset_fields() {
-        let conn = db();
-        let agent = reviewer(&conn);
-        let shared = save_subagent_type(
-            &conn,
-            &agent.id,
-            &SubagentTypeWrite {
-                id: None,
-                shared: true,
-                name: "Investigator".into(),
-                description: "shared".into(),
-                instructions: "Look, do not change".into(),
-                backend: Some("codex".into()),
-                model: None,
-                effort: None,
-                thinking_level: None,
-                skills: Vec::new(),
-                permission_mode: None,
-                tool_mode: Some("read_only".into()),
-            },
-        )
-        .unwrap();
-        assert!(shared.shared);
-        assert_eq!(shared.agent_id, None);
-        let own = save_subagent_type(
-            &conn,
-            &agent.id,
-            &SubagentTypeWrite {
-                id: None,
-                shared: false,
-                name: "investigator".into(),
-                description: "own".into(),
-                instructions: String::new(),
-                backend: None,
-                model: Some("gpt-5.5".into()),
-                effort: Some("high".into()),
-                thinking_level: None,
-                skills: vec![AgentSkill {
-                    name: "diff".into(),
-                    path: "/skills/diff/SKILL.md".into(),
-                    backend: Some("codex".into()),
-                }],
-                permission_mode: Some("plan".into()),
-                tool_mode: None,
-            },
-        )
-        .unwrap();
-        assert!(!own.shared);
-        let found = find_subagent_type(&conn, &agent.id, "INVESTIGATOR")
-            .unwrap()
-            .unwrap();
-        assert_eq!(found.id, own.id);
-        let resolved = resolve_subagent_run(&agent, &found);
-        assert_eq!(resolved.instructions, "Be thorough");
-        assert_eq!(resolved.backend.as_deref(), Some("claude"));
-        assert_eq!(resolved.model.as_deref(), Some("gpt-5.5"));
-        assert_eq!(resolved.effort.as_deref(), Some("high"));
-        assert_eq!(resolved.thinking_level.as_deref(), Some("think"));
-        assert_eq!(resolved.skills.len(), 1);
-        assert_eq!(resolved.skills[0].path, "/skills/diff/SKILL.md");
-        assert_eq!(resolved.permission_mode.as_deref(), Some("plan"));
-        assert_eq!(resolved.tool_mode, None);
-
-        let shared_only = find_subagent_type(&conn, JEAN_AGENT_ID, "investigator")
-            .unwrap()
-            .unwrap();
-        assert_eq!(shared_only.id, shared.id);
-        let jean = get_agent(&conn, JEAN_AGENT_ID).unwrap().unwrap();
-        let inherited = resolve_subagent_run(&jean, &shared_only);
-        assert_eq!(inherited.backend.as_deref(), Some("codex"));
-        assert_eq!(inherited.model, None);
-        assert_eq!(inherited.instructions, "Look, do not change");
-        assert!(inherited.skills.is_empty());
-        assert_eq!(inherited.tool_mode.as_deref(), Some("read_only"));
-
-        let duplicate = save_subagent_type(
-            &conn,
-            &agent.id,
-            &SubagentTypeWrite {
-                id: None,
-                shared: false,
-                name: "Investigator".into(),
-                description: String::new(),
-                instructions: String::new(),
-                backend: None,
-                model: None,
-                effort: None,
-                thinking_level: None,
-                skills: Vec::new(),
-                permission_mode: None,
-                tool_mode: None,
-            },
-        );
-        assert!(duplicate.unwrap_err().contains("already exists"));
-        assert!(save_subagent_type(
-            &conn,
-            &agent.id,
-            &SubagentTypeWrite {
-                id: None,
-                shared: false,
-                name: "Bad".into(),
-                description: String::new(),
-                instructions: String::new(),
-                backend: None,
-                model: None,
-                effort: None,
-                thinking_level: None,
-                skills: Vec::new(),
-                permission_mode: Some("sudo".into()),
-                tool_mode: None,
-            },
-        )
-        .unwrap_err()
-        .contains("permission mode"));
-    }
-
-    #[test]
-    fn subagent_spawn_respects_depth_hops_tasks_and_budget() {
-        let open = SubagentSpawnLimits {
-            caller_depth: 0,
-            caller_hop: 0,
-            running_tasks: 0,
-            wakes_remaining: 2,
-            max_hops: 3,
-        };
-        assert_eq!(subagent_spawn_block_reason(open), None);
-        assert_eq!(subagent_define_block_reason(0), None);
-
-        let mut nested = open;
-        nested.caller_depth = MAX_SUBAGENT_SPAWN_DEPTH;
-        assert!(subagent_spawn_block_reason(nested)
-            .unwrap()
-            .contains("cannot spawn"));
-        assert!(subagent_define_block_reason(nested.caller_depth)
-            .unwrap()
-            .contains("cannot define"));
-
-        let mut hopped = open;
-        hopped.caller_hop = 3;
-        assert!(subagent_spawn_block_reason(hopped)
-            .unwrap()
-            .contains("too long"));
-
-        let mut busy = open;
-        busy.running_tasks = MAX_RUNNING_TASKS;
-        assert!(subagent_spawn_block_reason(busy)
-            .unwrap()
-            .contains("running tasks"));
-
-        let mut spent = open;
-        spent.wakes_remaining = 0;
-        assert!(subagent_spawn_block_reason(spent)
-            .unwrap()
-            .contains("Hourly wake budget"));
-    }
-
-    #[test]
-    fn subagent_task_snapshot_overrides_the_agent_on_wake() {
-        let conn = db();
-        let agent = reviewer(&conn);
-        let kind = save_subagent_type(
-            &conn,
-            &agent.id,
-            &SubagentTypeWrite {
-                id: None,
-                shared: false,
-                name: "Diff".into(),
-                description: "read diffs".into(),
-                instructions: "Only report the diff".into(),
-                backend: Some("codex".into()),
-                model: Some("gpt-5.5".into()),
-                effort: None,
-                thinking_level: None,
-                skills: Vec::new(),
-                permission_mode: Some("yolo".into()),
-                tool_mode: Some("READ_ONLY".into()),
-            },
-        )
-        .unwrap();
-        assert_eq!(kind.tool_mode.as_deref(), Some("read_only"));
-        let resolved = resolve_subagent_run(&agent, &kind);
-        assert_eq!(resolved.effort.as_deref(), Some("low"));
-        assert_eq!(resolved.skills[0].name, "parent");
-        let task =
-            create_subagent_task(&conn, &agent.id, "sub-1", "Diff: check", &resolved, 1).unwrap();
-        assert_eq!(task.kind, "subagent");
-        assert_eq!(task.spawn_depth, 1);
-        assert_eq!(task.subagent_type_name.as_deref(), Some("Diff"));
-        assert_eq!(task.subagent_backend.as_deref(), Some("codex"));
-        assert_eq!(task.subagent_model.as_deref(), Some("gpt-5.5"));
-        assert_eq!(
-            task.subagent_instructions.as_deref(),
-            Some("Only report the diff")
-        );
-        assert_eq!(spawn_depth_for_session(&conn, "sub-1").unwrap(), 1);
-        assert_eq!(spawn_depth_for_session(&conn, "missing").unwrap(), 0);
-        let wake = agent_for_task_wake(&agent, Some(&task));
-        assert_eq!(wake.backend.as_deref(), Some("codex"));
-        assert_eq!(wake.model.as_deref(), Some("gpt-5.5"));
-        assert_eq!(wake.effort.as_deref(), Some("low"));
-        assert_eq!(wake.role_prompt, "Only report the diff");
-        assert_eq!(wake.skills.len(), 1);
-        let ordinary = create_task(&conn, &agent.id, "plain", "cron", "schedule").unwrap();
-        assert_eq!(ordinary.spawn_depth, 0);
-        let same = agent_for_task_wake(&agent, Some(&ordinary));
-        assert_eq!(same.backend.as_deref(), Some("claude"));
-        assert_eq!(same.role_prompt, "Be thorough");
-        assert!(delete_subagent_type(&conn, &agent.id, kind.id).unwrap());
-        assert!(find_subagent_type(&conn, &agent.id, "Diff")
-            .unwrap()
-            .is_none());
     }
 }

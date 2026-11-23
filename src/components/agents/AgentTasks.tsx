@@ -15,7 +15,6 @@ import {
 } from '@/services/agents'
 import { useChatStore } from '@/store/chat-store'
 import { formatRelative } from '@/lib/relative-time'
-import { taskKindLabel } from './subagent-types'
 import {
   AgentEmpty,
   AgentList,
@@ -25,6 +24,14 @@ import {
   statusVariant,
   AGENT_ROW,
 } from './agent-ui'
+
+const TASK_KIND_LABELS: Record<string, string> = {
+  schedule: 'Schedule',
+  delegation: 'Follow-up',
+  approval: 'Approval',
+}
+
+const taskKindLabel = (kind: string) => TASK_KIND_LABELS[kind] ?? kind
 
 const ChatWindow = lazy(() =>
   import('@/components/chat/ChatWindow').then(mod => ({
@@ -78,7 +85,7 @@ function TaskRow({
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm text-foreground">{task.title}</p>
           <p className="truncate text-2xs text-muted-foreground">
-            {taskKindLabel(task.kind, task.subagentTypeName)} · updated{' '}
+            {taskKindLabel(task.kind)} · updated{' '}
             {formatRelative(task.updatedAt)}
           </p>
           {task.summary ? (
@@ -169,8 +176,8 @@ export function AgentTasks({
                     {taskStatusLabel(openTask.status)}
                   </span>
                   <span>
-                    {taskKindLabel(openTask.kind, openTask.subagentTypeName)} ·
-                    updated {formatRelative(openTask.updatedAt)}
+                    {taskKindLabel(openTask.kind)} · updated{' '}
+                    {formatRelative(openTask.updatedAt)}
                   </span>
                 </DialogDescription>
                 {openTask.summary ? (

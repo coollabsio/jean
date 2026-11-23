@@ -27,8 +27,6 @@ const TICK: Duration = Duration::from_secs(5);
 const CHECK_DELAY_SECS: i64 = 2;
 const BUSY_RETRY_SECS: i64 = 5;
 const SUMMARY_CHARS: usize = 1500;
-/// Most agent-to-agent hops in one chain.
-pub const MAX_AGENT_HOPS: i64 = 3;
 /// A chat with this many messages continues in a new chat when idle.
 /// Test override: `JEAN_AGENT_CHAT_ROTATE_MESSAGES`.
 const CHAT_ROTATE_MESSAGES: u32 = 40;
@@ -379,7 +377,6 @@ fn follow_up_event<'a>(d: &'a db::Delegation, title: &'a str, body: &'a str) -> 
         body,
         hop: d.hop,
         target_session_id: d.origin_session_id.as_deref(),
-        ..Default::default()
     }
 }
 
@@ -528,25 +525,6 @@ pub(crate) fn wake_execution_mode_for(
         };
     }
     wake_execution_mode(selected)
-}
-
-/// A subagent type can pin plan, build, or yolo. Cursor has no Build mode.
-/// Without a pin, wakes use [`wake_execution_mode_for`].
-pub(crate) fn wake_permission_mode(
-    selected: Option<&str>,
-    backend: Option<&str>,
-    permission_mode: Option<&str>,
-) -> Option<&'static str> {
-    match permission_mode
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        Some("plan") => Some("plan"),
-        Some("yolo") => Some("yolo"),
-        Some("build") if backend == Some("cursor") => Some("yolo"),
-        Some("build") => Some("build"),
-        _ => wake_execution_mode_for(selected, backend),
-    }
 }
 
 /// Only an unused session is stamped. A used session changes backend on the
@@ -836,8 +814,7 @@ fn agent_session_location(
 /// Send `message` to a session as a new turn.
 /// The agent's backend, model, effort, thinking, and skills override the
 /// session for this turn. Unset fields stay on the session and user defaults.
-/// `permission_mode` is the subagent type's plan/build/yolo choice. Without
-/// one, the wake still leaves Plan mode so the Jean MCP tools stay available.
+/// The wake leaves Plan mode so the Jean MCP tools stay available.
 pub(crate) fn send_to_session(
     app: &AppHandle,
     agent: &db::Agent,
@@ -845,7 +822,6 @@ pub(crate) fn send_to_session(
     worktree_id: &str,
     path: &str,
     message: String,
-    permission_mode: Option<&str>,
 ) {
     let app_clone = app.clone();
     let agent_name = agent.id.clone();
@@ -853,10 +829,9 @@ pub(crate) fn send_to_session(
     let backend = trimmed_opt(&agent.backend)
         .map(str::to_string)
         .unwrap_or_else(|| backend_id(&session.backend).to_string());
-    let mode = wake_permission_mode(
+    let mode = wake_execution_mode_for(
         session.selected_execution_mode.as_deref(),
         Some(backend.as_str()),
-        permission_mode,
     );
     let mut overrides = agent_wake_overrides(agent);
     let needs_default_model = wake_needs_default_model(agent);
@@ -903,31 +878,16 @@ pub(crate) fn send_to_session(
     });
 }
 
-/// Mark events delivered and count a wake. Agent requests among them make
-/// `session_id` work for the sender, so its answer returns there.
+/// Mark events delivered and count a wake.
 fn record_delivery(
     conn: &rusqlite::Connection,
     agent_id: &str,
     events: &[&db::AgentEvent],
     session_id: &str,
-    worktree_id: &str,
 ) -> Result<(), String> {
     let ids: Vec<i64> = events.iter().map(|e| e.id).collect();
     db::mark_events_delivered(conn, &ids)?;
-    db::record_wake(conn, agent_id, session_id)?;
-    for event in events {
-        if let Some(sender) = event.reply_to_agent.as_deref() {
-            db::upsert_delegation(
-                conn,
-                sender,
-                session_id,
-                worktree_id,
-                event.hop,
-                event.reply_to_session.as_deref(),
-            )?;
-        }
-    }
-    Ok(())
+    db::record_wake(conn, agent_id, session_id)
 }
 
 /// Deliver queued updates of one agent. Returns true when something was sent.
@@ -981,25 +941,20 @@ async fn deliver(app: &AppHandle, agent_id: &str) -> Result<bool, String> {
             continue;
         }
         super::with_db(app, |conn| {
-            record_delivery(conn, &agent.id, &group, &session.id, &worktree_id)?;
+            record_delivery(conn, &agent.id, &group, &session.id)?;
             if task.is_some() {
                 db::set_task_running(conn, &session.id)?;
             }
             Ok(())
         })?;
         let owned: Vec<db::AgentEvent> = group.into_iter().cloned().collect();
-        let wake_agent = db::agent_for_task_wake(&agent, task.as_ref());
-        let permission = task
-            .as_ref()
-            .and_then(|item| item.subagent_permission_mode.as_deref());
         send_to_session(
             app,
-            &wake_agent,
+            &agent,
             &session,
             &worktree_id,
             &path,
             compose_update(&owned),
-            permission,
         );
         budget -= 1;
         sent = true;
@@ -1023,21 +978,15 @@ async fn deliver(app: &AppHandle, agent_id: &str) -> Result<bool, String> {
                 .await?;
         super::with_db(app, |conn| {
             db::create_task(conn, &agent.id, &session.id, &title, &event.kind)?;
-            record_delivery(conn, &agent.id, &[event], &session.id, &worktree_id)
+            record_delivery(conn, &agent.id, &[event], &session.id)
         })?;
-        let created = super::with_db(app, |conn| db::task_by_session(conn, &session.id))?;
-        let wake_agent = db::agent_for_task_wake(&agent, created.as_ref());
-        let permission = created
-            .as_ref()
-            .and_then(|item| item.subagent_permission_mode.as_deref());
         send_to_session(
             app,
-            &wake_agent,
+            &agent,
             &session,
             &worktree_id,
             &path,
             compose_update(std::slice::from_ref(event)),
-            permission,
         );
         budget -= 1;
         sent = true;
@@ -1048,7 +997,6 @@ async fn deliver(app: &AppHandle, agent_id: &str) -> Result<bool, String> {
 fn task_title_for(kind: &str) -> &'static str {
     match kind {
         "schedule" => "Scheduled task",
-        "message" => "Request from an agent",
         "approval" => "Approval result",
         _ => "Follow-up",
     }
@@ -1213,7 +1161,6 @@ async fn rotate_chat_if_long(app: &AppHandle, agent: &db::Agent) -> Result<bool,
         &agent.worktree_id,
         &path,
         chat_continued_message(old.messages.len(), journal_id),
-        None,
     );
     Ok(true)
 }
@@ -1342,30 +1289,6 @@ mod tests {
         assert_eq!(
             outcome_status(false, Some("done"), Some(&RunStatus::Completed)),
             "done"
-        );
-    }
-
-    #[test]
-    fn subagent_permission_mode_is_kept_and_cursor_build_becomes_yolo() {
-        assert_eq!(
-            wake_permission_mode(Some("build"), Some("claude"), Some("plan")),
-            Some("plan")
-        );
-        assert_eq!(
-            wake_permission_mode(Some("plan"), Some("claude"), Some("yolo")),
-            Some("yolo")
-        );
-        assert_eq!(
-            wake_permission_mode(Some("plan"), Some("cursor"), Some("build")),
-            Some("yolo")
-        );
-        assert_eq!(
-            wake_permission_mode(Some("yolo"), Some("claude"), None),
-            None
-        );
-        assert_eq!(
-            wake_permission_mode(Some("plan"), Some("claude"), None),
-            Some("build")
         );
     }
 
@@ -1556,11 +1479,9 @@ mod tests {
                 kind: "delegation".into(),
                 body: "Session A finished.".into(),
                 hop: 0,
-                reply_to_agent: None,
                 created_at: 0,
                 title: None,
                 target_session_id: None,
-                reply_to_session: None,
             },
             db::AgentEvent {
                 id: 2,
@@ -1568,11 +1489,9 @@ mod tests {
                 kind: "schedule".into(),
                 body: "Schedule #3 is due.".into(),
                 hop: 0,
-                reply_to_agent: None,
                 created_at: 0,
                 title: None,
                 target_session_id: None,
-                reply_to_session: None,
             },
         ];
         let message = compose_update(&events);

@@ -3750,12 +3750,8 @@ async fn send_chat_message_inner(
     let parallel_execution_prompt = crate::upgrade_legacy_parallel_execution_prompt(
         parallel_execution_prompt.filter(|p| !p.trim().is_empty()),
     );
-    let agent_system_prompt = crate::agents::system_prompt_for_run(
-        &app,
-        &worktree_id,
-        Some(&session_id),
-        Some(message.as_str()),
-    );
+    let agent_system_prompt =
+        crate::agents::system_prompt_for(&app, &worktree_id, Some(message.as_str()));
 
     // Use passed parameter for Chrome browser integration (default false - beta)
     let chrome = chrome_enabled.unwrap_or(false);

@@ -26,8 +26,6 @@ const { details, mutation } = vi.hoisted(() => {
     memoryChanges: [],
     tasks: [],
     notifications: [],
-    subagentTypes: [],
-    changes: [],
   }
   const mutation = () => ({ mutate: vi.fn(), isPending: false })
   return { details, mutation }
