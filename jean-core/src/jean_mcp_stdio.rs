@@ -138,18 +138,12 @@ fn proxy_to_parent(
 ) -> Result<Value, String> {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::windows::named_pipe::ClientOptions;
-    use tokio::runtime::Builder;
     use tokio::time::timeout;
 
     let encoded = serde_json::to_string(&request)
         .map_err(|e| format!("Failed to encode Jean MCP pipe request: {e}"))?;
-    let runtime = Builder::new_current_thread()
-        .enable_io()
-        .enable_time()
-        .build()
-        .map_err(|e| format!("Failed to create Jean MCP pipe runtime: {e}"))?;
 
-    let response = runtime.block_on(async {
+    let response = block_on_isolated(async {
         let mut pipe = ClientOptions::new()
             .open(socket)
             .map_err(|e| format!("Failed to connect Jean MCP named pipe {socket}: {e}"))?;
@@ -171,12 +165,39 @@ fn proxy_to_parent(
 
         serde_json::from_str::<Value>(&line)
             .map_err(|e| format!("Failed to parse Jean MCP pipe response: {e}"))
-    })?;
+    })??;
 
     if let Some(error) = parent_error_message(&response) {
         return Err(error);
     }
     Ok(response.get("result").cloned().unwrap_or(Value::Null))
+}
+
+/// Runs `future` on a new current-thread runtime in a scoped thread.
+///
+/// The stdio server runs inside the entry point's Tokio runtime. A nested
+/// `block_on` on that thread panics, and `panic = "abort"` turns the panic
+/// into a process abort (issue #934). A separate thread has no runtime
+/// context, so this works from inside or outside any runtime flavor.
+#[cfg(any(windows, test))]
+fn block_on_isolated<F>(future: F) -> Result<F::Output, String>
+where
+    F: std::future::Future + Send,
+    F::Output: Send,
+{
+    std::thread::scope(|scope| {
+        scope
+            .spawn(|| {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_io()
+                    .enable_time()
+                    .build()
+                    .map_err(|e| format!("Failed to create Jean MCP pipe runtime: {e}"))?;
+                Ok(runtime.block_on(future))
+            })
+            .join()
+            .map_err(|_| "Jean MCP pipe thread panicked".to_string())?
+    })
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -206,7 +227,29 @@ mod tests {
     use serde_json::json;
     use std::io::{self, Write};
 
-    use super::{parent_error_message, serve};
+    use super::{block_on_isolated, parent_error_message, serve};
+
+    async fn sleep_then(value: u32) -> u32 {
+        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        value
+    }
+
+    #[test]
+    fn block_on_isolated_works_outside_a_runtime() {
+        assert_eq!(block_on_isolated(sleep_then(1)), Ok(1));
+    }
+
+    // Regression for issue #934: the stdio server runs inside the entry
+    // point's multi-thread runtime, where a nested `block_on` panicked.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn block_on_isolated_works_inside_a_multi_thread_runtime() {
+        assert_eq!(block_on_isolated(sleep_then(2)), Ok(2));
+    }
+
+    #[tokio::test]
+    async fn block_on_isolated_works_inside_a_current_thread_runtime() {
+        assert_eq!(block_on_isolated(sleep_then(3)), Ok(3));
+    }
 
     #[test]
     fn parent_error_message_handles_plain_error_string() {
