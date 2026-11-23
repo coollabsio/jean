@@ -696,10 +696,13 @@ describe('useScrollManagement session scroll retention (issue #594)', () => {
 
     // Magic menu prompt: a user message appended without markAtBottom().
     setScrollHeight(2600)
+    const magic = makeMessages(1).map(m => ({
+      ...m,
+      id: 'magic',
+      content: 'Commit',
+    }))
     act(() => {
-      rerenderSession({
-        msgs: [...all, { ...all[0]!, id: 'magic', content: 'Commit' }],
-      })
+      rerenderSession({ msgs: [...all, ...magic] })
     })
 
     expect(viewport.scrollTop).toBe(2600)
