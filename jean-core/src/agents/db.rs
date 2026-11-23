@@ -1920,15 +1920,6 @@ pub fn list_notifications(
     rows.collect::<Result<_, _>>().map_err(err)
 }
 
-pub fn unread_notification_count(conn: &Connection, agent_id: &str) -> Result<i64, String> {
-    conn.query_row(
-        "SELECT COUNT(*) FROM notifications WHERE agent_id=?1 AND read_at IS NULL",
-        [agent_id],
-        |row| row.get(0),
-    )
-    .map_err(err)
-}
-
 /// Newest notification and newest task result of an agent, with times
 /// (for the sidebar's "what is going on" line).
 pub fn latest_activity(conn: &Connection, agent_id: &str) -> Result<Option<(i64, String)>, String> {
@@ -1939,15 +1930,6 @@ pub fn latest_activity(conn: &Connection, agent_id: &str) -> Result<Option<(i64,
     )
     .optional()
     .map_err(err)
-}
-
-pub fn mark_notifications_read(conn: &Connection, agent_id: &str) -> Result<(), String> {
-    conn.execute(
-        "UPDATE notifications SET read_at=?2 WHERE agent_id=?1 AND read_at IS NULL",
-        params![agent_id, now()],
-    )
-    .map_err(err)?;
-    Ok(())
 }
 
 /// End of the agent's previous chat, added to the prompt of its new chat.
@@ -3826,19 +3808,17 @@ mod tests {
     }
 
     #[test]
-    fn notifications_validate_and_mark_read() {
+    fn notifications_validate() {
         let conn = db();
         assert!(add_notification(&conn, COORD, None, "loud", "x").is_err());
         assert!(add_notification(&conn, COORD, None, "info", "  ").is_err());
         let n =
             add_notification(&conn, COORD, Some("task-1"), "action", "Approve the deploy").unwrap();
         assert_eq!(n.level, "action");
-        assert_eq!(unread_notification_count(&conn, COORD).unwrap(), 1);
-        mark_notifications_read(&conn, COORD).unwrap();
-        assert_eq!(unread_notification_count(&conn, COORD).unwrap(), 0);
-        assert!(list_notifications(&conn, COORD, 10).unwrap()[0]
-            .read_at
-            .is_some());
+        assert_eq!(
+            list_notifications(&conn, COORD, 10).unwrap()[0].message,
+            "Approve the deploy"
+        );
     }
 
     #[test]

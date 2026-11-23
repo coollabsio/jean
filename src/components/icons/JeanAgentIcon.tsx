@@ -51,8 +51,3 @@ export function AgentIcon({ icon = 'yellow', ...props }: AgentIconProps) {
     </svg>
   )
 }
-
-/** Pixel-art Jean coordinator: a smiling face with a boss crown. */
-export function JeanAgentIcon(props: SVGProps<SVGSVGElement>) {
-  return <AgentIcon icon="jean" {...props} />
-}

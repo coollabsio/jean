@@ -272,24 +272,3 @@ export function sameAgentRun(a: AgentRunDraft, b: AgentRunDraft): boolean {
     paths(a.skills) === paths(b.skills)
   )
 }
-
-/** One line for the agent header. Null when the agent uses every default. */
-export function agentRunSummary(agent: {
-  backend: string | null
-  model: string | null
-  skills: { name: string }[]
-}): string | null {
-  const parts: string[] = []
-  if (agent.backend) {
-    parts.push(
-      backendOptions.find(option => option.value === agent.backend)?.label ??
-        agent.backend
-    )
-  }
-  if (agent.model) parts.push(agent.model)
-  if (agent.skills.length > 0) {
-    const count = agent.skills.length
-    parts.push(`${count} skill${count === 1 ? '' : 's'}`)
-  }
-  return parts.length > 0 ? parts.join(' · ') : null
-}

@@ -388,6 +388,7 @@ This decouples UI triggers from implementations and enables consistent behavior.
 
 Each major system has focused documentation:
 
+- **[Project Coordinator](./coordinator.md)** - One coordinator chat per project that spawns worktrees and sessions
 - **[Devin Integration](./devin.md)** - Local/cloud ACP sessions, permissions, and MCP
 - **[Command System](./command-system.md)** - Unified action dispatch
 - **[Keyboard Shortcuts](./keyboard-shortcuts.md)** - Native event handling

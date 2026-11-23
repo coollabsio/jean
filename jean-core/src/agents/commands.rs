@@ -19,7 +19,6 @@ pub struct AgentSummary {
     pub active_delegations: i64,
     pub next_schedule_at: Option<i64>,
     pub budget_reached: bool,
-    pub unread_notifications: i64,
     /// One line about the latest notification
     pub activity: Option<String>,
 }
@@ -94,7 +93,6 @@ pub fn list_agents(app: &AppHandle) -> Result<Vec<AgentSummary>, String> {
             active_delegations,
             next_schedule_at,
             wakes,
-            unread_notifications,
             activity,
         ) = super::with_db(app, |conn| {
             Ok((
@@ -103,7 +101,6 @@ pub fn list_agents(app: &AppHandle) -> Result<Vec<AgentSummary>, String> {
                 db::active_delegation_count(conn, &agent.id)?,
                 db::next_schedule_at(conn, &agent.id)?,
                 db::wakes_since(conn, &agent.id, since)?,
-                db::unread_notification_count(conn, &agent.id)?,
                 db::latest_activity(conn, &agent.id)?,
             ))
         })?;
@@ -126,7 +123,6 @@ pub fn list_agents(app: &AppHandle) -> Result<Vec<AgentSummary>, String> {
             active_delegations,
             next_schedule_at,
             budget_reached: wakes >= agent.max_wakes_per_hour,
-            unread_notifications,
             activity: activity.and_then(|(_, text)| activity_preview(&text)),
             agent,
         });
@@ -200,12 +196,6 @@ pub fn get_agent_details(app: &AppHandle, agent_id: &str) -> Result<AgentDetails
             notifications: db::list_notifications(conn, agent_id, 30)?,
         })
     })
-}
-
-pub fn mark_notifications_read(app: &AppHandle, agent_id: &str) -> Result<(), String> {
-    super::with_db(app, |conn| db::mark_notifications_read(conn, agent_id))?;
-    super::notify_changed(app);
-    Ok(())
 }
 
 pub async fn update_agent(

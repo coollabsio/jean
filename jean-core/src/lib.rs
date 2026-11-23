@@ -283,8 +283,8 @@ pub struct AppPreferences {
     pub auto_delete_worktree_on_pr_merged: bool, // Delete a worktree when its linked PR is merged (default: true)
     #[serde(default)]
     pub debug_mode_enabled: bool, // Show debug panel in chat sessions (default: false)
-    #[serde(default)]
-    pub agents_enabled: bool, // Experimental: project coordinators and their engine (default: false)
+    #[serde(default, alias = "agents_enabled")]
+    pub coordinator_enabled: bool, // Experimental: project coordinators and their engine (default: false)
     #[serde(default)]
     pub default_enabled_mcp_servers: Vec<String>, // MCP server names enabled by default (empty = none)
     #[serde(default)]
@@ -1001,9 +1001,9 @@ mod tests {
         default_global_system_prompt_without_security, default_model,
         default_parallel_execution_prompt, effective_global_system_prompt,
         is_legacy_default_global_system_prompt,
-        legacy_parallel_execution_prompt_before_subagent_strategy, normalize_browser_default_host,
-        parse_cli_args_from, preferences_file_contents, resolve_headless_bind_host,
-        resolve_headless_token_required, resolve_http_server_bind_host,
+        legacy_parallel_execution_prompt_before_subagent_strategy, merge_preferences_patch,
+        normalize_browser_default_host, parse_cli_args_from, preferences_file_contents,
+        resolve_headless_bind_host, resolve_headless_token_required, resolve_http_server_bind_host,
         resolve_stored_parallel_execution_prompt, server_preferences_value,
         should_auto_select_cli_source, upgrade_legacy_parallel_execution_prompt,
         validate_headless_security, AppPreferences, MagicPrompts,
@@ -1043,6 +1043,35 @@ mod tests {
         assert_eq!(value["linear_api_key_configured"], json!(true));
         assert!(value.get("http_server_token").is_none());
         assert_eq!(value["http_server_token_configured"], json!(true));
+    }
+
+    #[test]
+    fn coordinator_flag_loads_from_the_old_agents_enabled_key() {
+        let mut saved = serde_json::to_value(AppPreferences::default()).unwrap();
+        let object = saved.as_object_mut().unwrap();
+        object.remove("coordinator_enabled");
+        object.insert("agents_enabled".to_string(), json!(true));
+
+        let preferences: AppPreferences = serde_json::from_value(saved).unwrap();
+
+        assert!(preferences.coordinator_enabled);
+        let written = serde_json::to_value(&preferences).unwrap();
+        assert_eq!(written["coordinator_enabled"], json!(true));
+        assert!(written.get("agents_enabled").is_none());
+    }
+
+    #[test]
+    fn preference_patch_with_an_old_key_sets_the_renamed_field() {
+        let current = AppPreferences::default();
+
+        let merged = merge_preferences_patch(
+            &current,
+            &json!({ "agents_enabled": true, "gemini_cli_source": "path" }),
+        )
+        .unwrap();
+
+        assert!(merged.coordinator_enabled);
+        assert_eq!(merged.antigravity_cli_source, "path");
     }
 
     #[test]
@@ -3608,7 +3637,7 @@ impl Default for AppPreferences {
             auto_pull_base_branch: default_auto_pull_base_branch(),
             auto_delete_worktree_on_pr_merged: default_auto_delete_worktree_on_pr_merged(),
             debug_mode_enabled: false,
-            agents_enabled: false,
+            coordinator_enabled: false,
             default_effort_level: default_effort_level(),
             default_enabled_mcp_servers: Vec::new(),
             known_mcp_servers: Vec::new(),
@@ -3907,10 +3936,6 @@ pub struct UIState {
     #[serde(default)]
     pub seen_failed_workflow_run_ids: Vec<u64>,
 
-    /// Agent ID → newest agent update time (Unix seconds) the user has seen
-    #[serde(default)]
-    pub agent_updates_seen_at: std::collections::HashMap<String, u64>,
-
     /// Sessions armed for auto-continue after a usage limit resets
     #[serde(default)]
     pub auto_resume: Vec<AutoResumeEntry>,
@@ -4080,7 +4105,6 @@ impl Default for UIState {
             pinned_recent_session_ids: Vec::new(),
             last_opened_per_project: std::collections::HashMap::new(),
             seen_failed_workflow_run_ids: Vec::new(),
-            agent_updates_seen_at: std::collections::HashMap::new(),
             auto_resume: Vec::new(),
             git_diff_view_mode: None,
             version: default_ui_state_version(),
@@ -4332,7 +4356,7 @@ async fn save_preferences(app: AppHandle, mut preferences: AppPreferences) -> Re
     );
 
     schedule_jean_mcp_socket_sync(app.clone());
-    // `agents_enabled` may have changed: let the coordinator loop see it now.
+    // `coordinator_enabled` may have changed: let the coordinator loop see it now.
     agents::nudge();
 
     Ok(())
@@ -4342,16 +4366,39 @@ async fn save_preferences(app: AppHandle, mut preferences: AppPreferences) -> Re
 /// This avoids race conditions when multiple components save concurrently.
 async fn patch_preferences(app: AppHandle, patch: Value) -> Result<(), String> {
     let current = load_preferences(app.clone()).await?;
+    let merged = merge_preferences_patch(&current, &patch)?;
+    save_preferences(app, merged).await
+}
+
+/// Old key → current key for renamed preferences (the `#[serde(alias)]` pairs).
+/// A patch from an older client still uses the old key. Merged as-is, the
+/// object would hold both keys and serde rejects it as a duplicate field.
+const RENAMED_PREFERENCE_KEYS: &[(&str, &str)] = &[
+    ("agents_enabled", "coordinator_enabled"),
+    ("selected_gemini_model", "selected_antigravity_model"),
+    (
+        "gemini_auto_steer_enabled",
+        "antigravity_auto_steer_enabled",
+    ),
+    ("gemini_cli_source", "antigravity_cli_source"),
+];
+
+fn merge_preferences_patch(
+    current: &AppPreferences,
+    patch: &Value,
+) -> Result<AppPreferences, String> {
     let mut current_json =
-        serde_json::to_value(&current).map_err(|e| format!("Serialize error: {e}"))?;
+        serde_json::to_value(current).map_err(|e| format!("Serialize error: {e}"))?;
     if let (Some(base), Some(patch_obj)) = (current_json.as_object_mut(), patch.as_object()) {
         for (key, value) in patch_obj {
-            base.insert(key.clone(), value.clone());
+            let key = RENAMED_PREFERENCE_KEYS
+                .iter()
+                .find(|(old, _)| old == key)
+                .map_or(key.as_str(), |(_, new)| *new);
+            base.insert(key.to_string(), value.clone());
         }
     }
-    let merged: AppPreferences =
-        serde_json::from_value(current_json).map_err(|e| format!("Merge error: {e}"))?;
-    save_preferences(app, merged).await
+    serde_json::from_value(current_json).map_err(|e| format!("Merge error: {e}"))
 }
 
 const SERVER_PREFERENCES_SCHEMA_VERSION: u32 = 1;
@@ -5642,7 +5689,7 @@ pub fn initialize_runtime(context: &RuntimeContext) -> Result<(), String> {
     chat::auth_failure::start_auth_failure_listener(context);
     auto_fix::scheduler::start_auto_fix_scheduler(context.clone());
     // Coordinators keep working without clients: open their database and
-    // start the loop. The loop idles while `agents_enabled` is off.
+    // start the loop. The loop idles while `coordinator_enabled` is off.
     match agents::init(context) {
         Ok(()) => agents::start(context.clone()),
         Err(error) => log::error!("Agents are unavailable: {error}"),

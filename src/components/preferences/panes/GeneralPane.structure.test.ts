@@ -275,7 +275,9 @@ describe('GeneralPane settings structure', () => {
 
     expect(experimentalIndex).toBeGreaterThan(-1)
     expect(experimental).toContain('defaultOpen={false}')
-    expect(experimental).toContain('agents_enabled')
+    expect(experimental).toContain('coordinator_enabled')
+    // Shown to every user, not only to those who already turned it on
+    expect(source).not.toContain('{preferences?.coordinator_enabled && (')
   })
 
   it('marks the GitLab CLI settings section as beta', () => {

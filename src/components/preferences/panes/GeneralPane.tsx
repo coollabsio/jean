@@ -4265,29 +4265,25 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             )}
           </SettingsSection>
 
-          {/* Agents are closed to new users. Users who already turned them on
-              keep the switch until they turn it off. */}
-          {preferences?.agents_enabled && (
-            <SettingsSection
-              title="Experimental"
-              anchorId="pref-general-section-experimental"
-              collapsible
-              defaultOpen={false}
+          <SettingsSection
+            title="Experimental"
+            anchorId="pref-general-section-experimental"
+            collapsible
+            defaultOpen={false}
+          >
+            <InlineField
+              id="pref-general-coordinator"
+              label="Project Coordinator"
+              description="One coordinator chat per project that spawns worktrees and sessions for you."
             >
-              <InlineField
-                id="pref-general-agents"
-                label="Agents"
-                description="Give each project a coordinator you chat with. It starts work in worktrees and sessions. Agents are no longer available to turn on: if you turn this off, you cannot turn it on again."
-              >
-                <Switch
-                  checked={preferences?.agents_enabled ?? false}
-                  onCheckedChange={checked =>
-                    patchPreferences.mutate({ agents_enabled: checked })
-                  }
-                />
-              </InlineField>
-            </SettingsSection>
-          )}
+              <Switch
+                checked={preferences?.coordinator_enabled ?? false}
+                onCheckedChange={checked =>
+                  patchPreferences.mutate({ coordinator_enabled: checked })
+                }
+              />
+            </InlineField>
+          </SettingsSection>
 
           <div
             id="pref-general-section-version"

@@ -1151,7 +1151,7 @@ export function ProjectCanvasView({
   const { data: preferences } = usePreferences(project.serverId)
   const coordinatorDelegations = useCoordinatorDelegations(
     projectId,
-    !!preferences?.agents_enabled && !project.server
+    !!preferences?.coordinator_enabled && !project.server
   )
   const worktreeSortMode = useProjectsStore(
     state =>

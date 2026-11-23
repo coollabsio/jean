@@ -4364,7 +4364,6 @@ const AGENT_COMMANDS: &[&str] = &[
     "export_agent_memory",
     "save_agent_journal",
     "search_agent_journal",
-    "mark_agent_notifications_read",
     "get_agent_connector_catalog",
 ];
 
@@ -4522,11 +4521,6 @@ async fn dispatch_agents_command(
                     to,
                     limit,
                 )?)
-            }
-            "mark_agent_notifications_read" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                crate::agents::commands::mark_notifications_read(app, &agent_id)?;
-                Ok(Value::Null)
             }
             "export_agent_memory" => {
                 let agent_id: String = field(args, "agentId", "agent_id")?;

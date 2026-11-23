@@ -292,7 +292,7 @@ export function parseAgentSentMessage(
   }
 }
 
-/** Request from another agent inside an automatic update (see `message_agent` in jean-core). */
+/** Request from another agent inside an automatic update. The `message_agent` tool is gone; old chat history still holds these. */
 export function parseAgentRequest(content: string): AgentSentMessage | null {
   if (!isAgentUpdateMessage(content)) return null
   const match = REQUEST_RE.exec(content)

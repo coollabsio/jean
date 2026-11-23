@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react'
 import { Plus, X } from '@/components/icons/reicon'
 import { AgentIcon } from '@/components/icons/JeanAgentIcon'
-import type { badgeVariants } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Tooltip,
@@ -9,7 +8,6 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import type { VariantProps } from 'class-variance-authority'
 
 /** Look of one list row in an agent tab (unbordered, hover tint). */
 export const AGENT_ROW =
@@ -244,24 +242,6 @@ export function AgentAddButton({
       <TooltipContent>{text}</TooltipContent>
     </Tooltip>
   )
-}
-
-type BadgeVariant = NonNullable<VariantProps<typeof badgeVariants>['variant']>
-
-/** Badge variant for task, delegation, and approval statuses. */
-export function statusVariant(status: string): BadgeVariant {
-  switch (status) {
-    case 'running':
-    case 'active':
-      return 'info'
-    case 'waiting':
-    case 'pending':
-      return 'warning'
-    case 'failed':
-      return 'danger'
-    default:
-      return 'subtle'
-  }
 }
 
 /** Save / discard row at the bottom of a settings panel. */

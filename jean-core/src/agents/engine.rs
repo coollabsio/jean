@@ -1,5 +1,5 @@
 //! Backend loop of the project coordinators. It runs without any client, and
-//! only while the `agents_enabled` preference is on:
+//! only while the `coordinator_enabled` preference is on:
 //! 1. `chat:done` / `chat:error` / `chat:cancelled` mark delegations to check.
 //! 2. Delegation checks read the finished session and queue an update.
 //! 3. Due schedules and event routines queue updates.

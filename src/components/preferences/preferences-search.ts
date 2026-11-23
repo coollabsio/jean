@@ -1030,6 +1030,23 @@ const sectionEntries: PreferenceSearchEntry[] = [
     fallbackAnchorId: 'pref-general-section-advanced',
   },
   {
+    id: 'experimental-coordinator',
+    pane: 'general',
+    paneTitle: 'General',
+    type: 'section',
+    title: 'Project Coordinator',
+    sectionTitle: 'Experimental',
+    keywords: [
+      'coordinator',
+      'agents',
+      'orchestrator',
+      'delegate',
+      'experimental',
+    ],
+    anchorId: 'pref-general-coordinator',
+    fallbackAnchorId: 'pref-general-section-experimental',
+  },
+  {
     id: 'terminal-settings',
     pane: 'terminal',
     paneTitle: 'Terminal',

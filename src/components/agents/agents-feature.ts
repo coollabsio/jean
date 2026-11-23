@@ -9,22 +9,22 @@ import { LOCAL_SERVER_ID } from '@/types/server-resource'
 
 // Kept apart from agents.ts so layout code does not load the agents service.
 
-/** Server IDs with Agents on, local first. Remote settings that are still
+/** Server IDs with the coordinator on, local first. Remote settings that are still
  * loading (undefined) count as off. */
 export function enabledAgentServers(
   localEnabled: boolean | undefined,
-  remotes: { serverId: string; agentsEnabled: boolean | undefined }[]
+  remotes: { serverId: string; coordinatorEnabled: boolean | undefined }[]
 ): string[] {
   return [
     ...(localEnabled ? [LOCAL_SERVER_ID] : []),
-    ...remotes.filter(r => r.agentsEnabled).map(r => r.serverId),
+    ...remotes.filter(r => r.coordinatorEnabled).map(r => r.serverId),
   ]
 }
 
 /**
- * Servers whose Agents setting (Experimental, off by default) is on: the
- * local server and, in the native app, every online remote server. Each
- * server keeps its own agents, so one enabled server is enough to show them.
+ * Servers whose Project Coordinator setting (Experimental, off by default) is
+ * on: the local server and, in the native app, every online remote server.
+ * Each server keeps its own coordinators, so one enabled server is enough.
  */
 export function useAgentsEnabledServers(): string[] {
   const { data: localPreferences } = usePreferences(LOCAL_SERVER_ID)
@@ -40,10 +40,10 @@ export function useAgentsEnabledServers(): string[] {
     })),
   })
   return enabledAgentServers(
-    localPreferences?.agents_enabled,
+    localPreferences?.coordinator_enabled,
     remotes.map((source, index) => ({
       serverId: source.serverId,
-      agentsEnabled: remotePreferences[index]?.data?.agents_enabled,
+      coordinatorEnabled: remotePreferences[index]?.data?.coordinator_enabled,
     }))
   )
 }

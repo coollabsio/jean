@@ -39,13 +39,11 @@ vi.mock('@/services/agents', async importOriginal => ({
   useUpdateAgentMemory: mutation,
   useSupersedeAgentMemory: mutation,
   useDeleteAgentMemory: mutation,
-  useMarkAgentNotificationsRead: mutation,
 }))
 
 const agent = {
   id: 'jean',
   name: 'Jean',
-  unreadNotifications: 0,
 } as AgentSummary
 
 describe('agent details tabs', () => {

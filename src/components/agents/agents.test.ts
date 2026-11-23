@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  agentServerId,
   loadAgentsForServers,
   scopeAgentSummary,
   scopeProjectCoordinator,
@@ -18,7 +17,6 @@ import { describeApproval } from './AgentActivity'
 import { formatRelative } from '@/lib/relative-time'
 import { formatInterval } from './AgentSchedules'
 import { enabledAgentServers } from './agents-feature'
-import { agentRunSummary } from './agent-config'
 
 function agent(overrides: Partial<AgentSummary>): AgentSummary {
   return {
@@ -40,7 +38,6 @@ function agent(overrides: Partial<AgentSummary>): AgentSummary {
     activeDelegations: 0,
     nextScheduleAt: null,
     budgetReached: false,
-    unreadNotifications: 0,
     activity: null,
     backend: null,
     model: null,
@@ -148,8 +145,6 @@ describe('multi-server agents', () => {
     expect(remote.serverName).toBe('Home server')
     expect(remote.backend).toBeNull()
     expect(remote.skills).toEqual([])
-    expect(agentServerId(remote.id)).toBe('srv')
-    expect(agentServerId(local.id)).toBe('local')
   })
 
   it('defaults the run configuration of agents from an older server', () => {
@@ -167,7 +162,6 @@ describe('multi-server agents', () => {
     expect(remote.effort).toBeNull()
     expect(remote.thinkingLevel).toBeNull()
     expect(remote.skills).toEqual([])
-    expect(agentRunSummary(remote)).toBeNull()
   })
 
   it('loads agents from online servers and skips failing ones', async () => {
@@ -195,12 +189,14 @@ describe('enabledAgentServers', () => {
     // Off on this computer, on for a remote server
     expect(
       enabledAgentServers(false, [
-        { serverId: 'srv', agentsEnabled: true },
-        { serverId: 'old', agentsEnabled: undefined },
+        { serverId: 'srv', coordinatorEnabled: true },
+        { serverId: 'old', coordinatorEnabled: undefined },
       ])
     ).toEqual(['srv'])
     expect(
-      enabledAgentServers(true, [{ serverId: 'srv', agentsEnabled: false }])
+      enabledAgentServers(true, [
+        { serverId: 'srv', coordinatorEnabled: false },
+      ])
     ).toEqual(['local'])
     expect(enabledAgentServers(undefined, [])).toEqual([])
   })

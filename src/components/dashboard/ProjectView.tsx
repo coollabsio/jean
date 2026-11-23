@@ -34,9 +34,9 @@ function ProjectViewSwitch({
 }
 
 /**
- * A project page. With Agents on, the user switches between the coordinator
+ * A project page. With Project Coordinator on, the user switches between the coordinator
  * chat and the sessions canvas (last choice per project; coordinator first).
- * Without Agents, and for folders and servers, it is the sessions canvas.
+ * Without it, and for folders and servers, it is the sessions canvas.
  */
 export function ProjectView({
   projectId,
@@ -47,7 +47,7 @@ export function ProjectView({
 }) {
   const { data: preferences } = usePreferences(project.serverId)
   const hasCoordinator =
-    !!preferences?.agents_enabled && !project.server && !isFolder(project)
+    !!preferences?.coordinator_enabled && !project.server && !isFolder(project)
   const mode = useUIStore(
     state => state.projectViewModes[projectId] ?? 'coordinator'
   )

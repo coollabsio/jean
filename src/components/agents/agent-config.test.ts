@@ -3,7 +3,6 @@ import type { AgentSkill } from '@/services/agents'
 import {
   AGENT_DEFAULT_OPTION,
   agentRunPatch,
-  agentRunSummary,
   backendChoices,
   draftFromAgent,
   effortOptionsForBackend,
@@ -167,26 +166,6 @@ describe('agent run patch and summary', () => {
       thinkingLevel: null,
       skills,
     })
-  })
-
-  it('summarizes only the fields that are set', () => {
-    expect(
-      agentRunSummary({ backend: null, model: null, skills: [] })
-    ).toBeNull()
-    expect(
-      agentRunSummary({
-        backend: 'codex',
-        model: 'gpt-5.5',
-        skills: [{ name: 'review' }],
-      })
-    ).toBe('Codex · gpt-5.5 · 1 skill')
-    expect(
-      agentRunSummary({
-        backend: 'grok',
-        model: null,
-        skills: [{ name: 'a' }, { name: 'b' }],
-      })
-    ).toBe('Grok · 2 skills')
   })
 
   it('treats the same skill paths as the same draft', () => {

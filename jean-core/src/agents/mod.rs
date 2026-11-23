@@ -80,10 +80,10 @@ pub fn with_db<T>(
     f(&mut conn)
 }
 
-/// The `agents_enabled` preference, read from disk on every call so a change
+/// The `coordinator_enabled` preference, read from disk on every call so a change
 /// applies without a restart.
 pub fn enabled(app: &AppHandle) -> bool {
-    crate::load_preferences_sync(app).is_ok_and(|prefs| prefs.agents_enabled)
+    crate::load_preferences_sync(app).is_ok_and(|prefs| prefs.coordinator_enabled)
 }
 
 /// Git projects get a coordinator. Folders and managed servers do not.

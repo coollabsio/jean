@@ -49,7 +49,6 @@ export interface AgentSummary {
   activeDelegations: number
   nextScheduleAt: number | null
   budgetReached: boolean
-  unreadNotifications: number
   /** One line about the latest activity (chat reply or notification) */
   activity: string | null
   /**
@@ -316,11 +315,6 @@ export async function loadAgentsForServers(
   )
 }
 
-/** Server of an agent key. */
-export function agentServerId(agentKey: string): string {
-  return parseServerResourceKey(agentKey)?.serverId ?? LOCAL_SERVER_ID
-}
-
 /** Run an agent command on the agent's server (routed by `agentId`).
  * IDs in a remote server's result are scoped like the agent key. */
 async function invokeAgent<T>(
@@ -578,12 +572,6 @@ export function useUpdateAgentMemory() {
 export function useDeleteAgentMemory() {
   return useAgentsMutation((args: { agentId: string; memoryId: number }) =>
     invoke<null>('delete_agent_memory', args)
-  )
-}
-
-export function useMarkAgentNotificationsRead() {
-  return useAgentsMutation((args: { agentId: string }) =>
-    invoke<null>('mark_agent_notifications_read', args)
   )
 }
 

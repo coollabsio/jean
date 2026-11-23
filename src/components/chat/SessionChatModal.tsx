@@ -294,7 +294,7 @@ export const SessionChatModal = memo(function SessionChatModal({
   const { data: projectServerPreferences } = usePreferences(project?.serverId)
   const coordinatorDelegations = useCoordinatorDelegations(
     project?.id ?? null,
-    isOpen && !!projectServerPreferences?.agents_enabled && !isServer
+    isOpen && !!projectServerPreferences?.coordinator_enabled && !isServer
   )
   const zenMode = useUIStore(state => state.zenMode)
   const isModalTerminalOpen = useTerminalStore(
