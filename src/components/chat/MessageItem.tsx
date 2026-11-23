@@ -11,8 +11,8 @@ import { ChatContinuedNotice } from './ChatContinuedNotice'
 import { SessionUpdateLine } from './SessionDelegation'
 import { parseSessionUpdates } from './session-update'
 import {
-  parseInlineNumberedQuestion,
-  withoutInlineQuestion,
+  parseInlineQuestions,
+  withoutInlineQuestions,
 } from './inline-question-utils'
 import { InlineQuestionOptions } from './InlineQuestionOptions'
 import { cn } from '@/lib/utils'
@@ -285,7 +285,7 @@ export const MessageItem = memo(function MessageItem({
   const inlineQuestion = useMemo(
     () =>
       isLastMessage && !hasFollowUpMessage && onSendAnswer
-        ? parseInlineNumberedQuestion(assistantResponse)
+        ? parseInlineQuestions(assistantResponse)
         : null,
     [isLastMessage, hasFollowUpMessage, onSendAnswer, assistantResponse]
   )
@@ -301,7 +301,7 @@ export const MessageItem = memo(function MessageItem({
   // The question buttons replace the same question in the text
   const withoutShownQuestion = (text: string) =>
     shownInlineQuestion
-      ? withoutInlineQuestion(text, shownInlineQuestion)
+      ? withoutInlineQuestions(text, shownInlineQuestion)
       : text
   const shouldRenderTimeline =
     message.role === 'assistant' &&
@@ -1014,8 +1014,7 @@ export const MessageItem = memo(function MessageItem({
 
       {shownInlineQuestion && onSendAnswer && (
         <InlineQuestionOptions
-          question={shownInlineQuestion.question}
-          options={shownInlineQuestion.options}
+          questions={shownInlineQuestion.questions}
           disabled={isSending}
           onSend={onSendAnswer}
         />

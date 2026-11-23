@@ -61,8 +61,8 @@ import { AgentApprovalInline } from '@/components/agents/AgentActivity'
 import { AgentMessageLinkRow } from '@/components/agents/AgentMessageLink'
 import { AgentQuestionCard } from '@/components/agents/AgentQuestionCard'
 import {
-  parseInlineNumberedQuestion,
-  type InlineQuestion,
+  parseInlineQuestions,
+  type InlineQuestions,
 } from './inline-question-utils'
 import { InlineQuestionOptions } from './InlineQuestionOptions'
 import {
@@ -139,7 +139,7 @@ type RenderItem =
       key: string
       latestText: string | null
       /** Numbered question that the latest text asks ("reply with a number") */
-      inlineQuestion: InlineQuestion | null
+      inlineQuestion: InlineQuestions | null
     }
   | { kind: 'question'; message: ChatMessage; globalIndex: number }
   | {
@@ -870,10 +870,10 @@ export const CompactMessageList = memo(
           // A `## Recap` section replaces the whole turn in the compact view
           const shown = text && (extractRecapSection(text) ?? text)
           // A numbered question shows as a question block below the text
-          const asked = shown ? parseInlineNumberedQuestion(shown) : null
+          const asked = shown ? parseInlineQuestions(shown) : null
           const askedBefore =
             !asked && text && text !== shown
-              ? parseInlineNumberedQuestion(text)
+              ? parseInlineQuestions(text)
               : null
           items.push({
             kind: 'compact',
@@ -1311,8 +1311,7 @@ export const CompactMessageList = memo(
                     )}
                     {inlineQuestion && onSendAnswer && (
                       <InlineQuestionOptions
-                        question={inlineQuestion.question}
-                        options={inlineQuestion.options}
+                        questions={inlineQuestion.questions}
                         disabled={isSending}
                         onSend={onSendAnswer}
                       />

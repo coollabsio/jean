@@ -1,6 +1,11 @@
-/** Cue from the inline-question prompt ("Reply with a number:"). */
+/**
+ * Cue from the inline-question prompt: "Reply with a number:" (one choice) or
+ * "Reply with one or more numbers:" (several choices).
+ */
 const REPLY_CUE_RE =
-  /\breply with (?:a|the|one) (?:number|option)\b[^.:?!\n]*[.:]?/i
+  /\breply with (?:a|the|one|one or more|any) (?:numbers?|options?)\b[^.:?!\n]*[.:]?/i
+const MULTIPLE_CUE_RE =
+  /\breply with (?:one or more|any) |\b(?:numbers|options)\b/i
 const ITEM_RE = /^\s{0,3}(\d{1,2})[.)]\s+(.+?)\s*$/
 const MAX_OPTIONS = 8
 
@@ -8,7 +13,13 @@ export interface InlineQuestion {
   /** Last line before the list, without the cue */
   question: string
   options: string[]
-  /** The text without the question, the cue, and the numbered list */
+  /** True when the user can pick more than one option */
+  multiple: boolean
+}
+
+export interface InlineQuestions {
+  questions: InlineQuestion[]
+  /** The text without the questions, the cues, and the numbered lists */
   rest: string
 }
 
@@ -16,6 +27,8 @@ interface NumberedList {
   start: number
   end: number
   options: string[]
+  /** Line with the cue */
+  cue: number
 }
 
 function plain(text: string): string {
@@ -26,6 +39,8 @@ function plain(text: string): string {
     .trim()
 }
 
+const withoutCue = (line: string) => line.replace(REPLY_CUE_RE, '').trimEnd()
+
 /** Index of the nearest non-blank line from `from` in `step` direction. */
 function nearestLine(lines: string[], from: number, step: 1 | -1): number {
   for (let i = from; i >= 0 && i < lines.length; i += step) {
@@ -34,26 +49,19 @@ function nearestLine(lines: string[], from: number, step: 1 | -1): number {
   return -1
 }
 
-/**
- * Question that a backend asked as text: "Reply with a number:" next to a
- * numbered list of 2 to 8 options. Uses the last such list. Null when the
- * text has no such question.
- */
-export function parseInlineNumberedQuestion(
-  text: string
-): InlineQuestion | null {
-  const lines = text.split('\n')
-  let found: NumberedList | null = null
+/** Numbered lists of 2+ items with a reply cue on the line before or after. */
+function cuedLists(lines: string[]): NumberedList[] {
+  const found: NumberedList[] = []
   let current: NumberedList | null = null
 
   const closeList = () => {
     if (!current || current.options.length < 2) return
     const before = nearestLine(lines, current.start - 1, -1)
     const after = nearestLine(lines, current.end + 1, 1)
-    const cued = [before, after].some(
+    const cue = [before, after].find(
       i => i >= 0 && REPLY_CUE_RE.test(lines[i] ?? '')
     )
-    if (cued) found = current
+    if (cue !== undefined) found.push({ ...current, cue })
   }
 
   for (const [index, line] of lines.entries()) {
@@ -69,7 +77,7 @@ export function parseInlineNumberedQuestion(
     const number = Number(item[1])
     if (number === 1) {
       closeList()
-      current = { start: index, end: index, options: [] }
+      current = { start: index, end: index, options: [], cue: -1 }
     }
     if (current && number === current.options.length + 1) {
       current.options.push(plain(item[2] ?? ''))
@@ -80,58 +88,103 @@ export function parseInlineNumberedQuestion(
     }
   }
   closeList()
-
-  const list = found as NumberedList | null
-  if (!list || list.options.length > MAX_OPTIONS) return null
-  if (new Set(list.options).size !== list.options.length) return null
-
-  // The question is the last non-blank line before the list, without the cue
-  const withoutCue = (line: string) => line.replace(REPLY_CUE_RE, '').trimEnd()
-  let questionIndex = -1
-  for (let i = list.start - 1; i >= 0; i--) {
-    if (plain(withoutCue(lines[i] ?? ''))) {
-      questionIndex = i
-      break
-    }
-  }
-  const question =
-    questionIndex >= 0 ? plain(withoutCue(lines[questionIndex] ?? '')) : ''
-
-  // The rest drops the question, the cue, and the list
-  const rest = lines
-    .filter(
-      (_, index) =>
-        index !== questionIndex && (index < list.start || index > list.end)
-    )
-    .map(withoutCue)
-
-  return {
-    question: question || 'Choose an option',
-    options: list.options,
-    rest: rest
-      .join('\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim(),
-  }
+  return found
 }
 
 /**
- * Text without the inline question when it asks the same question as `asked`
- * (the buttons show it). Otherwise the text as it is.
+ * Questions that a backend asked as text: each one is a question line,
+ * a reply cue ("Reply with a number:" or "Reply with one or more numbers:"),
+ * and a numbered list of 2 to 8 options. Null when the text has no such
+ * question.
  */
-export function withoutInlineQuestion(
-  text: string,
-  asked: InlineQuestion
-): string {
-  const parsed = parseInlineNumberedQuestion(text)
-  const same =
-    parsed?.question === asked.question &&
-    parsed.options.length === asked.options.length &&
-    parsed.options.every((option, index) => option === asked.options[index])
-  return same && parsed ? parsed.rest : text
+export function parseInlineQuestions(text: string): InlineQuestions | null {
+  const lines = text.split('\n')
+  const lists = cuedLists(lines)
+  if (lists.length === 0) return null
+
+  const removed = new Set<number>()
+  const questions: InlineQuestion[] = []
+  let previousEnd = -1
+  for (const list of lists) {
+    if (list.options.length > MAX_OPTIONS) return null
+    if (new Set(list.options).size !== list.options.length) return null
+
+    // The question is the last non-blank line before the list (and after the
+    // previous list), without the cue
+    let questionIndex = -1
+    for (let i = list.start - 1; i > previousEnd; i--) {
+      if (plain(withoutCue(lines[i] ?? ''))) {
+        questionIndex = i
+        break
+      }
+    }
+    if (questionIndex >= 0) removed.add(questionIndex)
+    for (let i = list.start; i <= list.end; i++) removed.add(i)
+    questions.push({
+      question:
+        (questionIndex >= 0 && plain(withoutCue(lines[questionIndex] ?? ''))) ||
+        'Choose an option',
+      options: list.options,
+      multiple: MULTIPLE_CUE_RE.test(
+        REPLY_CUE_RE.exec(lines[list.cue] ?? '')?.[0] ?? ''
+      ),
+    })
+    previousEnd = Math.max(list.end, list.cue)
+  }
+
+  const rest = lines
+    .filter((_, index) => !removed.has(index))
+    .map(withoutCue)
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+  return { questions, rest }
 }
 
-/** User reply for a picked option: its number and text. */
-export function inlineQuestionAnswer(options: string[], index: number): string {
-  return `${index + 1}. ${options[index] ?? ''}`
+function sameQuestions(a: InlineQuestion[], b: InlineQuestion[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every(
+      (q, i) =>
+        q.question === b[i]?.question &&
+        q.multiple === b[i]?.multiple &&
+        q.options.length === b[i]?.options.length &&
+        q.options.every((option, j) => option === b[i]?.options[j])
+    )
+  )
+}
+
+/**
+ * Text without the inline questions when it asks the same questions as
+ * `asked` (the buttons show them). Otherwise the text as it is.
+ */
+export function withoutInlineQuestions(
+  text: string,
+  asked: InlineQuestions
+): string {
+  const parsed = parseInlineQuestions(text)
+  return parsed && sameQuestions(parsed.questions, asked.questions)
+    ? parsed.rest
+    : text
+}
+
+/**
+ * User reply for the picked options: "N. option" per pick. With more than
+ * one question, each answer block starts with its question.
+ */
+export function inlineQuestionsAnswer(
+  questions: InlineQuestion[],
+  picks: number[][]
+): string {
+  const answers = questions.map((q, i) =>
+    (picks[i] ?? [])
+      .slice()
+      .sort((a, b) => a - b)
+      .map(index => `${index + 1}. ${q.options[index] ?? ''}`)
+      .join('\n')
+  )
+  if (questions.length === 1) return answers[0] ?? ''
+  return questions
+    .map((q, i) => `${q.question}\n${answers[i] ?? ''}`)
+    .join('\n\n')
 }

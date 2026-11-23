@@ -1,21 +1,48 @@
-import { CircleHelp } from '@/components/icons/reicon'
-import { inlineQuestionAnswer } from './inline-question-utils'
+import { useState } from 'react'
+import { Check, CircleHelp } from '@/components/icons/reicon'
+import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
+import {
+  inlineQuestionsAnswer,
+  type InlineQuestion,
+} from './inline-question-utils'
 
 /**
- * Numbered question that the assistant asked as text, with its options as
- * buttons. A click sends "N. option" as the next user message.
+ * Numbered questions that the assistant asked as text, with their options as
+ * buttons. One single-choice question: a click sends "N. option" as the next
+ * user message. Otherwise the user picks options for each question and sends
+ * all answers with Accept.
  */
 export function InlineQuestionOptions({
-  question,
-  options,
+  questions,
   disabled,
   onSend,
 }: {
-  question: string
-  options: string[]
+  questions: InlineQuestion[]
   disabled: boolean
   onSend: (text: string) => void
 }) {
+  const [picks, setPicks] = useState<number[][]>(() => questions.map(() => []))
+  const sendOnClick = questions.length === 1 && !questions[0]?.multiple
+  const complete = questions.every((_, i) => (picks[i]?.length ?? 0) > 0)
+
+  const pick = (questionIndex: number, optionIndex: number) => {
+    if (sendOnClick) {
+      onSend(inlineQuestionsAnswer(questions, [[optionIndex]]))
+      return
+    }
+    setPicks(current =>
+      questions.map((q, i) => {
+        const selected = current[i] ?? []
+        if (i !== questionIndex) return selected
+        if (!q.multiple) return [optionIndex]
+        return selected.includes(optionIndex)
+          ? selected.filter(index => index !== optionIndex)
+          : [...selected, optionIndex]
+      })
+    )
+  }
+
   return (
     <section
       aria-label="Question"
@@ -23,25 +50,55 @@ export function InlineQuestionOptions({
     >
       <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         <CircleHelp className="size-3.5" />
-        Question
+        {questions.length > 1 ? 'Questions' : 'Question'}
       </div>
-      <p className="text-sm font-medium text-foreground">{question}</p>
-      <div className="flex max-w-full flex-col items-start gap-1.5">
-        {options.map((option, index) => (
-          <button
-            key={option}
-            type="button"
-            disabled={disabled}
-            onClick={() => onSend(inlineQuestionAnswer(options, index))}
-            className="flex max-w-full items-start gap-2.5 rounded-md bg-muted/60 px-3 py-2 text-left text-sm text-foreground transition-colors enabled:cursor-pointer enabled:hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-default disabled:opacity-60"
-          >
-            <span className="flex size-5 shrink-0 items-center justify-center rounded bg-background/60 text-xs font-medium tabular-nums text-muted-foreground">
-              {index + 1}.
-            </span>
-            <span className="min-w-0 flex-1">{option}</span>
-          </button>
-        ))}
-      </div>
+      {questions.map((q, questionIndex) => (
+        <div
+          key={`${questionIndex}-${q.question}`}
+          role="group"
+          aria-label={q.question}
+          className="flex max-w-full flex-col items-start gap-1.5"
+        >
+          <p className="text-sm font-medium text-foreground">
+            {q.question}
+            {q.multiple && (
+              <span className="ml-1.5 text-xs font-normal text-muted-foreground">
+                (pick one or more)
+              </span>
+            )}
+          </p>
+          {q.options.map((option, index) => {
+            const selected = picks[questionIndex]?.includes(index) ?? false
+            return (
+              <button
+                key={option}
+                type="button"
+                disabled={disabled}
+                aria-pressed={sendOnClick ? undefined : selected}
+                onClick={() => pick(questionIndex, index)}
+                className={cn(
+                  'flex max-w-full items-start gap-2.5 rounded-md bg-muted/60 px-3 py-2 text-left text-sm text-foreground ring-inset transition-colors enabled:cursor-pointer enabled:hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-default disabled:opacity-60',
+                  selected && 'bg-primary/15 ring-1 ring-primary/60'
+                )}
+              >
+                <span className="flex size-5 shrink-0 items-center justify-center rounded bg-background/60 text-xs font-medium tabular-nums text-muted-foreground">
+                  {selected ? <Check className="size-3.5" /> : `${index + 1}.`}
+                </span>
+                <span className="min-w-0 flex-1">{option}</span>
+              </button>
+            )
+          })}
+        </div>
+      ))}
+      {!sendOnClick && (
+        <Button
+          size="sm"
+          disabled={disabled || !complete}
+          onClick={() => onSend(inlineQuestionsAnswer(questions, picks))}
+        >
+          Accept
+        </Button>
+      )}
     </section>
   )
 }

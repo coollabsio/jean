@@ -73,7 +73,7 @@ Rules:
 - Keep links: in the whole message, write every issue, PR, commit, advisory, Linear/Sentry issue, or URL with a known link as a Markdown link (for example `[#123](https://github.com/owner/repo/pull/123)`). Do not invent URLs.
 - `Tested against local dev env: Yes` or `Tested against local dev env: No`: include it only when the turn changed code, config, or behavior; Yes only if you verified it in a running local dev env.
 - `### How to test`: only when the turn made changes the user can verify. Max 5 numbered steps, each one plain action with the exact URL or command and the expected result — a manual smoke test of the main behavior if it makes sense. Omit it on read-only turns; never write placeholders like \"N/A\".
-- If the turn ends with a question for the user, put the question at the end of the recap: one line with the question, then `Reply with a number:`, then 2-8 numbered short options. Jean shows them as buttons. Ask the question exactly once: never before the `## Recap` heading, not even in an earlier message of the same turn or when a skill says so.
+- If the turn ends with a question for the user, put the question at the end of the recap: one line with the question, then `Reply with a number:` (or `Reply with one or more numbers:` when several options can apply), then 2-8 numbered short options. For several questions, repeat this block per question, each with its own options; never combine questions into one list. Jean shows them as buttons. Ask each question exactly once: never before the `## Recap` heading, not even in an earlier message of the same turn or when a skill says so.
 - Screenshots or images the user should see: list them in a fenced code block with the language `screenshots`, one absolute path or URL per line, in viewing order. Do not also link them.
 - Plan mode: still call the native plan tool (Claude ExitPlanMode, Codex `<proposed_plan>`, Cursor/OpenCode equivalent). The recap never replaces it.
 - Skip the recap for a single one-line answer with no tool calls.
@@ -150,7 +150,8 @@ mod tests {
     fn recap_holds_inline_question() {
         assert!(RECAP_INSTRUCTION.contains("put the question at the end of the recap"));
         assert!(RECAP_INSTRUCTION.contains("`Reply with a number:`"));
-        assert!(RECAP_INSTRUCTION.contains("Ask the question exactly once"));
+        assert!(RECAP_INSTRUCTION.contains("Ask each question exactly once"));
+        assert!(RECAP_INSTRUCTION.contains("repeat this block per question"));
     }
 
     #[test]
