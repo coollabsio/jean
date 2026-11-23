@@ -202,6 +202,13 @@ pub fn workdir_for_worktree(app: &AppHandle, worktree_id: &str) -> Option<String
     project_path(app, project_id).ok()
 }
 
+/// True when runs in this worktree must not change code. A coordinator
+/// delegates code changes to workspace sessions, so each backend that can
+/// restrict file writes does so for its chat (user messages and wake-ups).
+pub fn code_is_read_only(worktree_id: &str) -> bool {
+    db::project_id_from_coordinator_worktree(worktree_id).is_some()
+}
+
 /// Tell every client to refresh agent data, and run the engine now.
 pub fn notify_changed(app: &AppHandle) {
     emit_cache_keys(app, &["agents"]);
@@ -774,6 +781,153 @@ mod tests {
         assert_eq!(
             with_db(&app, |conn| db::pending_event_count(conn, COORD)).unwrap(),
             1
+        );
+    }
+
+    #[tokio::test]
+    async fn an_update_is_queued_again_when_the_chat_took_another_message_first() {
+        let _registry = crate::chat::registry::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let (_temp, app, _repo) = app_with_project();
+        let chat = commands::get_project_coordinator(&app, PROJECT)
+            .await
+            .unwrap()
+            .chat_session_id;
+        with_db(&app, |conn| {
+            db::add_event(
+                conn,
+                &db::NewEvent {
+                    agent_id: COORD,
+                    kind: "delegation",
+                    body: "Session s-1 finished.",
+                    ..Default::default()
+                },
+            )
+        })
+        .unwrap();
+        let pending = |app: &AppHandle| {
+            with_db(app, |conn| db::pending_events(conn, COORD))
+                .unwrap()
+                .into_iter()
+                .map(|event| event.body)
+                .collect::<Vec<_>>()
+        };
+
+        let delivery = engine::next_delivery(&app, COORD).await.unwrap().unwrap();
+        let message = delivery.message.clone();
+        assert_eq!(pending(&app), Vec::<String>::new());
+
+        // The user's message takes the chat between the tick and the wake
+        let user_send = crate::chat::registry::SendClaim::try_acquire(&chat).unwrap();
+        assert!(!engine::send_delivery(&app, delivery).await);
+        assert_eq!(pending(&app), ["Session s-1 finished."]);
+        assert!(engine::next_delivery(&app, COORD).await.unwrap().is_none());
+
+        // The user's turn ended: the same update is delivered
+        drop(user_send);
+        let again = engine::next_delivery(&app, COORD).await.unwrap().unwrap();
+        assert_eq!(again.message, message);
+        assert_eq!(again.event_ids, [1]);
+    }
+
+    #[tokio::test]
+    async fn listing_coordinators_loads_and_creates_no_chat() {
+        let (_temp, app, _repo) = app_with_project();
+        ensure_coordinator(&app, PROJECT).unwrap();
+        with_db(&app, |conn| {
+            db::add_event(
+                conn,
+                &db::NewEvent {
+                    agent_id: COORD,
+                    kind: "delegation",
+                    body: "Session s-1 finished.",
+                    ..Default::default()
+                },
+            )
+        })
+        .unwrap();
+        let index = crate::chat::storage::get_index_path(&app, COORD_WORKTREE).unwrap();
+
+        let listed = commands::list_agents(&app).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].agent.id, COORD);
+        assert_eq!(listed[0].agent.project_id, PROJECT);
+        assert_eq!(listed[0].agent.name, "Orbit");
+        assert_eq!(listed[0].status, "idle");
+        assert_eq!(listed[0].home_session_id, None);
+        assert_eq!(
+            (listed[0].pending_updates, listed[0].pending_approvals),
+            (1, 0)
+        );
+        assert!(!index.exists());
+
+        // The project view opened the chat: the list names it
+        let chat = commands::get_project_coordinator(&app, PROJECT)
+            .await
+            .unwrap()
+            .chat_session_id;
+        let listed = commands::list_agents(&app).unwrap();
+        assert_eq!(listed[0].home_session_id, Some(chat));
+    }
+
+    #[tokio::test]
+    async fn project_settings_apply_to_the_coordinator_chat() {
+        let (_temp, app, _repo) = app_with_project();
+        let mut data = crate::projects::storage::load_projects_data(&app).unwrap();
+        let project = data.find_project_mut(PROJECT).unwrap();
+        project.custom_system_prompt = Some("Use British English.".to_string());
+        project.default_backend = Some("codex".to_string());
+        project.enabled_mcp_servers = Some(vec!["claude:sentry".to_string()]);
+        crate::projects::storage::save_projects_data(&app, &data).unwrap();
+
+        let data = crate::projects::storage::load_projects_data(&app).unwrap();
+        let owner = |worktree_id: &str| {
+            data.project_for_worktree(worktree_id)
+                .map(|project| (project.id.as_str(), project.custom_system_prompt.as_deref()))
+        };
+        assert_eq!(
+            owner(COORD_WORKTREE),
+            Some((PROJECT, Some("Use British English.")))
+        );
+        assert_eq!(owner("__coord_gone__"), None);
+        assert_eq!(owner("__jean_agent__"), None);
+        // A real worktree still resolves through its record
+        let with_worktree: crate::projects::types::ProjectsData =
+            serde_json::from_value(serde_json::json!({
+                "projects": [
+                    { "id": "p-2", "name": "Other", "path": "/other", "default_branch": "main", "added_at": 1 },
+                ],
+                "worktrees": [
+                    { "id": "wt-1", "project_id": "p-2", "name": "fix-login", "path": "/wt/fix-login", "branch": "fix-login", "created_at": 1 },
+                ],
+            }))
+            .unwrap();
+        assert_eq!(
+            with_worktree
+                .project_for_worktree("wt-1")
+                .map(|project| project.id.as_str()),
+            Some("p-2")
+        );
+        assert_eq!(
+            crate::chat::resolve_default_backend(&app, Some(COORD_WORKTREE)),
+            crate::chat::types::Backend::Codex
+        );
+
+        // A wake-up uses the project's MCP servers until the chat has its own choice
+        let chat = commands::get_project_coordinator(&app, PROJECT)
+            .await
+            .unwrap()
+            .chat_session_id;
+        assert_eq!(
+            connectors::project_enabled_servers(&app, &chat, PROJECT),
+            ["claude:sentry"]
+        );
+        // The chat starts on the project's backend, not the global one
+        let sessions = crate::chat::storage::load_sessions_by_id(&app, COORD_WORKTREE).unwrap();
+        assert_eq!(
+            sessions.sessions[0].backend,
+            crate::chat::types::Backend::Codex
         );
     }
 

@@ -5,11 +5,9 @@ import {
   usePreferences,
 } from '@/services/preferences'
 import { useSessionServerSources } from '@/services/multi-server-sessions'
-import { useUIStore } from '@/store/ui-store'
 import { LOCAL_SERVER_ID } from '@/types/server-resource'
 
-// Kept apart from agents.ts so layout code (sidebar tabs, sidebar) does not load
-// the agents service.
+// Kept apart from agents.ts so layout code does not load the agents service.
 
 /** Server IDs with Agents on, local first. Remote settings that are still
  * loading (undefined) count as off. */
@@ -53,10 +51,4 @@ export function useAgentsEnabledServers(): string[] {
 /** Agents are on for at least one server. */
 export function useAgentsEnabled(): boolean {
   return useAgentsEnabledServers().length > 0
-}
-
-/** Agents page is open: section selected and feature enabled. */
-export function useShowAgents(): boolean {
-  const agentsSelected = useUIStore(state => state.railSection === 'agents')
-  return useAgentsEnabled() && agentsSelected
 }

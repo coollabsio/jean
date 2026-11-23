@@ -4277,16 +4277,13 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               <InlineField
                 id="pref-general-agents"
                 label="Agents"
-                description="Show the Agents tab with Jean, the coordinator agent. Agents are no longer available to turn on: if you turn this off, you cannot turn it on again."
+                description="Give each project a coordinator you chat with. It starts work in worktrees and sessions. Agents are no longer available to turn on: if you turn this off, you cannot turn it on again."
               >
                 <Switch
                   checked={preferences?.agents_enabled ?? false}
-                  onCheckedChange={checked => {
+                  onCheckedChange={checked =>
                     patchPreferences.mutate({ agents_enabled: checked })
-                    // Leave the Agents page when the feature is turned off
-                    if (!checked)
-                      useUIStore.getState().setRailSection('workspace')
-                  }}
+                  }
                 />
               </InlineField>
             </SettingsSection>

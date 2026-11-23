@@ -15,7 +15,7 @@ pub use steer::steer;
 use super::opencode::{
     agent_for_execution_mode, emit_backend_retry, emit_chat_chunk, emit_chat_done, emit_chat_error,
     emit_chat_thinking, emit_chat_tool_result, emit_chat_tool_use, emit_permission_replied,
-    normalize_opencode_tool, parse_provider_model, permission_rules_for_mode,
+    normalize_opencode_tool, parse_provider_model, permission_rules,
     should_auto_approve_opencode_permissions, structured_output_text_prompt, variant_for_effort,
     OpenCodeResponse,
 };
@@ -58,8 +58,8 @@ pub struct TurnRequest<'a> {
 
 /// Jean's 1.x permission rules (`permission`/`pattern`/`action`) in the 2.x
 /// shape (`action`/`resource`/`effect`). Action names are the same in both.
-fn v2_permission_rules(mode: &str) -> Option<Value> {
-    let rules = permission_rules_for_mode(mode)?;
+fn v2_permission_rules(mode: &str, read_only_code: bool) -> Option<Value> {
+    let rules = permission_rules(mode, read_only_code)?;
     Some(Value::Array(
         rules
             .as_array()?
@@ -102,7 +102,7 @@ fn prepare_session(client: &V2Client, req: &TurnRequest<'_>) -> Result<String, S
     let mode = req.execution_mode.unwrap_or("build");
     let agent = agent_for_execution_mode(req.execution_mode);
     let model = v2_model(req.model, req.reasoning_effort);
-    let rules = v2_permission_rules(mode);
+    let rules = v2_permission_rules(mode, crate::agents::code_is_read_only(req.worktree_id));
 
     if let Some(existing) = req.existing_opencode_session_id {
         let configured = client.set_agent(existing, agent).and_then(|()| {
@@ -1126,7 +1126,7 @@ mod tests {
 
     #[test]
     fn permission_rules_use_the_v2_shape() {
-        let rules = v2_permission_rules("yolo").unwrap();
+        let rules = v2_permission_rules("yolo", false).unwrap();
         assert_eq!(
             rules,
             json!([
@@ -1134,10 +1134,19 @@ mod tests {
                 { "action": "external_directory", "resource": "*", "effect": "allow" }
             ])
         );
-        let plan = v2_permission_rules("plan").unwrap();
+        let plan = v2_permission_rules("plan", false).unwrap();
         assert_eq!(
             plan[0],
             json!({ "action": "*", "resource": "*", "effect": "deny" })
+        );
+        // A coordinator chat cannot edit files, even with full access
+        assert_eq!(
+            v2_permission_rules("yolo", true).unwrap(),
+            json!([
+                { "action": "*", "resource": "*", "effect": "allow" },
+                { "action": "external_directory", "resource": "*", "effect": "allow" },
+                { "action": "edit", "resource": "*", "effect": "deny" }
+            ])
         );
     }
 

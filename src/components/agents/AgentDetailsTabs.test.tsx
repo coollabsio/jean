@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest'
 import userEvent from '@testing-library/user-event'
 import { render, screen, within } from '@/test/test-utils'
 import type { AgentDetails, AgentSummary } from '@/services/agents'
-import { AgentInbox } from './AgentInbox'
 import { AgentMemoryView } from './AgentMemoryView'
 
 const { details, mutation } = vi.hoisted(() => {
@@ -80,12 +79,5 @@ describe('agent details tabs', () => {
     expect(
       screen.getByRole('menuitem', { name: 'Copy as Markdown' })
     ).toBeVisible()
-  })
-
-  it('Inbox shows a one-line empty state without a help icon', () => {
-    render(<AgentInbox agent={agent} />)
-
-    expect(screen.getByText('No messages yet.')).toBeVisible()
-    expect(screen.queryByRole('button', { name: /^About/ })).toBeNull()
   })
 })

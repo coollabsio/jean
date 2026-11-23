@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Archive } from '@/components/icons/reicon'
-import { useSelectedAgent } from '@/components/agents/agents'
+import { coordinatorAgentIdForWorktree } from '@/components/agents/agents'
 import { formatLocalTime } from '@/components/chat/time-utils'
 import {
   Dialog,
@@ -14,7 +14,14 @@ import { useAgentDetails } from '@/services/agents'
 import { chatContinuedJournalId } from './message-content-utils'
 
 /** Shown in place of Jean's message that starts a continued agent chat. */
-export function ChatContinuedNotice({ content }: { content: string }) {
+export function ChatContinuedNotice({
+  content,
+  worktreeId,
+}: {
+  content: string
+  /** Worktree of the coordinator chat */
+  worktreeId: string | null
+}) {
   const journalId = chatContinuedJournalId(content)
   const [open, setOpen] = useState(false)
   return (
@@ -36,6 +43,7 @@ export function ChatContinuedNotice({ content }: { content: string }) {
       )}
       {journalId && open && (
         <JournalEntryDialog
+          agentId={coordinatorAgentIdForWorktree(worktreeId)}
           journalId={journalId}
           onClose={() => setOpen(false)}
         />
@@ -45,14 +53,15 @@ export function ChatContinuedNotice({ content }: { content: string }) {
 }
 
 function JournalEntryDialog({
+  agentId,
   journalId,
   onClose,
 }: {
+  agentId: string | null
   journalId: number
   onClose: () => void
 }) {
-  const { agent } = useSelectedAgent()
-  const { data, isLoading } = useAgentDetails(agent?.id ?? null)
+  const { data, isLoading } = useAgentDetails(agentId)
   const entry = data?.journal.find(item => item.id === journalId)
   return (
     <Dialog open onOpenChange={next => !next && onClose()}>

@@ -21,9 +21,7 @@ import { scheduleIdleWork } from '@/lib/idle'
 import { lazyWithPreload, preloadWhenIdle } from '@/lib/lazy-preload'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { JeanLoadingScreen } from '@/components/shared/JeanLoadingScreen'
-import { AgentPage } from '@/components/agents/AgentPage'
 import { AgentNotificationsListener } from '@/components/agents/AgentNotificationsListener'
-import { useShowAgents } from '@/components/agents/agents-feature'
 import { ServerOfflineView, useUnreachableServer } from './ServerOfflineView'
 
 const ChatWindow = lazyWithPreload(() =>
@@ -32,9 +30,9 @@ const ChatWindow = lazyWithPreload(() =>
   }))
 )
 
-const ProjectCanvasView = lazyWithPreload(() =>
-  import('@/components/dashboard/ProjectCanvasView').then(mod => ({
-    default: mod.ProjectCanvasView,
+const ProjectView = lazyWithPreload(() =>
+  import('@/components/dashboard/ProjectView').then(mod => ({
+    default: mod.ProjectView,
   }))
 )
 
@@ -57,7 +55,6 @@ export const MainWindowContent = memo(function MainWindowContent({
 }: MainWindowContentProps) {
   const activeWorktreePath = useChatStore(state => state.activeWorktreePath)
   const activeWorktreeId = useChatStore(state => state.activeWorktreeId)
-  const showAgents = useShowAgents()
   const isMobile = useIsMobile()
 
   const selectedProjectId = useProjectsStore(state => state.selectedProjectId)
@@ -77,14 +74,13 @@ export const MainWindowContent = memo(function MainWindowContent({
   useEffect(() => scheduleIdleWork(() => setBackendCheckReady(true), 1500), [])
   // Switching between canvas and chat must not wait for the other view's chunk.
   useEffect(
-    () => preloadWhenIdle([ChatWindow.preload, ProjectCanvasView.preload]),
+    () => preloadWhenIdle([ChatWindow.preload, ProjectView.preload]),
     []
   )
 
   const realProjects = projects.filter(p => !isFolder(p))
 
-  const showWelcome =
-    !showAgents && !activeWorktreePath && !selectedProjectId && !children
+  const showWelcome = !activeWorktreePath && !selectedProjectId && !children
   const shouldCheckBackends = backendCheckReady && showWelcome
   const { installedBackends, isLoading: backendsLoading } =
     useInstalledBackends({
@@ -132,7 +128,7 @@ export const MainWindowContent = memo(function MainWindowContent({
     <ServerOfflineView server={unreachableServer} />
   ) : selectedProjectId && selectedProject ? (
     <Suspense fallback={<JeanLoadingScreen />}>
-      <ProjectCanvasView
+      <ProjectView
         key={selectedProjectId}
         projectId={selectedProjectId}
         project={selectedProject}
@@ -225,7 +221,7 @@ export const MainWindowContent = memo(function MainWindowContent({
           />
         </div>
       )}
-      {activeWorktreePath && !showAgents && !unreachableServer ? (
+      {activeWorktreePath && !unreachableServer ? (
         <div
           ref={isMobile ? sidebarSwipeContainerRef : undefined}
           className="relative h-full w-full"
@@ -249,7 +245,7 @@ export const MainWindowContent = memo(function MainWindowContent({
           className="relative flex h-full w-full min-w-0 flex-col bg-background"
           data-testid="mobile-swipe-open-sidebar"
         >
-          {showAgents ? <AgentPage /> : nonChatContent}
+          {nonChatContent}
         </div>
       )}
     </div>

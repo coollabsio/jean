@@ -1,32 +1,12 @@
-import { useCallback } from 'react'
-import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
-import { parseServerResourceKey } from '@/lib/server-resource'
 import { useProjects, useWorktree } from '@/services/projects'
 import {
   useAgentDetails,
-  useAgentsList,
   useDecideAgentApproval,
   type AgentApproval,
-  type AgentDelegation,
-  type AgentSummary,
 } from '@/services/agents'
-import { openSessionInWorktree } from '@/components/chat/open-session'
 import { AgentQuestionCard } from './AgentQuestionCard'
-import { useAgentsEnabledServers } from './agents-feature'
-import {
-  AgentEmpty,
-  AgentList,
-  AgentLoading,
-  AgentNotice,
-  AgentSection,
-  AgentTabBody,
-  statusVariant,
-  AGENT_ROW,
-} from './agent-ui'
-import { formatRelative } from '@/lib/relative-time'
+import { coordinatorAgentIdForWorktree } from './agents'
 
 /** One line that says what an approval will do, with names, not IDs. */
 export function describeApproval(
@@ -105,62 +85,6 @@ function useTargetName(approval: AgentApproval): string | undefined {
   )
 }
 
-function ApprovalRow({ approval }: { approval: AgentApproval }) {
-  const decide = useDecide(approval)
-  const targetName = useTargetName(approval)
-  const run = decide.run
-  return (
-    <li
-      className={cn(
-        AGENT_ROW,
-        'flex flex-col gap-2 sm:flex-row sm:items-center'
-      )}
-    >
-      <div className="min-w-0 flex-1">
-        <p className="text-sm text-foreground">
-          {describeApproval(approval, targetName)}
-        </p>
-        {approval.status !== 'pending' && (
-          <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Badge variant={statusVariant(approval.status)}>
-              {approval.status}
-            </Badge>
-            {approval.result ? (
-              <span
-                className={cn(
-                  'truncate',
-                  approval.status === 'failed' && 'text-destructive'
-                )}
-              >
-                {approval.result}
-              </span>
-            ) : null}
-          </p>
-        )}
-      </div>
-      {approval.status === 'pending' && (
-        <div className="flex shrink-0 gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={decide.isPending}
-            onClick={() => run(false)}
-          >
-            Deny
-          </Button>
-          <Button
-            size="sm"
-            disabled={decide.isPending}
-            onClick={() => run(true)}
-          >
-            Approve
-          </Button>
-        </div>
-      )}
-    </li>
-  )
-}
-
 /** Approval request inside the agent chat, with its current status. */
 export function AgentApprovalInline({
   approvalId,
@@ -170,9 +94,7 @@ export function AgentApprovalInline({
   /** Worktree of the session that asked for approval */
   worktreeId: string | null | undefined
 }) {
-  const agents = useAgentsList(useAgentsEnabledServers()).data ?? []
-  const agent = agents.find(a => a.worktreeId === worktreeId)
-  const { data } = useAgentDetails(agent?.id ?? null)
+  const { data } = useAgentDetails(coordinatorAgentIdForWorktree(worktreeId))
   const approval = data?.approvals.find(a => a.id === approvalId)
   if (!approval) return null
   return <ApprovalQuestion approval={approval} />
@@ -206,123 +128,5 @@ function ApprovalQuestion({ approval }: { approval: AgentApproval }) {
         </p>
       )}
     </>
-  )
-}
-
-function DelegationRow({ delegation }: { delegation: AgentDelegation }) {
-  // Agent sessions use reserved IDs (also when scoped to a remote server)
-  const isAgentSession = (
-    parseServerResourceKey(delegation.worktreeId)?.resourceId ??
-    delegation.worktreeId
-  ).startsWith('__')
-  const { data: worktree } = useWorktree(
-    isAgentSession ? null : delegation.worktreeId
-  )
-
-  const open = useCallback(() => {
-    if (worktree) openSessionInWorktree(worktree, delegation.sessionId)
-  }, [worktree, delegation.sessionId])
-
-  return (
-    <li className={cn(AGENT_ROW, 'flex items-start gap-2')}>
-      <div className="min-w-0 flex-1">
-        <p className="flex items-center gap-2 text-sm">
-          <span className="truncate text-foreground">
-            {isAgentSession
-              ? 'Agent request'
-              : (worktree?.name ?? delegation.worktreeId)}
-          </span>
-          <Badge variant={statusVariant(delegation.status)}>
-            {delegation.status}
-          </Badge>
-          <span className="shrink-0 text-2xs tabular-nums text-muted-foreground">
-            {formatRelative(delegation.updatedAt)}
-          </span>
-        </p>
-        {delegation.lastSummary ? (
-          <p className="line-clamp-2 text-xs text-muted-foreground">
-            {delegation.lastSummary}
-          </p>
-        ) : null}
-      </div>
-      {worktree && (
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-7 text-xs"
-          onClick={open}
-        >
-          Open
-        </Button>
-      )}
-    </li>
-  )
-}
-
-function Section({
-  title,
-  description,
-  empty,
-  children,
-}: {
-  title: string
-  description: string
-  empty: string
-  children: React.ReactNode[]
-}) {
-  return (
-    <AgentSection
-      title={title}
-      count={children.length}
-      description={description}
-    >
-      {children.length > 0 ? (
-        <AgentList>{children}</AgentList>
-      ) : (
-        <AgentEmpty title={empty} />
-      )}
-    </AgentSection>
-  )
-}
-
-/** Approvals and followed sessions of an agent. */
-export function AgentActivity({ agent }: { agent: AgentSummary }) {
-  const { data, isLoading } = useAgentDetails(agent.id)
-  if (isLoading || !data) {
-    return (
-      <AgentTabBody>
-        <AgentLoading label="Loading activity…" />
-      </AgentTabBody>
-    )
-  }
-  const pending = data.approvals.filter(a => a.status === 'pending')
-  const decided = data.approvals.filter(a => a.status !== 'pending')
-  return (
-    <AgentTabBody>
-      {agent.budgetReached && (
-        <AgentNotice>
-          Hourly limit reached ({agent.maxWakesPerHour} wake-ups). Updates wait
-          until the next hour.
-        </AgentNotice>
-      )}
-      <Section
-        title="Approvals"
-        description="Destructive actions the agent asked you to allow."
-        empty="No approval requests."
-      >
-        {[...pending, ...decided].map(approval => (
-          <ApprovalRow key={approval.id} approval={approval} />
-        ))}
-      </Section>
-      <Section
-        title="Followed sessions"
-        description="Project sessions the agent started or watches."
-        empty="The agent does not follow any session yet."
-      >
-        {data.delegations.map(delegation => (
-          <DelegationRow key={delegation.id} delegation={delegation} />
-        ))}
-      </Section>
-    </AgentTabBody>
   )
 }

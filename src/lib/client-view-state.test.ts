@@ -68,32 +68,35 @@ describe('client view state', () => {
     expect(loadClientViewState()).toEqual(state)
   })
 
-  it('restores the open Agents view and falls back for invalid values', () => {
+  it('restores project view modes and the coordinator sidebar', () => {
     saveClientViewState({
       ...defaultClientViewState,
-      rail_section: 'agents',
-      rail_sidebar_visible: { workspace: false },
-      selected_agent_id: 'reviewer',
+      project_view_modes: { p1: 'sessions', 'srv:p2': 'coordinator' },
+      coordinator_sidebar_open: true,
+      coordinator_sidebar_width: 420,
     })
-    expect(loadClientViewState().rail_section).toBe('agents')
-    expect(loadClientViewState().rail_sidebar_visible).toEqual({
-      workspace: false,
+    const loaded = loadClientViewState()
+    expect(loaded.project_view_modes).toEqual({
+      p1: 'sessions',
+      'srv:p2': 'coordinator',
     })
-    expect(loadClientViewState().selected_agent_id).toBe('reviewer')
+    expect(loaded.coordinator_sidebar_open).toBe(true)
+    expect(loaded.coordinator_sidebar_width).toBe(420)
 
     const saved = JSON.parse(storage.get(CLIENT_VIEW_STATE_STORAGE_KEY) ?? '{}')
     storage.set(
       CLIENT_VIEW_STATE_STORAGE_KEY,
       JSON.stringify({
         ...saved,
-        rail_section: 'bogus',
-        rail_sidebar_visible: { workspace: 'no', other: true },
-        selected_agent_id: '',
+        project_view_modes: { p1: 'bogus', p2: 'sessions' },
+        coordinator_sidebar_open: 'yes',
+        coordinator_sidebar_width: 'wide',
       })
     )
-    expect(loadClientViewState().rail_section).toBe('workspace')
-    expect(loadClientViewState().rail_sidebar_visible).toEqual({})
-    expect(loadClientViewState().selected_agent_id).toBe('jean')
+    const fallback = loadClientViewState()
+    expect(fallback.project_view_modes).toEqual({ p2: 'sessions' })
+    expect(fallback.coordinator_sidebar_open).toBe(false)
+    expect(fallback.coordinator_sidebar_width).toBe(360)
   })
 
   it('keeps the agents Advanced toggle and defaults it to off', () => {

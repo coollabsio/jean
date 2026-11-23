@@ -1,4 +1,5 @@
 import type { ChatMessage, ToolCall } from '@/types/chat'
+import type { AgentDelegation } from '@/services/agents'
 import { extractJeanMcpBareToolName } from '@/components/chat/ToolCallInline'
 import {
   assistantTextParts,
@@ -10,7 +11,10 @@ import {
   stripAllMarkers,
 } from '@/components/chat/message-content-utils'
 
-/** A message an agent sent with `message_agent` or `send_chat_message`. */
+/**
+ * Work an agent started: a message sent with `message_agent` or
+ * `send_chat_message`, or a worktree made with `create_worktree`.
+ */
 export type AgentMessageLink =
   | { kind: 'agent'; toolId: string; agentId: string; message: string }
   | {
@@ -21,6 +25,13 @@ export type AgentMessageLink =
       worktreeId?: string
       worktreePath?: string
       name?: string
+    }
+  | {
+      kind: 'worktree'
+      toolId: string
+      name: string
+      worktreeId?: string
+      worktreePath?: string
     }
 
 export type ReplyItem =
@@ -40,23 +51,51 @@ function str(value: unknown): string | undefined {
   return typeof value === 'string' && value ? value : undefined
 }
 
-function parseOutput(output: string | undefined): Record<string, unknown> {
-  if (!output) return {}
+function parseJson(text: string): unknown {
   try {
-    const value: unknown = JSON.parse(output)
-    return value && typeof value === 'object'
-      ? (value as Record<string, unknown>)
-      : {}
+    return JSON.parse(text)
   } catch {
-    return {}
+    return undefined
   }
+}
+
+/** Result object of a Jean MCP call. Backends store it raw or still wrapped
+ * in MCP text content (`{content: [{type: 'text', text}]}` or the array). */
+function parseOutput(output: string | undefined): Record<string, unknown> {
+  let value = output ? parseJson(output) : undefined
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const content = (value as Record<string, unknown>).content
+    if (Array.isArray(content)) value = content
+  }
+  if (Array.isArray(value)) {
+    const text = value.find(
+      (part): part is { text: string } =>
+        !!part && typeof part === 'object' && typeof part.text === 'string'
+    )?.text
+    value = text ? parseJson(text) : undefined
+  }
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {}
 }
 
 export function agentMessageLink(tool: ToolCall): AgentMessageLink | null {
   if (tool.is_error) return null
   const name = extractJeanMcpBareToolName(tool.name)
-  if (name !== 'message_agent' && name !== 'send_chat_message') return null
   const input = (tool.input ?? {}) as Record<string, unknown>
+  if (name === 'create_worktree') {
+    // Without a result the call is still running
+    if (!tool.output) return null
+    const worktree = parseOutput(tool.output)
+    return {
+      kind: 'worktree',
+      toolId: tool.id,
+      name: str(worktree.name) ?? str(input.customName) ?? 'worktree',
+      worktreeId: str(worktree.id),
+      worktreePath: str(worktree.path),
+    }
+  }
+  if (name !== 'message_agent' && name !== 'send_chat_message') return null
   const message = str(input.message) ?? ''
   if (name === 'message_agent') {
     const agentId = str(input.agentId)
@@ -80,6 +119,30 @@ export function agentMessageLink(tool: ToolCall): AgentMessageLink | null {
         ? `${worktreeName}: ${sessionName}`
         : (worktreeName ?? sessionName),
   }
+}
+
+/**
+ * Status of the delegation a spawn card started: the newest delegation to its
+ * session (sent message) or worktree (created worktree).
+ */
+export function spawnDelegationStatus(
+  link: AgentMessageLink,
+  delegations: AgentDelegation[] | undefined
+): string | null {
+  const matches = (d: AgentDelegation) =>
+    link.kind === 'session'
+      ? d.sessionId === link.sessionId
+      : link.kind === 'worktree' && d.worktreeId === link.worktreeId
+  let latest: AgentDelegation | undefined
+  for (const d of delegations ?? [])
+    if (matches(d) && (!latest || d.id > latest.id)) latest = d
+  return latest?.status ?? null
+}
+
+/** Short one-line quote of a message for a spawn card. */
+export function messageSnippet(message: string, max = 48): string {
+  const line = message.trim().split('\n')[0]?.trim() ?? ''
+  return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line
 }
 
 const APPROVAL_REQUIRED_RE = /\\?"approvalRequired\\?"\s*:\s*true/

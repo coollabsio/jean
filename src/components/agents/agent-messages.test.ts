@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { ChatMessage } from '@/types/chat'
+import type { AgentDelegation } from '@/services/agents'
 import {
+  messageSnippet,
   agentApprovalId,
   agentMessageLink,
   agentQuestion,
@@ -11,7 +13,79 @@ import {
   conversationEntries,
   parseAgentRequest,
   parseAgentSentMessage,
+  spawnDelegationStatus,
 } from './agent-messages'
+
+describe('spawnDelegationStatus', () => {
+  const delegation = (
+    id: number,
+    sessionId: string,
+    worktreeId: string,
+    status: string
+  ): AgentDelegation => ({
+    id,
+    agentId: 'coord_p1',
+    sessionId,
+    worktreeId,
+    hop: 0,
+    status,
+    lastEvent: null,
+    lastError: null,
+    lastSummary: null,
+    checkAfter: null,
+    updatedAt: 0,
+  })
+  const delegations = [
+    delegation(1, 's1', 'w1', 'done'),
+    delegation(3, 's1', 'w1', 'waiting'),
+    delegation(2, 's2', 'w1', 'failed'),
+  ]
+
+  it('uses the newest delegation to the sent session', () => {
+    expect(
+      spawnDelegationStatus(
+        { kind: 'session', toolId: 't', sessionId: 's1', message: 'go' },
+        delegations
+      )
+    ).toBe('waiting')
+    expect(
+      spawnDelegationStatus(
+        { kind: 'session', toolId: 't', sessionId: 's2', message: 'go' },
+        delegations
+      )
+    ).toBe('failed')
+  })
+
+  it('uses the newest delegation on the created worktree', () => {
+    expect(
+      spawnDelegationStatus(
+        { kind: 'worktree', toolId: 't', name: 'x', worktreeId: 'w1' },
+        delegations
+      )
+    ).toBe('waiting')
+  })
+
+  it('shows nothing without a matching delegation', () => {
+    expect(
+      spawnDelegationStatus(
+        { kind: 'session', toolId: 't', sessionId: 's9', message: 'go' },
+        delegations
+      )
+    ).toBeNull()
+    expect(
+      spawnDelegationStatus(
+        { kind: 'worktree', toolId: 't', name: 'x' },
+        delegations
+      )
+    ).toBeNull()
+    expect(
+      spawnDelegationStatus(
+        { kind: 'session', toolId: 't', sessionId: 's1', message: 'go' },
+        undefined
+      )
+    ).toBeNull()
+  })
+})
 
 function assistant(partial: Partial<ChatMessage>): ChatMessage {
   return {
@@ -36,6 +110,17 @@ const REQUEST_UPDATE =
   '### 1. message\nRequest from agent Haruvo (`ag-1`):\n\nCheck the build.\n\n' +
   'Your final reply in this turn is sent back to Haruvo automatically.\n\n' +
   'Decide the next step.'
+
+describe('messageSnippet', () => {
+  it('keeps the first line and cuts long text', () => {
+    expect(messageSnippet('  Fix the OAuth login\nDetails…')).toBe(
+      'Fix the OAuth login'
+    )
+    expect(
+      messageSnippet('Fix the OAuth callback so it keeps the state', 20)
+    ).toBe('Fix the OAuth callb…')
+  })
+})
 
 describe('agentMessageLink', () => {
   it('reads message_agent calls', () => {
@@ -72,6 +157,46 @@ describe('agentMessageLink', () => {
       worktreePath: '/tmp/w9',
       name: 'Haruvo: integrate Beacon',
     })
+  })
+
+  it('reads create_worktree calls from the worktree in the MCP result', () => {
+    const worktree = { id: 'w7', name: 'fix-login', path: '/w/fix-login' }
+    const call = (output?: string) => ({
+      id: 't7',
+      name: 'mcp__jean__create_worktree',
+      input: { projectId: 'p1', customName: 'login-fix' },
+      output,
+    })
+    const expected = {
+      kind: 'worktree',
+      toolId: 't7',
+      name: 'fix-login',
+      worktreeId: 'w7',
+      worktreePath: '/w/fix-login',
+    }
+    expect(agentMessageLink(call(JSON.stringify(worktree)))).toEqual(expected)
+    expect(
+      agentMessageLink(
+        call(
+          JSON.stringify({
+            content: [{ type: 'text', text: JSON.stringify(worktree) }],
+          })
+        )
+      )
+    ).toEqual(expected)
+    expect(
+      agentMessageLink(
+        call(JSON.stringify([{ type: 'text', text: JSON.stringify(worktree) }]))
+      )
+    ).toEqual(expected)
+    expect(agentMessageLink(call('not json'))).toEqual({
+      kind: 'worktree',
+      toolId: 't7',
+      name: 'login-fix',
+      worktreeId: undefined,
+      worktreePath: undefined,
+    })
+    expect(agentMessageLink(call())).toBeNull()
   })
 
   it('ignores failed calls and other tools', () => {

@@ -20,6 +20,4 @@ export function openSessionInWorktree(
   chat.setActiveSession(worktree.id, sessionId)
   const ui = useUIStore.getState()
   ui.markWorktreeForAutoOpenSession(worktree.id, sessionId)
-  // Leave the Agents page so the project canvas can open the session
-  ui.setRailSection('workspace')
 }

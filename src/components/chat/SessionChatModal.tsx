@@ -49,6 +49,8 @@ import {
   useCloseSessions,
 } from '@/services/chat'
 import { usePreferences } from '@/services/preferences'
+import { useCoordinatorDelegations } from '@/components/agents/agents'
+import { CoordinatorBadge } from '@/components/agents/CoordinatorBadge'
 import { useQueryClient } from '@tanstack/react-query'
 import { useHoverIntent } from '@/hooks/useHoverIntent'
 import { LOCAL_SERVER_ID } from '@/types/server-resource'
@@ -289,6 +291,11 @@ export const SessionChatModal = memo(function SessionChatModal({
   const isMobile = useIsMobile()
   const isTouch = useIsTouchDevice()
   const isServer = !!project?.server
+  const { data: projectServerPreferences } = usePreferences(project?.serverId)
+  const coordinatorDelegations = useCoordinatorDelegations(
+    project?.id ?? null,
+    isOpen && !!projectServerPreferences?.agents_enabled && !isServer
+  )
   const zenMode = useUIStore(state => state.zenMode)
   const isModalTerminalOpen = useTerminalStore(
     state => state.modalTerminalOpen[worktreeId] ?? false
@@ -1518,6 +1525,9 @@ export const SessionChatModal = memo(function SessionChatModal({
                                         ? 'Generating…'
                                         : session.name}
                                     </span>
+                                    {coordinatorDelegations.sessionIds.has(
+                                      session.id
+                                    ) && <CoordinatorBadge />}
                                   </button>
                                 </TooltipTrigger>
                                 <TooltipContent side="bottom">

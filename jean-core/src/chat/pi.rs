@@ -543,9 +543,11 @@ fn pi_thinking_level(effort: Option<&super::types::EffortLevel>) -> Option<&str>
     }
 }
 
-fn pi_tools_for_mode(mode: &str) -> &'static str {
+/// `read_only_code` (coordinator chats) drops the file-writing tools.
+fn pi_tools_for_mode(mode: &str, read_only_code: bool) -> &'static str {
     match mode {
         "plan" => "read,grep,find,ls",
+        _ if read_only_code => "read,grep,find,ls,bash",
         _ => "read,grep,find,ls,bash,edit,write",
     }
 }
@@ -562,12 +564,13 @@ fn append_pi_agent_policy_args(
     execution_mode: Option<&str>,
     system_prompt: Option<&str>,
     pi_agent_owns_policy: bool,
+    read_only_code: bool,
 ) {
     if pi_agent_owns_policy {
         return;
     }
     args.push("--tools".to_string());
-    args.push(pi_tools_for_mode(execution_mode.unwrap_or("build")).to_string());
+    args.push(pi_tools_for_mode(execution_mode.unwrap_or("build"), read_only_code).to_string());
     append_system_prompt_arg(args, system_prompt);
 }
 
@@ -593,6 +596,7 @@ fn build_pi_rpc_args(
     system_prompt: Option<&str>,
     existing_pi_session_id: Option<&str>,
     pi_agent_owns_policy: bool,
+    read_only_code: bool,
 ) -> Vec<String> {
     let mut args = vec!["--mode".to_string(), "rpc".to_string()];
     if let Some(id) = usable_pi_session_id(existing_pi_session_id, jean_session_id) {
@@ -612,6 +616,7 @@ fn build_pi_rpc_args(
         execution_mode,
         system_prompt,
         pi_agent_owns_policy,
+        read_only_code,
     );
     args
 }
@@ -1381,6 +1386,7 @@ pub fn execute_pi(
             system_prompt,
             existing_pi_session_id,
             pi_agent_owns_policy,
+            crate::agents::code_is_read_only(worktree_id),
         );
         log::info!(
             "[PI] spawning RPC host session={session_id} worktree={worktree_id} model={:?} mode={:?} policy={}",
@@ -1469,6 +1475,7 @@ pub fn execute_pi(
             execution_mode,
             system_prompt,
             pi_agent_owns_policy,
+            crate::agents::code_is_read_only(worktree_id),
         );
         args.push(message.to_string());
 
@@ -2033,6 +2040,7 @@ mod tests {
             Some("System instructions"),
             Some("pi-session-123"),
             false,
+            false,
         );
 
         assert!(args.windows(2).any(|w| w == ["--mode", "rpc"]));
@@ -2062,6 +2070,7 @@ mod tests {
             Some("Jean system instructions"),
             None,
             true,
+            false,
         );
 
         assert!(!args.iter().any(|arg| arg == "--tools"));
@@ -2073,15 +2082,33 @@ mod tests {
 
     #[test]
     fn pi_tools_for_modes_match_pi_builtin_tool_names() {
-        assert_eq!(pi_tools_for_mode("plan"), "read,grep,find,ls");
+        assert_eq!(pi_tools_for_mode("plan", false), "read,grep,find,ls");
         assert_eq!(
-            pi_tools_for_mode("build"),
+            pi_tools_for_mode("build", false),
             "read,grep,find,ls,bash,edit,write"
         );
         assert_eq!(
-            pi_tools_for_mode("yolo"),
+            pi_tools_for_mode("yolo", false),
             "read,grep,find,ls,bash,edit,write"
         );
+    }
+
+    #[test]
+    fn coordinator_chats_get_no_file_writing_tools() {
+        assert_eq!(pi_tools_for_mode("build", true), "read,grep,find,ls,bash");
+        assert_eq!(pi_tools_for_mode("yolo", true), "read,grep,find,ls,bash");
+        assert_eq!(pi_tools_for_mode("plan", true), "read,grep,find,ls");
+        let args = build_pi_rpc_args(
+            "jean-session-123",
+            None,
+            Some("yolo"),
+            None,
+            None,
+            None,
+            false,
+            true,
+        );
+        assert_eq!(args, ["--mode", "rpc", "--tools", "read,grep,find,ls,bash"]);
     }
 
     #[test]
@@ -2093,6 +2120,7 @@ mod tests {
             None,
             None,
             Some("a8200218-d1ae-47c2-b69e-9943c5b6baa6"),
+            false,
             false,
         );
 

@@ -123,24 +123,22 @@ export interface MinimizedCliUpdate {
   progress: number | null
 }
 
-/** Top-level Jean feature selected in the sidebar tabs */
-export type RailSection = 'workspace' | 'agents'
+/** Main panel of a project: its coordinator chat or the sessions canvas */
+export type ProjectViewMode = 'coordinator' | 'sessions'
 
 interface UIState {
   leftSidebarVisible: boolean
-  railSection: RailSection
-  /** Last sidebar visibility of each rail section, restored on switch */
-  railSidebarVisible: Partial<Record<RailSection, boolean>>
-  /** Agent open on the Agents page */
-  selectedAgentId: string
-  /** When the user last left the Agents page (ms, 0 = never this session) */
-  agentsLeftAt: number
-  /** Agent pages show every tab and tool activity (off: Chat and Schedules) */
+  /** Per project: last main panel chosen (unset = coordinator) */
+  projectViewModes: Record<string, ProjectViewMode>
+  /** Coordinator view: worktrees sidebar on the right */
+  coordinatorSidebarOpen: boolean
+  /** Coordinator worktrees sidebar width in pixels */
+  coordinatorSidebarWidth: number
+  /** A project's coordinator chat is the main panel now (not persisted) */
+  coordinatorViewOpen: boolean
+  /** Coordinator chat shows tool activity (off: prose and spawn cards) */
   agentsAdvanced: boolean
-  /** Per agent: timestamp (unix s) of the newest update reply the user saw */
-  agentUpdatesSeenAt: Record<string, number>
   leftSidebarSize: number // Width in pixels, persisted across sessions
-  /** Agents sidebar width in pixels; can shrink to an icon column */
   /** File browser (worktree explorer) visibility */
   fileBrowserVisible: boolean
   /** File browser width in pixels, persisted across sessions */
@@ -267,12 +265,11 @@ interface UIState {
   availableCliUpdates: PendingCliUpdate[]
   toggleLeftSidebar: () => void
   setLeftSidebarVisible: (visible: boolean) => void
-  /** restoreSidebar: show the sidebar as the section last left it (desktop rail) */
-  setRailSection: (section: RailSection, restoreSidebar?: boolean) => void
-  setSelectedAgentId: (agentId: string) => void
+  setProjectViewMode: (projectId: string, mode: ProjectViewMode) => void
+  setCoordinatorSidebarOpen: (open: boolean) => void
+  setCoordinatorSidebarWidth: (width: number) => void
+  setCoordinatorViewOpen: (open: boolean) => void
   setAgentsAdvanced: (advanced: boolean) => void
-  markAgentUpdatesSeen: (agentId: string, timestamp: number) => void
-  setAgentUpdatesSeenAt: (seenAt: Record<string, number>) => void
   setLeftSidebarSize: (size: number) => void
   leftSidebarSwipe: {
     isDragging: boolean
@@ -444,12 +441,11 @@ export const useUIStore = create<UIState>()(
   devtools(
     (set, get) => ({
       leftSidebarVisible: false,
-      railSection: 'workspace',
-      railSidebarVisible: {},
-      selectedAgentId: 'jean',
-      agentsLeftAt: 0,
+      projectViewModes: {},
+      coordinatorSidebarOpen: false,
+      coordinatorSidebarWidth: 360,
+      coordinatorViewOpen: false,
       agentsAdvanced: false,
-      agentUpdatesSeenAt: {},
       leftSidebarSize: 250, // Default width in pixels
       leftSidebarSwipe: {
         isDragging: false,
@@ -580,38 +576,49 @@ export const useUIStore = create<UIState>()(
           'setLeftSidebarVisible'
         ),
 
-      setRailSection: (section, restoreSidebar = false) =>
+      setProjectViewMode: (projectId, mode) =>
         set(
           state =>
-            state.railSection === section
+            state.projectViewModes[projectId] === mode
               ? state
               : {
-                  railSection: section,
-                  railSidebarVisible: {
-                    ...state.railSidebarVisible,
-                    [state.railSection]: state.leftSidebarVisible,
+                  projectViewModes: {
+                    ...state.projectViewModes,
+                    [projectId]: mode,
                   },
-                  // A section never opened before shows its panel
-                  ...(restoreSidebar && {
-                    leftSidebarVisible:
-                      state.railSidebarVisible[section] ?? true,
-                  }),
-                  ...(state.railSection === 'agents' && {
-                    agentsLeftAt: Date.now(),
-                  }),
                 },
           undefined,
-          'setRailSection'
+          'setProjectViewMode'
         ),
 
-      setSelectedAgentId: agentId =>
+      setCoordinatorSidebarOpen: open =>
         set(
           state =>
-            state.selectedAgentId === agentId
+            state.coordinatorSidebarOpen === open
               ? state
-              : { selectedAgentId: agentId },
+              : { coordinatorSidebarOpen: open },
           undefined,
-          'setSelectedAgentId'
+          'setCoordinatorSidebarOpen'
+        ),
+
+      setCoordinatorSidebarWidth: width =>
+        set(
+          state =>
+            state.coordinatorSidebarWidth === width
+              ? state
+              : { coordinatorSidebarWidth: width },
+          undefined,
+          'setCoordinatorSidebarWidth'
+        ),
+
+      setCoordinatorViewOpen: open =>
+        set(
+          state =>
+            state.coordinatorViewOpen === open
+              ? state
+              : { coordinatorViewOpen: open },
+          undefined,
+          'setCoordinatorViewOpen'
         ),
 
       setAgentsAdvanced: advanced =>
@@ -622,31 +629,6 @@ export const useUIStore = create<UIState>()(
               : { agentsAdvanced: advanced },
           undefined,
           'setAgentsAdvanced'
-        ),
-
-      markAgentUpdatesSeen: (agentId, timestamp) =>
-        set(
-          state =>
-            (state.agentUpdatesSeenAt[agentId] ?? 0) >= timestamp
-              ? state
-              : {
-                  agentUpdatesSeenAt: {
-                    ...state.agentUpdatesSeenAt,
-                    [agentId]: timestamp,
-                  },
-                },
-          undefined,
-          'markAgentUpdatesSeen'
-        ),
-
-      setAgentUpdatesSeenAt: seenAt =>
-        set(
-          state =>
-            state.agentUpdatesSeenAt === seenAt
-              ? state
-              : { agentUpdatesSeenAt: seenAt },
-          undefined,
-          'setAgentUpdatesSeenAt'
         ),
 
       toggleRightSidebar: () =>

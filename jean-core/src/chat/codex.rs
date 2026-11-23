@@ -830,6 +830,32 @@ pub fn apply_codex_provider_to_config(
 /// Max concurrent Codex subagent threads.
 const CODEX_MAX_AGENT_THREADS: u32 = 3;
 
+/// Keep a thread or turn from changing files: read-only sandbox, and no way
+/// to ask for more access. Used for coordinator chats, which delegate code
+/// changes. MCP tools run outside the sandbox, so the Jean tools still work.
+/// Call it on `thread/start`, `thread/resume` and `turn/start` params.
+pub(crate) fn restrict_to_read_only(params: &mut serde_json::Value) {
+    if params.get("sandbox").is_some() {
+        params["sandbox"] = serde_json::json!("read-only");
+    }
+    if params.get("sandboxPolicy").is_some() {
+        params["sandboxPolicy"] = serde_json::json!({ "type": "readOnly", "networkAccess": true });
+    }
+    // "never" (yolo, plan) already cannot leave the sandbox. Every other
+    // policy could approve a write outside it.
+    if params.get("approvalPolicy") != Some(&serde_json::json!("never")) {
+        params["approvalPolicy"] = serde_json::json!({
+            "granular": {
+                "mcp_elicitations": false,
+                "sandbox_approval": false,
+                "rules": true,
+                "request_permissions": false,
+            }
+        });
+        params["approvalsReviewer"] = serde_json::json!("user");
+    }
+}
+
 /// Build JSON-RPC params for `thread/start`.
 #[allow(clippy::too_many_arguments)]
 pub fn build_thread_start_params(
@@ -1162,7 +1188,8 @@ pub fn execute_codex_via_server(
 
     // Mid-turn Approve (yolo) and pure yolo turns both auto-accept residual
     // command/permission prompts (issue #328).
-    super::registry::set_codex_yolo_auto_approve(session_id, is_yolo_mode);
+    let read_only_code = crate::agents::code_is_read_only(worktree_id);
+    super::registry::set_codex_yolo_auto_approve(session_id, is_yolo_mode && !read_only_code);
 
     log::debug!(
         "Codex server turn: session={session_id}, model={model:?}, mode={execution_mode:?}, effort={reasoning_effort:?}, verbosity={model_verbosity}, provider={:?}, resume={}",
@@ -1197,6 +1224,9 @@ pub fn execute_codex_via_server(
             );
             apply_agent_browser_session(&mut resume_params, session_id);
             apply_auto_compact_token_limit(&mut resume_params, auto_compact_token_limit);
+            if read_only_code {
+                restrict_to_read_only(&mut resume_params);
+            }
             let mut full_params =
                 serde_json::json!({ "threadId": tid, "persistExtendedHistory": true });
             // Copy overridable fields
@@ -1228,6 +1258,7 @@ pub fn execute_codex_via_server(
                         Some(model_verbosity),
                         codex_provider,
                         auto_compact_token_limit,
+                        read_only_code,
                     )
                 }
             }
@@ -1242,6 +1273,7 @@ pub fn execute_codex_via_server(
                 Some(model_verbosity),
                 codex_provider,
                 auto_compact_token_limit,
+                read_only_code,
             )
         }
     })() {
@@ -1278,7 +1310,7 @@ pub fn execute_codex_via_server(
     super::commands::flush_pending_codex_goal(app, session_id, &thread_id);
 
     // Build turn params
-    let turn_params = build_turn_start_params(
+    let mut turn_params = build_turn_start_params(
         &thread_id,
         prompt,
         working_dir,
@@ -1288,6 +1320,9 @@ pub fn execute_codex_via_server(
         &git_writable_roots,
         model,
     );
+    if read_only_code {
+        restrict_to_read_only(&mut turn_params);
+    }
 
     // Set up event channel for this session
     let (event_tx, event_rx) = std::sync::mpsc::channel();
@@ -1965,6 +2000,7 @@ fn start_new_thread(
     model_verbosity: Option<&str>,
     codex_provider: Option<&crate::CodexProviderProfile>,
     auto_compact_token_limit: Option<u64>,
+    read_only_code: bool,
 ) -> Result<String, String> {
     use super::codex_server;
 
@@ -1979,6 +2015,9 @@ fn start_new_thread(
     );
     apply_agent_browser_session(&mut params, session_id);
     apply_auto_compact_token_limit(&mut params, auto_compact_token_limit);
+    if read_only_code {
+        restrict_to_read_only(&mut params);
+    }
 
     let result = codex_server::send_request("thread/start", params)?;
     let thread_id = result
@@ -5687,6 +5726,56 @@ fn build_one_shot_codex_args(
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn coordinator_chats_get_a_read_only_sandbox_in_every_mode() {
+        let granular = serde_json::json!({
+            "granular": {
+                "mcp_elicitations": false,
+                "sandbox_approval": false,
+                "rules": true,
+                "request_permissions": false,
+            }
+        });
+        for (mode, approval) in [
+            ("build", granular.clone()),
+            ("auto", granular.clone()),
+            ("supervised", granular),
+            ("yolo", serde_json::json!("never")),
+        ] {
+            let mut thread = build_thread_start_params(
+                std::path::Path::new("/tmp/project"),
+                None,
+                Some(mode),
+                false,
+                None,
+                None,
+                None,
+            );
+            let mut turn = build_turn_start_params(
+                "thread-1",
+                "hello",
+                std::path::Path::new("/tmp/project"),
+                Some(mode),
+                None,
+                &[],
+                &[],
+                None,
+            );
+            restrict_to_read_only(&mut thread);
+            restrict_to_read_only(&mut turn);
+            assert_eq!(thread["sandbox"], "read-only", "{mode}");
+            assert_eq!(
+                turn["sandboxPolicy"],
+                serde_json::json!({ "type": "readOnly", "networkAccess": true }),
+                "{mode}"
+            );
+            assert_eq!(thread["approvalPolicy"], approval, "{mode}");
+            assert_eq!(turn["approvalPolicy"], approval, "{mode}");
+            assert_eq!(thread["approvalsReviewer"], "user", "{mode}");
+            assert_eq!(turn["approvalsReviewer"], "user", "{mode}");
+        }
+    }
 
     #[test]
     fn inherited_model_uses_available_account_default() {

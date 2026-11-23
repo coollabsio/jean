@@ -380,6 +380,30 @@ fn split_fast_model(model: &str) -> (&str, bool) {
     }
 }
 
+/// File-writing tools removed from runs that must not change code
+/// (coordinator chats). Bash stays: the coordinator needs it to read the
+/// repository, so shell writes are limited by the prompt only.
+const READ_ONLY_CODE_DISALLOWED_TOOLS: &str = "Edit,Write,MultiEdit,NotebookEdit";
+
+fn disallowed_tools_args(execution_mode: Option<&str>, read_only_code: bool) -> Vec<String> {
+    let mut tools = Vec::new();
+    // In build/yolo, remove ExitPlanMode entirely so Claude can't loop back
+    // into plan-approval after the user already approved one.
+    if matches!(
+        execution_mode.unwrap_or("build"),
+        "build" | "yolo" | "auto" | "supervised"
+    ) {
+        tools.push("ExitPlanMode");
+    }
+    if read_only_code {
+        tools.push(READ_ONLY_CODE_DISALLOWED_TOOLS);
+    }
+    tools
+        .into_iter()
+        .flat_map(|tool| ["--disallowedTools".to_string(), tool.to_string()])
+        .collect()
+}
+
 fn claude_permission_mode(execution_mode: Option<&str>) -> &'static str {
     match execution_mode.unwrap_or("build") {
         "supervised" => "default",
@@ -687,8 +711,7 @@ fn build_claude_args(
     let linked_project_paths: Vec<String> = crate::projects::storage::load_projects_data(app)
         .ok()
         .and_then(|data| {
-            let worktree = data.find_worktree(worktree_id)?;
-            let project = data.find_project(&worktree.project_id)?;
+            let project = data.project_for_worktree(worktree_id)?;
             Some(
                 project
                     .linked_project_ids
@@ -735,15 +758,10 @@ fn build_claude_args(
         env_vars.push(("IS_SANDBOX".to_string(), "1".to_string()));
     }
 
-    // In build/yolo, remove ExitPlanMode entirely so Claude can't loop back
-    // into plan-approval after the user already approved one.
-    if matches!(
-        execution_mode.unwrap_or("build"),
-        "build" | "yolo" | "auto" | "supervised"
-    ) {
-        args.push("--disallowedTools".to_string());
-        args.push("ExitPlanMode".to_string());
-    }
+    args.extend(disallowed_tools_args(
+        execution_mode,
+        crate::agents::code_is_read_only(worktree_id),
+    ));
 
     if should_mirror_custom_profile_env_for_detached() {
         env_vars.extend(load_custom_profile_env_vars(custom_profile_name));
@@ -915,28 +933,26 @@ fn build_claude_args(
 
     // Per-project custom system prompt + linked project instructions
     if let Ok(data) = load_projects_data(app) {
-        if let Some(worktree) = data.find_worktree(worktree_id) {
-            if let Some(project) = data.find_project(&worktree.project_id) {
-                if let Some(prompt) = &project.custom_system_prompt {
-                    let prompt = prompt.trim();
-                    if !prompt.is_empty() {
-                        system_prompt_parts.push(prompt.to_string());
-                    }
+        if let Some(project) = data.project_for_worktree(worktree_id) {
+            if let Some(prompt) = &project.custom_system_prompt {
+                let prompt = prompt.trim();
+                if !prompt.is_empty() {
+                    system_prompt_parts.push(prompt.to_string());
                 }
+            }
 
-                // Linked projects: inject instruction to check their directories
-                if !linked_project_paths.is_empty() {
-                    let dirs_list = linked_project_paths
-                        .iter()
-                        .map(|p| format!("- {p}"))
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    system_prompt_parts.push(format!(
-                        "This project is linked to other projects for cross-project context. \
-                         Check the following directories for additional instructions and documentation \
-                         (e.g., CLAUDE.md, AGENTS.md, docs/):\n{dirs_list}"
-                    ));
-                }
+            // Linked projects: inject instruction to check their directories
+            if !linked_project_paths.is_empty() {
+                let dirs_list = linked_project_paths
+                    .iter()
+                    .map(|p| format!("- {p}"))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                system_prompt_parts.push(format!(
+                    "This project is linked to other projects for cross-project context. \
+                     Check the following directories for additional instructions and documentation \
+                     (e.g., CLAUDE.md, AGENTS.md, docs/):\n{dirs_list}"
+                ));
             }
         }
     }
@@ -3119,6 +3135,24 @@ fn result_error_text(msg: &serde_json::Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn coordinator_chats_lose_the_file_writing_tools() {
+        assert_eq!(
+            disallowed_tools_args(Some("build"), true),
+            [
+                "--disallowedTools",
+                "ExitPlanMode",
+                "--disallowedTools",
+                "Edit,Write,MultiEdit,NotebookEdit"
+            ]
+        );
+        assert_eq!(
+            disallowed_tools_args(Some("yolo"), false),
+            ["--disallowedTools", "ExitPlanMode"]
+        );
+        assert_eq!(disallowed_tools_args(Some("plan"), false), [] as [&str; 0]);
+    }
 
     #[test]
     fn auto_compact_window_accepts_cli_forms_only() {

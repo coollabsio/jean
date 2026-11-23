@@ -1,7 +1,5 @@
 import type { ComponentType } from 'react'
 import { Folder, History, X } from '@/components/icons/reicon'
-import { AgentsIcon } from '@/components/icons/AgentsIcon'
-import { useAgentsEnabled } from '@/components/agents/agents-feature'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -9,7 +7,7 @@ import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
 import { suppressSidebarChromeContextMenu } from './sidebar-context-menu'
 
-type SidebarView = 'projects' | 'recent' | 'agents'
+type SidebarView = 'projects' | 'recent'
 
 const VIEWS: {
   view: SidebarView
@@ -18,33 +16,12 @@ const VIEWS: {
 }[] = [
   { view: 'projects', label: 'Workspace', Icon: Folder },
   { view: 'recent', label: 'Recent', Icon: History },
-  { view: 'agents', label: 'Agents', Icon: AgentsIcon },
 ]
 
-// Workspace/Recent live in the projects store, Agents in the UI store's
-// rail section; both are persisted in the client view state.
-function selectView(view: SidebarView) {
-  const ui = useUIStore.getState()
-  if (view === 'agents') {
-    ui.setRailSection('agents')
-    return
-  }
-  useProjectsStore.getState().setSidebarActiveTab(view)
-  ui.setRailSection('workspace')
-}
-
-/** One tab strip for the left sidebar: Workspace | Recent | Agents. */
+/** One tab strip for the left sidebar: Workspace | Recent. */
 export function SidebarTabs() {
-  const agentsEnabled = useAgentsEnabled()
-  const agentsSelected = useUIStore(state => state.railSection === 'agents')
-  const workspaceTab = useProjectsStore(state => state.sidebarActiveTab)
+  const active = useProjectsStore(state => state.sidebarActiveTab)
   const isMobile = useIsMobile()
-  // Disabled Agents falls back to the workspace tab
-  const active: SidebarView =
-    agentsEnabled && agentsSelected ? 'agents' : workspaceTab
-  const views = agentsEnabled
-    ? VIEWS
-    : VIEWS.filter(({ view }) => view !== 'agents')
 
   return (
     <div
@@ -56,7 +33,7 @@ export function SidebarTabs() {
         role="tablist"
         aria-label="Sidebar view"
       >
-        {views.map(({ view, label, Icon }) => (
+        {VIEWS.map(({ view, label, Icon }) => (
           <button
             key={view}
             type="button"
@@ -70,7 +47,9 @@ export function SidebarTabs() {
             )}
             title={label}
             aria-label={label}
-            onClick={() => selectView(view)}
+            onClick={() =>
+              useProjectsStore.getState().setSidebarActiveTab(view)
+            }
           >
             {/* Very narrow sidebars show icons only */}
             <Icon className="size-4 shrink-0 @[11rem]:hidden" />

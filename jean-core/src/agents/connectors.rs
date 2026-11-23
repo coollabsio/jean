@@ -198,7 +198,50 @@ pub fn mcp_config_server_names(config: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Apply a saved allowlist for an agent session. Other sessions are unchanged.
+/// Enabled MCP server keys for a coordinator chat, in the order the chat UI
+/// uses: the session's own choice, the project setting, the global default.
+pub(crate) fn project_enabled_servers(
+    app: &AppHandle,
+    session_id: &str,
+    project_id: &str,
+) -> Vec<String> {
+    let session = crate::chat::storage::load_metadata(app, session_id)
+        .ok()
+        .flatten()
+        .and_then(|metadata| metadata.enabled_mcp_servers);
+    let project = || {
+        crate::projects::storage::load_projects_data(app)
+            .ok()?
+            .find_project(project_id)?
+            .enabled_mcp_servers
+            .clone()
+    };
+    session.or_else(project).unwrap_or_else(|| {
+        crate::load_preferences_sync(app)
+            .map(|prefs| prefs.default_enabled_mcp_servers)
+            .unwrap_or_default()
+    })
+}
+
+/// Enabled-server keys (`backend:name`, or a bare name saved by older
+/// versions) as an allowlist for `backend`. Keys of other backends are
+/// dropped.
+pub fn allowlist_from_enabled_keys(keys: &[String], backend: &str) -> Vec<AgentConnector> {
+    keys.iter()
+        .filter_map(|key| match key.split_once(':') {
+            Some((key_backend, name)) => (key_backend == backend).then_some(name),
+            None => Some(key.as_str()),
+        })
+        .map(|name| AgentConnector {
+            backend: backend.to_string(),
+            name: name.to_string(),
+        })
+        .collect()
+}
+
+/// Apply the MCP server list of an agent session: the agent's saved
+/// allowlist, or for a wake-up without one the project's enabled servers.
+/// Other sessions are unchanged.
 pub async fn apply_agent_mcp_allowlist(
     app: &AppHandle,
     session_id: &str,
@@ -209,7 +252,17 @@ pub async fn apply_agent_mcp_allowlist(
     let Some(agent) = super::agent_for_session(app, session_id) else {
         return incoming;
     };
-    if agent.mcp_servers.is_none() {
+    let allowlist = match (&agent.mcp_servers, &incoming) {
+        (Some(saved), _) => saved.clone(),
+        // A wake-up carries no server list. Use the servers the chat UI
+        // would send for this session.
+        (None, None) if session_support(backend) == McpSessionSupport::PerSession => {
+            let enabled = project_enabled_servers(app, session_id, &agent.project_id);
+            allowlist_from_enabled_keys(&enabled, backend)
+        }
+        _ => return incoming,
+    };
+    if agent.mcp_servers.is_none() && allowlist.is_empty() {
         return incoming;
     }
     let discovered = if session_support(backend) == McpSessionSupport::PerSession {
@@ -243,7 +296,7 @@ pub async fn apply_agent_mcp_allowlist(
     } else {
         Some(Vec::new())
     };
-    match plan_mcp_config(agent.mcp_servers.as_deref(), backend, discovered.as_deref()) {
+    match plan_mcp_config(Some(&allowlist), backend, discovered.as_deref()) {
         McpConfigPlan::Keep => incoming,
         McpConfigPlan::Replace(config) => {
             log::info!(
@@ -568,6 +621,20 @@ mod tests {
             config: json!({ "command": name, "disabled": disabled }),
             disabled,
         }
+    }
+
+    #[test]
+    fn enabled_keys_become_an_allowlist_for_one_backend() {
+        let keys = ["claude:sentry", "codex:linear", "legacy"].map(String::from);
+        let connector = |name: &str| AgentConnector {
+            backend: "claude".into(),
+            name: name.into(),
+        };
+        assert_eq!(
+            allowlist_from_enabled_keys(&keys, "claude"),
+            vec![connector("sentry"), connector("legacy")]
+        );
+        assert_eq!(allowlist_from_enabled_keys(&[], "claude"), vec![]);
     }
 
     fn names(plan: &McpConfigPlan) -> Vec<String> {

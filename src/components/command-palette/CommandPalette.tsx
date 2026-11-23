@@ -16,10 +16,8 @@ import { formatRecentActivity } from '@/components/projects/recent-activity'
 import { getBackendIcon } from '@/components/ui/backend-label'
 import { searchPreferenceEntries } from '@/components/preferences/preferences-search'
 import type { Backend } from '@/types/chat'
-import {
-  useAgentsEnabledServers,
-  useShowAgents,
-} from '@/components/agents/agents-feature'
+import { useAgentsEnabledServers } from '@/components/agents/agents-feature'
+import { openProjectCoordinator } from '@/components/agents/open-coordinator'
 import { useAgentsList } from '@/services/agents'
 import { AgentIcon } from '@/components/icons/JeanAgentIcon'
 import { Badge } from '@/components/ui/badge'
@@ -135,24 +133,20 @@ export function CommandPalette() {
     ? (selectedProject.serverId ?? LOCAL_SERVER_ID)
     : getActiveConnectionId()
 
-  // Agents (only when the Agents feature is on for a server)
+  // Project coordinators (only when the Agents feature is on for a server)
   const agentServers = useAgentsEnabledServers()
   const { data: agents = [] } = useAgentsList(agentServers)
   const multiServerAgents = new Set(agents.map(a => a.serverId)).size > 1
-  const showAgents = useShowAgents()
-  const selectedAgentId = useUIStore(state => state.selectedAgentId)
-  const agentsLeftAt = useUIStore(state => state.agentsLeftAt)
-  // On the Agents page the current project is not on screen, so list it too
-  const hiddenProjectId = showAgents ? null : selectedProjectId
 
   // Create dynamic project commands (sorted by last-accessed, most recent first)
   // Current project is excluded so the previous project is first (quick CMD+K → Enter switching).
-  // On the Agents page it is kept, so CMD+K → Enter returns to it.
   const projectCommands = useMemo((): ProjectCommand[] => {
     return projects
       .filter(
         p =>
-          !p.is_folder && p.id !== hiddenProjectId && !isLegacyConnectionCopy(p)
+          !p.is_folder &&
+          p.id !== selectedProjectId &&
+          !isLegacyConnectionCopy(p)
       )
       .sort((a, b) => {
         const aIsActive = (a.serverId ?? LOCAL_SERVER_ID) === activeServerId
@@ -189,8 +183,6 @@ export function CommandPalette() {
             (project.serverName ?? 'local').toLowerCase(),
           ],
           execute: () => {
-            // Leave the Agents page so the project is visible
-            useUIStore.getState().setRailSection('workspace')
             useChatStore.getState().clearActiveWorktree()
             if (isServer) openServerProject(project.id, queryClient)
             else useProjectsStore.getState().selectProject(project.id)
@@ -202,7 +194,7 @@ export function CommandPalette() {
     projects,
     appDataDir,
     projectAccessTimestamps,
-    hiddenProjectId,
+    selectedProjectId,
     native,
     activeServerId,
   ])
@@ -228,18 +220,10 @@ export function CommandPalette() {
               agent =>
                 agent.name.toLowerCase().includes(searchLower) ||
                 agent.serverName.toLowerCase().includes(searchLower) ||
-                'agent'.includes(searchLower)
+                'agent'.includes(searchLower) ||
+                'coordinator'.includes(searchLower)
             )
           : agents
-
-    // The agent was the previous view (left after the last project switch):
-    // list it first so CMD+K → Enter returns to it, like the previous project.
-    const lastAgent = filteredAgents.find(a => a.id === selectedAgentId)
-    const firstProject = filteredProjectCommands.find(cmd => !cmd.isServer)
-    const agentIsPrevious =
-      !showAgents &&
-      !!lastAgent &&
-      agentsLeftAt > (firstProject?.accessedAt ?? 0)
 
     // Group static commands
     const staticGroups = staticCommands.reduce(
@@ -256,11 +240,7 @@ export function CommandPalette() {
       staticGroups,
       projectCommands: filteredProjectCommands.filter(cmd => !cmd.isServer),
       serverCommands: filteredProjectCommands.filter(cmd => cmd.isServer),
-      agents:
-        agentIsPrevious && lastAgent
-          ? [lastAgent, ...filteredAgents.filter(a => a !== lastAgent)]
-          : filteredAgents,
-      agentIsPrevious,
+      agents: filteredAgents,
     }
   }, [
     commandContext,
@@ -269,9 +249,6 @@ export function CommandPalette() {
     projectCommands,
     agents,
     agentServers.length,
-    showAgents,
-    selectedAgentId,
-    agentsLeftAt,
   ])
 
   const sessionResults = useMemo((): SessionResult[] => {
@@ -345,13 +322,11 @@ export function CommandPalette() {
     [closePalette]
   )
 
-  const handleAgentSelect = useCallback(
-    (agentId: string) => {
+  const handleCoordinatorSelect = useCallback(
+    (projectId: string) => {
       setCommandPaletteOpen(false)
       setSearch('')
-      const ui = useUIStore.getState()
-      ui.setRailSection('agents')
-      ui.setSelectedAgentId(agentId)
+      openProjectCoordinator(projectId)
     },
     [setCommandPaletteOpen]
   )
@@ -419,12 +394,12 @@ export function CommandPalette() {
   )
 
   const agentsGroup = commandGroups.agents.length > 0 && (
-    <CommandGroup heading="Agents">
+    <CommandGroup heading="Coordinators">
       {commandGroups.agents.map(agent => (
         <CommandItem
           key={agent.id}
           value={`agent-${agent.id} ${agent.name} ${agent.serverName}`}
-          onSelect={() => handleAgentSelect(agent.id)}
+          onSelect={() => handleCoordinatorSelect(agent.projectId)}
         >
           <AgentIcon icon={agent.icon} className="size-4 shrink-0" />
           <span className="min-w-0 truncate">{agent.name}</span>
@@ -495,8 +470,6 @@ export function CommandPalette() {
       <CommandList ref={listRef} className="max-h-[70dvh] sm:max-h-[300px]">
         <CommandEmpty>No results found.</CommandEmpty>
 
-        {/* Previous place first for quick CMD+K → Enter switching */}
-        {commandGroups.agentIsPrevious && agentsGroup}
         {commandGroups.projectCommands.length > 0 && (
           <CommandGroup heading="Projects">
             {commandGroups.projectCommands.map(renderProjectItem)}
@@ -507,7 +480,7 @@ export function CommandPalette() {
             {commandGroups.serverCommands.map(renderProjectItem)}
           </CommandGroup>
         )}
-        {!commandGroups.agentIsPrevious && agentsGroup}
+        {agentsGroup}
         {sessionResults.length > 0 && (
           <CommandGroup heading="Sessions">
             {sessionResults.map(row => renderSessionItem(row, 'session'))}

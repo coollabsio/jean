@@ -17,7 +17,6 @@ import {
   getTerminalShortcutWorktreeId,
   hasBlockingOpenOverlay,
   handleRunEnvironmentStarted,
-  isAgentsViewActive,
   isChatComposerTarget,
   isPlainSessionTerminalFocused,
   shouldAllowKeybindingThroughOpenOverlay,
@@ -899,43 +898,7 @@ describe('applyCacheInvalidationKeys', () => {
   })
 })
 
-describe('isAgentsViewActive', () => {
-  beforeEach(() => {
-    useUIStore.setState({ railSection: 'workspace' })
-  })
-
-  it('is active on the Agents section when Agents is on for a server', () => {
-    const queryClient = new QueryClient()
-    queryClient.setQueryData(['preferences'], { agents_enabled: true })
-    useUIStore.setState({ railSection: 'agents' })
-    expect(isAgentsViewActive(queryClient)).toBe(true)
-  })
-
-  it('counts Agents turned on for a remote server only', () => {
-    const queryClient = new QueryClient()
-    queryClient.setQueryData(['preferences'], { agents_enabled: false })
-    queryClient.setQueryData(['preferences', 'server', 'srv'], {
-      agents_enabled: true,
-    })
-    useUIStore.setState({ railSection: 'agents' })
-    expect(isAgentsViewActive(queryClient)).toBe(true)
-  })
-
-  it('is inactive in the workspace section', () => {
-    const queryClient = new QueryClient()
-    queryClient.setQueryData(['preferences'], { agents_enabled: true })
-    expect(isAgentsViewActive(queryClient)).toBe(false)
-  })
-
-  it('is inactive when Agents is off, since the projects view shows instead', () => {
-    const queryClient = new QueryClient()
-    queryClient.setQueryData(['preferences'], { agents_enabled: false })
-    useUIStore.setState({ railSection: 'agents' })
-    expect(isAgentsViewActive(queryClient)).toBe(false)
-  })
-})
-
-describe('close shortcut on the Agents page', () => {
+describe('close shortcut on the coordinator view', () => {
   function renderListeners(queryClient: QueryClient) {
     return renderHook(() => useMainWindowEventListeners(), {
       wrapper: ({ children }) => (
@@ -962,7 +925,7 @@ describe('close shortcut on the Agents page', () => {
   beforeEach(() => {
     document.body.innerHTML = ''
     useUIStore.setState({
-      railSection: 'workspace',
+      coordinatorViewOpen: false,
       sessionChatModalOpen: false,
       commandPaletteOpen: false,
       preferencesOpen: false,
@@ -970,10 +933,9 @@ describe('close shortcut on the Agents page', () => {
     })
   })
 
-  it('does nothing while an agent page is open', () => {
+  it('does nothing while the coordinator chat is the main panel', () => {
     const queryClient = new QueryClient()
-    queryClient.setQueryData(['preferences'], { agents_enabled: true })
-    useUIStore.setState({ railSection: 'agents' })
+    useUIStore.setState({ coordinatorViewOpen: true })
     const onClose = vi.fn()
     window.addEventListener('close-session-or-worktree', onClose)
     const { unmount } = renderListeners(queryClient)
@@ -989,10 +951,9 @@ describe('close shortcut on the Agents page', () => {
   it.each([
     ['new session', { key: 't', code: 'KeyT', shiftKey: false }],
     ['new session picker', { key: 'T', code: 'KeyT', shiftKey: true }],
-  ])('blocks the %s shortcut while an agent page is open', (_, keys) => {
+  ])('blocks the %s shortcut on the coordinator view', (_, keys) => {
     const queryClient = new QueryClient()
-    queryClient.setQueryData(['preferences'], { agents_enabled: true })
-    useUIStore.setState({ railSection: 'agents' })
+    useUIStore.setState({ coordinatorViewOpen: true })
     const onCreate = vi.fn()
     window.addEventListener('create-new-session', onCreate)
     const { unmount } = renderListeners(queryClient)
@@ -1012,9 +973,25 @@ describe('close shortcut on the Agents page', () => {
     window.removeEventListener('create-new-session', onCreate)
   })
 
+  it('closes the session of a modal opened over the coordinator view', () => {
+    const queryClient = new QueryClient()
+    useUIStore.setState({
+      coordinatorViewOpen: true,
+      sessionChatModalOpen: true,
+    })
+    const onClose = vi.fn()
+    window.addEventListener('close-session-or-worktree', onClose)
+    const { unmount } = renderListeners(queryClient)
+
+    pressCloseShortcut()
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+    unmount()
+    window.removeEventListener('close-session-or-worktree', onClose)
+  })
+
   it('still closes the session or worktree in the projects view', () => {
     const queryClient = new QueryClient()
-    queryClient.setQueryData(['preferences'], { agents_enabled: true })
     const onClose = vi.fn()
     window.addEventListener('close-session-or-worktree', onClose)
     const { unmount } = renderListeners(queryClient)
@@ -1027,24 +1004,11 @@ describe('close shortcut on the Agents page', () => {
   })
 })
 
-describe('sidebar section shortcuts', () => {
-  function press(digit: string) {
-    document.body.dispatchEvent(
-      new KeyboardEvent('keydown', {
-        key: digit,
-        code: `Digit${digit}`,
-        metaKey: true,
-        ctrlKey: true,
-        shiftKey: true,
-        bubbles: true,
-        cancelable: true,
-      })
-    )
-  }
-
-  it('switches the section and shows the hidden sidebar', () => {
+describe('coordinator sidebar shortcut', () => {
+  it('asks the coordinator view to toggle its worktrees sidebar', () => {
     document.body.innerHTML = ''
-    useUIStore.setState({ railSection: 'workspace', leftSidebarVisible: false })
+    const onToggle = vi.fn()
+    window.addEventListener('toggle-coordinator-sidebar', onToggle)
     const queryClient = new QueryClient()
     const { unmount } = renderHook(() => useMainWindowEventListeners(), {
       wrapper: ({ children }) => (
@@ -1054,13 +1018,21 @@ describe('sidebar section shortcuts', () => {
       ),
     })
 
-    press('2')
-    expect(useUIStore.getState().railSection).toBe('agents')
-    expect(useUIStore.getState().leftSidebarVisible).toBe(true)
+    document.body.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'w',
+        code: 'KeyW',
+        metaKey: true,
+        ctrlKey: true,
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      })
+    )
 
-    press('1')
-    expect(useUIStore.getState().railSection).toBe('workspace')
+    expect(onToggle).toHaveBeenCalledTimes(1)
     unmount()
+    window.removeEventListener('toggle-coordinator-sidebar', onToggle)
   })
 })
 
@@ -1093,7 +1065,6 @@ describe('text editing shortcuts in editable fields', () => {
   beforeEach(() => {
     document.body.innerHTML = ''
     useUIStore.setState({
-      railSection: 'workspace',
       zenMode: false,
       sessionChatModalOpen: false,
       commandPaletteOpen: false,

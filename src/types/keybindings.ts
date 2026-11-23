@@ -48,8 +48,7 @@ export type KeybindingAction =
   | 'search_chat'
   | 'toggle_zen_mode'
   | 'clear_session_context'
-  | 'show_workspace'
-  | 'show_agents'
+  | 'toggle_coordinator_sidebar'
 
 // Shortcut string format: "mod+key" where mod is cmd/ctrl
 // Examples: "mod+l", "mod+shift+p", "mod+1"
@@ -117,8 +116,7 @@ export const DEFAULT_KEYBINDINGS: KeybindingsMap = {
   toggle_zen_mode: 'mod+shift+z',
   // Destructive (wipes the transcript in place), so unbound by default (#693).
   clear_session_context: '',
-  show_workspace: 'mod+shift+1',
-  show_agents: 'mod+shift+2',
+  toggle_coordinator_sidebar: 'mod+shift+w',
 }
 
 // UI definitions for the settings pane
@@ -334,17 +332,10 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
     category: 'navigation',
   },
   {
-    action: 'show_workspace',
-    label: 'Show workspace',
-    description: 'Open the Workspace section in the left sidebar',
-    default_shortcut: 'mod+shift+1',
-    category: 'navigation',
-  },
-  {
-    action: 'show_agents',
-    label: 'Show agents',
-    description: 'Open the Agents section in the left sidebar',
-    default_shortcut: 'mod+shift+2',
+    action: 'toggle_coordinator_sidebar',
+    label: 'Toggle worktrees sidebar',
+    description: 'Show or hide the worktrees beside the project coordinator',
+    default_shortcut: 'mod+shift+w',
     category: 'navigation',
   },
   {

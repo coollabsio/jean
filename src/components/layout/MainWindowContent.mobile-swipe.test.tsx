@@ -16,7 +16,6 @@ vi.mock('@/services/projects', () => ({
 }))
 
 vi.mock('@/components/agents/agents-feature', () => ({
-  useShowAgents: () => false,
   useAgentsEnabled: () => false,
   useAgentsEnabledServers: () => [],
 }))
@@ -41,10 +40,8 @@ vi.mock('@/components/chat/ChatWindow', () => ({
   ChatWindow: () => <div data-testid="chat-window">Chat</div>,
 }))
 
-vi.mock('@/components/dashboard/ProjectCanvasView', () => ({
-  ProjectCanvasView: () => (
-    <div data-testid="project-canvas">Project canvas</div>
-  ),
+vi.mock('@/components/dashboard/ProjectView', () => ({
+  ProjectView: () => <div data-testid="project-canvas">Project canvas</div>,
 }))
 
 function fireTouch(

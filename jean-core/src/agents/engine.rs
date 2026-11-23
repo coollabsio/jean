@@ -670,8 +670,8 @@ pub(crate) async fn open_agent_session(
 
 /// Persist the agent's backend, model, and reasoning on a session that has no
 /// messages yet. Unset backend and model mean what a new chat would use: the
-/// preference backend and that backend's preference model. Unset effort and
-/// thinking clear any stored choice.
+/// project's default backend, else the preference backend, and that backend's
+/// preference model. Unset effort and thinking clear any stored choice.
 async fn stamp_agent_run_config(
     app: &AppHandle,
     agent: &db::Agent,
@@ -680,10 +680,10 @@ async fn stamp_agent_run_config(
     session: &mut crate::chat::types::Session,
 ) -> Result<(), String> {
     let prefs = crate::load_preferences(app.clone()).await.ok();
-    let backend: Backend =
-        serde_json::from_value(json!(trimmed_opt(&agent.backend)
-            .or(prefs.as_ref().map(|prefs| prefs.default_backend.as_str()))))
-        .unwrap_or_default();
+    let backend = match trimmed_opt(&agent.backend) {
+        Some(id) => serde_json::from_value(json!(id)).unwrap_or_default(),
+        None => crate::chat::resolve_default_backend(app, Some(worktree_id)),
+    };
     if session.backend != backend {
         crate::chat::set_session_backend(
             app.clone(),
@@ -804,21 +804,18 @@ pub(crate) fn compose_update(events: &[db::AgentEvent]) -> String {
     message
 }
 
-/// Send `message` to a session as a new turn.
+/// Send `message` to a session as a new turn and wait for the turn to end.
 /// The agent's backend, model, effort, thinking, and skills override the
 /// session for this turn. Unset fields stay on the session and user defaults.
 /// The wake leaves Plan mode so the Jean MCP tools stay available.
-pub(crate) fn send_to_session(
+pub(crate) async fn send_to_session(
     app: &AppHandle,
     agent: &db::Agent,
     session: &crate::chat::types::Session,
     worktree_id: &str,
     path: &str,
     message: String,
-) {
-    let app_clone = app.clone();
-    let agent_name = agent.id.clone();
-    let session_id = session.id.clone();
+) -> Result<(), crate::chat::SendError> {
     let backend = trimmed_opt(&agent.backend)
         .map(str::to_string)
         .unwrap_or_else(|| backend_id(&session.backend).to_string());
@@ -827,48 +824,42 @@ pub(crate) fn send_to_session(
         Some(backend.as_str()),
     );
     let mut overrides = agent_wake_overrides(agent);
-    let needs_default_model = wake_needs_default_model(agent);
-    let backend_for_model = agent.backend.clone();
-    let message = message_with_agent_skills(&message, &agent.skills);
-    let worktree_id = worktree_id.to_string();
-    let path = path.to_string();
-    tauri::async_runtime::spawn(async move {
-        if needs_default_model {
-            match crate::load_preferences(app_clone.clone()).await {
-                Ok(prefs) => {
-                    let parsed = serde_json::from_value::<Backend>(json!(
-                        backend_for_model.unwrap_or_default()
-                    ))
-                    .unwrap_or_default();
-                    let model = crate::chat::default_model_for_backend(&parsed, &prefs);
-                    fill_wake_model(&mut overrides, model.as_deref());
-                }
-                Err(e) => {
-                    log::warn!("[Agents] default model for {agent_name} was not loaded: {e}")
-                }
+    if wake_needs_default_model(agent) {
+        match crate::load_preferences(app.clone()).await {
+            Ok(prefs) => {
+                let parsed = serde_json::from_value::<Backend>(json!(agent
+                    .backend
+                    .clone()
+                    .unwrap_or_default()))
+                .unwrap_or_default();
+                let model = crate::chat::default_model_for_backend(&parsed, &prefs);
+                fill_wake_model(&mut overrides, model.as_deref());
+            }
+            Err(e) => {
+                log::warn!(
+                    "[Agents] default model for {} was not loaded: {e}",
+                    agent.id
+                )
             }
         }
-        let mut payload = json!({
-            "sessionId": session_id,
-            "worktreeId": worktree_id,
-            "worktreePath": path,
-            "message": message,
-        });
-        if let Some(mode) = mode {
-            payload["executionMode"] = json!(mode);
-        }
-        if let Some(map) = overrides.as_object() {
-            for (key, value) in map {
-                payload[key] = value.clone();
-            }
-        }
-        if let Err(e) =
-            crate::http_server::dispatch::dispatch_command(&app_clone, "send_chat_message", payload)
-                .await
-        {
-            log::warn!("[Agents] wake of {agent_name} failed: {e}");
-        }
+    }
+    let mut payload = json!({
+        "sessionId": session.id,
+        "worktreeId": worktree_id,
+        "worktreePath": path,
+        "message": message_with_agent_skills(&message, &agent.skills),
     });
+    if let Some(mode) = mode {
+        payload["executionMode"] = json!(mode);
+    }
+    if let Some(map) = overrides.as_object() {
+        for (key, value) in map {
+            payload[key] = value.clone();
+        }
+    }
+    crate::http_server::dispatch::send_chat_message_from_args(app, &payload)
+        .await
+        .map(|_| ())
 }
 
 /// One wake-up: the queued updates of a coordinator as one chat message.
@@ -878,6 +869,8 @@ pub(crate) struct Delivery {
     pub chat: crate::chat::types::Session,
     pub path: String,
     pub message: String,
+    /// The updates in `message`, to queue them again if the send fails.
+    pub event_ids: Vec<i64>,
 }
 
 /// Take the queued updates of one coordinator for delivery to its chat: mark
@@ -904,32 +897,59 @@ pub(crate) async fn next_delivery(
     if !can_deliver(chat_idle, budget) {
         return Ok(None);
     }
+    let event_ids: Vec<i64> = events.iter().map(|event| event.id).collect();
     super::with_db(app, |conn| {
-        let ids: Vec<i64> = events.iter().map(|event| event.id).collect();
-        db::mark_events_delivered(conn, &ids)?;
+        db::mark_events_delivered(conn, &event_ids)?;
         db::record_wake(conn, &agent.id, &chat.id)
     })?;
     Ok(Some(Delivery {
         message: compose_update(&events),
+        event_ids,
         agent,
         chat,
         path,
     }))
 }
 
-/// Deliver queued updates of one coordinator. Returns true when sent.
-async fn deliver(app: &AppHandle, agent_id: &str) -> Result<bool, String> {
-    let Some(delivery) = next_delivery(app, agent_id).await? else {
-        return Ok(false);
-    };
-    send_to_session(
+/// Send one wake-up and wait for its turn. Returns true when the update is
+/// in the chat. A send the chat never recorded (the user sent a message
+/// first, or the session cannot run) puts the updates back in the queue, so
+/// a later tick delivers them. The wake stays counted, which bounds retries
+/// by the hourly budget.
+pub(crate) async fn send_delivery(app: &AppHandle, delivery: Delivery) -> bool {
+    let agent_id = &delivery.agent.id;
+    let Err(error) = send_to_session(
         app,
         &delivery.agent,
         &delivery.chat,
         &delivery.agent.worktree_id,
         &delivery.path,
         delivery.message,
-    );
+    )
+    .await
+    else {
+        return true;
+    };
+    log::warn!("[Agents] wake of {agent_id} failed: {}", error.message);
+    if error.user_turn != crate::chat::types::UserTurnOutcome::NotAccepted {
+        return true;
+    }
+    if let Err(e) = super::with_db(app, |conn| db::requeue_events(conn, &delivery.event_ids)) {
+        log::error!("[Agents] updates of {agent_id} were not queued again: {e}");
+    }
+    false
+}
+
+/// Start delivery of the queued updates of one coordinator. Returns true
+/// when a wake-up was started.
+async fn deliver(app: &AppHandle, agent_id: &str) -> Result<bool, String> {
+    let Some(delivery) = next_delivery(app, agent_id).await? else {
+        return Ok(false);
+    };
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        send_delivery(&app, delivery).await;
+    });
     Ok(true)
 }
 
@@ -1068,14 +1088,15 @@ async fn rotate_chat_if_long(app: &AppHandle, agent: &db::Agent) -> Result<bool,
     );
     // The new chat starts with the agent's recap, so the user does not see
     // an empty chat.
-    send_to_session(
-        app,
-        agent,
-        &new,
-        &agent.worktree_id,
-        &path,
-        chat_continued_message(old.messages.len(), journal_id),
-    );
+    let message = chat_continued_message(old.messages.len(), journal_id);
+    let (app, agent) = (app.clone(), agent.clone());
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) =
+            send_to_session(&app, &agent, &new, &agent.worktree_id, &path, message).await
+        {
+            log::warn!("[Agents] recap of {} failed: {}", agent.id, e.message);
+        }
+    });
     Ok(true)
 }
 

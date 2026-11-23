@@ -1107,6 +1107,16 @@ pub fn add_event(conn: &Connection, e: &NewEvent) -> Result<i64, String> {
     Ok(conn.last_insert_rowid())
 }
 
+/// Sessions that still work for this agent.
+pub fn active_delegation_count(conn: &Connection, agent_id: &str) -> Result<i64, String> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM delegations WHERE agent_id=?1 AND status='active'",
+        [agent_id],
+        |row| row.get(0),
+    )
+    .map_err(err)
+}
+
 pub fn pending_events(conn: &Connection, agent_id: &str) -> Result<Vec<AgentEvent>, String> {
     let mut stmt = conn
         .prepare(
@@ -1158,6 +1168,16 @@ pub fn mark_events_delivered(conn: &Connection, ids: &[i64]) -> Result<(), Strin
             params![id, ts],
         )
         .map_err(err)?;
+    }
+    Ok(())
+}
+
+/// Put events back in the queue after a wake-up that never reached the chat.
+/// Running it twice leaves the same state.
+pub fn requeue_events(conn: &Connection, ids: &[i64]) -> Result<(), String> {
+    for id in ids {
+        conn.execute("UPDATE events SET delivered_at=NULL WHERE id=?1", [id])
+            .map_err(err)?;
     }
     Ok(())
 }

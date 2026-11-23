@@ -94,30 +94,28 @@ fn build_system_prompt_parts(
     );
 
     if let Ok(data) = load_projects_data(app) {
-        if let Some(worktree) = data.find_worktree(worktree_id) {
-            if let Some(project) = data.find_project(&worktree.project_id) {
-                if let Some(prompt) = trimmed_non_empty(project.custom_system_prompt.as_deref()) {
-                    parts.push(prompt);
-                }
+        if let Some(project) = data.project_for_worktree(worktree_id) {
+            if let Some(prompt) = trimmed_non_empty(project.custom_system_prompt.as_deref()) {
+                parts.push(prompt);
+            }
 
-                let linked_paths: Vec<String> = project
-                    .linked_project_ids
+            let linked_paths: Vec<String> = project
+                .linked_project_ids
+                .iter()
+                .filter_map(|id| data.find_project(id))
+                .filter_map(|project| trimmed_non_empty(Some(&project.path)))
+                .collect();
+            if !linked_paths.is_empty() {
+                let dirs_list = linked_paths
                     .iter()
-                    .filter_map(|id| data.find_project(id))
-                    .filter_map(|project| trimmed_non_empty(Some(&project.path)))
-                    .collect();
-                if !linked_paths.is_empty() {
-                    let dirs_list = linked_paths
-                        .iter()
-                        .map(|path| format!("- {path}"))
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    parts.push(format!(
-                        "This project is linked to other projects for cross-project context. \
-                         Check the following directories for additional instructions and documentation \
-                         (e.g., CLAUDE.md, AGENTS.md, docs/):\n{dirs_list}"
-                    ));
-                }
+                    .map(|path| format!("- {path}"))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                parts.push(format!(
+                    "This project is linked to other projects for cross-project context. \
+                     Check the following directories for additional instructions and documentation \
+                     (e.g., CLAUDE.md, AGENTS.md, docs/):\n{dirs_list}"
+                ));
             }
         }
     }

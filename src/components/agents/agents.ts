@@ -1,8 +1,13 @@
 import { useMemo } from 'react'
-import { useAgentsList, type AgentSummary } from '@/services/agents'
-import { useChatStore } from '@/store/chat-store'
-import { useUIStore } from '@/store/ui-store'
-import { useAgentsEnabledServers } from './agents-feature'
+import {
+  parseServerResourceKey,
+  serverResourceKey,
+} from '@/lib/server-resource'
+import {
+  useAgentDetails,
+  useProjectCoordinator,
+  type AgentDelegation,
+} from '@/services/agents'
 
 /** Colors offered for new agents (`jean` is reserved for the boss). */
 export const AGENT_COLOR_CHOICES = [
@@ -17,106 +22,78 @@ export const AGENT_COLOR_CHOICES = [
 /** Colors Jean can pick: its crowned default first, then the others. */
 export const JEAN_COLOR_CHOICES = ['jean', ...AGENT_COLOR_CHOICES] as const
 
-/** Agent by ID, or the first agent (Jean) when the ID is unknown. */
-export function findAgent(
-  agents: AgentSummary[] | undefined,
-  id: string | null | undefined
-): AgentSummary | undefined {
-  return agents?.find(agent => agent.id === id) ?? agents?.[0]
+/** Maps a raw ID through `map`, keeping a remote server's `serverId:` scope. */
+function mapScopedId(
+  key: string,
+  map: (raw: string) => string | null
+): string | null {
+  const ref = parseServerResourceKey(key)
+  const mapped = map(ref?.resourceId ?? key)
+  if (!mapped || !ref) return mapped
+  return serverResourceKey({ serverId: ref.serverId, resourceId: mapped })
 }
 
-/** Marks agents whose home chat runs in this client as working. The backend
- * list does not refresh when a chat starts, so the run would not show. */
-export function withRunningAgents(
-  agents: AgentSummary[] | undefined,
-  runningSessionIds: ReadonlySet<string>
-): AgentSummary[] | undefined {
-  if (!agents || runningSessionIds.size === 0) return agents
-  return agents.map(agent =>
-    agent.status !== 'working' &&
-    agent.homeSessionId &&
-    runningSessionIds.has(agent.homeSessionId)
-      ? { ...agent, status: 'working' }
-      : agent
+/** Coordinator agent of a coordinator chat worktree (`__coord_<pid>__`). */
+export function coordinatorAgentIdForWorktree(
+  worktreeId: string | null | undefined
+): string | null {
+  if (!worktreeId) return null
+  return mapScopedId(worktreeId, raw => {
+    const match = /^__coord_(.+)__$/.exec(raw)
+    return match ? `coord_${match[1]}` : null
+  })
+}
+
+/** Project of a coordinator agent ID (`coord_<pid>`). */
+export function coordinatorProjectId(agentId: string): string | null {
+  return mapScopedId(agentId, raw =>
+    raw.startsWith('coord_') ? raw.slice('coord_'.length) : null
   )
 }
 
-/** The agent selected in the Agents sidebar (from the backend list). */
-export function useSelectedAgent(): {
-  agent: AgentSummary | undefined
-  agents: AgentSummary[] | undefined
-  isLoading: boolean
-  error: unknown
-} {
-  const enabledServers = useAgentsEnabledServers()
-  const { data: listed, isLoading, error } = useAgentsList(enabledServers)
-  const selectedAgentId = useUIStore(state => state.selectedAgentId)
-  // Home chats running now, as a string so the selector stays stable
-  const runningKey = useChatStore(state =>
-    (listed ?? [])
-      .flatMap(agent =>
-        agent.homeSessionId && state.sendingSessionIds[agent.homeSessionId]
-          ? [agent.homeSessionId]
-          : []
-      )
-      .join('\n')
+/** Project of a coordinator chat worktree; it has no worktree record. */
+export function coordinatorProjectIdForWorktree(
+  worktreeId: string | null | undefined
+): string | null {
+  const agentId = coordinatorAgentIdForWorktree(worktreeId)
+  return agentId ? coordinatorProjectId(agentId) : null
+}
+
+const OPEN_DELEGATION_STATUSES = new Set(['active', 'waiting'])
+
+export interface CoordinatorDelegations {
+  worktreeIds: ReadonlySet<string>
+  sessionIds: ReadonlySet<string>
+}
+
+const NO_DELEGATIONS: CoordinatorDelegations = {
+  worktreeIds: new Set(),
+  sessionIds: new Set(),
+}
+
+/** Worktrees and sessions the coordinator still waits for. */
+export function openDelegations(
+  delegations: AgentDelegation[] | undefined
+): CoordinatorDelegations {
+  const open = (delegations ?? []).filter(d =>
+    OPEN_DELEGATION_STATUSES.has(d.status)
   )
-  const agents = useMemo(
-    () =>
-      withRunningAgents(
-        listed,
-        new Set(runningKey ? runningKey.split('\n') : [])
-      ),
-    [listed, runningKey]
-  )
+  if (open.length === 0) return NO_DELEGATIONS
   return {
-    agent: findAgent(agents, selectedAgentId),
-    agents,
-    isLoading,
-    error,
+    worktreeIds: new Set(open.map(d => d.worktreeId)),
+    sessionIds: new Set(open.map(d => d.sessionId)),
   }
 }
 
-/** Short status text for an agent row and header; null when idle. */
-export function agentStatusLabel(agent: AgentSummary): string | null {
-  if (agent.unreadNotifications > 0)
-    return `${agent.unreadNotifications} new notification${agent.unreadNotifications === 1 ? '' : 's'}`
-  if (agent.status === 'working') return 'Working'
-  if (agent.status === 'waiting') return 'Waiting for you'
-  if (agent.budgetReached) return 'Hourly limit reached'
-  return null
-}
-
-/** Sections of the agent side panel (the chat is always shown). */
-export type AgentTab =
-  | 'inbox'
-  | 'schedules'
-  | 'activity'
-  | 'memory'
-  | 'settings'
-
-const ALL_AGENT_TABS: AgentTab[] = [
-  'inbox',
-  'schedules',
-  'activity',
-  'memory',
-  'settings',
-]
-
-/**
- * Sections of the agent side panel. Without Advanced: Schedules, plus Inbox
- * while it has unread messages or is open (reading them must not hide it).
- */
-export function visibleAgentTabs(
-  advanced: boolean,
-  agent: Pick<AgentSummary, 'unreadNotifications'>,
-  current: AgentTab
-): AgentTab[] {
-  if (advanced) return ALL_AGENT_TABS
-  return ALL_AGENT_TABS.filter(
-    tab =>
-      tab === 'schedules' ||
-      (tab === 'inbox' &&
-        (agent.unreadNotifications > 0 || current === 'inbox'))
+/** Open delegations of a project's coordinator; empty while `enabled` is off. */
+export function useCoordinatorDelegations(
+  projectId: string | null,
+  enabled: boolean
+): CoordinatorDelegations {
+  const { data: coordinator } = useProjectCoordinator(projectId, enabled)
+  const { data: details } = useAgentDetails(
+    enabled ? (coordinator?.agentId ?? null) : null
   )
+  const delegations = enabled ? details?.delegations : undefined
+  return useMemo(() => openDelegations(delegations), [delegations])
 }

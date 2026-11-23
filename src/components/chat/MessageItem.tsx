@@ -1119,7 +1119,12 @@ export const MessageItem = memo(function MessageItem({
     // Jean's automatic agent updates are for the agent only; show its reply.
     if (isAgentUpdateMessage(message.content)) return null
     if (isChatContinuedMessage(message.content))
-      return <ChatContinuedNotice content={message.content} />
+      return (
+        <ChatContinuedNotice
+          content={message.content}
+          worktreeId={worktreeId}
+        />
+      )
     // Sub-session results live in the side panel; the stream keeps one line
     const sessionUpdates = parseSessionUpdates(message.content)
     if (sessionUpdates) return <SessionUpdateLine updates={sessionUpdates} />

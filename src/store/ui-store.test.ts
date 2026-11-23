@@ -422,31 +422,22 @@ describe('mobile left sidebar closes when a surface opens over it', () => {
   })
 })
 
-describe('rail section sidebar visibility', () => {
+describe('project view mode', () => {
   beforeEach(() => {
-    useUIStore.setState({
-      railSection: 'workspace',
-      railSidebarVisible: {},
-      leftSidebarVisible: false,
-    })
+    useUIStore.setState({ projectViewModes: {} })
   })
 
-  it('restores each section sidebar state when switching back', () => {
+  it('stores the last choice per project and skips no-op updates', () => {
     const ui = () => useUIStore.getState()
-    // Workspace collapsed; Agents never opened, so its panel shows
-    ui().setRailSection('agents', true)
-    expect(ui().leftSidebarVisible).toBe(true)
+    ui().setProjectViewMode('p1', 'sessions')
+    ui().setProjectViewMode('srv:p2', 'coordinator')
+    expect(ui().projectViewModes).toEqual({
+      p1: 'sessions',
+      'srv:p2': 'coordinator',
+    })
 
-    ui().setRailSection('workspace', true)
-    expect(ui().leftSidebarVisible).toBe(false)
-
-    ui().setRailSection('agents', true)
-    expect(ui().leftSidebarVisible).toBe(true)
-  })
-
-  it('keeps sidebar visibility when restore is off', () => {
-    useUIStore.getState().setRailSection('agents')
-    expect(useUIStore.getState().leftSidebarVisible).toBe(false)
-    expect(useUIStore.getState().railSidebarVisible.workspace).toBe(false)
+    const before = ui().projectViewModes
+    ui().setProjectViewMode('p1', 'sessions')
+    expect(ui().projectViewModes).toBe(before)
   })
 })

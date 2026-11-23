@@ -20,7 +20,7 @@ pub struct AgentSummary {
     pub next_schedule_at: Option<i64>,
     pub budget_reached: bool,
     pub unread_notifications: i64,
-    /// One line about the latest activity: chat reply or notification
+    /// One line about the latest notification
     pub activity: Option<String>,
 }
 
@@ -50,36 +50,44 @@ pub struct AgentDetails {
     pub notifications: Vec<db::Notification>,
 }
 
-pub async fn list_agents(app: &AppHandle) -> Result<Vec<AgentSummary>, String> {
+/// The coordinator's chat session, read from its session index when that
+/// file exists. Never creates a chat or an index.
+fn existing_home_session_id(app: &AppHandle, worktree_id: &str) -> Option<String> {
+    let path = crate::chat::storage::get_index_path(app, worktree_id).ok()?;
+    if !path.exists() {
+        return None;
+    }
+    let index = crate::chat::storage::load_index(app, worktree_id).ok()?;
+    let open = |id: &str| {
+        index
+            .sessions
+            .iter()
+            .any(|s| s.id == id && s.archived_at.is_none())
+    };
+    index
+        .active_session_id
+        .clone()
+        .filter(|id| open(id))
+        .or_else(|| {
+            index
+                .sessions
+                .iter()
+                .find(|s| s.archived_at.is_none())
+                .map(|s| s.id.clone())
+        })
+}
+
+/// Summary of every coordinator. Cheap on purpose: it reads `agents.db`, the
+/// process registry and an existing session index. It loads no chat and
+/// creates no chat or index; `get_project_coordinator` does that for one
+/// project. So `home_session_id` is `None` until the chat was opened once,
+/// `activity` is the latest notification, and `waiting` means a pending
+/// approval (a question asked in the chat shows in the chat itself).
+pub fn list_agents(app: &AppHandle) -> Result<Vec<AgentSummary>, String> {
     let agents = super::with_db(app, |conn| db::list_agents(conn))?;
+    let since = db::now() - 3600;
     let mut out = Vec::with_capacity(agents.len());
     for agent in agents {
-        let home_with_path = super::engine::home_session(app, &agent).await.ok();
-        // Last reply in the chat (with its time) for the activity line
-        let chat_reply = match &home_with_path {
-            Some((session, path)) => crate::chat::get_session(
-                app.clone(),
-                agent.worktree_id.clone(),
-                path.clone(),
-                session.id.clone(),
-                Some(2),
-            )
-            .await
-            .ok()
-            .and_then(|s| {
-                s.messages
-                    .iter()
-                    .rev()
-                    .find(|m| {
-                        m.role == crate::chat::types::MessageRole::Assistant
-                            && !m.content.trim().is_empty()
-                    })
-                    .map(|m| (m.timestamp as i64, m.content.clone()))
-            }),
-            None => None,
-        };
-        let home = home_with_path.map(|(s, _)| s);
-        let since = db::now() - 3600;
         let (
             pending_updates,
             pending_approvals,
@@ -87,46 +95,39 @@ pub async fn list_agents(app: &AppHandle) -> Result<Vec<AgentSummary>, String> {
             next_schedule_at,
             wakes,
             unread_notifications,
+            activity,
         ) = super::with_db(app, |conn| {
-            let active = db::list_delegations(conn, &agent.id, 200)?
-                .iter()
-                .filter(|d| d.status == "active")
-                .count() as i64;
             Ok((
                 db::pending_event_count(conn, &agent.id)?,
                 db::pending_approval_count(conn, &agent.id)?,
-                active,
+                db::active_delegation_count(conn, &agent.id)?,
                 db::next_schedule_at(conn, &agent.id)?,
                 db::wakes_since(conn, &agent.id, since)?,
                 db::unread_notification_count(conn, &agent.id)?,
+                db::latest_activity(conn, &agent.id)?,
             ))
         })?;
-        let busy = home
-            .as_ref()
-            .is_some_and(|s| crate::chat::registry::is_session_actively_managed(&s.id));
-        let waiting = home.as_ref().is_some_and(|s| s.waiting_for_input) || pending_approvals > 0;
-        let activity = super::with_db(app, |conn| db::latest_activity(conn, &agent.id))?
-            .into_iter()
-            .chain(chat_reply)
-            .max_by_key(|(at, _)| *at)
-            .and_then(|(_, text)| activity_preview(&text));
+        let home_session_id = existing_home_session_id(app, &agent.worktree_id);
+        let busy = home_session_id
+            .as_deref()
+            .is_some_and(crate::chat::registry::is_session_actively_managed);
         let status = if busy {
             "working"
-        } else if waiting {
+        } else if pending_approvals > 0 {
             "waiting"
         } else {
             "idle"
         };
         out.push(AgentSummary {
             status: status.to_string(),
-            home_session_id: home.map(|s| s.id),
+            home_session_id,
             pending_updates,
             pending_approvals,
             active_delegations,
             next_schedule_at,
             budget_reached: wakes >= agent.max_wakes_per_hour,
             unread_notifications,
-            activity,
+            activity: activity.and_then(|(_, text)| activity_preview(&text)),
             agent,
         });
     }

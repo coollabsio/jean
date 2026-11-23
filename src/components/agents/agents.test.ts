@@ -5,18 +5,18 @@ import {
   scopeAgentSummary,
   scopeProjectCoordinator,
   type AgentApproval,
+  type AgentDelegation,
   type AgentSummary,
 } from '@/services/agents'
 import {
-  agentStatusLabel,
-  findAgent,
-  visibleAgentTabs,
-  withRunningAgents,
+  coordinatorAgentIdForWorktree,
+  coordinatorProjectId,
+  coordinatorProjectIdForWorktree,
+  openDelegations,
 } from './agents'
 import { describeApproval } from './AgentActivity'
 import { formatRelative } from '@/lib/relative-time'
 import { formatInterval } from './AgentSchedules'
-import { notificationPreview, splitNotifications } from './AgentInbox'
 import { enabledAgentServers } from './agents-feature'
 import { agentRunSummary } from './agent-config'
 
@@ -50,34 +50,6 @@ function agent(overrides: Partial<AgentSummary>): AgentSummary {
     ...overrides,
   }
 }
-
-describe('agentStatusLabel', () => {
-  it('shows work, waiting and budget', () => {
-    expect(agentStatusLabel(agent({ status: 'working' }))).toBe('Working')
-    expect(agentStatusLabel(agent({ unreadNotifications: 1 }))).toBe(
-      '1 new notification'
-    )
-    expect(agentStatusLabel(agent({ status: 'waiting' }))).toBe(
-      'Waiting for you'
-    )
-    expect(agentStatusLabel(agent({ budgetReached: true }))).toBe(
-      'Hourly limit reached'
-    )
-    expect(
-      agentStatusLabel(agent({ pendingApprovals: 2, activeDelegations: 3 }))
-    ).toBeNull()
-  })
-})
-
-describe('findAgent', () => {
-  const agents = [agent({}), agent({ id: 'reviewer', builtin: false })]
-
-  it('finds by id and falls back to the first agent', () => {
-    expect(findAgent(agents, 'reviewer')?.id).toBe('reviewer')
-    expect(findAgent(agents, 'deleted-agent')?.id).toBe('coord_p1')
-    expect(findAgent(undefined, 'jean')).toBeUndefined()
-  })
-})
 
 describe('formatRelative', () => {
   const now = 1_000_000_000_000
@@ -138,27 +110,6 @@ describe('formatInterval', () => {
     expect(formatInterval(2 * 3600)).toBe('every 2h')
     expect(formatInterval(86_400)).toBe('every 1d')
     expect(formatInterval(90 * 60)).toBe('every 90m')
-  })
-})
-
-describe('splitNotifications', () => {
-  it('keeps unread apart from read and keeps order', () => {
-    const n = (id: number, readAt: number | null) => ({
-      id,
-      agentId: 'jean',
-      sessionId: null,
-      level: 'info',
-      message: `m${id}`,
-      createdAt: id,
-      readAt,
-    })
-    const { unread, read } = splitNotifications([
-      n(3, null),
-      n(2, 5),
-      n(1, null),
-    ])
-    expect(unread.map(x => x.id)).toEqual([3, 1])
-    expect(read.map(x => x.id)).toEqual([2])
   })
 })
 
@@ -255,54 +206,58 @@ describe('enabledAgentServers', () => {
   })
 })
 
-describe('agent rows', () => {
-  it('marks agents whose home chat is running as working', () => {
-    const idle = agent({ id: 'a', homeSessionId: 's1' })
-    const other = agent({ id: 'c', homeSessionId: 's3' })
-    const result = withRunningAgents([idle, other], new Set(['s1']))
-    expect(result?.map(a => a.status)).toEqual(['working', 'idle'])
-    const list = [idle]
-    expect(withRunningAgents(list, new Set())).toBe(list)
-  })
-})
-
-describe('notificationPreview', () => {
-  it('uses the first non-empty line', () => {
-    expect(notificationPreview('\n  Disk check: ok  \n\n| a | b |')).toBe(
-      'Disk check: ok'
+describe('coordinator IDs', () => {
+  it('maps a coordinator chat worktree to its agent, keeping the server', () => {
+    expect(coordinatorAgentIdForWorktree('__coord_p1__')).toBe('coord_p1')
+    expect(coordinatorAgentIdForWorktree('srv:__coord_p1__')).toBe(
+      'srv:coord_p1'
     )
-    expect(notificationPreview('   ')).toBe('')
+    expect(coordinatorAgentIdForWorktree('wt-1')).toBeNull()
+    expect(coordinatorAgentIdForWorktree(null)).toBeNull()
+  })
+
+  it('maps a coordinator agent to its project', () => {
+    expect(coordinatorProjectId('coord_p1')).toBe('p1')
+    expect(coordinatorProjectId('srv:coord_p1')).toBe('srv:p1')
+    expect(coordinatorProjectId('jean')).toBeNull()
+  })
+
+  it('maps a coordinator chat worktree to its project', () => {
+    expect(coordinatorProjectIdForWorktree('__coord_p1__')).toBe('p1')
+    expect(coordinatorProjectIdForWorktree('srv:__coord_p1__')).toBe('srv:p1')
+    expect(coordinatorProjectIdForWorktree('wt-1')).toBeNull()
+    expect(coordinatorProjectIdForWorktree(undefined)).toBeNull()
   })
 })
 
-describe('visibleAgentTabs', () => {
-  it('shows only Schedules by default', () => {
-    expect(visibleAgentTabs(false, agent({}), 'schedules')).toEqual([
-      'schedules',
-    ])
+describe('openDelegations', () => {
+  const delegation = (id: number, status: string): AgentDelegation => ({
+    id,
+    agentId: 'coord_p1',
+    sessionId: `s${id}`,
+    worktreeId: `w${id}`,
+    hop: 0,
+    status,
+    lastEvent: null,
+    lastError: null,
+    lastSummary: null,
+    checkAfter: null,
+    updatedAt: 0,
   })
 
-  it('adds Inbox while it has unread messages or is open', () => {
-    expect(
-      visibleAgentTabs(false, agent({ unreadNotifications: 2 }), 'schedules')
-    ).toEqual(['inbox', 'schedules'])
-    expect(visibleAgentTabs(false, agent({}), 'inbox')).toEqual([
-      'inbox',
-      'schedules',
+  it('keeps active and waiting delegations only', () => {
+    const open = openDelegations([
+      delegation(1, 'active'),
+      delegation(2, 'waiting'),
+      delegation(3, 'done'),
+      delegation(4, 'failed'),
+      delegation(5, 'cancelled'),
     ])
+    expect([...open.worktreeIds]).toEqual(['w1', 'w2'])
+    expect([...open.sessionIds]).toEqual(['s1', 's2'])
   })
 
-  it('hides advanced tabs even when one was open', () => {
-    expect(visibleAgentTabs(false, agent({}), 'memory')).not.toContain('memory')
-  })
-
-  it('shows every tab in advanced mode', () => {
-    expect(visibleAgentTabs(true, agent({}), 'schedules')).toEqual([
-      'inbox',
-      'schedules',
-      'activity',
-      'memory',
-      'settings',
-    ])
+  it('is empty without data', () => {
+    expect(openDelegations(undefined).sessionIds.size).toBe(0)
   })
 })

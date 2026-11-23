@@ -290,6 +290,7 @@ import { useDragAndDropImages } from './hooks/useDragAndDropImages'
 import { useChatWindowEvents } from './hooks/useChatWindowEvents'
 import { useInvestigateHandlers } from './hooks/useInvestigateHandlers'
 import { useMcpServerResolution } from './hooks/useMcpServerResolution'
+import { coordinatorProjectIdForWorktree } from '@/components/agents/agents'
 import { useInstalledBackends } from '@/hooks/useInstalledBackends'
 import { ReplyBubbles } from './ReplyBubble'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -804,9 +805,10 @@ const ChatWindowContent = memo(function ChatWindowContent({
 
   // Fetch projects to get project path for run toggle
   const { data: projects } = useProjects()
-  const project = worktree
-    ? projects?.find(p => p.id === worktree.project_id)
-    : null
+  // Coordinator chats have no worktree record
+  const projectId =
+    worktree?.project_id ?? coordinatorProjectIdForWorktree(activeWorktreeId)
+  const project = projectId ? projects?.find(p => p.id === projectId) : null
 
   // Git status for pull indicator
   const { data: gitStatus } = useGitStatus(activeWorktreeId ?? null)

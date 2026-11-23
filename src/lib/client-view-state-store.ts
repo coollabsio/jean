@@ -44,9 +44,9 @@ export function captureClientViewState(): ClientViewState {
     file_browser_size: ui.fileBrowserSize,
     right_sidebar_visible: ui.rightSidebarVisible,
     zen_mode: ui.zenMode,
-    rail_section: ui.railSection,
-    rail_sidebar_visible: ui.railSidebarVisible,
-    selected_agent_id: ui.selectedAgentId,
+    project_view_modes: ui.projectViewModes,
+    coordinator_sidebar_open: ui.coordinatorSidebarOpen,
+    coordinator_sidebar_width: ui.coordinatorSidebarWidth,
     agents_advanced: ui.agentsAdvanced,
     terminal_visible_by_worktree: terminal.terminalVisibleByWorktree,
     terminal_panel_open: terminal.terminalPanelOpen,
@@ -103,9 +103,9 @@ export function applyClientViewState(state: ClientViewState): void {
     fileBrowserSize: state.file_browser_size,
     rightSidebarVisible: state.right_sidebar_visible,
     zenMode: state.zen_mode,
-    railSection: state.rail_section,
-    railSidebarVisible: state.rail_sidebar_visible,
-    selectedAgentId: state.selected_agent_id,
+    projectViewModes: state.project_view_modes,
+    coordinatorSidebarOpen: state.coordinator_sidebar_open,
+    coordinatorSidebarWidth: state.coordinator_sidebar_width,
     agentsAdvanced: state.agents_advanced,
   })
   useTerminalStore.setState({
@@ -154,6 +154,7 @@ export function scopeClientViewStateResources(
     expanded_folder_ids: state.expanded_folder_ids.map(scope),
     expanded_worktree_ids: state.expanded_worktree_ids.map(scope),
     project_access_timestamps: scopeKeys(state.project_access_timestamps),
+    project_view_modes: scopeKeys(state.project_view_modes),
     dashboard_worktree_collapse_overrides: scopeKeys(
       state.dashboard_worktree_collapse_overrides
     ),

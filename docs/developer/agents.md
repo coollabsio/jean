@@ -96,6 +96,43 @@ selected skills, memory within a size budget, and the end of the previous chat
 (`carry_over`). A non-empty `role_prompt` is added as "Instructions from the
 user".
 
+### Project settings
+
+`ProjectsData::project_for_worktree` maps `__coord_<project_id>__` to its
+project, and every chat lookup uses it. So the coordinator chat gets the
+project's custom system prompt, linked projects, default provider and default
+backend, like a worktree of that project. The agent's own run configuration
+(next section) wins over the project defaults.
+
+A wake-up carries no `mcpConfig`. On backends with a per-session server list
+(`connectors::session_support`), `apply_agent_mcp_allowlist` then builds it
+from the enabled servers the chat UI would use: the session's own choice,
+else the project setting, else the global default. A saved per-agent
+connector list still wins. New servers are not enabled automatically on a
+wake-up.
+
+Branch auto-naming is skipped for coordinator chats: the branch in the
+project folder belongs to the user.
+
+### The coordinator cannot edit code
+
+`agents::code_is_read_only(worktree_id)` is true for coordinator worktree IDs.
+Each backend that can restrict file writes checks it when it builds a run, so
+the rule holds for user messages and wake-ups in every execution mode:
+
+| Backend | Enforced by |
+|---|---|
+| Claude | `--disallowedTools Edit,Write,MultiEdit,NotebookEdit` (`disallowed_tools_args`) |
+| Codex | Read-only sandbox on thread and turn, and an approval policy that cannot grant more access (`restrict_to_read_only`) |
+| OpenCode 1.x and 2.x | Last permission rule `edit` → `deny` (`permission_rules`) |
+| Pi | `--tools read,grep,find,ls,bash` (`pi_tools_for_mode`); not when the Pi agent owns its policy |
+| Cursor, Command Code, Grok, Kimi, Devin, Antigravity, Muse | Not enforced: the prompt rule only |
+
+Only Codex also stops shell writes. On Claude, OpenCode and Pi the shell tool
+stays, because the coordinator reads the repository with it; a write through
+the shell is limited by the prompt only. Plan mode is not used: it blocks the
+Jean MCP tools.
+
 ## Per-agent run configuration
 
 Each agent can set `backend`, `model`, `effort`, `thinking_level`, and
@@ -134,8 +171,9 @@ The engine applies the fields in three places:
 - Rotated chats are created with the agent's backend.
   An empty home chat (no messages, no running turn) is stamped the same way
   when the agent is created or its run configuration changes, so the chat
-  toolbar shows the choice. A cleared backend or model resets that empty chat
-  to the preference default. Listing agents does not stamp, so a toolbar
+  toolbar shows the choice. A cleared backend resets that empty chat to the
+  project's default backend, else the preference default; a cleared model
+  resets it to the preference model. Listing agents does not stamp, so a toolbar
   choice made before the first message is kept.
 - Wake-ups pass `backend`, `model`, `effortLevel`, and `thinkingLevel` on
   `send_chat_message`. A set backend with an unset model also passes that
@@ -187,6 +225,13 @@ input, or when the hourly budget (`max_wakes_per_hour`) is spent. The events
 stay queued and the next tick tries again. The end of the chat's own run
 nudges the loop, so updates that arrived during a turn are delivered right
 after it. One delivery counts as one wake.
+
+`next_delivery` marks the updates delivered, then `send_delivery` sends the
+message and waits for the turn. When the chat never recorded the message
+(`UserTurnOutcome::NotAccepted`: the user sent a message first, or the session
+cannot run), `db::requeue_events` puts the same updates back in the queue and
+a later tick sends them. The wake stays counted, so a send that keeps failing
+stops at the hourly budget.
 
 Saving preferences nudges the loop, so a change of `agents_enabled` is seen at
 once.
@@ -377,6 +422,13 @@ plus the fields for that kind (`delaySecs`, `everySecs`, `cron` + `timezone`,
 or `event`). `update_agent_schedule` patches `name`, `prompt`, `paused`, and,
 when `kind` is set, replaces the timing. Pause does not delete the routine.
 Changes emit `cache:invalidate` with key `agents`.
+
+`list_agents` is cheap: it reads `agents.db`, the process registry and an
+existing session index. It loads no chat and creates no chat or index.
+`homeSessionId` is `null` until the chat was opened once, `activity` is the
+latest notification, and `status` is `working` (a turn runs), `waiting` (a
+pending approval) or `idle`. A question asked in the chat is not in the list;
+use `get_project_coordinator` and the session for one project.
 
 `get_project_coordinator(projectId)` returns `{ agentId, worktreeId,
 worktreePath, chatSessionId, backend, model, effort, thinkingLevel }`. It

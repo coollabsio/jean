@@ -1,8 +1,9 @@
 import { useEffect } from 'react'
 import { toast } from 'sonner'
 import { listen } from '@/lib/transport'
-import { useUIStore } from '@/store/ui-store'
+import { coordinatorProjectId } from './agents'
 import { useAgentsEnabled } from './agents-feature'
+import { openProjectCoordinator } from './open-coordinator'
 
 interface AgentNotificationEvent {
   agentId: string
@@ -12,9 +13,8 @@ interface AgentNotificationEvent {
 }
 
 function openAgent(agentId: string) {
-  const ui = useUIStore.getState()
-  ui.setRailSection('agents')
-  ui.setSelectedAgentId(agentId)
+  const projectId = coordinatorProjectId(agentId)
+  if (projectId) openProjectCoordinator(projectId)
 }
 
 /** Shows a toast when an agent calls `notify_user`. Renders nothing. */

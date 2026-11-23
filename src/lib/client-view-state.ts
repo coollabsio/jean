@@ -26,13 +26,11 @@ export interface ClientViewState {
   file_browser_size: number
   right_sidebar_visible: boolean
   zen_mode: boolean
-  /** Open left rail section; Agents shows only while the feature is on */
-  rail_section: 'workspace' | 'agents'
-  /** Last sidebar visibility of each rail section */
-  rail_sidebar_visible: Partial<Record<'workspace' | 'agents', boolean>>
-  /** Agent open on the Agents page */
-  selected_agent_id: string
-  /** Agent pages show every tab and tool activity */
+  /** Per project: coordinator chat or sessions canvas as the main panel */
+  project_view_modes: Record<string, 'coordinator' | 'sessions'>
+  coordinator_sidebar_open: boolean
+  coordinator_sidebar_width: number
+  /** Coordinator chat shows tool activity */
   agents_advanced: boolean
   terminal_visible_by_worktree: Record<string, boolean>
   terminal_panel_open: Record<string, boolean>
@@ -70,9 +68,9 @@ export const defaultClientViewState: ClientViewState = {
   file_browser_size: 280,
   right_sidebar_visible: false,
   zen_mode: false,
-  rail_section: 'workspace',
-  rail_sidebar_visible: {},
-  selected_agent_id: 'jean',
+  project_view_modes: {},
+  coordinator_sidebar_open: false,
+  coordinator_sidebar_width: 360,
   agents_advanced: false,
   terminal_visible_by_worktree: {},
   terminal_panel_open: {},
@@ -117,6 +115,8 @@ function recordOf<T>(
 const isBoolean = (value: unknown): value is boolean =>
   typeof value === 'boolean'
 const isString = (value: unknown): value is string => typeof value === 'string'
+const isViewMode = (value: unknown): value is 'coordinator' | 'sessions' =>
+  value === 'coordinator' || value === 'sessions'
 const isCanvasFilter = (value: unknown): value is string =>
   value === 'all' ||
   value === 'manual' ||
@@ -217,6 +217,7 @@ function parseClientViewState(value: unknown): ClientViewState {
     'right_sidebar_visible',
     'zen_mode',
     'terminal_visible',
+    'coordinator_sidebar_open',
   ] as const) {
     if (isBoolean(value[key])) assign(key, value[key])
   }
@@ -230,6 +231,7 @@ function parseClientViewState(value: unknown): ClientViewState {
     'browser_modal_width',
     'browser_modal_height',
     'browser_bottom_panel_height',
+    'coordinator_sidebar_width',
   ] as const) {
     if (isNumber(value[key])) assign(key, value[key])
   }
@@ -243,21 +245,7 @@ function parseClientViewState(value: unknown): ClientViewState {
   ] as const) {
     assign(key, recordOf(value[key], isBoolean))
   }
-  if (value.rail_section === 'workspace' || value.rail_section === 'agents')
-    assign('rail_section', value.rail_section)
-  if (isRecord(value.rail_sidebar_visible)) {
-    const visible = value.rail_sidebar_visible
-    assign(
-      'rail_sidebar_visible',
-      Object.fromEntries(
-        (['workspace', 'agents'] as const)
-          .filter(section => isBoolean(visible[section]))
-          .map(section => [section, visible[section]])
-      )
-    )
-  }
-  if (isString(value.selected_agent_id) && value.selected_agent_id)
-    assign('selected_agent_id', value.selected_agent_id)
+  assign('project_view_modes', recordOf(value.project_view_modes, isViewMode))
   if (isBoolean(value.agents_advanced))
     assign('agents_advanced', value.agents_advanced)
   if (isDockMode(value.modal_terminal_dock_mode))

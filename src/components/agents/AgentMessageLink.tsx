@@ -11,11 +11,20 @@ import {
 import { Markdown } from '@/components/ui/markdown'
 import { ReplyBubble } from '@/components/chat/ReplyBubble'
 import { useSession } from '@/services/chat'
-import { useAgentsList, type AgentSummary } from '@/services/agents'
+import { useChatStore } from '@/store/chat-store'
+import { cn } from '@/lib/utils'
+import {
+  useAgentDetails,
+  useAgentsList,
+  type AgentSummary,
+} from '@/services/agents'
 import { useAgentsEnabledServers } from './agents-feature'
+import { coordinatorAgentIdForWorktree } from './agents'
 import {
   conversationEntries,
+  messageSnippet,
   sameAgentId,
+  spawnDelegationStatus,
   type AgentMessageLink,
   type AgentSentMessage,
   type ConversationEntry,
@@ -47,29 +56,98 @@ function sessionParticipant(name: string): Participant {
   }
 }
 
+const STATUS_CHIPS: Record<string, { label: string; className: string }> = {
+  active: { label: 'running', className: 'bg-blue-500/10 text-blue-500' },
+  waiting: {
+    label: 'waiting for input',
+    className: 'bg-amber-500/10 text-amber-500',
+  },
+  done: { label: 'done', className: 'bg-green-500/10 text-green-500' },
+  failed: { label: 'failed', className: 'bg-destructive/10 text-destructive' },
+  cancelled: {
+    label: 'cancelled',
+    className: 'bg-muted text-muted-foreground',
+  },
+}
+
+function StatusChip({ status }: { status: string | null }) {
+  const chip = status ? STATUS_CHIPS[status] : undefined
+  if (!chip) return null
+  return (
+    <span
+      className={cn(
+        'shrink-0 rounded-full px-1.5 text-xs leading-5',
+        chip.className
+      )}
+    >
+      {chip.label}
+    </span>
+  )
+}
+
 function LinkRow({
   label,
   participant,
+  detail,
+  status = null,
   onClick,
 }: {
   label: string
   participant: Participant
-  onClick: () => void
+  /** Muted text after the name, e.g. the message sent */
+  detail?: string
+  /** Delegation status of the spawned work */
+  status?: string | null
+  /** Missing: the target cannot be opened, so the row is plain text */
+  onClick?: () => void
 }) {
+  const content = (
+    <>
+      <span className="shrink-0">{label}</span>
+      {participant.icon}
+      <span className="truncate">
+        {participant.name}
+        {detail && <span className="text-muted-foreground/70">: {detail}</span>}
+      </span>
+      <StatusChip status={status} />
+    </>
+  )
+  const className =
+    'mx-auto flex max-w-full items-center gap-1.5 rounded-md px-2 py-0.5 text-sm text-muted-foreground'
+  if (!onClick) return <div className={className}>{content}</div>
   return (
     <button
       type="button"
       onClick={onClick}
-      className="mx-auto flex max-w-full items-center gap-1.5 rounded-md px-2 py-0.5 text-sm text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      className={cn(
+        className,
+        'transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
+      )}
     >
-      <span className="shrink-0">{label}</span>
-      {participant.icon}
-      <span className="truncate">{participant.name}</span>
+      {content}
     </button>
   )
 }
 
-/** Sender side: "Messaged <agent or session>". Opens the conversation. */
+/** Opens a worktree, at `sessionId` when given, in the project's session modal. */
+function openWorktreeSession(
+  worktreeId: string,
+  worktreePath: string,
+  sessionId?: string
+) {
+  if (sessionId) useChatStore.getState().setActiveSession(worktreeId, sessionId)
+  window.dispatchEvent(
+    new CustomEvent('open-worktree-modal', {
+      detail: { worktreeId, worktreePath },
+    })
+  )
+}
+
+/**
+ * Sender side, one card per spawn: "→ Created worktree <name>" or
+ * "→ Sent to <session>: '<message>'". Opens the worktree's session; old
+ * links without one open the conversation.
+ */
 export function AgentMessageLinkRow({
   link,
   worktreeId,
@@ -80,48 +158,72 @@ export function AgentMessageLinkRow({
 }) {
   const [open, setOpen] = useState(false)
   const agents = useAgents()
+  const { data: details } = useAgentDetails(
+    coordinatorAgentIdForWorktree(worktreeId)
+  )
+  const status = spawnDelegationStatus(link, details?.delegations)
+
+  if (link.kind === 'worktree') {
+    const { worktreeId: id, worktreePath: path } = link
+    return (
+      <LinkRow
+        label="→ Created worktree"
+        participant={sessionParticipant(link.name)}
+        status={status}
+        onClick={id && path ? () => openWorktreeSession(id, path) : undefined}
+      />
+    )
+  }
+
   const senderAgent = agents.find(a => a.worktreeId === worktreeId)
   const sender = agentParticipant(senderAgent, 'Agent')
-  const targetAgent =
-    link.kind === 'agent'
-      ? agents.find(a => sameAgentId(a.id, link.agentId))
-      : undefined
   const target =
     link.kind === 'agent'
-      ? agentParticipant(targetAgent, 'Agent')
+      ? agentParticipant(
+          agents.find(a => sameAgentId(a.id, link.agentId)),
+          'Agent'
+        )
       : sessionParticipant(link.name ?? 'Session')
+  const snippet = messageSnippet(link.message)
+  const sessionTarget =
+    link.kind === 'session' && link.worktreeId && link.worktreePath
+      ? {
+          worktreeId: link.worktreeId,
+          worktreePath: link.worktreePath,
+          sessionId: link.sessionId,
+        }
+      : null
 
   return (
     <>
       <LinkRow
-        label="Messaged"
+        label="→ Sent to"
         participant={target}
-        onClick={() => setOpen(true)}
+        detail={snippet ? `‘${snippet}’` : undefined}
+        status={status}
+        onClick={() =>
+          sessionTarget
+            ? openWorktreeSession(
+                sessionTarget.worktreeId,
+                sessionTarget.worktreePath,
+                sessionTarget.sessionId
+              )
+            : setOpen(true)
+        }
       />
-      {open &&
-        (link.kind === 'agent' ? (
-          // Old chats only: agents no longer message each other, and the
-          // session that answered is not tracked any more.
-          <AgentConversationDialog
-            sender={sender}
-            target={target}
-            sessionId={null}
-            worktreeId={null}
-            worktreePath={null}
-            request={link.message}
-            onClose={() => setOpen(false)}
-          />
-        ) : (
-          <AgentConversationDialog
-            sender={sender}
-            target={target}
-            sessionId={link.sessionId}
-            worktreeId={link.worktreeId ?? null}
-            worktreePath={link.worktreePath ?? null}
-            request={link.message}
-            onClose={() => setOpen(false)}
-          />
-        ))}
+      {open && (
+        // Old chats only: agents no longer message each other, and links
+        // without a worktree cannot open its session.
+        <AgentConversationDialog
+          sender={sender}
+          target={target}
+          sessionId={link.kind === 'session' ? link.sessionId : null}
+          worktreeId={null}
+          worktreePath={null}
+          request={link.message}
+          onClose={() => setOpen(false)}
+        />
+      )}
     </>
   )
 }

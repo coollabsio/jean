@@ -206,8 +206,7 @@ const IDLE_PRELOADS = [
 import { Toaster } from '@/components/ui/sonner'
 import { PreviewDialogHost } from '@/components/ui/preview-dialog-host'
 import { MobileLeftSidebar } from './MobileLeftSidebar'
-import { useShowAgents } from '@/components/agents/agents-feature'
-import { AgentsTitleSync, resolveWindowTitle } from './window-title'
+import { resolveWindowTitle } from './window-title'
 import { BrowserSidePane } from '@/components/browser/BrowserSidePane'
 import { BrowserPanel } from '@/components/browser/BrowserPanel'
 import { useBrowserEvents } from '@/hooks/useBrowserPane'
@@ -289,8 +288,7 @@ export function MainWindow() {
   const { offset: toasterOffset, mobileOffset: toasterMobileOffset } =
     useToasterOffset()
   const leftSidebarVisible = useUIStore(state => state.leftSidebarVisible)
-  const showAgents = useShowAgents()
-  // One width for every sidebar tab (Projects, Recent, Agents)
+  // One width for every sidebar tab (Workspace, Recent)
   const leftSidebarSize = useUIStore(state => state.leftSidebarSize)
   const setLeftSidebarVisible = useUIStore(state => state.setLeftSidebarVisible)
   const fileBrowserVisible = useUIStore(state => state.fileBrowserVisible)
@@ -385,25 +383,16 @@ export function MainWindow() {
     ? projects?.find(p => p.id === worktree.project_id)
     : null
 
-  // Selected agent name, reported only while the Agents view is mounted.
-  const [agentName, setAgentName] = useState<string | undefined>(undefined)
-  const handleAgentName = useCallback((name: string | undefined) => {
-    setAgentName(current => (current === name ? current : name))
-  }, [])
-
   // Project pages: project name on mobile, project › worktree on desktop.
-  // Agents view: the selected agent's name, in the title bar and browser tab.
   const windowTitle = useMemo(
     () =>
       resolveWindowTitle({
-        showAgents,
-        agentName,
         projectName: project?.name,
         worktreeName: worktree?.name,
         worktreeBranch: worktree?.branch,
         isMobile,
       }),
-    [showAgents, agentName, project, worktree, isMobile]
+    [project, worktree, isMobile]
   )
 
   // Compute polling info - null if no worktree or data not loaded.
@@ -604,7 +593,6 @@ export function MainWindow() {
       )}
     >
       <UIStatePersistence onInitializedChange={setIsInitialized} />
-      {showAgents && <AgentsTitleSync onName={handleAgentName} />}
       {isNativeApp() && isLinux && <WindowResizeHandles />}
 
       {/* Touch swipe-down pull indicator */}

@@ -357,13 +357,10 @@ pub(crate) fn resolve_default_backend(app: &AppHandle, worktree_id: Option<&str>
     // Check project-level override if worktree_id is provided
     if let Some(wt_id) = worktree_id {
         if let Ok(data) = load_projects_data(app) {
-            if let Some(project) = data.projects.iter().find(|p| {
-                !p.is_folder
-                    && data
-                        .worktrees
-                        .iter()
-                        .any(|w| w.id == wt_id && w.project_id == p.id)
-            }) {
+            if let Some(project) = data
+                .project_for_worktree(wt_id)
+                .filter(|project| !project.is_folder)
+            {
                 if let Some(ref pb) = project.default_backend {
                     resolved = match pb.as_str() {
                         "codex" => Backend::Codex,
@@ -596,8 +593,9 @@ fn default_provider_for_backend(
         Backend::Claude => load_projects_data(app)
             .ok()
             .and_then(|data| {
-                let project_id = data.find_worktree(worktree_id)?.project_id.clone();
-                data.find_project(&project_id)?.default_provider.clone()
+                data.project_for_worktree(worktree_id)?
+                    .default_provider
+                    .clone()
             })
             .or_else(|| prefs.and_then(|p| p.default_provider.clone())),
         Backend::Codex => prefs.and_then(|p| p.default_codex_provider.clone()),
@@ -765,30 +763,28 @@ fn build_kimi_system_prompt(
     );
     super::push_trimmed_prompt(&mut parts, agent_prompt);
     if let Ok(data) = load_projects_data(app) {
-        if let Some(worktree) = data.find_worktree(worktree_id) {
-            if let Some(project) = data.find_project(&worktree.project_id) {
-                if let Some(prompt) = project
-                    .custom_system_prompt
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                {
-                    parts.push(prompt.to_string());
-                }
-                let paths = project
-                    .linked_project_ids
-                    .iter()
-                    .filter_map(|id| data.find_project(id))
-                    .map(|project| project.path.trim())
-                    .filter(|path| !path.is_empty())
-                    .map(|path| format!("- {path}"))
-                    .collect::<Vec<_>>();
-                if local_files_available && !paths.is_empty() {
-                    parts.push(format!(
-                        "This project is linked to other projects for cross-project context. Check these directories for instructions and documentation:\n{}",
-                        paths.join("\n")
-                    ));
-                }
+        if let Some(project) = data.project_for_worktree(worktree_id) {
+            if let Some(prompt) = project
+                .custom_system_prompt
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                parts.push(prompt.to_string());
+            }
+            let paths = project
+                .linked_project_ids
+                .iter()
+                .filter_map(|id| data.find_project(id))
+                .map(|project| project.path.trim())
+                .filter(|path| !path.is_empty())
+                .map(|path| format!("- {path}"))
+                .collect::<Vec<_>>();
+            if local_files_available && !paths.is_empty() {
+                parts.push(format!(
+                    "This project is linked to other projects for cross-project context. Check these directories for instructions and documentation:\n{}",
+                    paths.join("\n")
+                ));
             }
         }
     }
@@ -1376,15 +1372,10 @@ pub async fn create_session(
             }
             // Check project-level override
             if let Ok(data) = crate::projects::storage::load_projects_data(&app) {
-                // Find project that owns this worktree path
-                if let Some(project) = data.projects.iter().find(|p| {
-                    // Match by worktree's project (worktree_id → project)
-                    !p.is_folder
-                        && data
-                            .worktrees
-                            .iter()
-                            .any(|w| w.id == worktree_id && w.project_id == p.id)
-                }) {
+                if let Some(project) = data
+                    .project_for_worktree(&worktree_id)
+                    .filter(|project| !project.is_folder)
+                {
                     if let Some(ref pb) = project.default_backend {
                         resolved = match pb.as_str() {
                             "codex" => Backend::Codex,
@@ -2980,6 +2971,51 @@ pub async fn send_chat_message(
     backend: Option<String>,
     include_recap: Option<bool>,
 ) -> Result<ChatMessage, String> {
+    send_chat_message_checked(
+        app,
+        session_id,
+        worktree_id,
+        worktree_path,
+        message,
+        model,
+        execution_mode,
+        thinking_level,
+        effort_level,
+        parallel_execution_prompt,
+        ai_language,
+        allowed_tools,
+        mcp_config,
+        chrome_enabled,
+        custom_profile_name,
+        backend,
+        include_recap,
+    )
+    .await
+    .map_err(|e| e.message)
+}
+
+/// `send_chat_message` with the typed error: `user_turn` tells the caller
+/// whether the prompt was recorded in the chat.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn send_chat_message_checked(
+    app: tauri::AppHandle,
+    session_id: String,
+    worktree_id: String,
+    worktree_path: String,
+    message: String,
+    model: Option<String>,
+    execution_mode: Option<String>,
+    thinking_level: Option<ThinkingLevel>,
+    effort_level: Option<EffortLevel>,
+    parallel_execution_prompt: Option<String>,
+    ai_language: Option<String>,
+    allowed_tools: Option<Vec<String>>,
+    mcp_config: Option<String>,
+    chrome_enabled: Option<bool>,
+    custom_profile_name: Option<String>,
+    backend: Option<String>,
+    include_recap: Option<bool>,
+) -> Result<ChatMessage, SendError> {
     let drain_target = (
         app.clone(),
         worktree_id.clone(),
@@ -3005,8 +3041,7 @@ pub async fn send_chat_message(
         backend,
         include_recap,
     )
-    .await
-    .map_err(|e| e.message);
+    .await;
     // Start the queue drain only after the inner call returned and released
     // its send claim. A drain started while the claim is held sees the
     // session as busy and stops, so queued prompts waited until the session
@@ -3014,7 +3049,11 @@ pub async fn send_chat_message(
     let (app, worktree_id, worktree_path, session_id) = drain_target;
     // Report before the drain: a queued prompt would otherwise start the next
     // run first and the report would see the session as live.
-    super::delegation::report_run_end(&app, &session_id, result.as_ref().err().map(String::as_str));
+    super::delegation::report_run_end(
+        &app,
+        &session_id,
+        result.as_ref().err().map(|e| e.message.as_str()),
+    );
     trigger_backend_queue_drain(app, worktree_id, worktree_path, session_id);
     result
 }
@@ -3139,8 +3178,11 @@ async fn send_chat_message_inner(
                 let worktree_record = load_projects_data(&app)
                     .ok()
                     .and_then(|data| data.find_worktree(&worktree_id).cloned());
+                // A coordinator chat runs in the project folder: its branch
+                // is the user's, never a placeholder to rename.
                 let generate_branch = is_first_worktree_message
                     && prefs.auto_branch_naming
+                    && !crate::agents::is_agent_worktree_id(&worktree_id)
                     && should_auto_name_branch(worktree_record.as_ref());
                 let generate_session = is_first_session_message && prefs.auto_session_naming;
 
@@ -4159,8 +4201,7 @@ async fn send_chat_message_inner(
                     crate::projects::storage::load_projects_data(&thread_app)
                         .ok()
                         .and_then(|data| {
-                            let worktree = data.find_worktree(&thread_worktree_id)?;
-                            let project = data.find_project(&worktree.project_id)?;
+                            let project = data.project_for_worktree(&thread_worktree_id)?;
                             Some(
                                 project
                                     .linked_project_ids
@@ -4224,28 +4265,26 @@ async fn send_chat_message_inner(
 
                     // Per-project custom system prompt + linked project instructions
                     if let Ok(data) = load_projects_data(&thread_app) {
-                        if let Some(worktree) = data.find_worktree(&thread_worktree_id) {
-                            if let Some(project) = data.find_project(&worktree.project_id) {
-                                if let Some(prompt) = &project.custom_system_prompt {
-                                    let prompt = prompt.trim();
-                                    if !prompt.is_empty() {
-                                        system_prompt_parts.push(prompt.to_string());
-                                    }
+                        if let Some(project) = data.project_for_worktree(&thread_worktree_id) {
+                            if let Some(prompt) = &project.custom_system_prompt {
+                                let prompt = prompt.trim();
+                                if !prompt.is_empty() {
+                                    system_prompt_parts.push(prompt.to_string());
                                 }
+                            }
 
-                                // Linked projects: inject instruction to check their directories
-                                if !linked_project_paths.is_empty() {
-                                    let dirs_list = linked_project_paths
-                                        .iter()
-                                        .map(|p| format!("- {p}"))
-                                        .collect::<Vec<_>>()
-                                        .join("\n");
-                                    system_prompt_parts.push(format!(
-                                        "This project is linked to other projects for cross-project context. \
-                                         Check the following directories for additional instructions and documentation \
-                                         (e.g., CLAUDE.md, AGENTS.md, docs/):\n{dirs_list}"
-                                    ));
-                                }
+                            // Linked projects: inject instruction to check their directories
+                            if !linked_project_paths.is_empty() {
+                                let dirs_list = linked_project_paths
+                                    .iter()
+                                    .map(|p| format!("- {p}"))
+                                    .collect::<Vec<_>>()
+                                    .join("\n");
+                                system_prompt_parts.push(format!(
+                                    "This project is linked to other projects for cross-project context. \
+                                     Check the following directories for additional instructions and documentation \
+                                     (e.g., CLAUDE.md, AGENTS.md, docs/):\n{dirs_list}"
+                                ));
                             }
                         }
                     }
@@ -4534,8 +4573,7 @@ async fn send_chat_message_inner(
                     crate::projects::storage::load_projects_data(&thread_app)
                         .ok()
                         .and_then(|data| {
-                            let worktree = data.find_worktree(&thread_worktree_id)?;
-                            let project = data.find_project(&worktree.project_id)?;
+                            let project = data.project_for_worktree(&thread_worktree_id)?;
                             Some(
                                 project
                                     .linked_project_ids
@@ -4601,28 +4639,26 @@ async fn send_chat_message_inner(
 
                     // Per-project custom system prompt + linked project instructions
                     if let Ok(data) = load_projects_data(&thread_app) {
-                        if let Some(worktree) = data.find_worktree(&thread_worktree_id) {
-                            if let Some(project) = data.find_project(&worktree.project_id) {
-                                if let Some(prompt) = &project.custom_system_prompt {
-                                    let prompt = prompt.trim();
-                                    if !prompt.is_empty() {
-                                        system_prompt_parts.push(prompt.to_string());
-                                    }
+                        if let Some(project) = data.project_for_worktree(&thread_worktree_id) {
+                            if let Some(prompt) = &project.custom_system_prompt {
+                                let prompt = prompt.trim();
+                                if !prompt.is_empty() {
+                                    system_prompt_parts.push(prompt.to_string());
                                 }
+                            }
 
-                                // Linked projects: inject instruction to check their directories
-                                if !opencode_linked_project_paths.is_empty() {
-                                    let dirs_list = opencode_linked_project_paths
-                                        .iter()
-                                        .map(|p| format!("- {p}"))
-                                        .collect::<Vec<_>>()
-                                        .join("\n");
-                                    system_prompt_parts.push(format!(
-                                        "This project is linked to other projects for cross-project context. \
-                                         Check the following directories for additional instructions and documentation \
-                                         (e.g., CLAUDE.md, AGENTS.md, docs/):\n{dirs_list}"
-                                    ));
-                                }
+                            // Linked projects: inject instruction to check their directories
+                            if !opencode_linked_project_paths.is_empty() {
+                                let dirs_list = opencode_linked_project_paths
+                                    .iter()
+                                    .map(|p| format!("- {p}"))
+                                    .collect::<Vec<_>>()
+                                    .join("\n");
+                                system_prompt_parts.push(format!(
+                                    "This project is linked to other projects for cross-project context. \
+                                     Check the following directories for additional instructions and documentation \
+                                     (e.g., CLAUDE.md, AGENTS.md, docs/):\n{dirs_list}"
+                                ));
                             }
                         }
                     }
@@ -4880,8 +4916,7 @@ async fn send_chat_message_inner(
                     crate::projects::storage::load_projects_data(&thread_app)
                         .ok()
                         .and_then(|data| {
-                            let worktree = data.find_worktree(&thread_worktree_id)?;
-                            let project = data.find_project(&worktree.project_id)?;
+                            let project = data.project_for_worktree(&thread_worktree_id)?;
                             Some(
                                 project
                                     .linked_project_ids
@@ -4919,27 +4954,25 @@ async fn send_chat_message_inner(
                     super::push_trimmed_prompt(&mut parts, thread_agent_prompt.as_deref());
 
                     if let Ok(data) = load_projects_data(&thread_app) {
-                        if let Some(worktree) = data.find_worktree(&thread_worktree_id) {
-                            if let Some(project) = data.find_project(&worktree.project_id) {
-                                if let Some(prompt) = &project.custom_system_prompt {
-                                    let prompt = prompt.trim();
-                                    if !prompt.is_empty() {
-                                        parts.push(prompt.to_string());
-                                    }
+                        if let Some(project) = data.project_for_worktree(&thread_worktree_id) {
+                            if let Some(prompt) = &project.custom_system_prompt {
+                                let prompt = prompt.trim();
+                                if !prompt.is_empty() {
+                                    parts.push(prompt.to_string());
                                 }
+                            }
 
-                                if !cursor_linked_project_paths.is_empty() {
-                                    let dirs_list = cursor_linked_project_paths
-                                        .iter()
-                                        .map(|p| format!("- {p}"))
-                                        .collect::<Vec<_>>()
-                                        .join("\n");
-                                    parts.push(format!(
-                                        "This project is linked to other projects for cross-project context. \
-                                         Check the following directories for additional instructions and documentation \
-                                         (e.g., CLAUDE.md, AGENTS.md, docs/):\n{dirs_list}"
-                                    ));
-                                }
+                            if !cursor_linked_project_paths.is_empty() {
+                                let dirs_list = cursor_linked_project_paths
+                                    .iter()
+                                    .map(|p| format!("- {p}"))
+                                    .collect::<Vec<_>>()
+                                    .join("\n");
+                                parts.push(format!(
+                                    "This project is linked to other projects for cross-project context. \
+                                     Check the following directories for additional instructions and documentation \
+                                     (e.g., CLAUDE.md, AGENTS.md, docs/):\n{dirs_list}"
+                                ));
                             }
                         }
                     }
@@ -5072,34 +5105,32 @@ async fn send_chat_message_inner(
                     super::push_trimmed_prompt(&mut parts, thread_agent_prompt.as_deref());
 
                     if let Ok(data) = load_projects_data(&thread_app) {
-                        if let Some(worktree) = data.find_worktree(&thread_worktree_id) {
-                            if let Some(project) = data.find_project(&worktree.project_id) {
-                                if let Some(prompt) = &project.custom_system_prompt {
-                                    let prompt = prompt.trim();
-                                    if !prompt.is_empty() {
-                                        parts.push(prompt.to_string());
-                                    }
+                        if let Some(project) = data.project_for_worktree(&thread_worktree_id) {
+                            if let Some(prompt) = &project.custom_system_prompt {
+                                let prompt = prompt.trim();
+                                if !prompt.is_empty() {
+                                    parts.push(prompt.to_string());
                                 }
+                            }
 
-                                let linked_paths = project
-                                    .linked_project_ids
+                            let linked_paths = project
+                                .linked_project_ids
+                                .iter()
+                                .filter_map(|id| data.find_project(id))
+                                .filter(|p| !p.path.trim().is_empty())
+                                .map(|p| p.path.clone())
+                                .collect::<Vec<_>>();
+                            if !linked_paths.is_empty() {
+                                let dirs_list = linked_paths
                                     .iter()
-                                    .filter_map(|id| data.find_project(id))
-                                    .filter(|p| !p.path.trim().is_empty())
-                                    .map(|p| p.path.clone())
-                                    .collect::<Vec<_>>();
-                                if !linked_paths.is_empty() {
-                                    let dirs_list = linked_paths
-                                        .iter()
-                                        .map(|p| format!("- {p}"))
-                                        .collect::<Vec<_>>()
-                                        .join("\n");
-                                    parts.push(format!(
-                                        "This project is linked to other projects for cross-project context. \
-                                         Check the following directories for additional instructions and documentation \
-                                         (e.g., CLAUDE.md, AGENTS.md, docs/):\n{dirs_list}"
-                                    ));
-                                }
+                                    .map(|p| format!("- {p}"))
+                                    .collect::<Vec<_>>()
+                                    .join("\n");
+                                parts.push(format!(
+                                    "This project is linked to other projects for cross-project context. \
+                                     Check the following directories for additional instructions and documentation \
+                                     (e.g., CLAUDE.md, AGENTS.md, docs/):\n{dirs_list}"
+                                ));
                             }
                         }
                     }
@@ -5179,34 +5210,32 @@ async fn send_chat_message_inner(
                     super::push_trimmed_prompt(&mut parts, thread_agent_prompt.as_deref());
 
                     if let Ok(data) = load_projects_data(&thread_app) {
-                        if let Some(worktree) = data.find_worktree(&thread_worktree_id) {
-                            if let Some(project) = data.find_project(&worktree.project_id) {
-                                if let Some(prompt) = &project.custom_system_prompt {
-                                    let prompt = prompt.trim();
-                                    if !prompt.is_empty() {
-                                        parts.push(prompt.to_string());
-                                    }
+                        if let Some(project) = data.project_for_worktree(&thread_worktree_id) {
+                            if let Some(prompt) = &project.custom_system_prompt {
+                                let prompt = prompt.trim();
+                                if !prompt.is_empty() {
+                                    parts.push(prompt.to_string());
                                 }
+                            }
 
-                                let linked_paths = project
-                                    .linked_project_ids
+                            let linked_paths = project
+                                .linked_project_ids
+                                .iter()
+                                .filter_map(|id| data.find_project(id))
+                                .filter(|p| !p.path.trim().is_empty())
+                                .map(|p| p.path.clone())
+                                .collect::<Vec<_>>();
+                            if !linked_paths.is_empty() {
+                                let dirs_list = linked_paths
                                     .iter()
-                                    .filter_map(|id| data.find_project(id))
-                                    .filter(|p| !p.path.trim().is_empty())
-                                    .map(|p| p.path.clone())
-                                    .collect::<Vec<_>>();
-                                if !linked_paths.is_empty() {
-                                    let dirs_list = linked_paths
-                                        .iter()
-                                        .map(|p| format!("- {p}"))
-                                        .collect::<Vec<_>>()
-                                        .join("\n");
-                                    parts.push(format!(
-                                        "This project is linked to other projects for cross-project context. \
-                                         Check the following directories for additional instructions and documentation \
-                                         (e.g., CLAUDE.md, AGENTS.md, docs/):\n{dirs_list}"
-                                    ));
-                                }
+                                    .map(|p| format!("- {p}"))
+                                    .collect::<Vec<_>>()
+                                    .join("\n");
+                                parts.push(format!(
+                                    "This project is linked to other projects for cross-project context. \
+                                     Check the following directories for additional instructions and documentation \
+                                     (e.g., CLAUDE.md, AGENTS.md, docs/):\n{dirs_list}"
+                                ));
                             }
                         }
                     }

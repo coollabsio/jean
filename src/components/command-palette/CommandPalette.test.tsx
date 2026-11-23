@@ -17,8 +17,8 @@ const {
   isNativeApp,
   getActiveConnectionId,
   projectStoreState,
-  setRailSection,
-  setSelectedAgentId,
+  setProjectViewMode,
+  clearActiveWorktree,
   agentState,
   openSessionInWorktree,
   openPreferencesEntry,
@@ -42,8 +42,8 @@ const {
     projectAccessTimestamps: {} as Record<string, number>,
     selectedProjectId: null as string | null,
   },
-  setRailSection: vi.fn(),
-  setSelectedAgentId: vi.fn(),
+  setProjectViewMode: vi.fn(),
+  clearActiveWorktree: vi.fn(),
   openSessionInWorktree: vi.fn(),
   openPreferencesEntry: vi.fn(),
   sessionState: {
@@ -51,12 +51,10 @@ const {
     hits: [] as unknown[],
   },
   agentState: {
-    pageOpen: false,
-    selectedAgentId: 'jean',
-    leftAt: 0,
     servers: [] as string[],
     agents: [] as {
       id: string
+      projectId: string
       name: string
       description: string
       icon: string
@@ -87,15 +85,12 @@ vi.mock('@/store/ui-store', () => ({
       const state = {
         commandPaletteOpen: true,
         setCommandPaletteOpen,
-        selectedAgentId: agentState.selectedAgentId,
-        agentsLeftAt: agentState.leftAt,
       }
       return selector ? selector(state) : state
     },
     {
       getState: () => ({
-        setRailSection,
-        setSelectedAgentId,
+        setProjectViewMode,
         openPreferencesEntry,
       }),
     }
@@ -104,7 +99,6 @@ vi.mock('@/store/ui-store', () => ({
 
 vi.mock('@/components/agents/agents-feature', () => ({
   useAgentsEnabledServers: () => agentState.servers,
-  useShowAgents: () => agentState.pageOpen,
 }))
 
 vi.mock('@/services/agents', () => ({
@@ -183,7 +177,7 @@ vi.mock('@/services/projects', () => ({
 }))
 
 vi.mock('@/store/chat-store', () => ({
-  useChatStore: { getState: () => ({ clearActiveWorktree: vi.fn() }) },
+  useChatStore: { getState: () => ({ clearActiveWorktree }) },
 }))
 
 vi.mock('@/store/projects-store', () => ({
@@ -263,7 +257,6 @@ describe('CommandPalette projects', () => {
     isNativeApp.mockReturnValue(true)
     getActiveConnectionId.mockReturnValue('remote-1')
     projectStoreState.selectedProjectId = null
-    agentState.pageOpen = false
     agentState.servers = []
     agentState.agents = []
   })
@@ -373,51 +366,41 @@ describe('CommandPalette projects', () => {
     expect(screen.queryByText('Local Tool')).not.toBeInTheDocument()
   })
 
-  it('lists the current project on the Agents page to switch back to it', () => {
-    projectStoreState.selectedProjectId = 'project-2'
-    agentState.pageOpen = true
-
-    render(<CommandPalette />)
-
-    expect(screen.getByText('Local Tool')).toBeInTheDocument()
-  })
-
-  it('leaves the Agents page when a project is selected', () => {
+  it('selects a project', () => {
     render(<CommandPalette />)
 
     fireEvent.click(
       screen.getByText('Local Tool').closest('[cmdk-item]') as Element
     )
 
-    expect(setRailSection).toHaveBeenCalledWith('workspace')
+    expect(clearActiveWorktree).toHaveBeenCalled()
     expect(selectProject).toHaveBeenCalledWith('project-2')
   })
 })
 
-describe('CommandPalette agents', () => {
+describe('CommandPalette coordinators', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     isNativeApp.mockReturnValue(true)
     getActiveConnectionId.mockReturnValue('local')
     projectStoreState.selectedProjectId = null
     projectStoreState.projectAccessTimestamps = {}
-    agentState.pageOpen = false
-    agentState.selectedAgentId = 'jean'
-    agentState.leftAt = 0
     agentState.servers = ['local']
     agentState.agents = [
       {
-        id: 'jean',
+        id: 'coord_p1',
+        projectId: 'p1',
         name: 'Jean',
-        description: 'The boss',
+        description: '',
         icon: 'jean',
         serverId: 'local',
         serverName: 'Local',
       },
       {
-        id: 'remote-2:reviewer',
-        name: 'Reviewer',
-        description: 'Reviews PRs',
+        id: 'remote-2:coord_p2',
+        projectId: 'remote-2:p2',
+        name: 'Orbit',
+        description: '',
         icon: 'blue',
         serverId: 'remote-2',
         serverName: 'Build server',
@@ -425,48 +408,29 @@ describe('CommandPalette agents', () => {
     ]
   })
 
-  it('lists agents and opens the selected agent', () => {
+  it("lists coordinators and opens the project's coordinator view", () => {
     render(<CommandPalette />)
 
-    const row = screen.getByText('Reviewer').closest('[cmdk-item]')
-    expect(row?.closest('[cmdk-group]')).toHaveTextContent(/^Agents/)
+    const row = screen.getByText('Orbit').closest('[cmdk-item]')
+    expect(row?.closest('[cmdk-group]')).toHaveTextContent(/^Coordinators/)
     expect(row).toHaveTextContent('Build server')
-    expect(row).not.toHaveTextContent('Reviews PRs')
 
     fireEvent.click(row as Element)
 
-    expect(setRailSection).toHaveBeenCalledWith('agents')
-    expect(setSelectedAgentId).toHaveBeenCalledWith('remote-2:reviewer')
+    expect(clearActiveWorktree).toHaveBeenCalled()
+    expect(selectProject).toHaveBeenCalledWith('remote-2:p2')
+    expect(setProjectViewMode).toHaveBeenCalledWith(
+      'remote-2:p2',
+      'coordinator'
+    )
   })
 
-  it('lists the previous agent first after switching to a project', () => {
-    agentState.selectedAgentId = 'remote-2:reviewer'
-    agentState.leftAt = 200
-    projectStoreState.projectAccessTimestamps = { 'project-2': 100 }
-
-    render(<CommandPalette />)
-
-    const first = document.querySelector('[cmdk-item]')
-    expect(first).toHaveTextContent('Reviewer')
-  })
-
-  it('keeps projects first when a project was opened after the agent', () => {
-    agentState.selectedAgentId = 'remote-2:reviewer'
-    agentState.leftAt = 100
-    projectStoreState.projectAccessTimestamps = { 'project-2': 200 }
-
-    render(<CommandPalette />)
-
-    const first = document.querySelector('[cmdk-item]')
-    expect(first?.closest('[cmdk-group]')).toHaveTextContent(/^Projects/)
-  })
-
-  it('hides agents when the feature is off', () => {
+  it('hides coordinators when the feature is off', () => {
     agentState.servers = []
 
     render(<CommandPalette />)
 
-    expect(screen.queryByText('Reviewer')).not.toBeInTheDocument()
+    expect(screen.queryByText('Orbit')).not.toBeInTheDocument()
   })
 })
 

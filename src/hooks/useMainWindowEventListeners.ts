@@ -177,15 +177,13 @@ export function findKeybindingAction(
 }
 
 /**
- * The Agents page is open (section selected and Agents on for a server, the
- * same rule as useShowAgents). It has one fixed session and no worktree, so
- * the new-session and close shortcuts must not reach the project handlers.
+ * The project coordinator chat is the main panel and no session modal is
+ * open. Its chat is one fixed session, so the new-session and close
+ * shortcuts must not reach the hidden worktrees list.
  */
-export function isAgentsViewActive(queryClient: QueryClient): boolean {
-  if (useUIStore.getState().railSection !== 'agents') return false
-  return queryClient
-    .getQueriesData<AppPreferences>({ queryKey: preferencesQueryKeys.all })
-    .some(([, data]) => data?.agents_enabled === true)
+export function isCoordinatorViewActive(): boolean {
+  const { coordinatorViewOpen, sessionChatModalOpen } = useUIStore.getState()
+  return coordinatorViewOpen && !sessionChatModalOpen
 }
 
 export function useWindowKeyboardFocusRestore() {
@@ -626,15 +624,9 @@ function executeKeybindingAction(
       setFileBrowserVisible(!fileBrowserVisible)
       break
     }
-    case 'show_workspace':
-    case 'show_agents': {
-      logger.debug(`Keybinding: ${action}`)
-      // Disabled Agents falls back to Workspace in the rail
-      const ui = useUIStore.getState()
-      const section = action === 'show_agents' ? 'agents' : 'workspace'
-      // Another section: restore its panel. Same section: show it.
-      if (ui.railSection === section) ui.setLeftSidebarVisible(true)
-      else ui.setRailSection(section, true)
+    case 'toggle_coordinator_sidebar': {
+      logger.debug('Keybinding: toggle_coordinator_sidebar')
+      window.dispatchEvent(new CustomEvent('toggle-coordinator-sidebar'))
       break
     }
     case 'toggle_zen_mode': {
@@ -1098,7 +1090,7 @@ export function useMainWindowEventListeners() {
         (matchedAction === 'close_session_or_worktree' ||
           matchedAction === 'new_session' ||
           matchedAction === 'open_new_session_modal') &&
-        isAgentsViewActive(queryClient)
+        isCoordinatorViewActive()
       ) {
         e.preventDefault()
         e.stopPropagation()

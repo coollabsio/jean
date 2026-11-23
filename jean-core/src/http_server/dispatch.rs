@@ -130,6 +130,115 @@ where
         .map_err(|error| format!("Command task failed: {error}"))?
 }
 
+/// `send_chat_message` from command args. The typed error tells in-process
+/// callers (the agents engine) whether the prompt reached the chat.
+pub(crate) async fn send_chat_message_from_args(
+    app: &AppHandle,
+    args: &Value,
+) -> Result<crate::chat::types::ChatMessage, crate::chat::SendError> {
+    let session_id: String = field(args, "sessionId", "session_id")?;
+    let worktree_id: String = field(args, "worktreeId", "worktree_id")?;
+    let worktree_path: String = field(args, "worktreePath", "worktree_path")?;
+    let message: String = from_field(args, "message")?;
+    let model: Option<String> = from_field_opt(args, "model")?;
+    let thinking_level_raw: Option<String> = field_opt(args, "thinkingLevel", "thinking_level")?;
+    let parallel_execution_prompt: Option<String> =
+        field_opt(args, "parallelExecutionPrompt", "parallel_execution_prompt")?;
+    let execution_mode: Option<String> = field_opt(args, "executionMode", "execution_mode")?;
+    let ai_language: Option<String> = field_opt(args, "aiLanguage", "ai_language")?;
+    let allowed_tools: Option<Vec<String>> = field_opt(args, "allowedTools", "allowed_tools")?;
+    let mut effort_level: Option<crate::chat::types::EffortLevel> =
+        field_opt(args, "effortLevel", "effort_level")?;
+    let thinking_level: Option<crate::chat::types::ThinkingLevel> =
+        match thinking_level_raw.as_deref() {
+            None => None,
+            Some("off") => Some(crate::chat::types::ThinkingLevel::Off),
+            // Adaptive: omit forced thinking settings. Also map to effort
+            // Adaptive when no explicit effort was provided.
+            Some("adaptive") => {
+                if effort_level.is_none() {
+                    effort_level = Some(crate::chat::types::EffortLevel::Adaptive);
+                }
+                Some(crate::chat::types::ThinkingLevel::Adaptive)
+            }
+            Some("think") => Some(crate::chat::types::ThinkingLevel::Think),
+            Some("megathink") => Some(crate::chat::types::ThinkingLevel::Megathink),
+            Some("ultrathink") => Some(crate::chat::types::ThinkingLevel::Ultrathink),
+            // Backward compatibility:
+            // Some frontend flows may send Codex effort values in thinkingLevel.
+            // Translate to effortLevel and force thinking off instead of failing.
+            Some("low") => {
+                if effort_level.is_none() {
+                    effort_level = Some(crate::chat::types::EffortLevel::Low);
+                }
+                Some(crate::chat::types::ThinkingLevel::Off)
+            }
+            Some("minimal") => {
+                if effort_level.is_none() {
+                    effort_level = Some(crate::chat::types::EffortLevel::Minimal);
+                }
+                Some(crate::chat::types::ThinkingLevel::Off)
+            }
+            Some("medium") => {
+                if effort_level.is_none() {
+                    effort_level = Some(crate::chat::types::EffortLevel::Medium);
+                }
+                Some(crate::chat::types::ThinkingLevel::Off)
+            }
+            Some("high") => {
+                if effort_level.is_none() {
+                    effort_level = Some(crate::chat::types::EffortLevel::High);
+                }
+                Some(crate::chat::types::ThinkingLevel::Off)
+            }
+            Some("xhigh") => {
+                if effort_level.is_none() {
+                    effort_level = Some(crate::chat::types::EffortLevel::Xhigh);
+                }
+                Some(crate::chat::types::ThinkingLevel::Off)
+            }
+            Some("max") => {
+                if effort_level.is_none() {
+                    effort_level = Some(crate::chat::types::EffortLevel::Max);
+                }
+                Some(crate::chat::types::ThinkingLevel::Off)
+            }
+            Some("ultracode") => {
+                if effort_level.is_none() {
+                    effort_level = Some(crate::chat::types::EffortLevel::Ultracode);
+                }
+                Some(crate::chat::types::ThinkingLevel::Off)
+            }
+            Some(other) => Some(crate::chat::types::ThinkingLevel::Other(other.to_string())),
+        };
+    let mcp_config: Option<String> = field_opt(args, "mcpConfig", "mcp_config")?;
+    let chrome_enabled: Option<bool> = field_opt(args, "chromeEnabled", "chrome_enabled")?;
+    let custom_profile_name: Option<String> =
+        field_opt(args, "customProfileName", "custom_profile_name")?;
+    let backend: Option<String> = field_opt(args, "backend", "backend")?;
+    let include_recap: Option<bool> = field_opt(args, "includeRecap", "include_recap")?;
+    crate::chat::send_chat_message_checked(
+        app.clone(),
+        session_id,
+        worktree_id,
+        worktree_path,
+        message,
+        model,
+        execution_mode,
+        thinking_level,
+        effort_level,
+        parallel_execution_prompt,
+        ai_language,
+        allowed_tools,
+        mcp_config,
+        chrome_enabled,
+        custom_profile_name,
+        backend,
+        include_recap,
+    )
+    .await
+}
+
 /// Dispatch a command by name to the corresponding Rust handler.
 /// This mirrors Tauri's invoke system but routes through WebSocket.
 ///
@@ -1544,117 +1653,11 @@ pub async fn dispatch_command(
         // =====================================================================
         // Chat Messaging
         // =====================================================================
-        "send_chat_message" => {
-            let session_id: String = field(&args, "sessionId", "session_id")?;
-            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
-            let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
-            let message: String = from_field(&args, "message")?;
-            let model: Option<String> = from_field_opt(&args, "model")?;
-            let thinking_level_raw: Option<String> =
-                field_opt(&args, "thinkingLevel", "thinking_level")?;
-            let parallel_execution_prompt: Option<String> = field_opt(
-                &args,
-                "parallelExecutionPrompt",
-                "parallel_execution_prompt",
-            )?;
-            let execution_mode: Option<String> =
-                field_opt(&args, "executionMode", "execution_mode")?;
-            let ai_language: Option<String> = field_opt(&args, "aiLanguage", "ai_language")?;
-            let allowed_tools: Option<Vec<String>> =
-                field_opt(&args, "allowedTools", "allowed_tools")?;
-            let mut effort_level: Option<crate::chat::types::EffortLevel> =
-                field_opt(&args, "effortLevel", "effort_level")?;
-            let thinking_level: Option<crate::chat::types::ThinkingLevel> = match thinking_level_raw
-                .as_deref()
-            {
-                None => None,
-                Some("off") => Some(crate::chat::types::ThinkingLevel::Off),
-                // Adaptive: omit forced thinking settings. Also map to effort
-                // Adaptive when no explicit effort was provided.
-                Some("adaptive") => {
-                    if effort_level.is_none() {
-                        effort_level = Some(crate::chat::types::EffortLevel::Adaptive);
-                    }
-                    Some(crate::chat::types::ThinkingLevel::Adaptive)
-                }
-                Some("think") => Some(crate::chat::types::ThinkingLevel::Think),
-                Some("megathink") => Some(crate::chat::types::ThinkingLevel::Megathink),
-                Some("ultrathink") => Some(crate::chat::types::ThinkingLevel::Ultrathink),
-                // Backward compatibility:
-                // Some frontend flows may send Codex effort values in thinkingLevel.
-                // Translate to effortLevel and force thinking off instead of failing.
-                Some("low") => {
-                    if effort_level.is_none() {
-                        effort_level = Some(crate::chat::types::EffortLevel::Low);
-                    }
-                    Some(crate::chat::types::ThinkingLevel::Off)
-                }
-                Some("minimal") => {
-                    if effort_level.is_none() {
-                        effort_level = Some(crate::chat::types::EffortLevel::Minimal);
-                    }
-                    Some(crate::chat::types::ThinkingLevel::Off)
-                }
-                Some("medium") => {
-                    if effort_level.is_none() {
-                        effort_level = Some(crate::chat::types::EffortLevel::Medium);
-                    }
-                    Some(crate::chat::types::ThinkingLevel::Off)
-                }
-                Some("high") => {
-                    if effort_level.is_none() {
-                        effort_level = Some(crate::chat::types::EffortLevel::High);
-                    }
-                    Some(crate::chat::types::ThinkingLevel::Off)
-                }
-                Some("xhigh") => {
-                    if effort_level.is_none() {
-                        effort_level = Some(crate::chat::types::EffortLevel::Xhigh);
-                    }
-                    Some(crate::chat::types::ThinkingLevel::Off)
-                }
-                Some("max") => {
-                    if effort_level.is_none() {
-                        effort_level = Some(crate::chat::types::EffortLevel::Max);
-                    }
-                    Some(crate::chat::types::ThinkingLevel::Off)
-                }
-                Some("ultracode") => {
-                    if effort_level.is_none() {
-                        effort_level = Some(crate::chat::types::EffortLevel::Ultracode);
-                    }
-                    Some(crate::chat::types::ThinkingLevel::Off)
-                }
-                Some(other) => Some(crate::chat::types::ThinkingLevel::Other(other.to_string())),
-            };
-            let mcp_config: Option<String> = field_opt(&args, "mcpConfig", "mcp_config")?;
-            let chrome_enabled: Option<bool> = field_opt(&args, "chromeEnabled", "chrome_enabled")?;
-            let custom_profile_name: Option<String> =
-                field_opt(&args, "customProfileName", "custom_profile_name")?;
-            let backend: Option<String> = field_opt(&args, "backend", "backend")?;
-            let include_recap: Option<bool> = field_opt(&args, "includeRecap", "include_recap")?;
-            let result = crate::chat::send_chat_message(
-                app.clone(),
-                session_id,
-                worktree_id,
-                worktree_path,
-                message,
-                model,
-                execution_mode,
-                thinking_level,
-                effort_level,
-                parallel_execution_prompt,
-                ai_language,
-                allowed_tools,
-                mcp_config,
-                chrome_enabled,
-                custom_profile_name,
-                backend,
-                include_recap,
-            )
-            .await?;
-            to_value(result)
-        }
+        "send_chat_message" => to_value(
+            send_chat_message_from_args(app, &args)
+                .await
+                .map_err(|e| e.message)?,
+        ),
         "cancel_chat_message" => {
             let session_id: String = field(&args, "sessionId", "session_id")?;
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
@@ -4383,7 +4386,7 @@ async fn dispatch_agents_command(
                 let agent_id: String = field(args, "agentId", "agent_id")?;
                 to_value(crate::agents::commands::agent_workdir(app, &agent_id)?)
             }
-            "list_agents" => to_value(crate::agents::commands::list_agents(app).await?),
+            "list_agents" => to_value(crate::agents::commands::list_agents(app)?),
             "get_agent_details" => {
                 let agent_id: String = field(args, "agentId", "agent_id")?;
                 to_value(crate::agents::commands::get_agent_details(app, &agent_id)?)
