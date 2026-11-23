@@ -19,6 +19,7 @@ import rehypeRaw from 'rehype-raw'
 import remarkGfm from 'remark-gfm'
 import remend from 'remend'
 import { remarkFixInterruptedLists } from '@/lib/remark-fix-interrupted-lists'
+import { remarkLinkInlineCodeUrls } from '@/lib/remark-link-inline-code-urls'
 import { Copy, Check, ListChecks, Thumbtack } from '@/components/icons/reicon'
 import { MarkdownIcon } from '@/components/icons/MarkdownIcon'
 import { toast } from 'sonner'
@@ -1076,7 +1077,11 @@ const compactComponents: Components = {
 // Module-level plugin arrays keep references stable across renders.
 // remarkFixInterruptedLists runs after GFM so task lists are already parsed,
 // then nests orphan sibling ULs under the preceding OL item (issue #200).
-const remarkPlugins = [remarkGfm, remarkFixInterruptedLists]
+const remarkPlugins = [
+  remarkGfm,
+  remarkFixInterruptedLists,
+  remarkLinkInlineCodeUrls,
+]
 // rehype-raw re-parses the full accumulated text as HTML on every render —
 // the dominant per-frame cost while streaming — so streaming mode skips it
 // and only completed (non-streaming) renders apply it.
