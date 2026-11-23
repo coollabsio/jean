@@ -1746,7 +1746,14 @@ mod tests {
 
         let found = claude_project_dir(temp.path(), r"D:\work\repo").unwrap();
 
-        assert_eq!(found.file_name().unwrap(), "d--work-repo");
+        // Case-insensitive filesystems (macOS) resolve the exact `D--...` path.
+        assert!(found.is_dir());
+        assert!(found
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .eq_ignore_ascii_case("d--work-repo"));
     }
 
     #[test]
