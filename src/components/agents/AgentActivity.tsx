@@ -171,9 +171,7 @@ export function AgentApprovalInline({
   worktreeId: string | null | undefined
 }) {
   const agents = useAgentsList(useAgentsEnabledServers()).data ?? []
-  const agent = agents.find(
-    a => a.worktreeId === worktreeId || a.tasksWorktreeId === worktreeId
-  )
+  const agent = agents.find(a => a.worktreeId === worktreeId)
   const { data } = useAgentDetails(agent?.id ?? null)
   const approval = data?.approvals.find(a => a.id === approvalId)
   if (!approval) return null

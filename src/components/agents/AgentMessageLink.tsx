@@ -11,16 +11,10 @@ import {
 import { Markdown } from '@/components/ui/markdown'
 import { ReplyBubble } from '@/components/chat/ReplyBubble'
 import { useSession } from '@/services/chat'
-import {
-  useAgentDetails,
-  useAgentsList,
-  useAgentWorkdir,
-  type AgentSummary,
-} from '@/services/agents'
+import { useAgentsList, type AgentSummary } from '@/services/agents'
 import { useAgentsEnabledServers } from './agents-feature'
 import {
   conversationEntries,
-  findRequestTask,
   sameAgentId,
   type AgentMessageLink,
   type AgentSentMessage,
@@ -78,20 +72,15 @@ function LinkRow({
 /** Sender side: "Messaged <agent or session>". Opens the conversation. */
 export function AgentMessageLinkRow({
   link,
-  sentAt,
   worktreeId,
 }: {
   link: AgentMessageLink
-  /** Unix seconds of the assistant message that sent it */
-  sentAt: number
   /** Worktree of the sending agent's session */
   worktreeId: string | null | undefined
 }) {
   const [open, setOpen] = useState(false)
   const agents = useAgents()
-  const senderAgent = agents.find(
-    a => a.worktreeId === worktreeId || a.tasksWorktreeId === worktreeId
-  )
+  const senderAgent = agents.find(a => a.worktreeId === worktreeId)
   const sender = agentParticipant(senderAgent, 'Agent')
   const targetAgent =
     link.kind === 'agent'
@@ -111,12 +100,14 @@ export function AgentMessageLinkRow({
       />
       {open &&
         (link.kind === 'agent' ? (
-          <AgentRequestConversation
+          // Old chats only: agents no longer message each other, and the
+          // session that answered is not tracked any more.
+          <AgentConversationDialog
             sender={sender}
             target={target}
-            targetAgent={targetAgent}
-            senderName={sender.name}
-            sentAt={sentAt}
+            sessionId={null}
+            worktreeId={null}
+            worktreePath={null}
             request={link.message}
             onClose={() => setOpen(false)}
           />
@@ -132,36 +123,6 @@ export function AgentMessageLinkRow({
           />
         ))}
     </>
-  )
-}
-
-/** `message_agent`: the answer lives in a task session of the target agent. */
-function AgentRequestConversation({
-  targetAgent,
-  senderName,
-  sentAt,
-  ...props
-}: {
-  sender: Participant
-  target: Participant
-  targetAgent: AgentSummary | undefined
-  senderName: string
-  sentAt: number
-  request: string
-  onClose: () => void
-}) {
-  const { data: details } = useAgentDetails(targetAgent?.id ?? null)
-  const { data: workdir } = useAgentWorkdir(targetAgent?.id ?? null)
-  const task = details
-    ? findRequestTask(details.tasks, senderName, sentAt)
-    : undefined
-  return (
-    <AgentConversationDialog
-      {...props}
-      sessionId={task?.sessionId ?? null}
-      worktreeId={targetAgent?.tasksWorktreeId ?? null}
-      worktreePath={workdir ?? null}
-    />
   )
 }
 

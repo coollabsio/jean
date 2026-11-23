@@ -394,7 +394,7 @@ pub async fn report_for_session(app: &AppHandle, agent: &Agent, source: &str) ->
     let support = session_support(&backend);
     let limited = agent.mcp_servers.is_some();
     let applied = limited && support == McpSessionSupport::PerSession;
-    let path = super::agent_workdir(app, &agent.id).unwrap_or_default();
+    let path = super::agent_workdir(app, agent).unwrap_or_default();
     let discovered = if has_own_mcp_discovery(&backend) && !path.is_empty() {
         crate::chat::get_mcp_servers(app.clone(), Some(backend.clone()), Some(path))
             .await
@@ -706,7 +706,8 @@ mod tests {
     #[test]
     fn prompt_mentions_a_saved_limit_and_an_unsupported_backend() {
         let mut agent = Agent {
-            id: "reviewer".into(),
+            id: "coord_p1".into(),
+            project_id: "p1".into(),
             name: "Reviewer".into(),
             description: String::new(),
             icon: "blue".into(),

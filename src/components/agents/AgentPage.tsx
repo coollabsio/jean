@@ -36,7 +36,6 @@ import {
 } from './agents'
 import { AgentActivity } from './AgentActivity'
 import { AgentMemoryView } from './AgentMemoryView'
-import { AgentTasks } from './AgentTasks'
 import { AgentSchedules } from './AgentSchedules'
 import { AgentInbox } from './AgentInbox'
 import { AgentSettings } from './AgentSettings'
@@ -121,7 +120,6 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
     muted?: boolean
   }[] = [
     { id: 'inbox', label: 'Inbox', badge: agent.unreadNotifications },
-    { id: 'tasks', label: 'Runs', badge: agent.runningTasks, muted: true },
     { id: 'schedules', label: 'Schedules' },
     // Pending approvals show in the chat, not as a badge here
     { id: 'activity', label: 'Activity' },
@@ -268,8 +266,6 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
               <AgentInbox agent={agent} />
             ) : tab === 'schedules' ? (
               <AgentSchedules agent={agent} />
-            ) : tab === 'tasks' ? (
-              <AgentTasks agent={agent} workdir={workdir} />
             ) : tab === 'activity' ? (
               <AgentActivity agent={agent} />
             ) : tab === 'memory' ? (

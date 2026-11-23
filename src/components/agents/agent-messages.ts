@@ -1,4 +1,3 @@
-import type { AgentTask } from '@/services/agents'
 import type { ChatMessage, ToolCall } from '@/types/chat'
 import { extractJeanMcpBareToolName } from '@/components/chat/ToolCallInline'
 import {
@@ -205,26 +204,6 @@ export function assistantReplyItems(
     }
   }
   return items
-}
-
-/**
- * Task session that answers a `message_agent` request. The engine opens it
- * later, titled "Request from <sender>", so take the first one after the send.
- */
-export function findRequestTask(
-  tasks: AgentTask[],
-  senderName: string,
-  sentAt: number
-): AgentTask | undefined {
-  const title = `Request from ${senderName}`
-  return tasks
-    .filter(
-      task =>
-        task.kind === 'message' &&
-        task.title === title &&
-        task.createdAt >= sentAt - 5
-    )
-    .sort((a, b) => a.createdAt - b.createdAt)[0]
 }
 
 const SENT_RE = /^\[Message from agent (.+?) \(`([^`]+)`\)\]\n*/

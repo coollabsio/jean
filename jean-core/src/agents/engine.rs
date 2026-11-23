@@ -1,14 +1,12 @@
-//! Backend loop of the agents infrastructure. It runs without any client:
-//! 1. `chat:done` / `chat:error` / `chat:cancelled` mark delegations and
-//!    tasks to check.
-//! 2. Delegation checks read the finished session and queue an update for
-//!    the session that started the work (its origin).
-//! 3. Due schedules queue updates.
-//! 4. Updates with a target session go there; updates without one start a
-//!    new task session (background work, apart from the user's chat).
+//! Backend loop of the project coordinators. It runs without any client, and
+//! only while the `agents_enabled` preference is on:
+//! 1. `chat:done` / `chat:error` / `chat:cancelled` mark delegations to check.
+//! 2. Delegation checks read the finished session and queue an update.
+//! 3. Due schedules and event routines queue updates.
+//! 4. Queued updates go to the coordinator's chat as one message, when that
+//!    chat is idle and the hourly budget allows it.
 //! 5. Long chats are closed and continue in a new chat. The end is saved
-//!    as carry-over and a shorter copy is stored as a journal entry. Old task
-//!    sessions are closed, then purged.
+//!    as carry-over and a shorter copy is stored as a journal entry.
 
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
@@ -35,10 +33,6 @@ const CHAT_ROTATE_MESSAGES: u32 = 40;
 const CHAT_ROTATE_IDLE_SECS: u64 = 10 * 60;
 /// Characters of the old chat's end carried into the new chat's prompt.
 const CARRY_OVER_CHARS: usize = 6000;
-/// Finished task sessions are closed after this, purged after the next.
-/// Test override: `JEAN_AGENT_TASK_ARCHIVE_SECS`.
-const TASK_ARCHIVE_AFTER_SECS: i64 = 3 * 86_400;
-const TASK_DELETE_AFTER_SECS: i64 = 30 * 86_400;
 /// Timestamped session event keys only dedup repeats of one emit.
 const EVENT_KEY_RETENTION_SECS: i64 = 86_400;
 const MAINTENANCE_INTERVAL_SECS: i64 = 60;
@@ -59,11 +53,15 @@ pub fn nudge() {
     WAKE.notify_one();
 }
 
-/// Start listeners and the loop. Call once after `agents::init`.
+/// Start listeners and the loop. Call once after `agents::init`. Both do
+/// nothing while the feature is off, and start to work when it is turned on.
 pub fn start(app: AppHandle) {
     for event_name in ["chat:done", "chat:error", "chat:cancelled"] {
         let listener_app = app.clone();
         app.listen(event_name, move |event| {
+            if !super::enabled(&listener_app) {
+                return;
+            }
             let Ok(payload) = serde_json::from_str::<Value>(event.payload()) else {
                 return;
             };
@@ -80,30 +78,36 @@ pub fn start(app: AppHandle) {
         });
     }
 
-    // Runs that ended while Jean was closed did not emit events: check every
-    // active delegation once (a check of a still-running session waits).
-    let at = db::now() + 20;
-    if let Err(e) = super::with_db(&app, |conn| db::requeue_active_delegations(conn, at)) {
-        log::warn!("[Agents] requeue failed: {e}");
-    }
-
     {
         let listener_app = app.clone();
         app.listen("pr:status-update", move |event| {
+            if !super::enabled(&listener_app) {
+                return;
+            }
             let Ok(payload) = serde_json::from_str::<Value>(event.payload()) else {
                 return;
             };
-            let Some((key, context)) = pr_merged_trigger(&payload) else {
+            let Some((worktree_id, key, context)) = pr_merged_trigger(&payload) else {
                 return;
             };
-            emit_schedule_trigger(&listener_app, "pr_merged", &key, &context);
+            if let Some(project_id) = project_of_worktree(&listener_app, &worktree_id) {
+                emit_schedule_trigger(&listener_app, &project_id, "pr_merged", &key, &context);
+            }
         });
     }
 
     tauri::async_runtime::spawn(async move {
+        let mut was_enabled = false;
         loop {
-            if let Err(e) = tick(&app).await {
-                log::warn!("[Agents] tick failed: {e}");
+            let enabled = super::enabled(&app);
+            if enabled && !was_enabled {
+                on_enabled(&app);
+            }
+            was_enabled = enabled;
+            if enabled {
+                if let Err(e) = tick(&app).await {
+                    log::warn!("[Agents] tick failed: {e}");
+                }
             }
             tokio::select! {
                 _ = tokio::time::sleep(TICK) => {}
@@ -113,42 +117,69 @@ pub fn start(app: AppHandle) {
     });
 }
 
-fn on_run_ended(app: &AppHandle, session_id: &str, kind: &str, error: Option<&str>) {
-    let agent_session = super::agent_for_session(app, session_id).is_some();
-    let marked = super::with_db(app, |conn| {
-        let at = db::now() + CHECK_DELAY_SECS;
-        Ok(
-            db::mark_delegation_run_ended(conn, session_id, kind, error, at)?
-                + db::mark_task_run_ended(conn, session_id, kind, at)?,
-        )
-    })
-    .unwrap_or(0);
-    // An agent's own run ended: its queued updates can be delivered now.
-    if marked > 0 || agent_session {
-        super::notify_changed(app);
+/// The feature was turned on (or Jean started with it on): every project gets
+/// its coordinator, and runs that ended meanwhile did not emit events, so
+/// every active delegation is checked once (a check of a still-running
+/// session waits).
+fn on_enabled(app: &AppHandle) {
+    if let Err(e) = super::ensure_all_coordinators(app) {
+        log::warn!("[Agents] coordinators were not created: {e}");
     }
-    // Agent and delegated sessions already wake their agent. Firing them again
-    // would loop: the routine's task (or the work it delegates) would finish
-    // and wake the same routine.
-    if let Some(trigger) = session_trigger_name(kind, agent_session || marked > 0) {
-        // A session runs many times: key on the run that ended, so a repeated
-        // emit of one run dedups and the next run fires again.
-        let run_id = crate::chat::storage::load_metadata(app, session_id)
-            .ok()
-            .flatten()
-            .and_then(|metadata| metadata.runs.last().map(|run| run.run_id.clone()));
-        let key = session_event_key(session_id, kind, run_id.as_deref(), db::now());
-        let context = match (kind, error) {
-            ("error", Some(message)) => format!("Session {session_id} failed: {message}"),
-            ("error", None) => format!("Session {session_id} failed."),
-            _ => format!("Session {session_id} finished."),
-        };
-        emit_schedule_trigger(app, trigger, &key, &context);
+    let at = db::now() + 20;
+    if let Err(e) = super::with_db(app, |conn| db::requeue_active_delegations(conn, at)) {
+        log::warn!("[Agents] requeue failed: {e}");
     }
+    super::notify_changed(app);
 }
 
-/// `done` / `error` on a project session. Sessions that already wake an
-/// agent (its own chat and tasks, and delegated sessions) are excluded.
+/// Project of a normal worktree. `None` for coordinator and unknown worktrees.
+fn project_of_worktree(app: &AppHandle, worktree_id: &str) -> Option<String> {
+    crate::projects::storage::load_projects_data(app)
+        .ok()?
+        .find_worktree(worktree_id)
+        .map(|worktree| worktree.project_id.clone())
+}
+
+fn on_run_ended(app: &AppHandle, session_id: &str, kind: &str, error: Option<&str>) {
+    let metadata = crate::chat::storage::load_metadata(app, session_id)
+        .ok()
+        .flatten();
+    let worktree_id = metadata.as_ref().map(|m| m.worktree_id.as_str());
+    let coordinator_session = worktree_id.is_some_and(super::is_agent_worktree_id);
+    let marked = super::with_db(app, |conn| {
+        let at = db::now() + CHECK_DELAY_SECS;
+        db::mark_delegation_run_ended(conn, session_id, kind, error, at)
+    })
+    .unwrap_or(0);
+    // A coordinator's own run ended: its queued updates can be delivered now.
+    if marked > 0 || coordinator_session {
+        super::notify_changed(app);
+    }
+    // Coordinator and delegated sessions already wake their coordinator.
+    // Firing them again would loop: the work the routine delegates would
+    // finish and wake the same routine.
+    let Some(trigger) = session_trigger_name(kind, coordinator_session || marked > 0) else {
+        return;
+    };
+    let Some(project_id) = worktree_id.and_then(|id| project_of_worktree(app, id)) else {
+        return;
+    };
+    // A session runs many times: key on the run that ended, so a repeated
+    // emit of one run dedups and the next run fires again.
+    let run_id = metadata
+        .as_ref()
+        .and_then(|metadata| metadata.runs.last().map(|run| run.run_id.as_str()));
+    let key = session_event_key(session_id, kind, run_id, db::now());
+    let context = match (kind, error) {
+        ("error", Some(message)) => format!("Session {session_id} failed: {message}"),
+        ("error", None) => format!("Session {session_id} failed."),
+        _ => format!("Session {session_id} finished."),
+    };
+    emit_schedule_trigger(app, &project_id, trigger, &key, &context);
+}
+
+/// `done` / `error` on a project session. Sessions that already wake a
+/// coordinator (its own chat, and delegated sessions) are excluded.
 pub(crate) fn session_trigger_name(kind: &str, wakes_agent: bool) -> Option<&'static str> {
     if wakes_agent {
         return None;
@@ -173,7 +204,8 @@ pub(crate) fn session_event_key(
     }
 }
 
-pub(crate) fn pr_merged_trigger(payload: &Value) -> Option<(String, String)> {
+/// (worktree ID, dedup key, text for the coordinator) of a merged pull request.
+pub(crate) fn pr_merged_trigger(payload: &Value) -> Option<(String, String, String)> {
     let state = payload.get("state").and_then(Value::as_str)?;
     if state != "merged" {
         return None;
@@ -192,14 +224,21 @@ pub(crate) fn pr_merged_trigger(payload: &Value) -> Option<(String, String)> {
                 .map(|number| number as i64)
         })?;
     Some((
+        worktree_id.to_string(),
         format!("pr:{worktree_id}:{pr_number}"),
         format!("Pull request #{pr_number} on worktree {worktree_id} was merged."),
     ))
 }
 
-fn emit_schedule_trigger(app: &AppHandle, event_name: &str, event_key: &str, context: &str) {
+fn emit_schedule_trigger(
+    app: &AppHandle,
+    project_id: &str,
+    event_name: &str,
+    event_key: &str,
+    context: &str,
+) {
     match super::with_db(app, |conn| {
-        db::fire_event_schedules(conn, event_name, event_key, context)
+        db::fire_event_schedules(conn, project_id, event_name, event_key, context)
     }) {
         Ok(fired) if !fired.is_empty() => super::notify_changed(app),
         Ok(_) => {}
@@ -212,10 +251,6 @@ async fn tick(app: &AppHandle) -> Result<(), String> {
     let checks = super::with_db(app, |conn| db::due_delegation_checks(conn, db::now()))?;
     for delegation in checks {
         changed |= check_delegation(app, &delegation).await?;
-    }
-    let task_checks = super::with_db(app, |conn| db::due_task_checks(conn, db::now()))?;
-    for task in task_checks {
-        changed |= check_task(app, &task).await?;
     }
     let fired = super::with_db(app, |conn| db::fire_due_schedules(conn, db::now()))?;
     changed |= !fired.is_empty();
@@ -235,7 +270,8 @@ async fn tick(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Path of a worktree for session lookups (agent worktrees use their folder).
+/// Path of a worktree for session lookups (a coordinator worktree is the
+/// project folder).
 fn worktree_path(app: &AppHandle, worktree_id: &str) -> Option<String> {
     if let Some(path) = super::workdir_for_worktree(app, worktree_id) {
         return Some(path);
@@ -246,10 +282,10 @@ fn worktree_path(app: &AppHandle, worktree_id: &str) -> Option<String> {
         .map(|w| w.path.clone())
 }
 
-/// "project / worktree" label (or the agent name for agent sessions).
+/// "project / worktree" label (or the coordinator name for its own sessions).
 fn worktree_label(app: &AppHandle, worktree_id: &str) -> String {
     if let Some(agent) = super::agent_for_worktree(app, worktree_id) {
-        return format!("agent {}", agent.name);
+        return format!("coordinator {}", agent.name);
     }
     let Ok(data) = crate::projects::storage::load_projects_data(app) else {
         return worktree_id.to_string();
@@ -318,7 +354,7 @@ async fn check_delegation(app: &AppHandle, d: &db::Delegation) -> Result<bool, S
             d.session_id
         );
         super::with_db(app, |conn| {
-            db::add_event(conn, &follow_up_event(d, "Follow-up: session gone", &body))?;
+            db::add_event(conn, &follow_up_event(d, &body))?;
             db::finish_delegation(conn, d.id, "failed", "Session no longer exists")
         })?;
         return Ok(true);
@@ -360,23 +396,20 @@ async fn check_delegation(app: &AppHandle, d: &db::Delegation) -> Result<bool, S
         body.push_str(&format!("\nLast reply:\n{reply}"));
     }
     let summary = truncate(&reply, 300);
-    let title = format!("Follow-up: {}", session.name);
     super::with_db(app, |conn| {
-        db::add_event(conn, &follow_up_event(d, &title, &body))?;
+        db::add_event(conn, &follow_up_event(d, &body))?;
         db::finish_delegation(conn, d.id, status, &summary)
     })?;
     Ok(true)
 }
 
-/// Update about delegated work, sent back to the session that started it.
-fn follow_up_event<'a>(d: &'a db::Delegation, title: &'a str, body: &'a str) -> db::NewEvent<'a> {
+/// Update about delegated work, for the coordinator that started it.
+fn follow_up_event<'a>(d: &'a db::Delegation, body: &'a str) -> db::NewEvent<'a> {
     db::NewEvent {
         agent_id: &d.agent_id,
         kind: "delegation",
-        title,
         body,
         hop: d.hop,
-        target_session_id: d.origin_session_id.as_deref(),
     }
 }
 
@@ -390,66 +423,39 @@ fn last_reply(session: &crate::chat::types::Session, max: usize) -> String {
         .unwrap_or_default()
 }
 
-/// A task session's run ended: save its status and one-line result.
-/// Returns true when the task changed.
-async fn check_task(app: &AppHandle, task: &db::Task) -> Result<bool, String> {
-    if crate::chat::registry::is_session_actively_managed(&task.session_id) {
-        super::with_db(app, |conn| {
-            db::defer_task_check(conn, task.id, Some(db::now() + BUSY_RETRY_SECS))
-        })?;
-        return Ok(false);
-    }
-    let worktree_id = db::agent_tasks_worktree_id(&task.agent_id);
-    let path = super::agent_workdir(app, &task.agent_id)?;
-    let Ok(session) = crate::chat::get_session(
-        app.clone(),
-        worktree_id,
-        path,
-        task.session_id.clone(),
-        Some(4),
-    )
-    .await
-    else {
-        super::with_db(app, |conn| {
-            db::finish_task(conn, task.id, "failed", "Task session no longer exists")
-        })?;
-        return Ok(true);
-    };
-    let open = super::with_db(app, |conn| {
-        db::open_delegations_from(conn, &task.session_id)
-    })?;
-    let status = if open > 0 && !session.waiting_for_input {
-        "waiting"
-    } else {
-        outcome_status(
-            session.waiting_for_input,
-            task.last_event.as_deref(),
-            session.last_run_status.as_ref(),
-        )
-    };
-    let summary = last_reply(&session, 300);
-    super::with_db(app, |conn| db::finish_task(conn, task.id, status, &summary))?;
-    Ok(true)
-}
-
-/// The agent's home session: the active (or first) session of its worktree.
+/// The coordinator's chat: the active (or first) open session of its
+/// worktree. Loading the worktree's sessions creates the first one, and a
+/// new one is made when the user closed them all.
 /// A new session has no saved mode yet (it would load as Plan, which blocks
 /// the Jean MCP tools), so save the default mode once.
 pub(crate) async fn home_session(
     app: &AppHandle,
     agent: &db::Agent,
 ) -> Result<(crate::chat::types::Session, String), String> {
-    let path = super::agent_workdir(app, &agent.id)?;
+    let path = super::agent_workdir(app, agent)?;
     let sessions =
         crate::chat::get_sessions(app.clone(), agent.worktree_id.clone(), path.clone(), None)
             .await?;
-    let mut session = sessions
+    let open = sessions
         .active_session_id
         .as_deref()
         .and_then(|id| sessions.sessions.iter().find(|s| s.id == id))
         .or_else(|| sessions.sessions.first())
-        .cloned()
-        .ok_or_else(|| format!("Agent {} has no session", agent.id))?;
+        .cloned();
+    let mut session = match open {
+        Some(session) => session,
+        None => {
+            let session = open_agent_session(app, agent, &agent.worktree_id, &path, None).await?;
+            crate::chat::set_active_session(
+                app.clone(),
+                agent.worktree_id.clone(),
+                path.clone(),
+                session.id.clone(),
+            )
+            .await?;
+            session
+        }
+    };
     ensure_session_mode(app, &agent.worktree_id, &path, &mut session).await?;
     Ok((session, path))
 }
@@ -629,7 +635,7 @@ pub(crate) fn message_with_agent_skills(message: &str, skills: &[db::AgentSkill]
     out
 }
 
-/// Create a task or rotated chat on the agent's backend, then store its model
+/// Create a rotated chat on the coordinator's backend, then store its model
 /// and reasoning choices.
 pub(crate) async fn open_agent_session(
     app: &AppHandle,
@@ -798,19 +804,6 @@ pub(crate) fn compose_update(events: &[db::AgentEvent]) -> String {
     message
 }
 
-/// Where a session lives: (worktree ID, folder) of an agent's chat or task.
-fn agent_session_location(
-    app: &AppHandle,
-    agent: &db::Agent,
-    task: Option<&db::Task>,
-) -> Result<(String, String), String> {
-    let path = super::agent_workdir(app, &agent.id)?;
-    Ok(match task {
-        Some(_) => (db::agent_tasks_worktree_id(&agent.id), path),
-        None => (agent.worktree_id.clone(), path),
-    })
-}
-
 /// Send `message` to a session as a new turn.
 /// The agent's backend, model, effort, thinking, and skills override the
 /// session for this turn. Unset fields stay on the session and user defaults.
@@ -878,131 +871,74 @@ pub(crate) fn send_to_session(
     });
 }
 
-/// Mark events delivered and count a wake.
-fn record_delivery(
-    conn: &rusqlite::Connection,
-    agent_id: &str,
-    events: &[&db::AgentEvent],
-    session_id: &str,
-) -> Result<(), String> {
-    let ids: Vec<i64> = events.iter().map(|e| e.id).collect();
-    db::mark_events_delivered(conn, &ids)?;
-    db::record_wake(conn, agent_id, session_id)
+/// One wake-up: the queued updates of a coordinator as one chat message.
+pub(crate) struct Delivery {
+    pub agent: db::Agent,
+    /// The coordinator's chat session.
+    pub chat: crate::chat::types::Session,
+    pub path: String,
+    pub message: String,
 }
 
-/// Deliver queued updates of one agent. Returns true when something was sent.
-async fn deliver(app: &AppHandle, agent_id: &str) -> Result<bool, String> {
+/// Take the queued updates of one coordinator for delivery to its chat: mark
+/// them delivered and count a wake. `None` while the chat runs or waits for
+/// input, or when the hourly budget is spent. The updates then stay queued
+/// and the next tick tries again (the end of the chat's run nudges the loop).
+pub(crate) async fn next_delivery(
+    app: &AppHandle,
+    agent_id: &str,
+) -> Result<Option<Delivery>, String> {
     let Some(agent) = super::with_db(app, |conn| db::get_agent(conn, agent_id))? else {
-        return Ok(false);
+        return Ok(None);
     };
     let events = super::with_db(app, |conn| db::pending_events(conn, &agent.id))?;
     if events.is_empty() {
-        return Ok(false);
+        return Ok(None);
     }
-    let (home, _) = home_session(app, &agent).await?;
-    let mut budget = super::with_db(app, |conn| {
+    let (chat, path) = home_session(app, &agent).await?;
+    let chat_idle =
+        !crate::chat::registry::is_session_actively_managed(&chat.id) && !chat.waiting_for_input;
+    let budget = super::with_db(app, |conn| {
         db::wake_budget_remaining(conn, &agent.id, agent.max_wakes_per_hour, db::now())
     })?;
-    let mut sent = false;
-
-    // 1. Updates for an existing session (follow-ups, approval results).
-    //    An old (rotated) chat forwards to the current chat.
-    let mut targeted: Vec<(String, Vec<&db::AgentEvent>)> = Vec::new();
-    for event in events.iter().filter(|e| e.target_session_id.is_some()) {
-        let target = event.target_session_id.clone().unwrap_or_default();
-        let is_task = super::with_db(app, |conn| db::task_by_session(conn, &target))?
-            .is_some_and(|t| t.archived_at.is_none());
-        let target = if is_task { target } else { home.id.clone() };
-        match targeted.iter_mut().find(|(id, _)| *id == target) {
-            Some((_, group)) => group.push(event),
-            None => targeted.push((target, vec![event])),
-        }
+    if !can_deliver(chat_idle, budget) {
+        return Ok(None);
     }
-    for (session_id, group) in targeted {
-        if budget <= 0 {
-            break;
-        }
-        let task = super::with_db(app, |conn| db::task_by_session(conn, &session_id))?;
-        let (worktree_id, path) = agent_session_location(app, &agent, task.as_ref())?;
-        let Ok(session) = crate::chat::get_session(
-            app.clone(),
-            worktree_id.clone(),
-            path.clone(),
-            session_id.clone(),
-            Some(1),
-        )
-        .await
-        else {
-            continue;
-        };
-        if crate::chat::registry::is_session_actively_managed(&session.id)
-            || session.waiting_for_input
-        {
-            continue;
-        }
-        super::with_db(app, |conn| {
-            record_delivery(conn, &agent.id, &group, &session.id)?;
-            if task.is_some() {
-                db::set_task_running(conn, &session.id)?;
-            }
-            Ok(())
-        })?;
-        let owned: Vec<db::AgentEvent> = group.into_iter().cloned().collect();
-        send_to_session(
-            app,
-            &agent,
-            &session,
-            &worktree_id,
-            &path,
-            compose_update(&owned),
-        );
-        budget -= 1;
-        sent = true;
-    }
-
-    // 2. Updates without a target start a new task session each.
-    for event in events.iter().filter(|e| e.target_session_id.is_none()) {
-        let running = super::with_db(app, |conn| db::running_task_count(conn, &agent.id))?;
-        if budget <= 0 || running >= db::MAX_RUNNING_TASKS {
-            break;
-        }
-        let worktree_id = db::agent_tasks_worktree_id(&agent.id);
-        let path = super::agent_workdir(app, &agent.id)?;
-        let title = event
-            .title
-            .clone()
-            .filter(|t| !t.trim().is_empty())
-            .unwrap_or_else(|| task_title_for(&event.kind).to_string());
-        let session =
-            open_agent_session(app, &agent, &worktree_id, &path, Some(truncate(&title, 60)))
-                .await?;
-        super::with_db(app, |conn| {
-            db::create_task(conn, &agent.id, &session.id, &title, &event.kind)?;
-            record_delivery(conn, &agent.id, &[event], &session.id)
-        })?;
-        send_to_session(
-            app,
-            &agent,
-            &session,
-            &worktree_id,
-            &path,
-            compose_update(std::slice::from_ref(event)),
-        );
-        budget -= 1;
-        sent = true;
-    }
-    Ok(sent)
+    super::with_db(app, |conn| {
+        let ids: Vec<i64> = events.iter().map(|event| event.id).collect();
+        db::mark_events_delivered(conn, &ids)?;
+        db::record_wake(conn, &agent.id, &chat.id)
+    })?;
+    Ok(Some(Delivery {
+        message: compose_update(&events),
+        agent,
+        chat,
+        path,
+    }))
 }
 
-fn task_title_for(kind: &str) -> &'static str {
-    match kind {
-        "schedule" => "Scheduled task",
-        "approval" => "Approval result",
-        _ => "Follow-up",
-    }
+/// Deliver queued updates of one coordinator. Returns true when sent.
+async fn deliver(app: &AppHandle, agent_id: &str) -> Result<bool, String> {
+    let Some(delivery) = next_delivery(app, agent_id).await? else {
+        return Ok(false);
+    };
+    send_to_session(
+        app,
+        &delivery.agent,
+        &delivery.chat,
+        &delivery.agent.worktree_id,
+        &delivery.path,
+        delivery.message,
+    );
+    Ok(true)
 }
 
-/// Rotate long idle chats and close or purge old task sessions.
+/// Queued updates wait while the chat is busy or the hourly budget is spent.
+pub(crate) fn can_deliver(chat_idle: bool, budget_remaining: i64) -> bool {
+    chat_idle && budget_remaining > 0
+}
+
+/// Rotate long idle chats and drop old event keys.
 async fn maintenance(app: &AppHandle) -> Result<bool, String> {
     let mut changed = false;
     for agent in super::with_db(app, |conn| db::list_agents(conn))? {
@@ -1010,28 +946,6 @@ async fn maintenance(app: &AppHandle) -> Result<bool, String> {
             log::warn!("[Agents] chat rotation of {} failed: {e}", agent.id);
             false
         });
-    }
-    let archive_before =
-        db::now() - env_limit("JEAN_AGENT_TASK_ARCHIVE_SECS", TASK_ARCHIVE_AFTER_SECS);
-    for task in super::with_db(app, |conn| db::finished_tasks_before(conn, archive_before))? {
-        let worktree_id = db::agent_tasks_worktree_id(&task.agent_id);
-        let path = super::agent_workdir(app, &task.agent_id)?;
-        if let Err(e) =
-            crate::chat::close_session(app.clone(), worktree_id, path, task.session_id.clone())
-                .await
-        {
-            log::warn!("[Agents] close of task {} failed: {e}", task.id);
-        }
-        super::with_db(app, |conn| db::mark_task_archived(conn, task.id))?;
-        changed = true;
-    }
-    let delete_before = db::now() - TASK_DELETE_AFTER_SECS;
-    for task in super::with_db(app, |conn| db::archived_tasks_before(conn, delete_before))? {
-        let worktree_id = db::agent_tasks_worktree_id(&task.agent_id);
-        let path = super::agent_workdir(app, &task.agent_id)?;
-        let _ = crate::chat::purge_session(app, &worktree_id, &path, &task.session_id);
-        super::with_db(app, |conn| db::delete_task(conn, task.id))?;
-        changed = true;
     }
     let keys_before = db::now() - EVENT_KEY_RETENTION_SECS;
     super::with_db(app, |conn| db::prune_event_keys(conn, keys_before))?;
@@ -1062,7 +976,7 @@ fn tail_chars(text: &str, max_chars: usize) -> String {
 /// into the new chat's prompt, a shorter copy is stored as a journal entry,
 /// and the old chat is archived.
 async fn rotate_chat_if_long(app: &AppHandle, agent: &db::Agent) -> Result<bool, String> {
-    let path = super::agent_workdir(app, &agent.id)?;
+    let path = super::agent_workdir(app, agent)?;
     let sessions = crate::chat::get_sessions(
         app.clone(),
         agent.worktree_id.clone(),
@@ -1242,28 +1156,27 @@ pub async fn decide_approval(
             ),
         )
     };
-    let title = format!("Approval #{approval_id}: {}", approval.tool);
-    super::with_db(app, |conn| {
+    let project_id = super::with_db(app, |conn| {
         db::set_approval_result(conn, approval_id, final_status, &result)?;
         db::add_event(
             conn,
             &db::NewEvent {
                 agent_id: &approval.agent_id,
                 kind: "approval",
-                title: &title,
                 body: &body,
-                target_session_id: approval.session_id.as_deref(),
                 ..Default::default()
             },
         )?;
-        Ok(())
+        Ok(db::get_agent(conn, &approval.agent_id)?.map(|agent| agent.project_id))
     })?;
     let key = format!("approval:{approval_id}");
     let context = format!(
         "Approval #{approval_id} ({}) was {final_status}.",
         approval.tool
     );
-    emit_schedule_trigger(app, "approval_resolved", &key, &context);
+    if let Some(project_id) = project_id {
+        emit_schedule_trigger(app, &project_id, "approval_resolved", &key, &context);
+    }
     super::notify_changed(app);
     super::with_db(app, |conn| db::get_approval(conn, approval_id))?
         .ok_or_else(|| format!("Approval #{approval_id} not found"))
@@ -1321,9 +1234,14 @@ mod tests {
     #[test]
     fn merged_payloads_become_trigger_keys() {
         let merged = serde_json::json!({"state": "merged", "worktree_id": "wt-1", "pr_number": 12});
-        let (key, context) = pr_merged_trigger(&merged).unwrap();
-        assert_eq!(key, "pr:wt-1:12");
-        assert!(context.contains("#12"));
+        assert_eq!(
+            pr_merged_trigger(&merged).unwrap(),
+            (
+                "wt-1".to_string(),
+                "pr:wt-1:12".to_string(),
+                "Pull request #12 on worktree wt-1 was merged.".to_string()
+            )
+        );
         assert!(pr_merged_trigger(
             &serde_json::json!({"state": "open", "worktree_id": "wt-1", "pr_number": 12})
         )
@@ -1389,12 +1307,13 @@ mod tests {
 
     fn sample_agent() -> db::Agent {
         db::Agent {
-            id: "reviewer".into(),
-            name: "Reviewer".into(),
+            id: "coord_p1".into(),
+            project_id: "p1".into(),
+            name: "Orbit".into(),
             description: String::new(),
-            icon: "blue".into(),
+            icon: "jean".into(),
             role_prompt: String::new(),
-            worktree_id: "__agent_reviewer__".into(),
+            worktree_id: "__coord_p1__".into(),
             max_wakes_per_hour: 12,
             builtin: false,
             backend: None,
@@ -1465,6 +1384,13 @@ mod tests {
     }
 
     #[test]
+    fn updates_wait_while_the_chat_is_busy_or_the_budget_is_spent() {
+        assert!(can_deliver(true, 1));
+        assert!(!can_deliver(false, 12));
+        assert!(!can_deliver(true, 0));
+    }
+
+    #[test]
     fn truncate_counts_chars_not_bytes() {
         assert_eq!(truncate("  short ", 10), "short");
         assert_eq!(truncate("ééééé", 3), "ééé…");
@@ -1475,23 +1401,19 @@ mod tests {
         let events = vec![
             db::AgentEvent {
                 id: 1,
-                agent_id: "jean".into(),
+                agent_id: "coord_p1".into(),
                 kind: "delegation".into(),
                 body: "Session A finished.".into(),
                 hop: 0,
                 created_at: 0,
-                title: None,
-                target_session_id: None,
             },
             db::AgentEvent {
                 id: 2,
-                agent_id: "jean".into(),
+                agent_id: "coord_p1".into(),
                 kind: "schedule".into(),
                 body: "Schedule #3 is due.".into(),
                 hop: 0,
                 created_at: 0,
-                title: None,
-                target_session_id: None,
             },
         ];
         let message = compose_update(&events);

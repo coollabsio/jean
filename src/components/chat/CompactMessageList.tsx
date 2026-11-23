@@ -1257,7 +1257,6 @@ export const CompactMessageList = memo(
                       <AgentMessageLinkRow
                         key={reply.link.toolId}
                         link={reply.link}
-                        sentAt={reply.sentAt}
                         worktreeId={worktreeId}
                       />
                     )

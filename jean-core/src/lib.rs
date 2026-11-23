@@ -284,7 +284,7 @@ pub struct AppPreferences {
     #[serde(default)]
     pub debug_mode_enabled: bool, // Show debug panel in chat sessions (default: false)
     #[serde(default)]
-    pub agents_enabled: bool, // Experimental: show the Agents tab (default: false)
+    pub agents_enabled: bool, // Experimental: project coordinators and their engine (default: false)
     #[serde(default)]
     pub default_enabled_mcp_servers: Vec<String>, // MCP server names enabled by default (empty = none)
     #[serde(default)]
@@ -4332,6 +4332,8 @@ async fn save_preferences(app: AppHandle, mut preferences: AppPreferences) -> Re
     );
 
     schedule_jean_mcp_socket_sync(app.clone());
+    // `agents_enabled` may have changed: let the coordinator loop see it now.
+    agents::nudge();
 
     Ok(())
 }
@@ -5639,7 +5641,8 @@ pub fn initialize_runtime(context: &RuntimeContext) -> Result<(), String> {
     context.manage(task_manager);
     chat::auth_failure::start_auth_failure_listener(context);
     auto_fix::scheduler::start_auto_fix_scheduler(context.clone());
-    // Agents keep working without clients: open their database and start the loop.
+    // Coordinators keep working without clients: open their database and
+    // start the loop. The loop idles while `agents_enabled` is off.
     match agents::init(context) {
         Ok(()) => agents::start(context.clone()),
         Err(error) => log::error!("Agents are unavailable: {error}"),

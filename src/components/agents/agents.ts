@@ -81,10 +81,7 @@ export function useSelectedAgent(): {
 export function agentStatusLabel(agent: AgentSummary): string | null {
   if (agent.unreadNotifications > 0)
     return `${agent.unreadNotifications} new notification${agent.unreadNotifications === 1 ? '' : 's'}`
-  if (agent.status === 'working')
-    return agent.runningTasks > 0
-      ? `Working (${agent.runningTasks} run${agent.runningTasks === 1 ? '' : 's'})`
-      : 'Working'
+  if (agent.status === 'working') return 'Working'
   if (agent.status === 'waiting') return 'Waiting for you'
   if (agent.budgetReached) return 'Hourly limit reached'
   return null
@@ -93,7 +90,6 @@ export function agentStatusLabel(agent: AgentSummary): string | null {
 /** Sections of the agent side panel (the chat is always shown). */
 export type AgentTab =
   | 'inbox'
-  | 'tasks'
   | 'schedules'
   | 'activity'
   | 'memory'
@@ -101,7 +97,6 @@ export type AgentTab =
 
 const ALL_AGENT_TABS: AgentTab[] = [
   'inbox',
-  'tasks',
   'schedules',
   'activity',
   'memory',

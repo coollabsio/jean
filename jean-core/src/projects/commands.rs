@@ -815,6 +815,7 @@ pub async fn add_project(
     data.add_project(project.clone());
     save_projects_data(&app, &data)?;
     allow_project_in_asset_scope(&app, &project.path);
+    crate::agents::on_project_added(&app, &project.id);
 
     let mut project = project;
     attach_default_avatar(&mut project);
@@ -978,6 +979,7 @@ pub async fn init_project(
     data.add_project(project.clone());
     save_projects_data(&app, &data)?;
     allow_project_in_asset_scope(&app, &project.path);
+    crate::agents::on_project_added(&app, &project.id);
 
     log::trace!("Successfully initialized project: {}", project.name);
     Ok(project)
@@ -1039,6 +1041,7 @@ pub async fn clone_project(
     data.add_project(project.clone());
     save_projects_data(&app, &data)?;
     allow_project_in_asset_scope(&app, &project.path);
+    crate::agents::on_project_added(&app, &project.id);
 
     log::trace!("Successfully cloned project: {}", project.name);
     Ok(project)
@@ -1089,6 +1092,7 @@ pub async fn remove_project(app: AppHandle, project_id: String) -> Result<(), St
         .ok_or_else(|| format!("Project not found: {project_id}"))?;
 
     save_projects_data(&app, &data)?;
+    crate::agents::remove_coordinator(&app, &project_id);
 
     // Clean up session data and sessions files of the dropped worktrees
     for worktree in &dropped_worktrees {

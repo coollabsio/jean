@@ -30,6 +30,8 @@ export interface AgentSkill {
 export interface AgentSummary {
   /** Agent key: raw ID on the local server, `serverId:id` on a remote one */
   id: string
+  /** Project this coordinator belongs to */
+  projectId: string
   /** Jean server that runs this agent */
   serverId: string
   serverName: string
@@ -47,11 +49,8 @@ export interface AgentSummary {
   activeDelegations: number
   nextScheduleAt: number | null
   budgetReached: boolean
-  /** Worktree ID of the agent's background task sessions */
-  tasksWorktreeId: string
-  runningTasks: number
   unreadNotifications: number
-  /** One line about the latest activity (chat reply, notification, task) */
+  /** One line about the latest activity (chat reply or notification) */
   activity: string | null
   /**
    * Backend this agent's sessions use. Null keeps the current session and
@@ -81,20 +80,6 @@ export interface AgentSummary {
 export interface AgentConnector {
   backend: string
   name: string
-}
-
-export interface AgentTask {
-  id: number
-  agentId: string
-  sessionId: string
-  title: string
-  /** schedule | delegation | approval */
-  kind: string
-  /** running | waiting | done | failed | cancelled */
-  status: string
-  summary: string | null
-  createdAt: number
-  updatedAt: number
 }
 
 export interface AgentNotification {
@@ -227,7 +212,6 @@ export interface AgentDetails {
   memories: AgentMemory[]
   journal: AgentJournalEntry[]
   memoryChanges: AgentMemoryChange[]
-  tasks: AgentTask[]
   notifications: AgentNotification[]
 }
 
@@ -257,6 +241,8 @@ export const agentsQueryKeys = {
     [...agentsQueryKeys.all, 'details', agentId] as const,
   workdir: (agentId: string) =>
     [...agentsQueryKeys.all, 'workdir', agentId] as const,
+  coordinator: (projectId: string) =>
+    [...agentsQueryKeys.all, 'coordinator', projectId] as const,
 }
 
 type AgentRunKeys = 'backend' | 'model' | 'effort' | 'thinkingLevel' | 'skills'
@@ -289,16 +275,17 @@ export function scopeAgentSummary(
   return {
     ...agent,
     id: scope(agent.id),
+    projectId: scope(agent.projectId),
     worktreeId: scope(agent.worktreeId),
-    tasksWorktreeId: scope(agent.tasksWorktreeId),
     homeSessionId: agent.homeSessionId ? scope(agent.homeSessionId) : null,
     serverId,
     serverName,
   }
 }
 
-/** Agents of every online server. Servers without agents support (older
- * Jean) or with errors are skipped. */
+/** Coordinators of every online server. Servers without agents support
+ * (older Jean) or with errors are skipped, and so are the agents of an older
+ * server that are not project coordinators (they have no `projectId`). */
 export async function loadAgentsForServers(
   sources: SessionServerSource[],
   invokeServer: (
@@ -316,13 +303,15 @@ export async function loadAgentsForServers(
   )
   return results.flatMap(result =>
     result.status === 'fulfilled'
-      ? result.value.agents.map(agent =>
-          scopeAgentSummary(
-            result.value.source.serverId,
-            result.value.source.name,
-            agent
+      ? result.value.agents
+          .filter(agent => agent.projectId)
+          .map(agent =>
+            scopeAgentSummary(
+              result.value.source.serverId,
+              result.value.source.name,
+              agent
+            )
           )
-        )
       : []
   )
 }
@@ -374,6 +363,60 @@ export function useAgentsList(enabledServerIds: string[]) {
     enabled,
     staleTime: 10_000,
     placeholderData: keepPreviousData,
+  })
+}
+
+/** `get_project_coordinator` result: the coordinator of one project and the
+ * chat session the user talks to it in. */
+export interface ProjectCoordinator {
+  agentId: string
+  /** Reserved worktree ID of the coordinator's sessions */
+  worktreeId: string
+  /** Folder the chat runs in: the project folder */
+  worktreePath: string
+  chatSessionId: string
+  /** Null = the default a new chat would use */
+  backend: string | null
+  model: string | null
+  effort: string | null
+  thinkingLevel: string | null
+}
+
+/** IDs in a remote server's coordinator become server-scoped keys, like the
+ * project key they were asked with. */
+export function scopeProjectCoordinator(
+  projectKey: string,
+  raw: ProjectCoordinator
+): ProjectCoordinator {
+  const serverId = parseServerResourceKey(projectKey)?.serverId
+  if (!serverId || serverId === LOCAL_SERVER_ID) return raw
+  const scope = (resourceId: string) =>
+    serverResourceKey({ serverId, resourceId })
+  return {
+    ...raw,
+    agentId: scope(raw.agentId),
+    worktreeId: scope(raw.worktreeId),
+    chatSessionId: scope(raw.chatSessionId),
+  }
+}
+
+/** The coordinator of a project. The server creates it, and its chat
+ * session, when they do not exist yet. Routed by `projectId`. */
+export function useProjectCoordinator(
+  projectId: string | null,
+  enabled = true
+) {
+  return useQuery({
+    queryKey: agentsQueryKeys.coordinator(projectId ?? ''),
+    queryFn: async () =>
+      scopeProjectCoordinator(
+        projectId ?? '',
+        await invoke<ProjectCoordinator>('get_project_coordinator', {
+          projectId,
+        })
+      ),
+    enabled: enabled && !!projectId,
+    staleTime: 10_000,
   })
 }
 

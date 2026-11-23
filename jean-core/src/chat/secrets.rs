@@ -12,8 +12,8 @@
 //! `list_secrets` card can list and delete secrets without reading values.
 //!
 //! Secrets are scoped to an owner: the project of a worktree session, or the
-//! agent of an agent chat, its task sessions, and its subagents (agent
-//! sessions live in virtual `__agent_*__` worktrees outside any project).
+//! project coordinator of a coordinator chat (those sessions live in the
+//! virtual `__coord_<project_id>__` worktree, which has no worktree record).
 //! Sessions list and reuse (`get_secret`) only their owner's secrets, so a
 //! scheduled task in a new session can find a key saved earlier. This is not
 //! a security wall: every agent runs as the same OS user and can read the

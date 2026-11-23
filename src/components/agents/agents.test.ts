@@ -3,6 +3,7 @@ import {
   agentServerId,
   loadAgentsForServers,
   scopeAgentSummary,
+  scopeProjectCoordinator,
   type AgentApproval,
   type AgentSummary,
 } from '@/services/agents'
@@ -14,7 +15,6 @@ import {
 } from './agents'
 import { describeApproval } from './AgentActivity'
 import { formatRelative } from '@/lib/relative-time'
-import { groupTasks, taskStatusLabel } from './AgentTasks'
 import { formatInterval } from './AgentSchedules'
 import { notificationPreview, splitNotifications } from './AgentInbox'
 import { enabledAgentServers } from './agents-feature'
@@ -22,16 +22,17 @@ import { agentRunSummary } from './agent-config'
 
 function agent(overrides: Partial<AgentSummary>): AgentSummary {
   return {
-    id: 'jean',
+    id: 'coord_p1',
+    projectId: 'p1',
     serverId: 'local',
     serverName: 'Local',
-    name: 'Jean',
+    name: 'Orbit',
     description: '',
     icon: 'jean',
     rolePrompt: '',
-    worktreeId: '__jean_agent__',
+    worktreeId: '__coord_p1__',
     maxWakesPerHour: 12,
-    builtin: true,
+    builtin: false,
     status: 'idle',
     homeSessionId: null,
     pendingUpdates: 0,
@@ -39,8 +40,6 @@ function agent(overrides: Partial<AgentSummary>): AgentSummary {
     activeDelegations: 0,
     nextScheduleAt: null,
     budgetReached: false,
-    tasksWorktreeId: '__agent_tasks_jean__',
-    runningTasks: 0,
     unreadNotifications: 0,
     activity: null,
     backend: null,
@@ -55,9 +54,6 @@ function agent(overrides: Partial<AgentSummary>): AgentSummary {
 describe('agentStatusLabel', () => {
   it('shows work, waiting and budget', () => {
     expect(agentStatusLabel(agent({ status: 'working' }))).toBe('Working')
-    expect(
-      agentStatusLabel(agent({ status: 'working', runningTasks: 2 }))
-    ).toBe('Working (2 runs)')
     expect(agentStatusLabel(agent({ unreadNotifications: 1 }))).toBe(
       '1 new notification'
     )
@@ -78,7 +74,7 @@ describe('findAgent', () => {
 
   it('finds by id and falls back to the first agent', () => {
     expect(findAgent(agents, 'reviewer')?.id).toBe('reviewer')
-    expect(findAgent(agents, 'deleted-agent')?.id).toBe('jean')
+    expect(findAgent(agents, 'deleted-agent')?.id).toBe('coord_p1')
     expect(findAgent(undefined, 'jean')).toBeUndefined()
   })
 })
@@ -136,13 +132,6 @@ describe('describeApproval', () => {
   })
 })
 
-describe('taskStatusLabel', () => {
-  it('explains waiting tasks', () => {
-    expect(taskStatusLabel('waiting')).toBe('waiting for sessions')
-    expect(taskStatusLabel('done')).toBe('done')
-  })
-})
-
 describe('formatInterval', () => {
   it('uses the largest whole unit', () => {
     expect(formatInterval(30 * 60)).toBe('every 30m')
@@ -174,15 +163,36 @@ describe('splitNotifications', () => {
 })
 
 describe('multi-server agents', () => {
+  it('scopes a remote project coordinator like its project key', () => {
+    const raw = {
+      agentId: 'coord_p1',
+      worktreeId: '__coord_p1__',
+      worktreePath: '/repos/orbit',
+      chatSessionId: 's1',
+      backend: null,
+      model: null,
+      effort: null,
+      thinkingLevel: null,
+    }
+    expect(scopeProjectCoordinator('p1', raw)).toEqual(raw)
+    expect(scopeProjectCoordinator('srv:p1', raw)).toEqual({
+      ...raw,
+      agentId: 'srv:coord_p1',
+      worktreeId: 'srv:__coord_p1__',
+      chatSessionId: 'srv:s1',
+    })
+  })
+
   it('scopes remote agent IDs so commands and chats route to that server', () => {
     const raw = agent({ id: 'reviewer', homeSessionId: 's1' })
     const local = scopeAgentSummary('local', 'Local', raw)
     expect(local.id).toBe('reviewer')
-    expect(local.worktreeId).toBe('__jean_agent__')
+    expect(local.worktreeId).toBe('__coord_p1__')
+    expect(local.projectId).toBe('p1')
     const remote = scopeAgentSummary('srv', 'Home server', raw)
     expect(remote.id).toBe('srv:reviewer')
-    expect(remote.worktreeId).toBe('srv:__jean_agent__')
-    expect(remote.tasksWorktreeId).toBe('srv:__agent_tasks_jean__')
+    expect(remote.worktreeId).toBe('srv:__coord_p1__')
+    expect(remote.projectId).toBe('srv:p1')
     expect(remote.homeSessionId).toBe('srv:s1')
     expect(remote.serverName).toBe('Home server')
     expect(remote.backend).toBeNull()
@@ -220,10 +230,12 @@ describe('multi-server agents', () => {
       async serverId => {
         if (serverId === 'old') throw new Error('Unknown command: list_agents')
         if (serverId === 'off') throw new Error('must not be called')
-        return [agent({})]
+        // An older server still lists an agent that is not a coordinator
+        const { projectId: _projectId, ...legacy } = agent({ id: 'jean' })
+        return [agent({}), legacy as AgentSummary]
       }
     )
-    expect(agents.map(a => a.id)).toEqual(['jean', 'srv:jean'])
+    expect(agents.map(a => a.id)).toEqual(['coord_p1', 'srv:coord_p1'])
   })
 })
 
@@ -263,22 +275,6 @@ describe('notificationPreview', () => {
   })
 })
 
-describe('groupTasks', () => {
-  it('separates running and waiting tasks from finished ones', () => {
-    const task = (id: number, status: string) =>
-      ({ id, status }) as Parameters<typeof groupTasks>[0][number]
-    const { active, finished } = groupTasks([
-      task(1, 'done'),
-      task(2, 'running'),
-      task(3, 'failed'),
-      task(4, 'waiting'),
-      task(5, 'cancelled'),
-    ])
-    expect(active.map(t => t.id)).toEqual([2, 4])
-    expect(finished.map(t => t.id)).toEqual([1, 3, 5])
-  })
-})
-
 describe('visibleAgentTabs', () => {
   it('shows only Schedules by default', () => {
     expect(visibleAgentTabs(false, agent({}), 'schedules')).toEqual([
@@ -303,7 +299,6 @@ describe('visibleAgentTabs', () => {
   it('shows every tab in advanced mode', () => {
     expect(visibleAgentTabs(true, agent({}), 'schedules')).toEqual([
       'inbox',
-      'tasks',
       'schedules',
       'activity',
       'memory',

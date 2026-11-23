@@ -1,13 +1,55 @@
-# Agents
+# Agents (project coordinators)
 
-Agents are persistent AI workers (Jean, the built-in coordinator) that manage projects through the Jean MCP tools. They run on the
-backend, so they keep working with no client open. The feature is experimental and closed
-to new users: **Settings → General → Experimental → Agents** (`agents_enabled`,
-default off) shows only when `agents_enabled` is already true. Users who turn
-it off cannot turn it on again from the UI.
+Every git project has one coordinator: a persistent agent that Jean creates
+automatically. The user chats with it. It does not change code itself. It
+starts work in normal worktrees and sessions through the Jean MCP tools
+(`create_worktree`, `create_session`, `send_chat_message`), and when one of
+those sessions ends, Jean wakes the coordinator and it posts a short status in
+its chat. Coordinators run on the backend, so they keep working with no client
+open.
+
+The feature is experimental: **Settings → General → Experimental → Agents**
+(`agents_enabled`, default off). The engine reads the preference on every tick
+and in every listener, so turning it on or off applies without a restart.
+While it is off, no coordinator is created, no schedule fires, and nothing is
+delivered. When it is turned on, every project gets its coordinator and the
+delegations that were active are checked once.
 
 Code: `jean-core/src/agents/` (backend), `src/components/agents/` and
-`src/services/agents.ts` (UI).
+`src/services/agents.ts` (UI). The UI still shows the old agents page; the
+project coordinator view replaces it.
+
+## Coordinator identity and lifecycle
+
+| Thing | Value |
+|---|---|
+| Agent ID | `coord_<project_id>` (`db::coordinator_id`) |
+| Worktree ID of its sessions | `__coord_<project_id>__` (`db::coordinator_worktree_id`) |
+| Working directory | The project folder (`agents::agent_workdir`) |
+| Row | `agents.project_id` is set (migration v9, unique index) |
+
+Project IDs are UUIDs, so both IDs pass `sanitize_filename` unchanged.
+`db::ensure_coordinator` refuses any other ID.
+
+- `agents::ensure_coordinator(app, project_id)` is idempotent. It runs for
+  every project when the feature turns on (`ensure_all_coordinators`), when a
+  project is added (`on_project_added`, called from `add_project`,
+  `init_project` and `clone_project`), and from `get_project_coordinator`.
+  The coordinator name follows the project name. Folders and managed servers
+  get no coordinator.
+- `remove_project` calls `agents::remove_coordinator`: it stops and deletes
+  the coordinator's chat sessions and their index, then deletes the row.
+  Foreign keys delete its delegations, events, wakes, schedules, approvals
+  and notifications. `db::delete_coordinator` also deletes its private
+  memories, their change records, and its journal, which have no foreign key.
+- Coordinators are never deleted at startup. A project list that failed to
+  load must not delete memory.
+- Rows with `project_id` NULL are the old built-in `jean` agent and old custom
+  agents. They and their data stay in the database and are not loaded:
+  `list_agents`, `get_agent`, `agent_by_worktree`, schedule firing, pending
+  events and delegation checks all filter `project_id IS NOT NULL`. Their
+  session index files (`__jean_agent__`, `__agent_<id>__`) are still skipped
+  by orphan cleanup (`is_agent_worktree_id`).
 
 ## Storage
 
@@ -17,44 +59,42 @@ SQLite). Migrations are a list in `agents/db.rs` (`MIGRATIONS`, tracked with
 
 | Table | Purpose |
 |---|---|
-| `agents` | Definitions. Jean (`jean`, built-in) is seeded on every start. |
+| `agents` | One row per coordinator (`project_id` set). Nothing is seeded. |
 | `delegations` | "Session S works for agent A". `origin_session_id` = the agent session that sent the work. Status: `active`, `waiting`, `done`, `failed`, `cancelled`. |
-| `events` | Queued updates for an agent (`delegation`, `schedule`, `approval`, `message`). `target_session_id` = where it goes; empty = a new task. |
-| `tasks` | One row per task session (background work): status, one-line result, closed state (`archived_at`). |
+| `events` | Queued updates for a coordinator (`delegation`, `schedule`, `approval`). All of them go to its chat. The `title` and `target_session_id` columns are no longer written. |
+| `tasks` | Unused. Rows of the removed task sessions are kept. |
 | `notifications` | `notify_user` messages (inbox, toast). |
 | `wakes` | One row per wake-up, for the hourly budget (`max_wakes_per_hour`). |
 | `schedules` | One-shot, interval (`every_secs`), cron, and event routines. |
 | `approvals` | Destructive MCP calls that wait for the user. |
-| `memories` + `memories_fts` | Rules, facts, open work. `scope` is `agent` (private), `shared` (cross-agent working memory), or `user` (facts about the user). `agent_id` NULL for shared and user. Superseded rows stay but drop out of search and prompts. FTS5 kept in sync by triggers. |
+| `memories` + `memories_fts` | Rules, facts, open work. `scope` is `agent` (this project's coordinator), `shared` (all coordinators: facts that hold in every project), or `user` (facts about the user). `agent_id` NULL for shared and user. Superseded rows stay but drop out of search and prompts. FTS5 kept in sync by triggers. |
 | `memory_changes` | Audit of create, update, forget, and supersede (before and after text, who did it). |
 | `journal` + `journal_fts` | Dated history for one agent, including a short copy of a chat when it rotates. |
 
 All functions in `db.rs` take a `&Connection`, so tests use an in-memory
 database. Runtime code uses `agents::with_db(app, |conn| ...)`.
 
-## Agent sessions: chat and tasks
+## Coordinator sessions
 
-Agent sessions are normal Jean sessions under reserved worktree IDs that have
-no worktree record. Each agent has two:
+Coordinator sessions are normal Jean sessions under the reserved worktree ID
+`__coord_<project_id>__`, which has no worktree record. They run in the
+project folder. There is one continuous chat (the active session) plus the
+closed old chats from rotation. There are no task sessions: schedule runs,
+event routines, approval results and delegation results all wake the chat.
 
-| Worktree ID | Holds |
-|---|---|
-| `__jean_agent__` / `__agent_<id>__` | The chat with the user (current chat + closed old chats) |
-| `__agent_tasks_<id>__` | Task sessions: one per schedule run, agent request, or follow-up without an origin |
+`agents::agent_for_worktree` maps the worktree ID to the coordinator,
+`agents::workdir_for_worktree` and `resolve_worktree_path` (MCP core) map it
+to the project folder, and `agents::is_agent_worktree_id()` keeps its session
+index out of orphan cleanup.
 
-Both run in the agent's scratch folder: `{app_data}/jean-agent` or
-`{app_data}/agents/<id>`. The chat never gets schedule runs or agent requests;
-the user sees task results through `notify_user` (inbox + toast) and the Tasks
-tab.
-`agents::is_agent_worktree_id()` keeps their session indexes out of orphan
-cleanup, and `resolve_worktree_path` in the MCP core maps them to the scratch
-folder.
-
-`agents::system_prompt_for()` adds the agent prompt (role, how the
-infrastructure works, other agents, selected skills, memory within a size
-budget) to every run in an agent worktree, for every backend. Chat sessions
-also get the end of the previous chat (`carry_over`); task sessions are told
-the user does not read them and to use `notify_user`.
+`agents::system_prompt_for()` adds the coordinator prompt to every run in a
+coordinator worktree, for every backend: the role for project <name> at
+<path>, the rule not to change code, how to delegate (`create_worktree`,
+`send_chat_message`, `read_session_messages`, one line per task sent), the
+project's worktrees (at most 30), the sessions it waits for (at most 20),
+selected skills, memory within a size budget, and the end of the previous chat
+(`carry_over`). A non-empty `role_prompt` is added as "Instructions from the
+user".
 
 ## Per-agent run configuration
 
@@ -91,7 +131,7 @@ states, badges, save footers).
 
 The engine applies the fields in three places:
 
-- New task sessions and rotated chats are created with the agent's backend.
+- Rotated chats are created with the agent's backend.
   An empty home chat (no messages, no running turn) is stamped the same way
   when the agent is created or its run configuration changes, so the chat
   toolbar shows the choice. A cleared backend or model resets that empty chat
@@ -126,29 +166,34 @@ are not copied or rewritten.
 ## The loop (`agents/engine.rs`)
 
 ```
-send_chat_message (MCP, caller = agent chat or task session)
-  └─ record_delegation ──► delegations(active, origin = caller)
+send_chat_message (MCP, caller = coordinator chat)
+  └─ record_delegation ──► delegations(active)
 chat:done / chat:error / chat:cancelled (in-process listener)
-  └─ mark delegations and tasks of that session ──► check_after = now + 2s
-tick (every 5s, or nudge())
-  ├─ delegation checks ──► event with target = origin session
-  ├─ task checks ──► task status + one-line result
-  ├─ due schedules (one-shot, interval, cron) ──► event without target
+  └─ mark delegations of that session ──► check_after = now + 2s
+tick (every 5s, or nudge(); skipped while agents_enabled is off)
+  ├─ delegation checks ──► event
+  ├─ due schedules (one-shot, interval, cron) ──► event
   │    event routines are queued by listeners, not by this tick
-  ├─ deliver (not paused, within the hourly budget):
-  │    ├─ target set ──► "[Jean agent update]" into that session when idle
-  │    │                 (a closed old chat forwards to the current chat)
-  │    └─ no target ──► new task session (max 2 running per agent)
+  ├─ deliver: all queued events of a coordinator as one
+  │    "[Jean agent update]" message into its chat
   └─ maintenance (every 60s):
-       ├─ chat ≥ 40 messages and idle 10 min ──► new chat, old one closed,
-       │                                        end saved as carry_over, shorter
-       │                                        copy stored as a journal entry
-       └─ finished tasks: close after 3 days, purge 30 days later
+       └─ chat ≥ 40 messages and idle 10 min ──► new chat, old one closed,
+                                                end saved as carry_over, shorter
+                                                copy stored as a journal entry
 ```
 
+Delivery (`next_delivery`) sends nothing while the chat runs or waits for
+input, or when the hourly budget (`max_wakes_per_hour`) is spent. The events
+stay queued and the next tick tries again. The end of the chat's own run
+nudges the loop, so updates that arrived during a turn are delivered right
+after it. One delivery counts as one wake.
+
+Saving preferences nudges the loop, so a change of `agents_enabled` is seen at
+once.
+
 Test overrides (environment, for isolated test servers only):
-`JEAN_AGENT_CHAT_ROTATE_MESSAGES`, `JEAN_AGENT_CHAT_ROTATE_IDLE_SECS`,
-`JEAN_AGENT_TASK_ARCHIVE_SECS`. `JEAN_AGENT_CLOCK_FILE` points at a file whose
+`JEAN_AGENT_CHAT_ROTATE_MESSAGES`, `JEAN_AGENT_CHAT_ROTATE_IDLE_SECS`.
+`JEAN_AGENT_CLOCK_FILE` points at a file whose
 contents are a positive unix timestamp; `db::now()` returns that instead of the
 wall clock so a cron routine can be moved onto its next slot during a local
 run. Leave it unset in normal use.
@@ -159,7 +204,7 @@ run. Leave it unset in normal use.
 - When the agent has a backend, model, effort, or thinking level, the wake
   passes those on `send_chat_message`. Selected skills are appended to the
   wake message with the chat skill marker.
-- New chat and task sessions get an implement execution mode saved once
+- New chat sessions get an implement execution mode saved once
   (`ensure_session_mode`). Plan is not that default. Old session JSON without
   a saved mode still loads as Plan so those sessions are not escalated.
 - At startup, active delegations are checked once, so runs that ended while
@@ -211,10 +256,12 @@ That is the same 5-minute floor as `every_secs`. `*/5 * * * *` is allowed;
 ### Events
 
 Event routines wake through the same queue as cron: `fire_event_schedules`
-inserts a `schedule` event with no target, and the tick delivers it as a new
-task. Delivery already stops at `max_wakes_per_hour` and at two running tasks.
-A spent budget leaves the event queued; it is not dropped and it is not
-delivered early. These routines do not add a hop.
+inserts a `schedule` event and the tick delivers it to the chat. An event
+wakes only the coordinator of the project it happened in (the project of the
+session's or pull request's worktree, or of the coordinator that asked for the
+approval). Delivery stops at `max_wakes_per_hour`. A spent budget leaves the
+event queued; it is not dropped and it is not delivered early. These routines
+do not add a hop.
 
 The same occurrence is stored in `schedule_event_keys`, so a merged PR does
 not queue twice. Session keys include the second they happened,
@@ -223,7 +270,7 @@ keys. Pausing does not.
 
 | Event | Source | Not fired when |
 |---|---|---|
-| `session_finished` | `chat:done` | The session belongs to an agent (chat or task) or is an active delegation. Those already wake their agent, and a routine on them would loop. |
+| `session_finished` | `chat:done` | The session is a coordinator chat or an active delegation. Those already wake their coordinator, and a routine on them would loop. |
 | `session_failed` | `chat:error` | Same exclusion. `chat:cancelled` is not a trigger. |
 | `pr_merged` | `pr:status-update` whose `state` is `merged` | The same worktree and PR number already woke this routine. Open and closed PRs do not match. |
 | `approval_resolved` | `decide_approval`, after the result is queued back to the requesting session | The approval id already woke this routine. |
@@ -269,9 +316,19 @@ When a chat rotates (40 messages and 10 minutes idle), the end is still saved as
 
 ## MCP tools (`agents/mcp.rs`)
 
-Agent-only tools: `schedule_create/update/list/cancel`, `memory_save/search/update/forget/supersede`, `journal_add/search`,
+Coordinator-only tools: `schedule_create/update/list/cancel`, `memory_save/search/update/forget/supersede`, `journal_add/search`,
 `notify_user` (emits `agents:notification` for the toast),
-`set_status`, `task_list`. `set_status` returns only `shown`: the agent chat
+`set_status`, `ask_user`, `list_connectors`. `task_list` is removed.
+
+These tools are listed only for a coordinator chat. `tools/list` is answered
+by the Jean app, not by the stdio proxy: the proxy sends
+`{"method":"tools/list","source":<JEAN_MCP_SESSION>}` over the local socket
+and `jean_mcp_core::tools_list_for_source` returns the list for that session.
+Every other session, and a proxy that cannot reach the app, gets the project
+tools only (`set_connector` included). Calling a coordinator tool from another
+session still fails in `mcp::run`.
+
+`set_status` returns only `shown`: the chat
 reads the latest call from the streamed tool calls and shows its 2-5 word text
 in the status line (`agent-status.ts`). A Jean-tool allowlist cannot
 block it. The caller is identified by `JEAN_MCP_SESSION`. Codex threads
@@ -299,8 +356,7 @@ at the tool call that made it (`agentApprovalId` in `agent-messages.ts`,
 options. The text uses worktree and agent names (`describeApproval`), not IDs
 or raw arguments.
 
-**Questions:** `ask_user` (agent chat sessions only; task sessions get an
-error that points to `notify_user`) takes `question`, 2 to 8 `options`, and
+**Questions:** `ask_user` takes `question`, 2 to 8 `options`, and
 `multiple`. The tool only validates and returns `shown`. The agent chat renders
 the call input as `AgentQuestionCard`: one answer sends on click, multiple
 answers send with a Send button (one `- option` line each). The answer is a
@@ -312,7 +368,7 @@ count).
 
 Registered in `http_server/dispatch.rs` (`AGENT_COMMANDS`, served by
 `dispatch_agents_command`), so native IPC and web access both work:
-`list_agents`, `get_agent_details`, `update_agent`, `decide_agent_approval`, `create_agent_schedule`,
+`get_project_coordinator`, `list_agents`, `get_agent_details`, `update_agent`, `decide_agent_approval`, `create_agent_schedule`,
 `update_agent_schedule`, `cancel_agent_schedule`,
 `save/search/update/delete/supersede/export_agent_memory`, `save/search_agent_journal`, `mark_agent_notifications_read`,
 `get_agent_workdir`.
@@ -321,6 +377,14 @@ plus the fields for that kind (`delaySecs`, `everySecs`, `cron` + `timezone`,
 or `event`). `update_agent_schedule` patches `name`, `prompt`, `paused`, and,
 when `kind` is set, replaces the timing. Pause does not delete the routine.
 Changes emit `cache:invalidate` with key `agents`.
+
+`get_project_coordinator(projectId)` returns `{ agentId, worktreeId,
+worktreePath, chatSessionId, backend, model, effort, thinkingLevel }`. It
+creates the coordinator and its chat session when they do not exist, and a new
+chat when the user closed the last one. The run fields are `null` when the
+coordinator uses the defaults. The TypeScript wrapper is
+`useProjectCoordinator` in `src/services/agents.ts`. `get_agent_workdir`
+returns the project folder.
 
 ## Stack size note
 
@@ -410,7 +474,7 @@ checks the server is in `get_mcp_servers` for the worktree, then returns
 `mcp login --no-browser <name>` for the embedded login terminal. Other
 backends return an error. The button is `McpSignInButton` / `openMcpLogin`.
 OAuth itself stays inside the CLI. Agent settings reuse that button and pass
-the agent scratch folder as the worktree, which is where the agent session
+the project folder as the worktree, which is where the agent session
 runs.
 
 ### What the agent limit does

@@ -4344,7 +4344,7 @@ fn emit_cache_invalidation(app: &AppHandle, keys: &[&str]) {
 // =============================================================================
 
 const AGENT_COMMANDS: &[&str] = &[
-    "get_jean_agent_workdir",
+    "get_project_coordinator",
     "get_agent_workdir",
     "list_agents",
     "get_agent_details",
@@ -4373,10 +4373,15 @@ async fn dispatch_agents_command(
 ) -> Result<Value, String> {
     {
         match command {
-            "get_jean_agent_workdir" => to_value(crate::agents::agent_workdir(app, "jean")?),
+            "get_project_coordinator" => {
+                let project_id: String = field(args, "projectId", "project_id")?;
+                let coordinator =
+                    crate::agents::commands::get_project_coordinator(app, &project_id).await?;
+                to_value(coordinator)
+            }
             "get_agent_workdir" => {
                 let agent_id: String = field(args, "agentId", "agent_id")?;
-                to_value(crate::agents::agent_workdir(app, &agent_id)?)
+                to_value(crate::agents::commands::agent_workdir(app, &agent_id)?)
             }
             "list_agents" => to_value(crate::agents::commands::list_agents(app).await?),
             "get_agent_details" => {

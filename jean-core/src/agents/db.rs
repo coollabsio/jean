@@ -9,9 +9,8 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
-/// Built-in coordinator agent. Its worktree ID predates the agents database.
-pub const JEAN_AGENT_ID: &str = "jean";
-pub const JEAN_AGENT_WORKTREE_ID: &str = "__jean_agent__";
+/// Worktree ID of the old built-in agent. Its sessions stay on disk, unused.
+const LEGACY_JEAN_WORKTREE_ID: &str = "__jean_agent__";
 
 /// Most memory entries one scope (an agent, or shared) can hold.
 pub const MAX_MEMORIES_PER_SCOPE: i64 = 500;
@@ -251,6 +250,12 @@ const MIGRATIONS: &[&str] = &[
     // Subagent types. This is its own step so a later rebase can renumber it.
     // Do not fold this SQL into an older migration.
     subagent_types_migration_sql(),
+    // v9: one coordinator per project. Rows without a project (the old
+    // built-in agent and custom agents) stay in the table and are not loaded.
+    r#"
+    ALTER TABLE agents ADD COLUMN project_id TEXT;
+    CREATE UNIQUE INDEX agents_project ON agents(project_id);
+    "#,
 ];
 
 /// Migration step for agent-defined subagent types.
@@ -291,11 +296,6 @@ pub const fn subagent_types_migration_sql() -> &'static str {
     "#
 }
 
-const JEAN_ROLE_PROMPT: &str = "You are Jean, the coordinator agent of the Jean app. You are the boss of all the user's projects.
-- Delegate coding work to sessions inside the correct project worktree. Do not edit project files directly.
-- Follow up on delegated work when its update arrives: check the result, start the next step, or tell the user.
-- Keep answers short and report what you did with project and worktree names.";
-
 pub fn now() -> i64 {
     if let Some(path) = clock_file() {
         if let Ok(text) = std::fs::read_to_string(path) {
@@ -322,7 +322,7 @@ fn clock_file() -> Option<&'static str> {
         .as_deref()
 }
 
-/// Open (or create) the database, apply migrations and seed built-in agents.
+/// Open (or create) the database and apply migrations.
 pub fn open(path: &std::path::Path) -> Result<Connection, String> {
     let conn = Connection::open(path).map_err(|e| format!("Failed to open agents db: {e}"))?;
     conn.pragma_update(None, "journal_mode", "WAL")
@@ -331,7 +331,7 @@ pub fn open(path: &std::path::Path) -> Result<Connection, String> {
     Ok(conn)
 }
 
-/// Apply migrations and seed data (also used by tests with an in-memory db).
+/// Apply migrations (also used by tests with an in-memory db).
 pub fn init(conn: &Connection) -> Result<(), String> {
     conn.pragma_update(None, "foreign_keys", "ON")
         .map_err(|e| format!("Failed to enable foreign keys: {e}"))?;
@@ -345,13 +345,6 @@ pub fn init(conn: &Connection) -> Result<(), String> {
         ))
         .map_err(|e| format!("Agents db migration {} failed: {e}", index + 1))?;
     }
-    let ts = now();
-    conn.execute(
-        "INSERT OR IGNORE INTO agents (id, name, description, icon, role_prompt, worktree_id, builtin, created_at, updated_at)
-         VALUES (?1, 'Jean', 'The boss. Coordinates all your projects.', 'jean', ?2, ?3, 1, ?4, ?4)",
-        params![JEAN_AGENT_ID, JEAN_ROLE_PROMPT, JEAN_AGENT_WORKTREE_ID, ts],
-    )
-    .map_err(|e| format!("Failed to seed Jean agent: {e}"))?;
     Ok(())
 }
 
@@ -379,6 +372,8 @@ pub struct AgentSkill {
 #[serde(rename_all = "camelCase")]
 pub struct Agent {
     pub id: String,
+    /// Project this coordinator belongs to.
+    pub project_id: String,
     pub name: String,
     pub description: String,
     pub icon: String,
@@ -419,7 +414,7 @@ pub struct AgentConnector {
 }
 
 const AGENT_COLUMNS: &str =
-    "id, name, description, icon, role_prompt, worktree_id, max_wakes_per_hour, builtin, backend, model, effort, thinking_level, skills, mcp_servers, jean_tools";
+    "id, name, description, icon, role_prompt, worktree_id, max_wakes_per_hour, builtin, backend, model, effort, thinking_level, skills, mcp_servers, jean_tools, project_id";
 
 const AGENT_BACKENDS: &[&str] = &[
     "claude",
@@ -453,6 +448,7 @@ fn agent_from_row(row: &rusqlite::Row) -> rusqlite::Result<Agent> {
     let skills_json: String = row.get(12)?;
     Ok(Agent {
         id: row.get(0)?,
+        project_id: row.get(15)?,
         name: row.get(1)?,
         description: row.get(2)?,
         icon: row.get(3)?,
@@ -681,7 +677,7 @@ fn optional_json<T: Serialize>(value: &Option<T>, label: &str) -> Result<Option<
 pub fn list_agents(conn: &Connection) -> Result<Vec<Agent>, String> {
     let mut stmt = conn
         .prepare(&format!(
-            "SELECT {AGENT_COLUMNS} FROM agents ORDER BY builtin DESC, created_at, id"
+            "SELECT {AGENT_COLUMNS} FROM agents WHERE project_id IS NOT NULL ORDER BY created_at, id"
         ))
         .map_err(err)?;
     let rows = stmt.query_map([], agent_from_row).map_err(err)?;
@@ -690,7 +686,7 @@ pub fn list_agents(conn: &Connection) -> Result<Vec<Agent>, String> {
 
 pub fn get_agent(conn: &Connection, id: &str) -> Result<Option<Agent>, String> {
     conn.query_row(
-        &format!("SELECT {AGENT_COLUMNS} FROM agents WHERE id = ?1"),
+        &format!("SELECT {AGENT_COLUMNS} FROM agents WHERE id = ?1 AND project_id IS NOT NULL"),
         [id],
         agent_from_row,
     )
@@ -700,7 +696,9 @@ pub fn get_agent(conn: &Connection, id: &str) -> Result<Option<Agent>, String> {
 
 pub fn agent_by_worktree(conn: &Connection, worktree_id: &str) -> Result<Option<Agent>, String> {
     conn.query_row(
-        &format!("SELECT {AGENT_COLUMNS} FROM agents WHERE worktree_id = ?1"),
+        &format!(
+            "SELECT {AGENT_COLUMNS} FROM agents WHERE worktree_id = ?1 AND project_id IS NOT NULL"
+        ),
         [worktree_id],
         agent_from_row,
     )
@@ -708,35 +706,94 @@ pub fn agent_by_worktree(conn: &Connection, worktree_id: &str) -> Result<Option<
     .map_err(err)
 }
 
-/// Worktree ID for a new agent's sessions. Only `[a-z0-9-]` IDs are accepted,
-/// so the ID survives session index file-name sanitizing unchanged.
-pub fn agent_worktree_id(agent_id: &str) -> String {
-    if agent_id == JEAN_AGENT_ID {
-        JEAN_AGENT_WORKTREE_ID.to_string()
-    } else {
-        format!("__agent_{agent_id}__")
-    }
+/// Coordinator agent ID of a project.
+pub fn coordinator_id(project_id: &str) -> String {
+    format!("coord_{project_id}")
 }
 
-/// Worktree ID of an agent's task sessions (background work), kept apart from
-/// its chat sessions. Agent IDs never contain `_`, so it cannot clash with a
-/// chat worktree ID.
-pub fn agent_tasks_worktree_id(agent_id: &str) -> String {
-    format!("__agent_tasks_{agent_id}__")
+/// Worktree ID of a project's coordinator chat sessions. It has no worktree
+/// record; the sessions run in the project folder.
+pub fn coordinator_worktree_id(project_id: &str) -> String {
+    format!("__coord_{project_id}__")
 }
 
-/// Agent ID of a task worktree ID.
-pub fn agent_id_from_tasks_worktree(worktree_id: &str) -> Option<&str> {
+/// Project ID of a coordinator worktree ID.
+pub fn project_id_from_coordinator_worktree(worktree_id: &str) -> Option<&str> {
     worktree_id
-        .strip_prefix("__agent_tasks_")
+        .strip_prefix("__coord_")
         .and_then(|rest| rest.strip_suffix("__"))
         .filter(|id| !id.is_empty())
 }
 
 /// True for worktree IDs reserved for agent sessions (never real worktrees).
+/// Includes the IDs of the old agents, so their session files are kept.
 pub fn is_agent_worktree_id(worktree_id: &str) -> bool {
-    worktree_id == JEAN_AGENT_WORKTREE_ID
-        || (worktree_id.starts_with("__agent_") && worktree_id.ends_with("__"))
+    worktree_id == LEGACY_JEAN_WORKTREE_ID
+        || ((worktree_id.starts_with("__coord_") || worktree_id.starts_with("__agent_"))
+            && worktree_id.ends_with("__"))
+}
+
+/// Project IDs are UUIDs. Anything else could change when it is used in a
+/// session index file name, so it gets no coordinator.
+fn is_safe_project_id(project_id: &str) -> bool {
+    !project_id.is_empty()
+        && project_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
+/// Create the coordinator of a project, or return the existing one. The name
+/// follows the project name. Safe to call any number of times.
+pub fn ensure_coordinator(
+    conn: &Connection,
+    project_id: &str,
+    project_name: &str,
+) -> Result<Agent, String> {
+    if !is_safe_project_id(project_id) {
+        return Err(format!(
+            "Project ID cannot have a coordinator: {project_id}"
+        ));
+    }
+    let id = coordinator_id(project_id);
+    conn.execute(
+        "INSERT INTO agents (id, name, icon, worktree_id, project_id, created_at, updated_at)
+         VALUES (?1, ?2, 'jean', ?3, ?4, ?5, ?5)
+         ON CONFLICT(id) DO UPDATE SET name = excluded.name, updated_at = excluded.updated_at
+         WHERE agents.name <> excluded.name",
+        params![
+            id,
+            project_name,
+            coordinator_worktree_id(project_id),
+            project_id,
+            now()
+        ],
+    )
+    .map_err(err)?;
+    get_agent(conn, &id)?.ok_or_else(|| format!("Coordinator was not created: {id}"))
+}
+
+/// Delete the coordinator of a removed project with everything it owns.
+/// Delegations, events, wakes, schedules, approvals and notifications go by
+/// foreign key. Memories and the journal have no foreign key.
+/// Returns false when the project had no coordinator.
+pub fn delete_coordinator(conn: &Connection, project_id: &str) -> Result<bool, String> {
+    let id = coordinator_id(project_id);
+    conn.execute("DELETE FROM memories WHERE agent_id = ?1", [&id])
+        .map_err(err)?;
+    conn.execute(
+        "DELETE FROM memory_changes WHERE owner_agent_id = ?1",
+        [&id],
+    )
+    .map_err(err)?;
+    conn.execute("DELETE FROM journal WHERE agent_id = ?1", [&id])
+        .map_err(err)?;
+    let deleted = conn
+        .execute(
+            "DELETE FROM agents WHERE id = ?1 AND project_id = ?2",
+            params![id, project_id],
+        )
+        .map_err(err)?;
+    Ok(deleted > 0)
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
@@ -945,6 +1002,7 @@ pub fn due_delegation_checks(conn: &Connection, at: i64) -> Result<Vec<Delegatio
         .prepare(&format!(
             "SELECT {DELEGATION_COLUMNS} FROM delegations
              WHERE status IN ('active', 'waiting') AND check_after IS NOT NULL AND check_after <= ?1
+               AND agent_id IN (SELECT id FROM agents WHERE project_id IS NOT NULL)
              ORDER BY check_after"
         ))
         .map_err(err)?;
@@ -1028,36 +1086,22 @@ pub struct AgentEvent {
     pub body: String,
     pub hop: i64,
     pub created_at: i64,
-    /// Title of the task session made for this event.
-    pub title: Option<String>,
-    /// Session that gets this update. `None` = a new task session.
-    pub target_session_id: Option<String>,
 }
 
-/// A queued update for an agent.
+/// A queued update for a coordinator. Every update goes to its chat.
 #[derive(Debug, Clone, Default)]
 pub struct NewEvent<'a> {
     pub agent_id: &'a str,
     pub kind: &'a str,
-    pub title: &'a str,
     pub body: &'a str,
     pub hop: i64,
-    pub target_session_id: Option<&'a str>,
 }
 
 pub fn add_event(conn: &Connection, e: &NewEvent) -> Result<i64, String> {
     conn.execute(
-        "INSERT INTO events (agent_id, kind, title, body, hop, target_session_id, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![
-            e.agent_id,
-            e.kind,
-            e.title,
-            e.body,
-            e.hop,
-            e.target_session_id,
-            now()
-        ],
+        "INSERT INTO events (agent_id, kind, body, hop, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![e.agent_id, e.kind, e.body, e.hop, now()],
     )
     .map_err(err)?;
     Ok(conn.last_insert_rowid())
@@ -1066,7 +1110,7 @@ pub fn add_event(conn: &Connection, e: &NewEvent) -> Result<i64, String> {
 pub fn pending_events(conn: &Connection, agent_id: &str) -> Result<Vec<AgentEvent>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, agent_id, kind, body, hop, created_at, title, target_session_id
+            "SELECT id, agent_id, kind, body, hop, created_at
              FROM events WHERE agent_id=?1 AND delivered_at IS NULL ORDER BY id LIMIT 50",
         )
         .map_err(err)?;
@@ -1079,8 +1123,6 @@ pub fn pending_events(conn: &Connection, agent_id: &str) -> Result<Vec<AgentEven
                 body: row.get(3)?,
                 hop: row.get(4)?,
                 created_at: row.get(5)?,
-                title: row.get(6)?,
-                target_session_id: row.get(7)?,
             })
         })
         .map_err(err)?;
@@ -1089,7 +1131,11 @@ pub fn pending_events(conn: &Connection, agent_id: &str) -> Result<Vec<AgentEven
 
 pub fn agents_with_pending_events(conn: &Connection) -> Result<Vec<String>, String> {
     let mut stmt = conn
-        .prepare("SELECT DISTINCT agent_id FROM events WHERE delivered_at IS NULL")
+        .prepare(
+            "SELECT DISTINCT agent_id FROM events
+             WHERE delivered_at IS NULL
+               AND agent_id IN (SELECT id FROM agents WHERE project_id IS NOT NULL)",
+        )
         .map_err(err)?;
     let rows = stmt.query_map([], |row| row.get(0)).map_err(err)?;
     rows.collect::<Result<_, _>>().map_err(err)
@@ -1510,7 +1556,6 @@ fn queue_schedule_event(conn: &Connection, schedule: &Schedule, body: &str) -> R
         &NewEvent {
             agent_id: &schedule.agent_id,
             kind: "schedule",
-            title: &schedule.name,
             body,
             ..Default::default()
         },
@@ -1518,8 +1563,7 @@ fn queue_schedule_event(conn: &Connection, schedule: &Schedule, body: &str) -> R
     Ok(())
 }
 
-/// Fire due time-based schedules of agents that are not paused: add one event
-/// each, then move repeating schedules to their next time and end one-shot
+/// Fire due time-based schedules of coordinators: add one event each, then move repeating schedules to their next time and end one-shot
 /// schedules. Missed runs (Jean closed) fire once, not once per missed slot.
 /// Event routines are not included; they wake from [`fire_event_schedules`].
 pub fn fire_due_schedules(conn: &Connection, at: i64) -> Result<Vec<Schedule>, String> {
@@ -1529,7 +1573,8 @@ pub fn fire_due_schedules(conn: &Connection, at: i64) -> Result<Vec<Schedule>, S
             .prepare(&format!(
                 "SELECT {columns}
                  FROM schedules s JOIN agents a ON a.id = s.agent_id
-                 WHERE s.active=1 AND s.paused=0 AND s.event IS NULL AND s.next_run_at <= ?1"
+                 WHERE s.active=1 AND s.paused=0 AND s.event IS NULL AND s.next_run_at <= ?1
+                   AND a.project_id IS NOT NULL"
             ))
             .map_err(err)?;
         let rows = stmt.query_map([at], schedule_from_row).map_err(err)?;
@@ -1580,11 +1625,13 @@ pub fn fire_due_schedules(conn: &Connection, at: i64) -> Result<Vec<Schedule>, S
     Ok(due)
 }
 
-/// Wake event routines. `event_key` is remembered so the same occurrence (the
-/// same merged PR, the same session) does not queue twice. The hourly wake
-/// budget is applied later, when the queued update is delivered.
+/// Wake the event routines of one project's coordinator. `event_key` is
+/// remembered so the same occurrence (the same merged PR, the same session)
+/// does not queue twice. The hourly wake budget is applied later, when the
+/// queued update is delivered.
 pub fn fire_event_schedules(
     conn: &Connection,
+    project_id: &str,
     event_name: &str,
     event_key: &str,
     context: &str,
@@ -1598,11 +1645,11 @@ pub fn fire_event_schedules(
             .prepare(&format!(
                 "SELECT {columns}
                  FROM schedules s JOIN agents a ON a.id = s.agent_id
-                 WHERE s.active=1 AND s.paused=0 AND s.event=?1"
+                 WHERE s.active=1 AND s.paused=0 AND s.event=?1 AND a.project_id=?2"
             ))
             .map_err(err)?;
         let rows = stmt
-            .query_map([event_name], schedule_from_row)
+            .query_map([event_name, project_id], schedule_from_row)
             .map_err(err)?;
         rows.collect::<Result<_, _>>().map_err(err)?
     };
@@ -1774,204 +1821,6 @@ pub fn pending_approval_count(conn: &Connection, agent_id: &str) -> Result<i64, 
 }
 
 // ============================================================================
-// Tasks (background work, one session each)
-// ============================================================================
-
-/// Most tasks of one agent that run at the same time.
-pub const MAX_RUNNING_TASKS: i64 = 2;
-
-#[derive(Debug, Clone, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct Task {
-    pub id: i64,
-    pub agent_id: String,
-    pub session_id: String,
-    pub title: String,
-    /// schedule | delegation | message | approval
-    pub kind: String,
-    /// running | waiting (on delegated work) | done | failed | cancelled
-    pub status: String,
-    pub summary: Option<String>,
-    pub last_event: Option<String>,
-    pub check_after: Option<i64>,
-    pub created_at: i64,
-    pub updated_at: i64,
-    pub archived_at: Option<i64>,
-}
-
-const TASK_COLUMNS: &str = "id, agent_id, session_id, title, kind, status, summary, last_event, check_after, created_at, updated_at, archived_at";
-
-fn task_from_row(row: &rusqlite::Row) -> rusqlite::Result<Task> {
-    Ok(Task {
-        id: row.get(0)?,
-        agent_id: row.get(1)?,
-        session_id: row.get(2)?,
-        title: row.get(3)?,
-        kind: row.get(4)?,
-        status: row.get(5)?,
-        summary: row.get(6)?,
-        last_event: row.get(7)?,
-        check_after: row.get(8)?,
-        created_at: row.get(9)?,
-        updated_at: row.get(10)?,
-        archived_at: row.get(11)?,
-    })
-}
-
-pub fn create_task(
-    conn: &Connection,
-    agent_id: &str,
-    session_id: &str,
-    title: &str,
-    kind: &str,
-) -> Result<Task, String> {
-    let ts = now();
-    conn.execute(
-        "INSERT INTO tasks (agent_id, session_id, title, kind, status, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, 'running', ?5, ?5)",
-        params![agent_id, session_id, title, kind, ts],
-    )
-    .map_err(err)?;
-    task_by_session(conn, session_id)?.ok_or_else(|| "Task was not created".to_string())
-}
-
-pub fn task_by_session(conn: &Connection, session_id: &str) -> Result<Option<Task>, String> {
-    conn.query_row(
-        &format!("SELECT {TASK_COLUMNS} FROM tasks WHERE session_id=?1"),
-        [session_id],
-        task_from_row,
-    )
-    .optional()
-    .map_err(err)
-}
-
-/// The task got new input (follow-up update): it runs again.
-pub fn set_task_running(conn: &Connection, session_id: &str) -> Result<(), String> {
-    conn.execute(
-        "UPDATE tasks SET status='running', last_event=NULL, check_after=NULL, updated_at=?2 WHERE session_id=?1",
-        params![session_id, now()],
-    )
-    .map_err(err)?;
-    Ok(())
-}
-
-/// A run of a task session ended: queue a check of its final state.
-pub fn mark_task_run_ended(
-    conn: &Connection,
-    session_id: &str,
-    event: &str,
-    check_after: i64,
-) -> Result<usize, String> {
-    conn.execute(
-        "UPDATE tasks SET last_event=?2, check_after=?3 WHERE session_id=?1 AND archived_at IS NULL",
-        params![session_id, event, check_after],
-    )
-    .map_err(err)
-}
-
-pub fn due_task_checks(conn: &Connection, at: i64) -> Result<Vec<Task>, String> {
-    let mut stmt = conn
-        .prepare(&format!(
-            "SELECT {TASK_COLUMNS} FROM tasks WHERE check_after IS NOT NULL AND check_after <= ?1"
-        ))
-        .map_err(err)?;
-    let rows = stmt.query_map([at], task_from_row).map_err(err)?;
-    rows.collect::<Result<_, _>>().map_err(err)
-}
-
-pub fn defer_task_check(
-    conn: &Connection,
-    id: i64,
-    check_after: Option<i64>,
-) -> Result<(), String> {
-    conn.execute(
-        "UPDATE tasks SET check_after=?2 WHERE id=?1",
-        params![id, check_after],
-    )
-    .map_err(err)?;
-    Ok(())
-}
-
-pub fn finish_task(conn: &Connection, id: i64, status: &str, summary: &str) -> Result<(), String> {
-    conn.execute(
-        "UPDATE tasks SET status=?2, summary=?3, check_after=NULL, updated_at=?4 WHERE id=?1",
-        params![id, status, summary, now()],
-    )
-    .map_err(err)?;
-    Ok(())
-}
-
-pub fn running_task_count(conn: &Connection, agent_id: &str) -> Result<i64, String> {
-    conn.query_row(
-        "SELECT COUNT(*) FROM tasks WHERE agent_id=?1 AND status='running' AND archived_at IS NULL",
-        [agent_id],
-        |row| row.get(0),
-    )
-    .map_err(err)
-}
-
-/// Delegations still open that a session started (a task waits on them).
-pub fn open_delegations_from(conn: &Connection, origin_session_id: &str) -> Result<i64, String> {
-    conn.query_row(
-        "SELECT COUNT(*) FROM delegations WHERE origin_session_id=?1 AND status IN ('active', 'waiting')",
-        [origin_session_id],
-        |row| row.get(0),
-    )
-    .map_err(err)
-}
-
-pub fn list_tasks(conn: &Connection, agent_id: &str, limit: i64) -> Result<Vec<Task>, String> {
-    let mut stmt = conn
-        .prepare(&format!(
-            "SELECT {TASK_COLUMNS} FROM tasks WHERE agent_id=?1 AND archived_at IS NULL
-             ORDER BY (status IN ('running', 'waiting')) DESC, updated_at DESC, id DESC LIMIT ?2"
-        ))
-        .map_err(err)?;
-    let rows = stmt
-        .query_map(params![agent_id, limit], task_from_row)
-        .map_err(err)?;
-    rows.collect::<Result<_, _>>().map_err(err)
-}
-
-/// Finished tasks last changed before `before` (to archive their sessions).
-pub fn finished_tasks_before(conn: &Connection, before: i64) -> Result<Vec<Task>, String> {
-    let mut stmt = conn
-        .prepare(&format!(
-            "SELECT {TASK_COLUMNS} FROM tasks
-             WHERE archived_at IS NULL AND status IN ('done', 'failed', 'cancelled') AND updated_at < ?1"
-        ))
-        .map_err(err)?;
-    let rows = stmt.query_map([before], task_from_row).map_err(err)?;
-    rows.collect::<Result<_, _>>().map_err(err)
-}
-
-pub fn mark_task_archived(conn: &Connection, id: i64) -> Result<(), String> {
-    conn.execute(
-        "UPDATE tasks SET archived_at=?2, check_after=NULL WHERE id=?1",
-        params![id, now()],
-    )
-    .map_err(err)?;
-    Ok(())
-}
-
-/// Archived tasks archived before `before` (to delete their sessions).
-pub fn archived_tasks_before(conn: &Connection, before: i64) -> Result<Vec<Task>, String> {
-    let mut stmt = conn
-        .prepare(&format!(
-            "SELECT {TASK_COLUMNS} FROM tasks WHERE archived_at IS NOT NULL AND archived_at < ?1"
-        ))
-        .map_err(err)?;
-    let rows = stmt.query_map([before], task_from_row).map_err(err)?;
-    rows.collect::<Result<_, _>>().map_err(err)
-}
-
-pub fn delete_task(conn: &Connection, id: i64) -> Result<(), String> {
-    conn.execute("DELETE FROM tasks WHERE id=?1", [id])
-        .map_err(err)?;
-    Ok(())
-}
-
-// ============================================================================
 // Notifications (notify_user) and chat carry-over
 // ============================================================================
 
@@ -2062,25 +1911,14 @@ pub fn unread_notification_count(conn: &Connection, agent_id: &str) -> Result<i6
 
 /// Newest notification and newest task result of an agent, with times
 /// (for the sidebar's "what is going on" line).
-pub fn latest_activity(conn: &Connection, agent_id: &str) -> Result<Vec<(i64, String)>, String> {
-    let notification: Option<(i64, String)> = conn
-        .query_row(
-            "SELECT created_at, message FROM notifications WHERE agent_id=?1 ORDER BY id DESC LIMIT 1",
-            [agent_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()
-        .map_err(err)?;
-    let task: Option<(i64, String)> = conn
-        .query_row(
-            "SELECT updated_at, COALESCE(NULLIF(summary, ''), title) FROM tasks
-             WHERE agent_id=?1 ORDER BY updated_at DESC, id DESC LIMIT 1",
-            [agent_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()
-        .map_err(err)?;
-    Ok(notification.into_iter().chain(task).collect())
+pub fn latest_activity(conn: &Connection, agent_id: &str) -> Result<Option<(i64, String)>, String> {
+    conn.query_row(
+        "SELECT created_at, message FROM notifications WHERE agent_id=?1 ORDER BY id DESC LIMIT 1",
+        [agent_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .optional()
+    .map_err(err)
 }
 
 pub fn mark_notifications_read(conn: &Connection, agent_id: &str) -> Result<(), String> {
@@ -3027,41 +2865,200 @@ mod tests {
 
     use super::*;
 
+    /// Coordinator of project `p1`, created by [`db`].
+    const COORD: &str = "coord_p1";
+
     fn db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         init(&conn).unwrap();
+        ensure_coordinator(&conn, "p1", "Orbit").unwrap();
         conn
     }
 
     fn other_agent(conn: &Connection) -> Agent {
+        ensure_coordinator(conn, "p2", "Other").unwrap()
+    }
+
+    fn legacy_agent(conn: &Connection, id: &str, worktree_id: &str) {
         conn.execute(
-            "INSERT INTO agents (id, name, worktree_id, created_at, updated_at)
-             VALUES ('other', 'Other', '__agent_other__', 1, 1)",
-            [],
+            "INSERT INTO agents (id, name, worktree_id, builtin, created_at, updated_at)
+             VALUES (?1, ?1, ?2, 1, 1, 1)",
+            params![id, worktree_id],
         )
         .unwrap();
-        get_agent(conn, "other").unwrap().unwrap()
     }
 
     #[test]
-    fn init_seeds_jean_and_is_idempotent() {
-        let conn = db();
+    fn init_is_idempotent_and_seeds_no_agent() {
+        let conn = Connection::open_in_memory().unwrap();
         init(&conn).unwrap();
-        let agents = list_agents(&conn).unwrap();
-        assert_eq!(agents.len(), 1);
-        assert_eq!(agents[0].id, JEAN_AGENT_ID);
-        assert_eq!(agents[0].worktree_id, JEAN_AGENT_WORKTREE_ID);
-        assert!(agents[0].builtin);
+        init(&conn).unwrap();
+        assert_eq!(list_agents(&conn).unwrap(), vec![]);
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, MIGRATIONS.len() as i64);
+        assert_eq!(version, 9);
+    }
+
+    #[test]
+    fn ensure_coordinator_is_idempotent_and_follows_the_project_name() {
+        let conn = db();
+        let first = get_agent(&conn, COORD).unwrap().unwrap();
+        assert_eq!(first.id, "coord_p1");
+        assert_eq!(first.project_id, "p1");
+        assert_eq!(first.worktree_id, "__coord_p1__");
+        assert_eq!(first.name, "Orbit");
+        assert_eq!(first.max_wakes_per_hour, 12);
+        update_agent(
+            &conn,
+            COORD,
+            &AgentPatch {
+                backend: Some(Some("codex".into())),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let again = ensure_coordinator(&conn, "p1", "Orbit 2").unwrap();
+        assert_eq!(again.name, "Orbit 2");
+        assert_eq!(again.backend.as_deref(), Some("codex"));
+        assert_eq!(list_agents(&conn).unwrap().len(), 1);
+        assert_eq!(
+            ensure_coordinator(&conn, "../p", "Bad").unwrap_err(),
+            "Project ID cannot have a coordinator: ../p"
+        );
+        assert!(ensure_coordinator(&conn, "", "Bad").is_err());
+    }
+
+    #[test]
+    fn deleting_a_coordinator_removes_everything_it_owns() {
+        let conn = db();
+        other_agent(&conn);
+        upsert_delegation(&conn, COORD, "s1", "wt1", 0, None).unwrap();
+        create_schedule(&conn, COORD, "brief", "daily brief", 100, Some(600)).unwrap();
+        create_approval(&conn, COORD, None, "push_worktree", &serde_json::json!({})).unwrap();
+        save(&conn, &mem(Some(COORD), "Never push orbit")).unwrap();
+        save(&conn, &mem(Some("coord_p2"), "Other project rule")).unwrap();
+        save(&conn, &fact(None, "user", "Name is Ada")).unwrap();
+        add_journal(
+            &conn,
+            &NewJournal {
+                agent_id: COORD,
+                project_id: None,
+                content: "Shipped orbit",
+                occurred_at: None,
+                source: "agent",
+                source_session_id: None,
+            },
+        )
+        .unwrap();
+        assert!(delete_coordinator(&conn, "p1").unwrap());
+        assert!(!delete_coordinator(&conn, "p1").unwrap());
+        assert_eq!(get_agent(&conn, COORD).unwrap(), None);
+        let count = |table: &str| -> i64 {
+            conn.query_row(
+                &format!("SELECT COUNT(*) FROM {table} WHERE agent_id = 'coord_p1'"),
+                [],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        for table in [
+            "delegations",
+            "schedules",
+            "approvals",
+            "memories",
+            "journal",
+        ] {
+            assert_eq!(count(table), 0, "{table}");
+        }
+        // The other coordinator and the user facts are untouched
+        let left: Vec<String> = list_memories(&conn, "coord_p2")
+            .unwrap()
+            .into_iter()
+            .map(|memory| memory.content)
+            .collect();
+        assert_eq!(left.len(), 2);
+        assert!(left.contains(&"Other project rule".to_string()));
+        assert!(left.contains(&"Name is Ada".to_string()));
+    }
+
+    #[test]
+    fn legacy_agents_stay_in_the_table_and_are_not_loaded() {
+        let conn = db();
+        legacy_agent(&conn, "jean", "__jean_agent__");
+        legacy_agent(&conn, "reviewer", "__agent_reviewer__");
+        let ids: Vec<String> = list_agents(&conn)
+            .unwrap()
+            .into_iter()
+            .map(|agent| agent.id)
+            .collect();
+        assert_eq!(ids, vec!["coord_p1"]);
+        assert_eq!(get_agent(&conn, "jean").unwrap(), None);
+        assert_eq!(agent_by_worktree(&conn, "__jean_agent__").unwrap(), None);
+        assert_eq!(
+            agent_by_worktree(&conn, "__coord_p1__")
+                .unwrap()
+                .unwrap()
+                .id,
+            "coord_p1"
+        );
+        // Their schedules do not fire and their updates are not delivered
+        create_schedule(&conn, "jean", "old", "old brief", 100, None).unwrap();
+        create_schedule(&conn, COORD, "new", "new brief", 100, None).unwrap();
+        add_event(
+            &conn,
+            &NewEvent {
+                agent_id: "reviewer",
+                kind: "delegation",
+                body: "old",
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        upsert_delegation(&conn, "jean", "s-old", "wt", 0, None).unwrap();
+        mark_delegation_run_ended(&conn, "s-old", "done", None, 10).unwrap();
+        let fired: Vec<String> = fire_due_schedules(&conn, 150)
+            .unwrap()
+            .into_iter()
+            .map(|schedule| schedule.agent_id)
+            .collect();
+        assert_eq!(fired, vec!["coord_p1"]);
+        assert_eq!(agents_with_pending_events(&conn).unwrap(), vec!["coord_p1"]);
+        assert_eq!(due_delegation_checks(&conn, 20).unwrap(), vec![]);
+        let rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM agents", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(rows, 3);
+    }
+
+    #[test]
+    fn coordinator_worktree_ids_map_to_projects() {
+        let project = "550e8400-e29b-41d4-a716-446655440000";
+        assert_eq!(
+            coordinator_id(project),
+            "coord_550e8400-e29b-41d4-a716-446655440000"
+        );
+        let worktree = coordinator_worktree_id(project);
+        assert_eq!(worktree, "__coord_550e8400-e29b-41d4-a716-446655440000__");
+        assert_eq!(
+            project_id_from_coordinator_worktree(&worktree),
+            Some(project)
+        );
+        assert_eq!(project_id_from_coordinator_worktree("__coord___"), None);
+        assert_eq!(project_id_from_coordinator_worktree("__jean_agent__"), None);
+        assert_eq!(project_id_from_coordinator_worktree(project), None);
+        // Reserved IDs keep their session index files, old agents included
+        for reserved in [worktree.as_str(), "__jean_agent__", "__agent_reviewer__"] {
+            assert!(is_agent_worktree_id(reserved), "{reserved}");
+        }
+        assert!(!is_agent_worktree_id(project));
+        assert!(!is_agent_worktree_id("base-550e8400"));
     }
 
     #[test]
     fn delegation_check_cycle() {
         let conn = db();
-        upsert_delegation(&conn, JEAN_AGENT_ID, "s1", "wt1", 0, None).unwrap();
+        upsert_delegation(&conn, COORD, "s1", "wt1", 0, None).unwrap();
         // Unrelated session: nothing marked
         assert_eq!(
             mark_delegation_run_ended(&conn, "other", "done", None, 10).unwrap(),
@@ -3087,10 +3084,10 @@ mod tests {
             mark_delegation_run_ended(&conn, "s1", "done", None, 20).unwrap(),
             0
         );
-        upsert_delegation(&conn, JEAN_AGENT_ID, "s1", "wt1", 1, None).unwrap();
+        upsert_delegation(&conn, COORD, "s1", "wt1", 1, None).unwrap();
         assert_eq!(active_hop_for_session(&conn, "s1").unwrap(), 1);
         assert_eq!(
-            list_delegations(&conn, JEAN_AGENT_ID, 10).unwrap()[0].status,
+            list_delegations(&conn, COORD, 10).unwrap()[0].status,
             "active"
         );
     }
@@ -3098,9 +3095,9 @@ mod tests {
     #[test]
     fn requeue_only_touches_active_unqueued_delegations() {
         let conn = db();
-        upsert_delegation(&conn, JEAN_AGENT_ID, "s1", "wt", 0, None).unwrap();
-        upsert_delegation(&conn, JEAN_AGENT_ID, "s2", "wt", 0, None).unwrap();
-        let d2 = list_delegations(&conn, JEAN_AGENT_ID, 10).unwrap();
+        upsert_delegation(&conn, COORD, "s1", "wt", 0, None).unwrap();
+        upsert_delegation(&conn, COORD, "s2", "wt", 0, None).unwrap();
+        let d2 = list_delegations(&conn, COORD, 10).unwrap();
         let s2 = d2.iter().find(|d| d.session_id == "s2").unwrap();
         finish_delegation(&conn, s2.id, "done", "").unwrap();
         assert_eq!(requeue_active_delegations(&conn, 5).unwrap(), 1);
@@ -3112,46 +3109,42 @@ mod tests {
         let id = add_event(
             &conn,
             &NewEvent {
-                agent_id: JEAN_AGENT_ID,
+                agent_id: COORD,
                 kind: "delegation",
-                title: "Follow-up",
                 body: "hello",
-                target_session_id: Some("task-1"),
                 ..Default::default()
             },
         )
         .unwrap();
-        let pending = pending_events(&conn, JEAN_AGENT_ID).unwrap();
-        assert_eq!(pending[0].target_session_id.as_deref(), Some("task-1"));
-        assert_eq!(pending[0].title.as_deref(), Some("Follow-up"));
+        let pending = pending_events(&conn, COORD).unwrap();
+        assert_eq!(pending[0].body, "hello");
         assert_eq!(
             agents_with_pending_events(&conn).unwrap(),
-            vec![JEAN_AGENT_ID.to_string()]
+            vec![COORD.to_string()]
         );
-        assert_eq!(pending_event_count(&conn, JEAN_AGENT_ID).unwrap(), 1);
+        assert_eq!(pending_event_count(&conn, COORD).unwrap(), 1);
         mark_events_delivered(&conn, &[id]).unwrap();
-        assert!(pending_events(&conn, JEAN_AGENT_ID).unwrap().is_empty());
-        record_wake(&conn, JEAN_AGENT_ID, "home").unwrap();
-        assert_eq!(wakes_since(&conn, JEAN_AGENT_ID, now() - 3600).unwrap(), 1);
-        assert_eq!(wakes_since(&conn, JEAN_AGENT_ID, now() + 1).unwrap(), 0);
+        assert!(pending_events(&conn, COORD).unwrap().is_empty());
+        record_wake(&conn, COORD, "home").unwrap();
+        assert_eq!(wakes_since(&conn, COORD, now() - 3600).unwrap(), 1);
+        assert_eq!(wakes_since(&conn, COORD, now() + 1).unwrap(), 0);
     }
 
     #[test]
     fn schedules_fire_once_or_repeat() {
         let conn = db();
-        let once = create_schedule(&conn, JEAN_AGENT_ID, "once", "check CI", 100, None).unwrap();
-        let every =
-            create_schedule(&conn, JEAN_AGENT_ID, "brief", "daily brief", 100, Some(600)).unwrap();
+        let once = create_schedule(&conn, COORD, "once", "check CI", 100, None).unwrap();
+        let every = create_schedule(&conn, COORD, "brief", "daily brief", 100, Some(600)).unwrap();
         assert!(fire_due_schedules(&conn, 99).unwrap().is_empty());
         assert_eq!(fire_due_schedules(&conn, 150).unwrap().len(), 2);
-        let left = list_schedules(&conn, JEAN_AGENT_ID).unwrap();
+        let left = list_schedules(&conn, COORD).unwrap();
         assert_eq!(left.len(), 1);
         assert_eq!(left[0].id, every.id);
         assert_eq!(left[0].next_run_at, 750);
-        assert_eq!(pending_event_count(&conn, JEAN_AGENT_ID).unwrap(), 2);
-        assert!(!cancel_schedule(&conn, JEAN_AGENT_ID, once.id).unwrap());
-        assert!(cancel_schedule(&conn, JEAN_AGENT_ID, every.id).unwrap());
-        assert_eq!(next_schedule_at(&conn, JEAN_AGENT_ID).unwrap(), None);
+        assert_eq!(pending_event_count(&conn, COORD).unwrap(), 2);
+        assert!(!cancel_schedule(&conn, COORD, once.id).unwrap());
+        assert!(cancel_schedule(&conn, COORD, every.id).unwrap());
+        assert_eq!(next_schedule_at(&conn, COORD).unwrap(), None);
     }
 
     #[test]
@@ -3159,13 +3152,13 @@ mod tests {
         let conn = db();
         let id = create_approval(
             &conn,
-            JEAN_AGENT_ID,
+            COORD,
             Some("task-1"),
             "delete_worktree",
             &serde_json::json!({"worktreeId": "w"}),
         )
         .unwrap();
-        assert_eq!(pending_approval_count(&conn, JEAN_AGENT_ID).unwrap(), 1);
+        assert_eq!(pending_approval_count(&conn, COORD).unwrap(), 1);
         assert!(decide_approval(&conn, id, "approved").unwrap());
         assert!(!decide_approval(&conn, id, "denied").unwrap());
         set_approval_result(&conn, id, "approved", "ok").unwrap();
@@ -3173,7 +3166,7 @@ mod tests {
         assert_eq!(a.status, "approved");
         assert_eq!(a.args["worktreeId"], "w");
         assert_eq!(a.session_id.as_deref(), Some("task-1"));
-        assert_eq!(pending_approval_count(&conn, JEAN_AGENT_ID).unwrap(), 0);
+        assert_eq!(pending_approval_count(&conn, COORD).unwrap(), 0);
     }
 
     fn mem<'a>(agent: Option<&'a str>, content: &'a str) -> NewMemory<'a> {
@@ -3215,12 +3208,8 @@ mod tests {
     #[test]
     fn memory_save_dedupes_and_validates() {
         let conn = db();
-        let a = save(&conn, &mem(Some(JEAN_AGENT_ID), "Never push orbit to main")).unwrap();
-        let b = save(
-            &conn,
-            &mem(Some(JEAN_AGENT_ID), "  Never push orbit to main "),
-        )
-        .unwrap();
+        let a = save(&conn, &mem(Some(COORD), "Never push orbit to main")).unwrap();
+        let b = save(&conn, &mem(Some(COORD), "  Never push orbit to main ")).unwrap();
         assert_eq!(a.id, b.id);
         // Same text in another scope is a separate entry
         let shared = save(&conn, &mem(None, "Never push orbit to main")).unwrap();
@@ -3243,11 +3232,7 @@ mod tests {
     fn memory_search_scopes_fts_and_expiry() {
         let conn = db();
         let other = other_agent(&conn);
-        save(
-            &conn,
-            &mem(Some(JEAN_AGENT_ID), "Orbit deploys need approval"),
-        )
-        .unwrap();
+        save(&conn, &mem(Some(COORD), "Orbit deploys need approval")).unwrap();
         save(&conn, &mem(None, "User prefers short answers")).unwrap();
         save(
             &conn,
@@ -3258,20 +3243,20 @@ mod tests {
             &conn,
             &NewMemory {
                 expires_at: Some(1),
-                ..mem(Some(JEAN_AGENT_ID), "Orbit old open work")
+                ..mem(Some(COORD), "Orbit old open work")
             },
         )
         .unwrap();
 
-        let hits = find(&conn, JEAN_AGENT_ID, Some("orbit"));
+        let hits = find(&conn, COORD, Some("orbit"));
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].content, "Orbit deploys need approval");
         // Prefix match and syntax-safe input
-        assert_eq!(find(&conn, JEAN_AGENT_ID, Some("deplo")).len(), 1);
+        assert_eq!(find(&conn, COORD, Some("deplo")).len(), 1);
         assert!(search_memories(
             &conn,
             &MemorySearch {
-                agent_id: JEAN_AGENT_ID,
+                agent_id: COORD,
                 query: Some("\"(* AND"),
                 kind: None,
                 scope: None,
@@ -3285,9 +3270,9 @@ mod tests {
         )
         .is_ok());
         // No query: own + shared, not expired, not other agent
-        assert_eq!(find(&conn, JEAN_AGENT_ID, None).len(), 2);
+        assert_eq!(find(&conn, COORD, None).len(), 2);
         // UI list includes expired
-        assert_eq!(list_memories(&conn, JEAN_AGENT_ID).unwrap().len(), 3);
+        assert_eq!(list_memories(&conn, COORD).unwrap().len(), 3);
     }
 
     #[test]
@@ -3297,7 +3282,7 @@ mod tests {
         let m = save(&conn, &mem(Some(&other.id), "other fact")).unwrap();
         assert!(update_memory(
             &conn,
-            JEAN_AGENT_ID,
+            COORD,
             m.id,
             &MemoryPatch {
                 pinned: Some(true),
@@ -3306,7 +3291,7 @@ mod tests {
             None,
         )
         .is_err());
-        assert!(!forget_memory(&conn, JEAN_AGENT_ID, m.id, None).unwrap());
+        assert!(!forget_memory(&conn, COORD, m.id, None).unwrap());
         let updated = update_memory(
             &conn,
             &other.id,
@@ -3330,9 +3315,7 @@ mod tests {
         assert!(changes
             .iter()
             .all(|change| change.owner_agent_id.as_deref() == Some(other.id.as_str())));
-        assert!(list_memory_changes(&conn, JEAN_AGENT_ID, 10)
-            .unwrap()
-            .is_empty());
+        assert!(list_memory_changes(&conn, COORD, 10).unwrap().is_empty());
     }
 
     fn fact<'a>(agent: Option<&'a str>, scope: &'a str, content: &'a str) -> NewMemory<'a> {
@@ -3378,7 +3361,7 @@ mod tests {
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
         assert_eq!(version, MIGRATIONS.len() as i64);
-        let memories = list_memories(&conn, JEAN_AGENT_ID).unwrap();
+        let memories = list_memories(&conn, "jean").unwrap();
         let shared = memories
             .iter()
             .find(|m| m.content == "User likes tea")
@@ -3390,9 +3373,9 @@ mod tests {
         assert_eq!(shared.scope, "shared");
         assert!(shared.agent_id.is_none());
         assert_eq!(private.scope, "agent");
-        assert_eq!(private.agent_id.as_deref(), Some(JEAN_AGENT_ID));
+        assert_eq!(private.agent_id.as_deref(), Some("jean"));
         assert_eq!(private.superseded_by, None);
-        assert_eq!(find(&conn, JEAN_AGENT_ID, Some("tea")).len(), 1);
+        assert_eq!(find(&conn, "jean", Some("tea")).len(), 1);
         let journal_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM journal", [], |row| row.get(0))
             .unwrap();
@@ -3407,21 +3390,21 @@ mod tests {
     fn user_facts_are_visible_to_every_agent_and_private_memory_is_not() {
         let conn = db();
         let other = other_agent(&conn);
-        save(&conn, &fact(Some(JEAN_AGENT_ID), "user", "Name is Ada")).unwrap();
+        save(&conn, &fact(Some(COORD), "user", "Name is Ada")).unwrap();
         assert!(save(
             &conn,
             &NewMemory {
                 kind: "rule",
                 scope: Some("user"),
-                ..mem(Some(JEAN_AGENT_ID), "A rule about Ada")
+                ..mem(Some(COORD), "A rule about Ada")
             }
         )
         .is_err());
-        let private = save(&conn, &mem(Some(JEAN_AGENT_ID), "Jean private note")).unwrap();
+        let private = save(&conn, &mem(Some(COORD), "Jean private note")).unwrap();
         save(&conn, &mem(Some(&other.id), "Other private note")).unwrap();
         save(&conn, &mem(None, "Shared deploy rule")).unwrap();
 
-        let jean = find(&conn, JEAN_AGENT_ID, None);
+        let jean = find(&conn, COORD, None);
         let other_hits = find(&conn, &other.id, None);
         assert!(jean
             .iter()
@@ -3433,7 +3416,7 @@ mod tests {
         assert!(!other_hits.iter().any(|m| m.content == "Jean private note"));
         assert!(!jean.iter().any(|m| m.content == "Other private note"));
 
-        let jean_prompt = select_prompt_memories(&conn, JEAN_AGENT_ID, None, 8000).unwrap();
+        let jean_prompt = select_prompt_memories(&conn, COORD, None, 8000).unwrap();
         let other_prompt = select_prompt_memories(&conn, &other.id, None, 8000).unwrap();
         assert!(jean_prompt.entries.iter().any(|m| m.scope == "user"));
         assert!(other_prompt
@@ -3446,7 +3429,7 @@ mod tests {
     #[test]
     fn prompt_selection_ranks_pinned_then_relevance_inside_the_budget() {
         let conn = db();
-        let pinned = save(&conn, &mem(Some(JEAN_AGENT_ID), "Never force-push main")).unwrap();
+        let pinned = save(&conn, &mem(Some(COORD), "Never force-push main")).unwrap();
         conn.execute("UPDATE memories SET pinned=1 WHERE id=?1", [pinned.id])
             .unwrap();
         touch(&conn, pinned.id, 100);
@@ -3454,19 +3437,18 @@ mod tests {
         touch(&conn, user.id, 50);
         let checklist = save(
             &conn,
-            &mem(Some(JEAN_AGENT_ID), "Orbit deploy checklist for production"),
+            &mem(Some(COORD), "Orbit deploy checklist for production"),
         )
         .unwrap();
         touch(&conn, checklist.id, 200);
-        let weak = save(&conn, &mem(Some(JEAN_AGENT_ID), "orbit deploy note")).unwrap();
+        let weak = save(&conn, &mem(Some(COORD), "orbit deploy note")).unwrap();
         touch(&conn, weak.id, 900);
-        let noise = save(&conn, &mem(Some(JEAN_AGENT_ID), "Buy oat milk")).unwrap();
+        let noise = save(&conn, &mem(Some(COORD), "Buy oat milk")).unwrap();
         touch(&conn, noise.id, 1000);
         let other = other_agent(&conn);
         save(&conn, &mem(Some(&other.id), "Orbit deploy secret plan")).unwrap();
 
-        let selected =
-            select_prompt_memories(&conn, JEAN_AGENT_ID, Some("orbit deploy"), 8000).unwrap();
+        let selected = select_prompt_memories(&conn, COORD, Some("orbit deploy"), 8000).unwrap();
         let ids: Vec<i64> = selected.entries.iter().map(|m| m.id).collect();
         assert_eq!(ids[0], user.id);
         let rest: Vec<i64> = ids.into_iter().skip(1).collect();
@@ -3479,7 +3461,7 @@ mod tests {
         let ranked = search_memories(
             &conn,
             &MemorySearch {
-                agent_id: JEAN_AGENT_ID,
+                agent_id: COORD,
                 query: Some("orbit deploy"),
                 kind: None,
                 scope: None,
@@ -3503,7 +3485,7 @@ mod tests {
             .any(|m| m.content.contains("secret")));
         assert!(!selected.truncated);
 
-        let tight = select_prompt_memories(&conn, JEAN_AGENT_ID, Some("orbit deploy"), 80).unwrap();
+        let tight = select_prompt_memories(&conn, COORD, Some("orbit deploy"), 80).unwrap();
         assert!(tight.truncated);
         assert!(tight.entries.iter().any(|m| m.id == user.id));
         let used: usize = tight
@@ -3520,22 +3502,19 @@ mod tests {
         let conn = db();
         let orbit = save(
             &conn,
-            &mem(Some(JEAN_AGENT_ID), "orbit deploy uses the blue cluster"),
+            &mem(Some(COORD), "orbit deploy uses the blue cluster"),
         )
         .unwrap();
         touch(&conn, orbit.id, 100);
         let soup = save(
             &conn,
-            &mem(
-                Some(JEAN_AGENT_ID),
-                "The cafeteria serves tomato soup on Friday",
-            ),
+            &mem(Some(COORD), "The cafeteria serves tomato soup on Friday"),
         )
         .unwrap();
         touch(&conn, soup.id, 500);
         let selected = select_prompt_memories(
             &conn,
-            JEAN_AGENT_ID,
+            COORD,
             Some("What do you know about the orbit deploy?"),
             8000,
         )
@@ -3554,7 +3533,7 @@ mod tests {
             &NewMemory {
                 project_id: Some("orbit"),
                 pinned: true,
-                ..mem(Some(JEAN_AGENT_ID), "Ask before merging orbit")
+                ..mem(Some(COORD), "Ask before merging orbit")
             },
         )
         .unwrap();
@@ -3564,7 +3543,7 @@ mod tests {
         let hits = search_memories(
             &conn,
             &MemorySearch {
-                agent_id: JEAN_AGENT_ID,
+                agent_id: COORD,
                 query: Some("orbit"),
                 kind: Some("rule"),
                 scope: Some("agent"),
@@ -3582,7 +3561,7 @@ mod tests {
         assert!(search_memories(
             &conn,
             &MemorySearch {
-                agent_id: JEAN_AGENT_ID,
+                agent_id: COORD,
                 query: None,
                 kind: Some("fact"),
                 scope: Some("user"),
@@ -3600,7 +3579,7 @@ mod tests {
         assert!(search_memories(
             &conn,
             &MemorySearch {
-                agent_id: JEAN_AGENT_ID,
+                agent_id: COORD,
                 query: None,
                 kind: None,
                 scope: None,
@@ -3618,37 +3597,37 @@ mod tests {
     #[test]
     fn supersede_hides_the_old_fact_and_records_the_change() {
         let conn = db();
-        let old = save(&conn, &fact(Some(JEAN_AGENT_ID), "user", "Timezone is UTC")).unwrap();
+        let old = save(&conn, &fact(Some(COORD), "user", "Timezone is UTC")).unwrap();
         let corrected = supersede_memory(
             &conn,
-            JEAN_AGENT_ID,
-            Some(JEAN_AGENT_ID),
+            COORD,
+            Some(COORD),
             old.id,
             "Timezone is Helsinki",
             None,
         )
         .unwrap();
         assert_ne!(corrected.id, old.id);
-        assert!(find(&conn, JEAN_AGENT_ID, Some("Helsinki"))
+        assert!(find(&conn, COORD, Some("Helsinki"))
             .iter()
             .any(|m| m.id == corrected.id));
-        assert!(find(&conn, JEAN_AGENT_ID, Some("UTC")).is_empty());
-        let prompt = select_prompt_memories(&conn, JEAN_AGENT_ID, Some("timezone"), 8000).unwrap();
+        assert!(find(&conn, COORD, Some("UTC")).is_empty());
+        let prompt = select_prompt_memories(&conn, COORD, Some("timezone"), 8000).unwrap();
         assert!(prompt.entries.iter().all(|m| m.id != old.id));
-        let changes = list_memory_changes(&conn, JEAN_AGENT_ID, 10).unwrap();
+        let changes = list_memory_changes(&conn, COORD, 10).unwrap();
         let change = changes.iter().find(|c| c.action == "supersede").unwrap();
         assert_eq!(change.before_content.as_deref(), Some("Timezone is UTC"));
         assert_eq!(
             change.after_content.as_deref(),
             Some("Timezone is Helsinki")
         );
-        assert_eq!(change.actor_agent_id.as_deref(), Some(JEAN_AGENT_ID));
-        assert!(supersede_memory(&conn, JEAN_AGENT_ID, None, old.id, "again", None).is_err());
+        assert_eq!(change.actor_agent_id.as_deref(), Some(COORD));
+        assert!(supersede_memory(&conn, COORD, None, old.id, "again", None).is_err());
         assert!(supersede_memory(
             &conn,
-            JEAN_AGENT_ID,
+            COORD,
             None,
-            save(&conn, &mem(Some(JEAN_AGENT_ID), "a rule")).unwrap().id,
+            save(&conn, &mem(Some(COORD), "a rule")).unwrap().id,
             "nope",
             None,
         )
@@ -3670,31 +3649,20 @@ mod tests {
         assert_eq!(again.id, pinned.id);
         assert!(again.pinned);
         for i in 0..210 {
-            save(&conn, &mem(Some(JEAN_AGENT_ID), &format!("note {i}"))).unwrap();
+            save(&conn, &mem(Some(COORD), &format!("note {i}"))).unwrap();
         }
-        assert_eq!(list_memories(&conn, JEAN_AGENT_ID).unwrap().len(), 211);
-        let prompt = select_prompt_memories(&conn, JEAN_AGENT_ID, None, usize::MAX).unwrap();
+        assert_eq!(list_memories(&conn, COORD).unwrap().len(), 211);
+        let prompt = select_prompt_memories(&conn, COORD, None, usize::MAX).unwrap();
         assert_eq!(prompt.entries.len(), 211);
     }
 
     #[test]
     fn supersede_does_not_merge_into_a_rule_with_the_same_text() {
         let conn = db();
-        let rule = save(&conn, &mem(Some(JEAN_AGENT_ID), "Deploy on Fridays")).unwrap();
-        let old = save(
-            &conn,
-            &fact(Some(JEAN_AGENT_ID), "agent", "Deploy on Mondays"),
-        )
-        .unwrap();
-        let corrected = supersede_memory(
-            &conn,
-            JEAN_AGENT_ID,
-            None,
-            old.id,
-            "Deploy on Fridays",
-            None,
-        )
-        .unwrap();
+        let rule = save(&conn, &mem(Some(COORD), "Deploy on Fridays")).unwrap();
+        let old = save(&conn, &fact(Some(COORD), "agent", "Deploy on Mondays")).unwrap();
+        let corrected =
+            supersede_memory(&conn, COORD, None, old.id, "Deploy on Fridays", None).unwrap();
         assert_ne!(corrected.id, rule.id);
         assert_eq!(corrected.kind, "fact");
     }
@@ -3703,7 +3671,7 @@ mod tests {
     fn journal_rejects_millisecond_timestamps() {
         let conn = db();
         let entry = |occurred_at| NewJournal {
-            agent_id: JEAN_AGENT_ID,
+            agent_id: COORD,
             project_id: None,
             content: "Shipped",
             occurred_at: Some(occurred_at),
@@ -3719,10 +3687,10 @@ mod tests {
     fn forget_removes_the_row_and_keeps_the_old_text() {
         let conn = db();
         let memory = save(&conn, &fact(None, "user", "Lives in Espoo")).unwrap();
-        assert!(forget_memory(&conn, JEAN_AGENT_ID, memory.id, None).unwrap());
+        assert!(forget_memory(&conn, COORD, memory.id, None).unwrap());
         assert!(get_memory(&conn, memory.id).unwrap().is_none());
-        assert!(find(&conn, JEAN_AGENT_ID, Some("Espoo")).is_empty());
-        let changes = list_memory_changes(&conn, JEAN_AGENT_ID, 10).unwrap();
+        assert!(find(&conn, COORD, Some("Espoo")).is_empty());
+        let changes = list_memory_changes(&conn, COORD, 10).unwrap();
         let forgotten = changes.iter().find(|c| c.action == "forget").unwrap();
         assert_eq!(forgotten.before_content.as_deref(), Some("Lives in Espoo"));
         assert!(forgotten.after_content.is_none());
@@ -3736,7 +3704,7 @@ mod tests {
         add_journal(
             &conn,
             &NewJournal {
-                agent_id: JEAN_AGENT_ID,
+                agent_id: COORD,
                 project_id: None,
                 content: "Shipped the orbit fix",
                 occurred_at: Some(1_700),
@@ -3748,7 +3716,7 @@ mod tests {
         add_journal(
             &conn,
             &NewJournal {
-                agent_id: JEAN_AGENT_ID,
+                agent_id: COORD,
                 project_id: Some("orbit"),
                 content: "Renamed the reviewer agent",
                 occurred_at: Some(5_000),
@@ -3772,7 +3740,7 @@ mod tests {
         let by_text = search_journal(
             &conn,
             &JournalSearch {
-                agent_id: JEAN_AGENT_ID,
+                agent_id: COORD,
                 query: Some("orbit"),
                 from: None,
                 to: None,
@@ -3786,7 +3754,7 @@ mod tests {
         let by_date = search_journal(
             &conn,
             &JournalSearch {
-                agent_id: JEAN_AGENT_ID,
+                agent_id: COORD,
                 query: None,
                 from: Some(4_000),
                 to: Some(6_000),
@@ -3799,7 +3767,7 @@ mod tests {
         assert!(search_journal(
             &conn,
             &JournalSearch {
-                agent_id: JEAN_AGENT_ID,
+                agent_id: COORD,
                 query: Some("orbit"),
                 from: Some(4_000),
                 to: Some(6_000),
@@ -3826,7 +3794,7 @@ mod tests {
         assert!(add_journal(
             &conn,
             &NewJournal {
-                agent_id: JEAN_AGENT_ID,
+                agent_id: COORD,
                 project_id: None,
                 content: " ",
                 occurred_at: None,
@@ -3838,73 +3806,17 @@ mod tests {
     }
 
     #[test]
-    fn task_worktree_ids_map_back_to_agents() {
-        assert_eq!(agent_tasks_worktree_id("jean"), "__agent_tasks_jean__");
-        assert_eq!(
-            agent_id_from_tasks_worktree("__agent_tasks_jean__"),
-            Some("jean")
-        );
-        assert_eq!(agent_id_from_tasks_worktree("__agent_tasks___"), None);
-        assert_eq!(agent_id_from_tasks_worktree("__agent_reviewer__"), None);
-        assert!(is_agent_worktree_id("__agent_tasks_release-manager__"));
-        // A chat worktree of an agent named "tasks-x" is not a task worktree
-        assert_eq!(
-            agent_id_from_tasks_worktree(&agent_worktree_id("tasks-x")),
-            None
-        );
-    }
-
-    #[test]
-    fn task_lifecycle_and_limits() {
-        let conn = db();
-        let t = create_task(&conn, JEAN_AGENT_ID, "task-1", "hello check", "schedule").unwrap();
-        assert_eq!(t.status, "running");
-        assert_eq!(running_task_count(&conn, JEAN_AGENT_ID).unwrap(), 1);
-        assert_eq!(mark_task_run_ended(&conn, "task-1", "done", 10).unwrap(), 1);
-        assert!(due_task_checks(&conn, 9).unwrap().is_empty());
-        assert_eq!(due_task_checks(&conn, 10).unwrap().len(), 1);
-        // A task that started work waits for it
-        upsert_delegation(&conn, JEAN_AGENT_ID, "worker", "wt", 0, Some("task-1")).unwrap();
-        assert_eq!(open_delegations_from(&conn, "task-1").unwrap(), 1);
-        finish_task(&conn, t.id, "waiting", "sent work").unwrap();
-        assert_eq!(running_task_count(&conn, JEAN_AGENT_ID).unwrap(), 0);
-        set_task_running(&conn, "task-1").unwrap();
-        finish_task(&conn, t.id, "done", "all good").unwrap();
-        assert_eq!(
-            list_tasks(&conn, JEAN_AGENT_ID, 10).unwrap()[0]
-                .summary
-                .as_deref(),
-            Some("all good")
-        );
-        // Archive and delete cycle
-        let old = finished_tasks_before(&conn, now() + 1).unwrap();
-        assert_eq!(old.len(), 1);
-        mark_task_archived(&conn, t.id).unwrap();
-        assert!(list_tasks(&conn, JEAN_AGENT_ID, 10).unwrap().is_empty());
-        assert_eq!(mark_task_run_ended(&conn, "task-1", "done", 10).unwrap(), 0);
-        assert_eq!(archived_tasks_before(&conn, now() + 1).unwrap().len(), 1);
-        delete_task(&conn, t.id).unwrap();
-        assert!(task_by_session(&conn, "task-1").unwrap().is_none());
-    }
-
-    #[test]
     fn notifications_validate_and_mark_read() {
         let conn = db();
-        assert!(add_notification(&conn, JEAN_AGENT_ID, None, "loud", "x").is_err());
-        assert!(add_notification(&conn, JEAN_AGENT_ID, None, "info", "  ").is_err());
-        let n = add_notification(
-            &conn,
-            JEAN_AGENT_ID,
-            Some("task-1"),
-            "action",
-            "Approve the deploy",
-        )
-        .unwrap();
+        assert!(add_notification(&conn, COORD, None, "loud", "x").is_err());
+        assert!(add_notification(&conn, COORD, None, "info", "  ").is_err());
+        let n =
+            add_notification(&conn, COORD, Some("task-1"), "action", "Approve the deploy").unwrap();
         assert_eq!(n.level, "action");
-        assert_eq!(unread_notification_count(&conn, JEAN_AGENT_ID).unwrap(), 1);
-        mark_notifications_read(&conn, JEAN_AGENT_ID).unwrap();
-        assert_eq!(unread_notification_count(&conn, JEAN_AGENT_ID).unwrap(), 0);
-        assert!(list_notifications(&conn, JEAN_AGENT_ID, 10).unwrap()[0]
+        assert_eq!(unread_notification_count(&conn, COORD).unwrap(), 1);
+        mark_notifications_read(&conn, COORD).unwrap();
+        assert_eq!(unread_notification_count(&conn, COORD).unwrap(), 0);
+        assert!(list_notifications(&conn, COORD, 10).unwrap()[0]
             .read_at
             .is_some());
     }
@@ -3912,10 +3824,10 @@ mod tests {
     #[test]
     fn carry_over_round_trip() {
         let conn = db();
-        assert_eq!(get_carry_over(&conn, JEAN_AGENT_ID).unwrap(), None);
-        set_carry_over(&conn, JEAN_AGENT_ID, "User: hi").unwrap();
+        assert_eq!(get_carry_over(&conn, COORD).unwrap(), None);
+        set_carry_over(&conn, COORD, "User: hi").unwrap();
         assert_eq!(
-            get_carry_over(&conn, JEAN_AGENT_ID).unwrap().as_deref(),
+            get_carry_over(&conn, COORD).unwrap().as_deref(),
             Some("User: hi")
         );
     }
@@ -3936,26 +3848,28 @@ mod tests {
         )
         .unwrap();
         init(&conn).unwrap();
-        let d = &list_delegations(&conn, JEAN_AGENT_ID, 10).unwrap()[0];
-        assert_eq!(d.session_id, "s1");
-        assert_eq!(d.origin_session_id, None);
-        create_task(&conn, JEAN_AGENT_ID, "t1", "x", "schedule").unwrap();
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
         assert_eq!(version, MIGRATIONS.len() as i64);
-        let jean = get_agent(&conn, JEAN_AGENT_ID).unwrap().unwrap();
-        assert_eq!(jean.backend, None);
-        assert_eq!(jean.model, None);
-        assert_eq!(jean.effort, None);
-        assert_eq!(jean.thinking_level, None);
-        assert!(jean.skills.is_empty());
+        // The old agent and its data are kept, and it is not loaded
+        let d = &list_delegations(&conn, "jean", 10).unwrap()[0];
+        assert_eq!(d.session_id, "s1");
+        assert_eq!(d.origin_session_id, None);
+        assert_eq!(get_agent(&conn, "jean").unwrap(), None);
+        let coordinator = ensure_coordinator(&conn, "p1", "Orbit").unwrap();
+        assert_eq!(coordinator.backend, None);
+        assert_eq!(coordinator.model, None);
+        assert_eq!(coordinator.effort, None);
+        assert_eq!(coordinator.thinking_level, None);
+        assert!(coordinator.skills.is_empty());
+        assert_eq!(list_agents(&conn).unwrap(), vec![coordinator]);
     }
 
     #[test]
     fn run_config_round_trips_and_old_rows_stay_on_defaults() {
         let conn = db();
-        let jean = get_agent(&conn, JEAN_AGENT_ID).unwrap().unwrap();
+        let jean = get_agent(&conn, COORD).unwrap().unwrap();
         assert_eq!(jean.backend, None);
         assert!(jean.skills.is_empty());
 
@@ -4072,13 +3986,13 @@ mod tests {
     #[test]
     fn connector_allowlist_is_null_until_set_and_null_clears_it() {
         let conn = db();
-        let jean = get_agent(&conn, JEAN_AGENT_ID).unwrap().unwrap();
+        let jean = get_agent(&conn, COORD).unwrap().unwrap();
         assert_eq!(jean.mcp_servers, None);
         assert_eq!(jean.jean_tools, None);
 
         let saved = update_agent(
             &conn,
-            JEAN_AGENT_ID,
+            COORD,
             &AgentPatch {
                 mcp_servers: Some(Some(vec![
                     AgentConnector {
@@ -4109,7 +4023,7 @@ mod tests {
 
         let kept = update_agent(
             &conn,
-            JEAN_AGENT_ID,
+            COORD,
             &AgentPatch {
                 name: Some("Jean".into()),
                 ..Default::default()
@@ -4121,7 +4035,7 @@ mod tests {
 
         let cleared = update_agent(
             &conn,
-            JEAN_AGENT_ID,
+            COORD,
             &serde_json::from_str(r#"{"mcpServers":null,"jeanTools":null}"#).unwrap(),
         )
         .unwrap();
@@ -4169,13 +4083,16 @@ mod tests {
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
         assert_eq!(version, MIGRATIONS.len() as i64);
-        let schedules = list_schedules(&conn, JEAN_AGENT_ID).unwrap();
+        // Schedules fire only for coordinators: give the old row a project.
+        conn.execute("UPDATE agents SET project_id = 'p1' WHERE id = 'jean'", [])
+            .unwrap();
+        let schedules = list_schedules(&conn, "jean").unwrap();
         assert_eq!(schedules.len(), 2);
         assert!(schedules.iter().all(|schedule| schedule.cron.is_none()
             && schedule.event.is_none()
             && !schedule.paused));
         assert_eq!(fire_due_schedules(&conn, 150).unwrap().len(), 2);
-        let left = list_schedules(&conn, JEAN_AGENT_ID).unwrap();
+        let left = list_schedules(&conn, "jean").unwrap();
         assert_eq!(left.len(), 1);
         assert_eq!(left[0].name, "brief");
         assert_eq!(left[0].next_run_at, 750);
@@ -4189,8 +4106,7 @@ mod tests {
         let timing =
             validate_schedule_timing(None, Some("0 * * * *"), Some("UTC"), None, None, now_unix)
                 .unwrap();
-        let schedule =
-            insert_schedule(&conn, JEAN_AGENT_ID, "hourly", "check", &timing, false).unwrap();
+        let schedule = insert_schedule(&conn, COORD, "hourly", "check", &timing, false).unwrap();
         assert_eq!(schedule.cron.as_deref(), Some("0 * * * *"));
         assert_eq!(schedule.timezone.as_deref(), Some("UTC"));
         assert!(schedule.next_run_at > now_unix);
@@ -4201,20 +4117,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(fire_due_schedules(&conn, late).unwrap().len(), 1);
-        let left = list_schedules(&conn, JEAN_AGENT_ID).unwrap();
+        let left = list_schedules(&conn, COORD).unwrap();
         assert_eq!(left.len(), 1);
         assert!(left[0].next_run_at > late);
-        assert_eq!(pending_event_count(&conn, JEAN_AGENT_ID).unwrap(), 1);
-        update_schedule(
-            &conn,
-            JEAN_AGENT_ID,
-            left[0].id,
-            None,
-            None,
-            Some(true),
-            None,
-        )
-        .unwrap();
+        assert_eq!(pending_event_count(&conn, COORD).unwrap(), 1);
+        update_schedule(&conn, COORD, left[0].id, None, None, Some(true), None).unwrap();
         assert!(fire_due_schedules(&conn, left[0].next_run_at + 10)
             .unwrap()
             .is_empty());
@@ -4225,73 +4132,47 @@ mod tests {
         let conn = db();
         let timing =
             validate_schedule_timing(None, None, None, Some("pr_merged"), None, 0).unwrap();
-        let schedule = insert_schedule(
-            &conn,
-            JEAN_AGENT_ID,
-            "merged",
-            "look at the PR",
-            &timing,
-            false,
-        )
-        .unwrap();
+        let schedule =
+            insert_schedule(&conn, COORD, "merged", "look at the PR", &timing, false).unwrap();
         assert_eq!(schedule.event.as_deref(), Some("pr_merged"));
-        assert_eq!(next_schedule_at(&conn, JEAN_AGENT_ID).unwrap(), None);
+        assert_eq!(next_schedule_at(&conn, COORD).unwrap(), None);
         assert_eq!(
-            fire_event_schedules(&conn, "pr_merged", "pr:wt:1", "PR 1 merged")
+            fire_event_schedules(&conn, "p1", "pr_merged", "pr:wt:1", "PR 1 merged")
                 .unwrap()
                 .len(),
             1
         );
-        assert!(fire_event_schedules(&conn, "pr_merged", "pr:wt:1", "again")
-            .unwrap()
-            .is_empty());
+        assert!(
+            fire_event_schedules(&conn, "p1", "pr_merged", "pr:wt:1", "again")
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(
-            fire_event_schedules(&conn, "pr_merged", "pr:wt:2", "other")
+            fire_event_schedules(&conn, "p1", "pr_merged", "pr:wt:2", "other")
                 .unwrap()
                 .len(),
             1
         );
         let failed =
             validate_schedule_timing(None, None, None, Some("session_failed"), None, 0).unwrap();
-        update_schedule(
-            &conn,
-            JEAN_AGENT_ID,
-            schedule.id,
-            None,
-            None,
-            None,
-            Some(&failed),
-        )
-        .unwrap();
+        update_schedule(&conn, COORD, schedule.id, None, None, None, Some(&failed)).unwrap();
         assert_eq!(
-            fire_event_schedules(&conn, "session_failed", "session:s:error", "boom")
+            fire_event_schedules(&conn, "p1", "session_failed", "session:s:error", "boom")
                 .unwrap()
                 .len(),
             1
         );
-        update_schedule(
-            &conn,
-            JEAN_AGENT_ID,
-            schedule.id,
-            None,
-            None,
-            Some(true),
-            None,
-        )
-        .unwrap();
+        update_schedule(&conn, COORD, schedule.id, None, None, Some(true), None).unwrap();
         assert!(
-            fire_event_schedules(&conn, "session_failed", "session:s2:error", "later")
+            fire_event_schedules(&conn, "p1", "session_failed", "session:s2:error", "later")
                 .unwrap()
                 .is_empty()
         );
         for _ in 0..12 {
-            record_wake(&conn, JEAN_AGENT_ID, "s").unwrap();
+            record_wake(&conn, COORD, "s").unwrap();
         }
-        assert_eq!(
-            wake_budget_remaining(&conn, JEAN_AGENT_ID, 12, now()).unwrap(),
-            0
-        );
-        assert!(pending_event_count(&conn, JEAN_AGENT_ID).unwrap() >= 3);
+        assert_eq!(wake_budget_remaining(&conn, COORD, 12, now()).unwrap(), 0);
+        assert!(pending_event_count(&conn, COORD).unwrap() >= 3);
         assert!(validate_schedule_timing(None, None, None, Some("webhook"), None, 0).is_err());
         assert!(
             validate_schedule_timing(Some(60), None, None, None, None, 0)
@@ -4308,8 +4189,7 @@ mod tests {
         let conn = db();
         let timing =
             validate_schedule_timing(None, None, None, Some("pr_merged"), None, 0).unwrap();
-        let schedule =
-            insert_schedule(&conn, JEAN_AGENT_ID, "merged", "look", &timing, false).unwrap();
+        let schedule = insert_schedule(&conn, COORD, "merged", "look", &timing, false).unwrap();
         for (key, fired_at) in [
             ("session:s:done:1", 10),
             ("archive:wt:1", 10),
@@ -4340,11 +4220,10 @@ mod tests {
         let conn = db();
         let timing =
             validate_schedule_timing(None, None, None, Some("pr_merged"), None, 0).unwrap();
-        let schedule =
-            insert_schedule(&conn, JEAN_AGENT_ID, "before", "check", &timing, false).unwrap();
+        let schedule = insert_schedule(&conn, COORD, "before", "check", &timing, false).unwrap();
         let error = update_schedule(
             &conn,
-            JEAN_AGENT_ID,
+            COORD,
             schedule.id,
             Some("after"),
             Some("   "),
@@ -4353,9 +4232,7 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.contains("Prompt"), "{error}");
-        let stored = get_schedule(&conn, JEAN_AGENT_ID, schedule.id)
-            .unwrap()
-            .unwrap();
+        let stored = get_schedule(&conn, COORD, schedule.id).unwrap().unwrap();
         assert_eq!(stored.name, "before");
         assert_eq!(stored.prompt, "check");
     }

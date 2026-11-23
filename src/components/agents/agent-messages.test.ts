@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import type { AgentTask } from '@/services/agents'
 import type { ChatMessage } from '@/types/chat'
 import {
   agentApprovalId,
@@ -10,7 +9,6 @@ import {
   questionAnswerText,
   selectedOptions,
   conversationEntries,
-  findRequestTask,
   parseAgentRequest,
   parseAgentSentMessage,
 } from './agent-messages'
@@ -290,30 +288,5 @@ describe('conversationEntries', () => {
       ['target', 'Noted.'],
       ['user', 'Also check lint'],
     ])
-  })
-})
-
-describe('findRequestTask', () => {
-  const task = (id: number, createdAt: number, title: string): AgentTask => ({
-    id,
-    agentId: 'grok',
-    sessionId: `s${id}`,
-    title,
-    kind: 'message',
-    status: 'done',
-    summary: null,
-    createdAt,
-    updatedAt: createdAt,
-  })
-
-  it('picks the first request task from the sender after the send', () => {
-    const tasks = [
-      task(1, 50, 'Request from Haruvo'),
-      task(2, 120, 'Request from Haruvo'),
-      task(3, 101, 'Request from Other'),
-      task(4, 102, 'Request from Haruvo'),
-    ]
-    expect(findRequestTask(tasks, 'Haruvo', 100)?.id).toBe(4)
-    expect(findRequestTask(tasks, 'Haruvo', 200)).toBeUndefined()
   })
 })

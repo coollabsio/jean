@@ -7,7 +7,10 @@ use serde_json::{json, Value};
 use tauri::AppHandle;
 use tokio::sync::Mutex;
 
-use crate::jean_mcp_core::{call_tool, extract_tool_call, jsonrpc_error, jsonrpc_ok};
+use crate::jean_mcp_core::{
+    call_tool, extract_tool_call, jsonrpc_error, jsonrpc_ok, tools_list_for_source,
+    TOOLS_LIST_METHOD,
+};
 
 #[derive(Debug)]
 pub struct JeanMcpSocketHandle {
@@ -255,14 +258,18 @@ async fn handle_socket_request(app: &AppHandle, expected_token: &str, line: &str
         return json!({"error":"unauthorized"});
     }
 
-    let tool_call = match extract_tool_call(body.clone()) {
-        Ok(tool_call) => tool_call,
-        Err(e) => return jsonrpc_error(None, e.code, &e.message),
-    };
     let source = body
         .get("source")
         .and_then(|v| v.as_str())
         .unwrap_or("anon");
+    if body.get("method").and_then(|v| v.as_str()) == Some(TOOLS_LIST_METHOD) {
+        return jsonrpc_ok(None, tools_list_for_source(app, source));
+    }
+
+    let tool_call = match extract_tool_call(body.clone()) {
+        Ok(tool_call) => tool_call,
+        Err(e) => return jsonrpc_error(None, e.code, &e.message),
+    };
     let depth = body.get("depth").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
 
     match call_tool(app, &tool_call.name, tool_call.arguments, source, depth).await {
@@ -274,6 +281,37 @@ async fn handle_socket_request(app: &AppHandle, expected_token: &str, line: &str
 #[cfg(test)]
 mod tests {
     use std::path::Path;
+
+    #[tokio::test]
+    async fn tools_list_request_returns_the_project_tools_for_a_normal_caller() {
+        let temp = tempfile::tempdir().unwrap();
+        let app =
+            tauri::AppHandle::new(temp.path().to_path_buf(), temp.path().to_path_buf()).unwrap();
+        let response = super::handle_socket_request(
+            &app,
+            "secret",
+            r#"{"token":"secret","source":"anon","method":"tools/list"}"#,
+        )
+        .await;
+        let names: Vec<&str> = response["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap())
+            .collect();
+        assert!(names.contains(&"create_worktree"));
+        assert!(names.contains(&"set_connector"));
+        assert!(!names.contains(&"memory_save"));
+        assert!(!names.contains(&"ask_user"));
+
+        let denied = super::handle_socket_request(
+            &app,
+            "secret",
+            r#"{"token":"wrong","source":"anon","method":"tools/list"}"#,
+        )
+        .await;
+        assert_eq!(denied, serde_json::json!({"error": "unauthorized"}));
+    }
 
     #[test]
     fn windows_pipe_path_is_stable_and_named_pipe_safe() {

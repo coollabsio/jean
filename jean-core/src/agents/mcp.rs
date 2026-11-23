@@ -1,4 +1,4 @@
-//! Jean MCP tools for agents (schedules, memory, journal), the
+//! Jean MCP tools for project coordinators (schedules, memory, journal), the
 //! approval gate for destructive tools, and delegation tracking.
 
 use serde_json::{json, Value};
@@ -31,7 +31,6 @@ const AGENT_TOOLS: &[&str] = &[
     "notify_user",
     "set_status",
     "ask_user",
-    "task_list",
     "list_connectors",
 ];
 
@@ -47,31 +46,31 @@ pub fn is_agent_tool(name: &str) -> bool {
     AGENT_TOOLS.contains(&name)
 }
 
-/// MCP definitions of the agent tools (appended to the Jean tool registry).
+/// MCP definitions of the coordinator tools (appended to the Jean tool
+/// registry, and listed only for coordinator sessions).
 pub fn tool_definitions() -> Value {
     json!([
-        {"name":"schedule_create","description":"Agent sessions only. Wake yourself later with a prompt. Choose one: delayMinutes (once), runAt (once at an exact date-time: YYYY-MM-DDTHH:MM local time in timezone, or RFC 3339 with an offset), everyMinutes (repeating, min 5), cron (5 fields) plus timezone, or event (session_finished, session_failed, pr_merged, approval_resolved). The run is a background task.","inputSchema":{"type":"object","properties":{"name":{"type":"string"},"prompt":{"type":"string"},"delayMinutes":{"type":"number","minimum":1},"runAt":{"type":"string"},"everyMinutes":{"type":"number","minimum":5},"cron":{"type":"string"},"timezone":{"type":"string"},"event":{"type":"string","enum":["session_finished","session_failed","pr_merged","approval_resolved"]}},"required":["name","prompt"],"additionalProperties":false}},
-        {"name":"schedule_update","description":"Agent sessions only. Change one of your schedules: name, prompt, paused, or its timing (the same fields as schedule_create).","inputSchema":{"type":"object","properties":{"scheduleId":{"type":"integer"},"name":{"type":"string"},"prompt":{"type":"string"},"paused":{"type":"boolean"},"delayMinutes":{"type":"number","minimum":1},"runAt":{"type":"string"},"everyMinutes":{"type":"number","minimum":5},"cron":{"type":"string"},"timezone":{"type":"string"},"event":{"type":"string","enum":["session_finished","session_failed","pr_merged","approval_resolved"]}},"required":["scheduleId"],"additionalProperties":false}},
-        {"name":"schedule_list","description":"Agent sessions only. List your active schedules, including paused ones.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
-        {"name":"schedule_cancel","description":"Agent sessions only. Delete one of your schedules.","inputSchema":{"type":"object","properties":{"scheduleId":{"type":"integer"}},"required":["scheduleId"],"additionalProperties":false}},
-        {"name":"memory_save","description":"Agent sessions only. Save a lasting memory: a rule, a fact the code does not show, or open work. Never save secrets or live state. scope 'agent' is private. scope 'shared' is working memory for every agent (rules, facts, open work), not who the user is. scope 'user' is only facts about the user (name, timezone, preferences) and every agent sees them. Same text in the same scope updates the existing entry.","inputSchema":{"type":"object","properties":{"content":{"type":"string","maxLength":1000},"kind":{"type":"string","enum":["rule","fact","open_work"]},"scope":{"type":"string","enum":["agent","shared","user"]},"projectId":{"type":"string"},"pinned":{"type":"boolean"},"expiresInDays":{"type":"number","minimum":1}},"required":["content","kind"],"additionalProperties":false}},
-        {"name":"memory_search","description":"Agent sessions only. Full-text search of your memories, shared memories, and user facts. Ranked by pinned, then relevance, then recency. Without query: pinned and newest first. from/to are unix seconds on updated_at.","inputSchema":{"type":"object","properties":{"query":{"type":"string"},"kind":{"type":"string","enum":["rule","fact","open_work"]},"scope":{"type":"string","enum":["agent","shared","user"]},"projectId":{"type":"string"},"pinned":{"type":"boolean"},"from":{"type":"integer"},"to":{"type":"integer"},"limit":{"type":"integer","minimum":1,"maximum":50}},"additionalProperties":false}},
-        {"name":"memory_update","description":"Agent sessions only. Change the content, kind, or pinned flag of a memory you can see. The previous text is kept in the change record.","inputSchema":{"type":"object","properties":{"memoryId":{"type":"integer"},"content":{"type":"string","maxLength":1000},"kind":{"type":"string","enum":["rule","fact","open_work"]},"pinned":{"type":"boolean"}},"required":["memoryId"],"additionalProperties":false}},
-        {"name":"memory_forget","description":"Agent sessions only. Delete a memory that is wrong or no longer needed. The previous text is kept in the change record.","inputSchema":{"type":"object","properties":{"memoryId":{"type":"integer"}},"required":["memoryId"],"additionalProperties":false}},
-        {"name":"memory_supersede","description":"Agent sessions only. Correct a fact. The old text drops out of search and prompts and stays in the change record. Use memory_update for rules and open work.","inputSchema":{"type":"object","properties":{"memoryId":{"type":"integer"},"content":{"type":"string","maxLength":1000}},"required":["memoryId","content"],"additionalProperties":false}},
-        {"name":"journal_add","description":"Agent sessions only. Record what happened, a decision, or an outcome. This is dated history, not a lasting fact. Use memory_save for rules and facts.","inputSchema":{"type":"object","properties":{"content":{"type":"string","maxLength":2000},"occurredAt":{"type":"integer","description":"Unix seconds. Default: now."},"projectId":{"type":"string"}},"required":["content"],"additionalProperties":false}},
-        {"name":"journal_search","description":"Agent sessions only. Recall your journal by text and/or date, including chats that were archived. from/to are unix seconds on occurred_at. Other agents' journals are not included.","inputSchema":{"type":"object","properties":{"query":{"type":"string"},"from":{"type":"integer"},"to":{"type":"integer"},"limit":{"type":"integer","minimum":1,"maximum":50}},"additionalProperties":false}},
-        {"name":"notify_user","description":"Agent sessions only. Tell the user something they must know: a result of a goal, a question, a failure, or a needed decision (level 'action'). Shows on the agent page and as a notification. Not for routine progress.","inputSchema":{"type":"object","properties":{"message":{"type":"string","maxLength":2000},"level":{"type":"string","enum":["info","action","error"]}},"required":["message"],"additionalProperties":false}},
-        {"name":"set_status","description":"Agent sessions only. Show the user a short status of what you do now, in 2 to 5 plain words (for example: 'Checking firewall logs'). Do not name tools, commands, or file paths. It shows only while your turn runs.","inputSchema":{"type":"object","properties":{"text":{"type":"string","maxLength":60}},"required":["text"],"additionalProperties":false}},
-        {"name":"ask_user","description":"Agent chat sessions only. Ask the user a question that needs a decision. The chat shows it with the options as buttons. multiple false: the user picks one option and it is sent at once. multiple true: the user picks one or more and sends them. The answer arrives as the next user message. End your turn after calling it.","inputSchema":{"type":"object","properties":{"question":{"type":"string","maxLength":500},"options":{"type":"array","items":{"type":"string","maxLength":200},"minItems":2,"maxItems":MAX_QUESTION_OPTIONS},"multiple":{"type":"boolean","description":"Default false."}},"required":["question","options"],"additionalProperties":false}},
-        {"name":"task_list","description":"Agent sessions only. List your recent background tasks (schedule runs, follow-ups) with status and one-line result.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":50}},"additionalProperties":false}},
-        {"name":"list_connectors","description":"Agent sessions only. Read-only. List the MCP connectors saved for this agent, whether a limit is saved, and whether this session's backend can apply that limit. Does not change the limit or sign in.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}}
+        {"name":"schedule_create","description":"Coordinator chat only. Wake yourself later with a prompt. Choose one: delayMinutes (once), runAt (once at an exact date-time: YYYY-MM-DDTHH:MM local time in timezone, or RFC 3339 with an offset), everyMinutes (repeating, min 5), cron (5 fields) plus timezone, or event (session_finished, session_failed, pr_merged, approval_resolved). The run arrives in your chat as an update.","inputSchema":{"type":"object","properties":{"name":{"type":"string"},"prompt":{"type":"string"},"delayMinutes":{"type":"number","minimum":1},"runAt":{"type":"string"},"everyMinutes":{"type":"number","minimum":5},"cron":{"type":"string"},"timezone":{"type":"string"},"event":{"type":"string","enum":["session_finished","session_failed","pr_merged","approval_resolved"]}},"required":["name","prompt"],"additionalProperties":false}},
+        {"name":"schedule_update","description":"Coordinator chat only. Change one of your schedules: name, prompt, paused, or its timing (the same fields as schedule_create).","inputSchema":{"type":"object","properties":{"scheduleId":{"type":"integer"},"name":{"type":"string"},"prompt":{"type":"string"},"paused":{"type":"boolean"},"delayMinutes":{"type":"number","minimum":1},"runAt":{"type":"string"},"everyMinutes":{"type":"number","minimum":5},"cron":{"type":"string"},"timezone":{"type":"string"},"event":{"type":"string","enum":["session_finished","session_failed","pr_merged","approval_resolved"]}},"required":["scheduleId"],"additionalProperties":false}},
+        {"name":"schedule_list","description":"Coordinator chat only. List your active schedules, including paused ones.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
+        {"name":"schedule_cancel","description":"Coordinator chat only. Delete one of your schedules.","inputSchema":{"type":"object","properties":{"scheduleId":{"type":"integer"}},"required":["scheduleId"],"additionalProperties":false}},
+        {"name":"memory_save","description":"Coordinator chat only. Save a lasting memory: a rule, a fact the code does not show, or open work. Never save secrets or live state. scope 'agent' is for this project only. scope 'shared' is for facts that hold in every project (the coordinators of all projects see it), not who the user is. scope 'user' is only facts about the user (name, timezone, preferences). Same text in the same scope updates the existing entry.","inputSchema":{"type":"object","properties":{"content":{"type":"string","maxLength":1000},"kind":{"type":"string","enum":["rule","fact","open_work"]},"scope":{"type":"string","enum":["agent","shared","user"]},"projectId":{"type":"string"},"pinned":{"type":"boolean"},"expiresInDays":{"type":"number","minimum":1}},"required":["content","kind"],"additionalProperties":false}},
+        {"name":"memory_search","description":"Coordinator chat only. Full-text search of your memories, shared memories, and user facts. Ranked by pinned, then relevance, then recency. Without query: pinned and newest first. from/to are unix seconds on updated_at.","inputSchema":{"type":"object","properties":{"query":{"type":"string"},"kind":{"type":"string","enum":["rule","fact","open_work"]},"scope":{"type":"string","enum":["agent","shared","user"]},"projectId":{"type":"string"},"pinned":{"type":"boolean"},"from":{"type":"integer"},"to":{"type":"integer"},"limit":{"type":"integer","minimum":1,"maximum":50}},"additionalProperties":false}},
+        {"name":"memory_update","description":"Coordinator chat only. Change the content, kind, or pinned flag of a memory you can see. The previous text is kept in the change record.","inputSchema":{"type":"object","properties":{"memoryId":{"type":"integer"},"content":{"type":"string","maxLength":1000},"kind":{"type":"string","enum":["rule","fact","open_work"]},"pinned":{"type":"boolean"}},"required":["memoryId"],"additionalProperties":false}},
+        {"name":"memory_forget","description":"Coordinator chat only. Delete a memory that is wrong or no longer needed. The previous text is kept in the change record.","inputSchema":{"type":"object","properties":{"memoryId":{"type":"integer"}},"required":["memoryId"],"additionalProperties":false}},
+        {"name":"memory_supersede","description":"Coordinator chat only. Correct a fact. The old text drops out of search and prompts and stays in the change record. Use memory_update for rules and open work.","inputSchema":{"type":"object","properties":{"memoryId":{"type":"integer"},"content":{"type":"string","maxLength":1000}},"required":["memoryId","content"],"additionalProperties":false}},
+        {"name":"journal_add","description":"Coordinator chat only. Record what happened, a decision, or an outcome. This is dated history, not a lasting fact. Use memory_save for rules and facts.","inputSchema":{"type":"object","properties":{"content":{"type":"string","maxLength":2000},"occurredAt":{"type":"integer","description":"Unix seconds. Default: now."},"projectId":{"type":"string"}},"required":["content"],"additionalProperties":false}},
+        {"name":"journal_search","description":"Coordinator chat only. Recall your journal by text and/or date, including chats that were archived. from/to are unix seconds on occurred_at. Journals of other projects are not included.","inputSchema":{"type":"object","properties":{"query":{"type":"string"},"from":{"type":"integer"},"to":{"type":"integer"},"limit":{"type":"integer","minimum":1,"maximum":50}},"additionalProperties":false}},
+        {"name":"notify_user","description":"Coordinator chat only. Tell the user something they must know: a result of a goal, a question, a failure, or a needed decision (level 'action'). Shows as a notification. Not for routine progress.","inputSchema":{"type":"object","properties":{"message":{"type":"string","maxLength":2000},"level":{"type":"string","enum":["info","action","error"]}},"required":["message"],"additionalProperties":false}},
+        {"name":"set_status","description":"Coordinator chat only. Show the user a short status of what you do now, in 2 to 5 plain words (for example: 'Checking firewall logs'). Do not name tools, commands, or file paths. It shows only while your turn runs.","inputSchema":{"type":"object","properties":{"text":{"type":"string","maxLength":60}},"required":["text"],"additionalProperties":false}},
+        {"name":"ask_user","description":"Coordinator chat only. Ask the user a question that needs a decision. The chat shows it with the options as buttons. multiple false: the user picks one option and it is sent at once. multiple true: the user picks one or more and sends them. The answer arrives as the next user message. End your turn after calling it.","inputSchema":{"type":"object","properties":{"question":{"type":"string","maxLength":500},"options":{"type":"array","items":{"type":"string","maxLength":200},"minItems":2,"maxItems":MAX_QUESTION_OPTIONS},"multiple":{"type":"boolean","description":"Default false."}},"required":["question","options"],"additionalProperties":false}},
+        {"name":"list_connectors","description":"Coordinator chat only. Read-only. List the MCP connectors saved for this coordinator, whether a limit is saved, and whether this session's backend can apply that limit. Does not change the limit or sign in.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}}
     ])
 }
 
 fn caller_agent(app: &AppHandle, source: &str) -> Result<db::Agent, String> {
     super::agent_for_session(app, source)
-        .ok_or_else(|| "This tool is only for Jean agent sessions".to_string())
+        .ok_or_else(|| "This tool is only for a project coordinator chat".to_string())
 }
 
 fn str_arg(args: &Value, key: &str) -> Option<String> {
@@ -410,17 +409,8 @@ pub async fn run(app: &AppHandle, name: &str, args: &Value, source: &str) -> Res
             json!({ "status": "shown" })
         }
         "ask_user" => {
-            let is_task = super::with_db(app, |conn| db::task_by_session(conn, source))?.is_some();
-            if is_task {
-                return Err("ask_user works only in your chat with the user. In a task session, use notify_user with level 'action'.".to_string());
-            }
             question_from_args(args)?;
             json!({ "status": "shown", "note": "The user sees the question with the options. End your turn now. The answer arrives as the next user message." })
-        }
-        "task_list" => {
-            let limit = int_arg(args, "limit").unwrap_or(20).clamp(1, 50);
-            let tasks = super::with_db(app, |conn| db::list_tasks(conn, &agent.id, limit))?;
-            json!({ "tasks": tasks })
         }
         "list_connectors" => {
             return Ok(super::connectors::report_for_session(app, &agent, source).await);
@@ -474,7 +464,6 @@ pub fn record_delegation(
     };
     let result = super::with_db(app, |conn| {
         let hop = db::active_hop_for_session(conn, source)?;
-        // The update returns to this calling session (chat or task).
         db::upsert_delegation(
             conn,
             &agent.id,
@@ -554,7 +543,7 @@ mod tests {
     fn update_timing_keeps_the_stored_cron_and_timezone() {
         let stored = db::Schedule {
             id: 1,
-            agent_id: "jean".into(),
+            agent_id: "coord_p1".into(),
             name: "brief".into(),
             prompt: "check".into(),
             every_secs: None,

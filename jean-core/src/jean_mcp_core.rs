@@ -22,6 +22,8 @@ pub const JEAN_MCP_SOCKET_ENV: &str = "JEAN_MCP_SOCKET";
 pub const JEAN_MCP_TOKEN_ENV: &str = "JEAN_MCP_TOKEN";
 pub const JEAN_MCP_SESSION_ENV: &str = "JEAN_MCP_SESSION";
 pub const JEAN_MCP_DEPTH_ENV: &str = "JEAN_MCP_DEPTH";
+/// `method` of a local IPC request that asks for the caller's tool list.
+pub const TOOLS_LIST_METHOD: &str = "tools/list";
 /// Tool Claude CLI calls via `--permission-prompt-tool` (Supervised and YOLO + Chrome runs).
 pub const CLAUDE_PERMISSION_PROMPT_TOOL: &str = "claude_permission_prompt";
 
@@ -107,8 +109,26 @@ pub fn initialize_result() -> Value {
     })
 }
 
-pub fn tools_list_result() -> Value {
-    json!({ "tools": tool_registry() })
+/// `tools/list` for one caller. Coordinator tools are listed only for a
+/// coordinator session; every other caller gets the project tools.
+pub fn tools_list_result(coordinator: bool) -> Value {
+    let mut tools = tool_registry();
+    if !coordinator {
+        if let Some(list) = tools.as_array_mut() {
+            list.retain(|tool| {
+                !tool
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .is_some_and(crate::agents::mcp::is_agent_tool)
+            });
+        }
+    }
+    json!({ "tools": tools })
+}
+
+/// `tools/list` for the session behind an MCP connection.
+pub fn tools_list_for_source(app: &AppHandle, source: &str) -> Value {
+    tools_list_result(crate::agents::agent_for_session(app, source).is_some())
 }
 
 #[derive(Debug)]
@@ -184,6 +204,7 @@ pub fn extract_tool_call(params: Value) -> Result<ToolCallRequest, ToolError> {
 
 pub fn handle_protocol_message(
     body: Value,
+    list_tools: impl FnOnce() -> Value,
     call_tool: impl FnMut(ToolCallRequest) -> Result<Value, String>,
 ) -> Option<Value> {
     let id = body.get("id").cloned();
@@ -193,7 +214,7 @@ pub fn handle_protocol_message(
     match method {
         "initialize" => Some(jsonrpc_ok(id, initialize_result())),
         "notifications/initialized" => None,
-        "tools/list" => Some(jsonrpc_ok(id, tools_list_result())),
+        "tools/list" => Some(jsonrpc_ok(id, list_tools())),
         "tools/call" => Some(
             match extract_tool_call(params)
                 .map_err(|e| e.message)
@@ -212,6 +233,8 @@ pub fn handle_protocol_message(
     }
 }
 
+/// Every Jean MCP tool, coordinator tools included. A caller sees the list
+/// from [`tools_list_result`].
 pub fn tool_registry() -> Value {
     // Split into multiple json! arrays so the macro does not hit recursion_limit.
     let mut tools = tool_registry_core().as_array().cloned().unwrap_or_default();
@@ -329,7 +352,7 @@ fn tool_registry_session() -> Value {
         {"name":"get_worktree_diff","description":"Get a bounded unified git diff for a worktree. diffType is uncommitted (HEAD vs working tree) or branch (origin/base...HEAD). Optional path limits to one pathspec; maxBytes is capped.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"diffType":{"type":"string","enum":["uncommitted","branch"],"default":"uncommitted"},"path":{"type":"string"},"maxBytes":{"type":"integer","minimum":1,"maximum":200000,"default":60000}},"required":["worktreeId"],"additionalProperties":false}},
         {"name":"get_current_context","description":"Return the calling session's context: sessionId, worktreeId, projectId, projectPath, projectName. Use this so the agent knows what 'this project' refers to without guessing.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
         {"name":"request_secret","description":"Ask the user for a secret (API key, token, auth key) in a private card in this chat. First call get_secret: a secret saved earlier for this project (or for you, in an agent session) can be reused without asking. You never see the value. Never ask for secrets in chat text and never invent one. End your turn after the call. When the user saves, the next user message gives a private file path that holds only the value. Read it only inside a shell command, for example TOKEN=\"$(cat '<path>')\" mycli login. Do not print, echo, or copy the value. The user picks how long the file is kept (until they delete it, or 24 hours) and can delete it at any time. If the file is gone, call request_secret again. For a value with several lines, such as a whole .env file, set multiline and give an example.","inputSchema":{"type":"object","properties":{"label":{"type":"string","maxLength":80,"description":"Card title, for example 'Tailscale auth key'."},"reason":{"type":"string","maxLength":500,"description":"What the secret is for and where the user can create it."},"placeholder":{"type":"string","maxLength":80,"description":"Optional input placeholder, for example 'tskey-auth-...'."},"multiline":{"type":"boolean","description":"Show a multi-line text area instead of a one-line input. Use it for values with several lines, such as a whole .env file or a private key."},"example":{"type":"string","maxLength":1000,"description":"Optional example of the expected format with fake values, shown on the card. Give one for multi-line values, for example 'DATABASE_URL=postgresql://user:password@host/db\\nRESEND_API_KEY=re_...'."}},"required":["label","reason"],"additionalProperties":false}},
-        {"name":"get_secret","description":"Get the private file path of a secret saved earlier (from a request_secret card), by its label. Secrets belong to the project of a worktree session, or to the agent in an agent chat and its task sessions. Use it in new sessions and scheduled tasks to reuse a saved key without asking again. Read the path only inside a shell command, for example TOKEN=\"$(cat '<path>')\". Never print the value. Fails with the saved labels of this project or agent when none matches; then call request_secret.","inputSchema":{"type":"object","properties":{"label":{"type":"string","maxLength":80,"description":"Label of the saved secret (case-insensitive)."}},"required":["label"],"additionalProperties":false}},
+        {"name":"get_secret","description":"Get the private file path of a secret saved earlier (from a request_secret card), by its label. Secrets belong to the project of a worktree session, or to the project coordinator in its chat. Use it in new sessions and scheduled tasks to reuse a saved key without asking again. Read the path only inside a shell command, for example TOKEN=\"$(cat '<path>')\". Never print the value. Fails with the saved labels of this project or agent when none matches; then call request_secret.","inputSchema":{"type":"object","properties":{"label":{"type":"string","maxLength":80,"description":"Label of the saved secret (case-insensitive)."}},"required":["label"],"additionalProperties":false}},
         {"name":"list_secrets","description":"Show the user the secrets saved for this project (or this agent, in an agent session) from request_secret cards, in a card in this chat with a Delete button for each. Use it when the user asks to see, manage, or delete saved secrets. Returns labels, retention, and save time only; never values or file paths. You cannot delete secrets: the user deletes them on the card. End your turn after the call.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
         {"name":"get_run_environments","description":"List Jean Run-command / panel-command dev environments. Returns whether each is running, worktree/base-session identity, startup command, listening/configured ports, and http URL when a port is known. Optional worktreeId or projectId filters. Does not include full-screen CLI session terminals.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string","description":"Optional worktree id to filter to one worktree or base session."},"projectId":{"type":"string","description":"Optional project id to filter to that project's worktrees."}},"additionalProperties":false}}
         ,{"name":"start_run_environment","description":"Start or reuse a Jean-managed Run environment for a worktree using a run command configured in jean.json. When command is omitted, uses the first configured run command. Returns the environment identity, command, running state, ports, and URL when detected.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string","description":"Worktree whose configured Run environment should start."},"command":{"type":"string","description":"Optional exact jean.json run command to start. Must be one of the configured run commands."}},"required":["worktreeId"],"additionalProperties":false}}
@@ -3006,7 +3029,7 @@ fn resolve_project_path(app: &AppHandle, project_id: &str) -> Result<String, Too
 }
 
 fn resolve_worktree_path(app: &AppHandle, worktree_id: &str) -> Result<String, ToolError> {
-    // Agent sessions run in their scratch folder (no worktree record).
+    // Coordinator sessions run in the project folder (no worktree record).
     if let Some(path) = crate::agents::workdir_for_worktree(app, worktree_id) {
         return Ok(path);
     }

@@ -19,11 +19,8 @@ pub struct AgentSummary {
     pub active_delegations: i64,
     pub next_schedule_at: Option<i64>,
     pub budget_reached: bool,
-    /// Worktree ID of the agent's background task sessions.
-    pub tasks_worktree_id: String,
-    pub running_tasks: i64,
     pub unread_notifications: i64,
-    /// One line about the latest activity: chat reply, notification, or task result
+    /// One line about the latest activity: chat reply or notification
     pub activity: Option<String>,
 }
 
@@ -50,7 +47,6 @@ pub struct AgentDetails {
     pub memories: Vec<db::Memory>,
     pub journal: Vec<db::JournalEntry>,
     pub memory_changes: Vec<db::MemoryChange>,
-    pub tasks: Vec<db::Task>,
     pub notifications: Vec<db::Notification>,
 }
 
@@ -90,7 +86,6 @@ pub async fn list_agents(app: &AppHandle) -> Result<Vec<AgentSummary>, String> {
             active_delegations,
             next_schedule_at,
             wakes,
-            running_tasks,
             unread_notifications,
         ) = super::with_db(app, |conn| {
             let active = db::list_delegations(conn, &agent.id, 200)?
@@ -103,14 +98,12 @@ pub async fn list_agents(app: &AppHandle) -> Result<Vec<AgentSummary>, String> {
                 active,
                 db::next_schedule_at(conn, &agent.id)?,
                 db::wakes_since(conn, &agent.id, since)?,
-                db::running_task_count(conn, &agent.id)?,
                 db::unread_notification_count(conn, &agent.id)?,
             ))
         })?;
-        let busy = running_tasks > 0
-            || home
-                .as_ref()
-                .is_some_and(|s| crate::chat::registry::is_session_actively_managed(&s.id));
+        let busy = home
+            .as_ref()
+            .is_some_and(|s| crate::chat::registry::is_session_actively_managed(&s.id));
         let waiting = home.as_ref().is_some_and(|s| s.waiting_for_input) || pending_approvals > 0;
         let activity = super::with_db(app, |conn| db::latest_activity(conn, &agent.id))?
             .into_iter()
@@ -132,14 +125,56 @@ pub async fn list_agents(app: &AppHandle) -> Result<Vec<AgentSummary>, String> {
             active_delegations,
             next_schedule_at,
             budget_reached: wakes >= agent.max_wakes_per_hour,
-            tasks_worktree_id: db::agent_tasks_worktree_id(&agent.id),
-            running_tasks,
             unread_notifications,
             activity,
             agent,
         });
     }
     Ok(out)
+}
+
+/// What the project view needs to show a project's coordinator chat.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectCoordinator {
+    pub agent_id: String,
+    /// Reserved worktree ID of the coordinator's sessions.
+    pub worktree_id: String,
+    /// Folder the chat runs in: the project folder.
+    pub worktree_path: String,
+    pub chat_session_id: String,
+    /// `None` = the default a new chat would use.
+    pub backend: Option<String>,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub thinking_level: Option<String>,
+}
+
+/// The coordinator of a project and its chat session. Creates both when they
+/// do not exist yet.
+pub async fn get_project_coordinator(
+    app: &AppHandle,
+    project_id: &str,
+) -> Result<ProjectCoordinator, String> {
+    let agent = super::ensure_coordinator(app, project_id)?;
+    let (chat, worktree_path) = super::engine::home_session(app, &agent).await?;
+    Ok(ProjectCoordinator {
+        agent_id: agent.id,
+        worktree_id: agent.worktree_id,
+        worktree_path,
+        chat_session_id: chat.id,
+        backend: agent.backend,
+        model: agent.model,
+        effort: agent.effort,
+        thinking_level: agent.thinking_level,
+    })
+}
+
+/// Folder a coordinator's sessions run in.
+pub fn agent_workdir(app: &AppHandle, agent_id: &str) -> Result<String, String> {
+    let agent = super::with_db(app, |conn| db::get_agent(conn, agent_id))?
+        .ok_or_else(|| format!("Agent not found: {agent_id}"))?;
+    super::agent_workdir(app, &agent)
 }
 
 pub fn get_agent_details(app: &AppHandle, agent_id: &str) -> Result<AgentDetails, String> {
@@ -161,7 +196,6 @@ pub fn get_agent_details(app: &AppHandle, agent_id: &str) -> Result<AgentDetails
                 },
             )?,
             memory_changes: db::list_memory_changes(conn, agent_id, 30)?,
-            tasks: db::list_tasks(conn, agent_id, 50)?,
             notifications: db::list_notifications(conn, agent_id, 30)?,
         })
     })
@@ -636,9 +670,9 @@ mod tests {
             superseded_at: None,
         };
         let md = render_memory_markdown(
-            "jean",
+            "coord_p1",
             &[
-                m(1, "rule", "Ask before merge", Some("jean"), true),
+                m(1, "rule", "Ask before merge", Some("coord_p1"), true),
                 m(2, "fact", "vattaf is prod", None, false),
             ],
         );
