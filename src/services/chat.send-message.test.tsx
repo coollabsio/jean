@@ -10,6 +10,7 @@ import {
   restoreReturnedQueuedMessage,
   upsertTurnAssistantMessage,
   useSendMessage,
+  USER_TURN_VERDICT_GRACE_MS,
 } from './chat'
 import { useChatStore } from '@/store/chat-store'
 import type { ChatMessage, QueuedMessage, Session } from '@/types/chat'
@@ -94,6 +95,35 @@ async function startSend(hook: ReturnType<typeof setup>['hook']) {
       finish(reply)
       await send
     })
+  }
+}
+
+type SendArgs = Parameters<ReturnType<typeof useSendMessage>['mutateAsync']>[0]
+
+/**
+ * Send, let the invoke reject, and wait out the verdict grace time. Returns
+ * the rejection reason.
+ */
+async function sendUntilRejected(
+  hook: ReturnType<typeof setup>['hook'],
+  args: SendArgs,
+  duringGrace?: () => void
+) {
+  vi.useFakeTimers()
+  try {
+    let reason: unknown
+    await act(async () => {
+      const send = hook.result.current.mutateAsync(args).catch(error => {
+        reason = error
+      })
+      await vi.advanceTimersByTimeAsync(USER_TURN_VERDICT_GRACE_MS / 2)
+      duringGrace?.()
+      await vi.advanceTimersByTimeAsync(USER_TURN_VERDICT_GRACE_MS)
+      await send
+    })
+    return reason
+  } finally {
+    vi.useRealTimers()
   }
 }
 
@@ -242,17 +272,15 @@ describe('useSendMessage completion', () => {
       useChatStore.getState().setInputDraft('session-1', newerDraft)
       mockInvoke.mockRejectedValue('Session not found: session-1')
 
-      await act(async () => {
-        await expect(
-          hook.result.current.mutateAsync({
-            sessionId: 'session-1',
-            worktreeId: 'worktree-1',
-            worktreePath: '/tmp/worktree-1',
-            message: 'do not lose this text',
-            backend: 'claude',
-          })
-        ).rejects.toBe('Session not found: session-1')
-      })
+      expect(
+        await sendUntilRejected(hook, {
+          sessionId: 'session-1',
+          worktreeId: 'worktree-1',
+          worktreePath: '/tmp/worktree-1',
+          message: 'do not lose this text',
+          backend: 'claude',
+        })
+      ).toBe('Session not found: session-1')
 
       expect(useChatStore.getState().inputDrafts['session-1']).toBe(
         newerDraft || 'do not lose this text'
@@ -288,18 +316,16 @@ describe('useSendMessage completion', () => {
     } as never)
     mockInvoke.mockRejectedValue('Codex could not start: login required')
 
-    await act(async () => {
-      await expect(
-        hook.result.current.mutateAsync({
-          sessionId: 'session-1',
-          worktreeId: 'worktree-1',
-          worktreePath: '/tmp/worktree-1',
-          message:
-            'check this\n\n[File: src/a.ts - Use the Read tool to view this file]\n\n[Image attached: /tmp/img.png - Use the Read tool to view this image]',
-          backend: 'codex',
-        })
-      ).rejects.toBe('Codex could not start: login required')
-    })
+    expect(
+      await sendUntilRejected(hook, {
+        sessionId: 'session-1',
+        worktreeId: 'worktree-1',
+        worktreePath: '/tmp/worktree-1',
+        message:
+          'check this\n\n[File: src/a.ts - Use the Read tool to view this file]\n\n[Image attached: /tmp/img.png - Use the Read tool to view this image]',
+        backend: 'codex',
+      })
+    ).toBe('Codex could not start: login required')
 
     const state = useChatStore.getState()
     expect(state.inputDrafts['session-1']).toBe('check this')
@@ -321,17 +347,15 @@ describe('useSendMessage completion', () => {
       return Promise.reject('CLI execution thread closed unexpectedly')
     })
 
-    await act(async () => {
-      await expect(
-        hook.result.current.mutateAsync({
-          sessionId: 'session-1',
-          worktreeId: 'worktree-1',
-          worktreePath: '/tmp/worktree-1',
-          message: 'second question',
-          backend: 'claude',
-        })
-      ).rejects.toBe('CLI execution thread closed unexpectedly')
-    })
+    expect(
+      await sendUntilRejected(hook, {
+        sessionId: 'session-1',
+        worktreeId: 'worktree-1',
+        worktreePath: '/tmp/worktree-1',
+        message: 'second question',
+        backend: 'claude',
+      })
+    ).toBe('CLI execution thread closed unexpectedly')
 
     expect(contents(session()?.messages)).toEqual([
       'first question',
@@ -341,6 +365,41 @@ describe('useSendMessage completion', () => {
     expect(
       useChatStore.getState().sendingSessionIds['session-1']
     ).toBeUndefined()
+  })
+
+  it('keeps the prompt when the verdict arrives after the rejection (#927)', async () => {
+    const { hook, session } = setup([message('u1', 'user', 'first question')])
+    useChatStore.setState({
+      inputDrafts: {},
+      lastSentMessages: { 'session-1': 'second question' },
+    } as never)
+    mockInvoke.mockRejectedValue('API Error: rate limit reached')
+
+    const reason = await sendUntilRejected(
+      hook,
+      {
+        sessionId: 'session-1',
+        worktreeId: 'worktree-1',
+        worktreePath: '/tmp/worktree-1',
+        message: 'second question',
+        backend: 'claude',
+      },
+      () => {
+        // Before the verdict, the optimistic prompt is still on screen.
+        expect(contents(session()?.messages)).toEqual([
+          'first question',
+          'second question',
+        ])
+        recordUserTurnOutcome('session-1', 'persisted')
+      }
+    )
+
+    expect(reason).toBe('API Error: rate limit reached')
+    expect(contents(session()?.messages)).toEqual([
+      'first question',
+      'second question',
+    ])
+    expect(useChatStore.getState().inputDrafts['session-1']).toBeUndefined()
   })
 
   it('keeps newer typing and drops stale attachments after a rejected send', async () => {
@@ -360,17 +419,15 @@ describe('useSendMessage completion', () => {
     } as never)
     mockInvoke.mockRejectedValue('boom')
 
-    await act(async () => {
-      await expect(
-        hook.result.current.mutateAsync({
-          sessionId: 'session-1',
-          worktreeId: 'worktree-1',
-          worktreePath: '/tmp/worktree-1',
-          message: 'old\n\n[Image attached: /tmp/img.png]',
-          backend: 'claude',
-        })
-      ).rejects.toBe('boom')
-    })
+    expect(
+      await sendUntilRejected(hook, {
+        sessionId: 'session-1',
+        worktreeId: 'worktree-1',
+        worktreePath: '/tmp/worktree-1',
+        message: 'old\n\n[Image attached: /tmp/img.png]',
+        backend: 'claude',
+      })
+    ).toBe('boom')
 
     const state = useChatStore.getState()
     expect(state.inputDrafts['session-1']).toBe('newer draft')
