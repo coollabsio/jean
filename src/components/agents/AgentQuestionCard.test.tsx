@@ -63,6 +63,7 @@ describe('AgentQuestionCard', () => {
     expect(
       screen.getByText('New worktree, Existing session')
     ).toBeInTheDocument()
+    expect(screen.getByText(multiple.question)).toBeInTheDocument()
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
   })
 
@@ -76,6 +77,7 @@ describe('AgentQuestionCard', () => {
         onSend={vi.fn()}
       />
     )
-    expect(screen.getByText('"Somewhere else"')).toBeInTheDocument()
+    expect(screen.getByText('Somewhere else')).toBeInTheDocument()
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument()
   })
 })
