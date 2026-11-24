@@ -386,6 +386,14 @@ fn merge_pi_line(response: &mut PiResponse, value: &Value) {
 
     let event_type = value.get("type").and_then(Value::as_str).unwrap_or("");
     match event_type {
+        // Written by Jean when the PI host accepts a steer (`steer_pi_turn`).
+        "steered_user_message" => {
+            if let Some(text) = value.get("text").and_then(Value::as_str) {
+                response.content_blocks.push(ContentBlock::UserInput {
+                    text: text.to_string(),
+                });
+            }
+        }
         "message" => {
             let Some(message) = value.get("message") else {
                 return;
@@ -2161,5 +2169,21 @@ mod tests {
         assert_eq!(pi_thinking_level(Some(&EffortLevel::High)), Some("high"));
         assert_eq!(pi_thinking_level(Some(&EffortLevel::Xhigh)), Some("xhigh"));
         assert_eq!(pi_thinking_level(None), None);
+    }
+
+    #[test]
+    fn history_keeps_steered_user_messages_in_order() {
+        let input = [
+            r#"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"Working"}}"#,
+            r#"{"type":"steered_user_message","text":"also run tests"}"#,
+            r#"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"Done"}}"#,
+        ]
+        .join("\n");
+
+        let blocks = parse_pi_json_stream_inner(&input).content_blocks;
+
+        assert!(matches!(&blocks[0], ContentBlock::Text { text } if text == "Working"));
+        assert!(matches!(&blocks[1], ContentBlock::UserInput { text } if text == "also run tests"));
+        assert!(matches!(&blocks[2], ContentBlock::Text { text } if text == "Done"));
     }
 }

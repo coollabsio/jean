@@ -2030,7 +2030,7 @@ pub fn tail_claude_output(
 
             match msg_type {
                 "steered_user_message" => {
-                    // Written by the Claude host when the CLI consumed a steer.
+                    // Written by the Claude host when it accepts a steer.
                     if let Some(text) = msg.get("text").and_then(|v| v.as_str()) {
                         content_blocks.push(ContentBlock::UserInput {
                             text: text.to_string(),

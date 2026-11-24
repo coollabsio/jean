@@ -240,9 +240,9 @@ re-parse the whole accumulated buffer (avoids O(n²) on long sessions).
 
 When `claude_auto_steer_enabled` is on (Unix only, CLI must list `--replay-user-messages`), Claude runs go through Jean's detached Claude host (`jean-core/src/chat/claude_host.rs`, argv `--jean-claude-host`) instead of `cat input | claude`. The host keeps Claude's stdin open and accepts `steer` requests on `<app_data>/r/c<sid8><run8>.sock` (`steer_claude_turn`).
 
-- The host drops the replayed initial prompt and rewrites replayed steers (`isReplay: true` user lines) as `steered_user_message`. Never parse replayed user lines elsewhere.
+- The host writes `steered_user_message` to the run log when it accepts a steer (the CLI can consume it minutes later, after the current tool), so reloads and other clients see it at once. It drops all replayed user lines (`isReplay: true`: the initial prompt and steer echoes). Never parse replayed user lines elsewhere.
 - The host closes stdin on `result` only when no steer is pending, then writes `jean_claude_host_exit`. The tailer treats runs with `jean_claude_host_start` as host-backed and ends at the exit marker, not the first `result`.
-- `steer_claude_turn` emits `chat:steered` as soon as the host accepts the steer (the CLI can take seconds to consume it). It marks the text as announced, so the tailer skips its own `chat:steered` on consumption. After a Jean restart nothing is marked, so recovered runs emit from the tailer.
+- `steer_claude_turn` emits `chat:steered` as soon as the host accepts the steer. It marks the text as announced first, so the tailer skips its own `chat:steered` for the host's line. After a Jean restart nothing is marked, so recovered runs emit from the tailer.
 - Details and limitations: `docs/developer/architecture-guide.md` → "Claude CLI mid-turn steering".
 
 #### Claude CLI JSON Schema Pattern

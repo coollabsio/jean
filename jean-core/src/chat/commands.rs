@@ -10906,7 +10906,7 @@ fn queued_message_supports_any_steering(msg: &serde_json::Value) -> bool {
 /// host. Errors when the run is not host-backed or the turn already finished;
 /// callers fall back to the queue. `chat:steered` is emitted when the host
 /// accepts the steer; the host writes `steered_user_message` to the run log
-/// when the CLI consumes it.
+/// at the same time (the CLI consumes it later, at its next turn boundary).
 pub async fn steer_claude_turn(
     app: AppHandle,
     worktree_id: String,
@@ -10945,9 +10945,9 @@ async fn steer_text_into_claude_turn(
             .map_err(|e| format!("Failed to resolve app data dir: {e}"))?;
         let socket_path =
             super::claude_host::claude_host_socket_path(&app_data, session_id, &run_id);
-        // The CLI consumes the steer only at its next turn boundary, which can
-        // take seconds. Show the prompt now; mark it first so the tailer does
-        // not emit it a second time on consumption (even when that is fast).
+        // The host writes the steer to the run log on accept. Show the prompt
+        // now; mark it first so the tailer does not emit it a second time when
+        // it reads that line (even when that is fast).
         super::claude_host::mark_steer_announced(session_id, message);
         let text = message.to_string();
         let result = tokio::task::spawn_blocking(move || {

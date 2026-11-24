@@ -3333,9 +3333,9 @@ pub fn persist_partial_cancelled_content(
 /// frontend showed when the user cancelled.
 ///
 /// The frontend's streaming view is authoritative: the backend's incremental
-/// writes can lag behind it (web access), and a Claude steer accepted by the
-/// host is only written when the CLI consumes it, so a steer cancelled before
-/// that point exists only in the frontend. Only the pieces the disk is missing
+/// writes can lag behind it (web access), and older Claude hosts wrote a steer
+/// only when the CLI consumed it, so a steer cancelled before that point
+/// exists only in the frontend. Only the pieces the disk is missing
 /// are returned. parse_run_to_message() accumulates tool calls and text across
 /// assistant lines, so appending does not duplicate.
 fn missing_cancelled_content_lines(
