@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import userEvent from '@testing-library/user-event'
 import { render, screen, within } from '@/test/test-utils'
 import { useChatStore } from '@/store/chat-store'
-import { useUIStore, type ProjectViewMode } from '@/store/ui-store'
+import { useUIStore } from '@/store/ui-store'
 import type { Project, RecentWorktreeItem, Worktree } from '@/types/projects'
 import type { Session } from '@/types/chat'
 import { CoordinatorView } from './CoordinatorView'
@@ -81,11 +81,10 @@ function row(
 
 const project = { id: 'p1', name: 'My Project' } as Project
 
-function renderView(mode: ProjectViewMode = 'coordinator') {
+function renderView() {
   return render(
     <CoordinatorView
       project={project}
-      mode={mode}
       viewSwitch={<span>switch</span>}
       sessionModalHost={null}
     />
@@ -171,7 +170,7 @@ describe('CoordinatorView', () => {
       name: 'Coordinator details',
     })
     expect(
-      within(aside).getByRole('tab', { name: 'Worktrees' })
+      within(aside).getByRole('tab', { name: 'Sessions' })
     ).toHaveAttribute('aria-selected', 'true')
     const items = await within(aside).findAllByRole('listitem')
     expect(items.map(item => item.textContent)).toEqual([
@@ -195,31 +194,14 @@ describe('CoordinatorView', () => {
     expect(useUIStore.getState().coordinatorSidebarOpen).toBe(true)
   })
 
-  it('says so when the coordinator started no work', async () => {
+  it('says so in the sidebar when the coordinator started no work', async () => {
     mocks.items = [row('c', 'c-mine', { last_run_status: 'running' })]
-    renderView('sessions')
+    renderView()
+    await userEvent.click(screen.getByRole('button', { name: 'Show details' }))
     expect(
       await screen.findByText('The coordinator has not started any work yet.')
     ).toBeVisible()
-  })
-
-  it('in sessions mode shows the delegated list instead of the chat', async () => {
-    mocks.delegatedSessionIds = ['a-run']
-    mocks.items = [
-      row('a', 'a-run', { last_run_status: 'running' }),
-      row('c', 'c-mine', { last_run_status: 'running' }),
-    ]
-    renderView('sessions')
-    const list = await screen.findByRole('list', {
-      name: 'Coordinator worktrees',
-    })
-    expect(
-      within(list)
-        .getAllByRole('listitem')
-        .map(item => item.textContent)
-    ).toEqual(['wt-asession a-runnow'])
-    expect(screen.queryByText('coordinator chat')).toBeNull()
-    expect(screen.getByText('My Project')).toBeVisible()
+    expect(screen.getByText('coordinator chat')).toBeVisible()
   })
 
   it('on mobile opens the details as a sheet that closes after opening a session', async () => {

@@ -20,6 +20,7 @@ import {
   useRef,
   useState,
   Suspense,
+  type ReactNode,
 } from 'react'
 import { useQueries, useQueryClient } from '@tanstack/react-query'
 import { invoke } from '@/lib/transport'
@@ -268,6 +269,8 @@ import { resolveModalWorktreeSnapshot } from './modal-worktree-snapshot'
 interface ProjectCanvasViewProps {
   projectId: string
   project: Project
+  /** Shown beside the project name (the Coordinator | Sessions switch) */
+  headerAccessory?: ReactNode
   /**
    * Worktrees list beside the coordinator chat: compact rows, no keyboard
    * navigation or restored selection, so canvas shortcuts stay inert while
@@ -1131,6 +1134,7 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
 export function ProjectCanvasView({
   projectId,
   project,
+  headerAccessory,
   embedded = false,
 }: ProjectCanvasViewProps) {
   useEffect(
@@ -3298,6 +3302,7 @@ export function ProjectCanvasView({
                 <h2 className="truncate text-sm font-normal text-muted-foreground">
                   {project.name}
                 </h2>
+                {headerAccessory}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
