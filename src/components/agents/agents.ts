@@ -62,16 +62,12 @@ export function coordinatorProjectIdForWorktree(
 const OPEN_DELEGATION_STATUSES = new Set(['active', 'waiting'])
 
 export interface CoordinatorDelegations {
-  worktreeIds: ReadonlySet<string>
   sessionIds: ReadonlySet<string>
 }
 
-const NO_DELEGATIONS: CoordinatorDelegations = {
-  worktreeIds: new Set(),
-  sessionIds: new Set(),
-}
+const NO_DELEGATIONS: CoordinatorDelegations = { sessionIds: new Set() }
 
-/** Worktrees and sessions the coordinator still waits for. */
+/** Sessions the coordinator still waits for. */
 export function openDelegations(
   delegations: AgentDelegation[] | undefined
 ): CoordinatorDelegations {
@@ -79,10 +75,7 @@ export function openDelegations(
     OPEN_DELEGATION_STATUSES.has(d.status)
   )
   if (open.length === 0) return NO_DELEGATIONS
-  return {
-    worktreeIds: new Set(open.map(d => d.worktreeId)),
-    sessionIds: new Set(open.map(d => d.sessionId)),
-  }
+  return { sessionIds: new Set(open.map(d => d.sessionId)) }
 }
 
 /** Open delegations of a project's coordinator; empty while `enabled` is off. */

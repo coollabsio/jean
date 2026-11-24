@@ -249,7 +249,6 @@ describe('openDelegations', () => {
       delegation(4, 'failed'),
       delegation(5, 'cancelled'),
     ])
-    expect([...open.worktreeIds]).toEqual(['w1', 'w2'])
     expect([...open.sessionIds]).toEqual(['s1', 's2'])
   })
 
