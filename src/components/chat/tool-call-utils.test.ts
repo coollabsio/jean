@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   assistantTextParts,
+  quietTurnSegments,
   buildTimeline,
   coalesceContentBlocks,
   findPlanFilePath,
@@ -637,5 +638,41 @@ describe('assistantTextParts', () => {
       'Working on it',
     ])
     expect(assistantTextParts([], '  ')).toEqual([])
+  })
+})
+
+describe('quietTurnSegments', () => {
+  it('keeps steered prompts where they went into the turn', () => {
+    expect(
+      quietTurnSegments(
+        [
+          { type: 'text', text: 'Looking ' },
+          { type: 'text', text: 'at it' },
+          { type: 'tool_use', tool_call_id: 't1' },
+          { type: 'text', text: 'Found it' },
+          { type: 'user_input', text: 'also check the tests' },
+          { type: 'user_input', text: ' ' },
+          { type: 'user_input', text: 'and the docs' },
+          { type: 'text', text: 'On it' },
+        ],
+        ''
+      )
+    ).toEqual([
+      { kind: 'text', parts: ['Looking at it', 'Found it'] },
+      { kind: 'steered', texts: ['also check the tests', 'and the docs'] },
+      { kind: 'text', parts: ['On it'] },
+    ])
+  })
+
+  it('shows a steered prompt before any assistant text', () => {
+    expect(
+      quietTurnSegments([{ type: 'user_input', text: 'stop that' }], '')
+    ).toEqual([{ kind: 'steered', texts: ['stop that'] }])
+  })
+
+  it('falls back to content without blocks', () => {
+    expect(quietTurnSegments([], ' Working ')).toEqual([
+      { kind: 'text', parts: ['Working'] },
+    ])
   })
 })

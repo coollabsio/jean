@@ -93,6 +93,12 @@ interface UseMessageSendingParams {
   markAtBottom: () => void
   clearInputDraft: (sessionId: string) => void
   clearChatInputState: () => void
+  /**
+   * Agent (coordinator) chats: a prompt sent while a turn runs always steers
+   * into it on steer-capable backends, never queues (falls back to the queue
+   * only when the steer fails).
+   */
+  alwaysSteer?: boolean
 }
 
 const PLAN_TURN_PROMPT =
@@ -147,6 +153,7 @@ export function useMessageSending({
   markAtBottom,
   clearInputDraft,
   clearChatInputState,
+  alwaysSteer = false,
 }: UseMessageSendingParams) {
   // Installed backends for availability; auth map for login gate at send time.
   const { installedBackends, isLoading: backendsLoading } =
@@ -752,7 +759,8 @@ export function useMessageSending({
         const backend = selectedBackendRef.current
         if (
           isSteerCapableBackend(backend, preferences) &&
-          (options?.forceSteer ||
+          (alwaysSteer ||
+            options?.forceSteer ||
             (!options?.forceQueue &&
               isBackendAutoSteerEnabled(backend, preferences)))
         ) {
@@ -807,9 +815,10 @@ export function useMessageSending({
         }
         console.log(`[Send] handleSubmit ENQUEUING (session is sending)`)
         // An explicit queue must not be steered by the backend queue drain.
-        const toEnqueue = options?.forceQueue
-          ? { ...queuedMessage, noSteer: true }
-          : queuedMessage
+        const toEnqueue =
+          options?.forceQueue && !alwaysSteer
+            ? { ...queuedMessage, noSteer: true }
+            : queuedMessage
         enqueueMessage(activeSessionId, toEnqueue)
         persistEnqueue(
           activeWorktreeId,
@@ -826,6 +835,7 @@ export function useMessageSending({
       activeSessionId,
       activeWorktreeId,
       activeWorktreePath,
+      alwaysSteer,
       authByBackend,
       authLoading,
       backendsLoading,

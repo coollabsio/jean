@@ -52,4 +52,36 @@ describe('InlineQuestionOptions', () => {
       'Mode?\n2. Full\n\nTimeouts?\n1. Local\n2. Remote'
     )
   })
+
+  it('clears a single-choice pick on a second click', () => {
+    const onSend = vi.fn()
+    render(
+      <InlineQuestionOptions
+        questions={[
+          { question: 'Mode?', options: ['Hash', 'Full'], multiple: false },
+          { question: 'Scope?', options: ['All', 'Some'], multiple: false },
+        ]}
+        disabled={false}
+        onSend={onSend}
+      />
+    )
+    const accept = screen.getByRole('button', { name: 'Accept' })
+    const mode = screen.getByRole('group', { name: 'Mode?' })
+    const scope = screen.getByRole('group', { name: 'Scope?' })
+    const hash = Array.from(mode.querySelectorAll('button')).find(b =>
+      b.textContent?.includes('Hash')
+    ) as HTMLElement
+    const all = Array.from(scope.querySelectorAll('button')).find(b =>
+      b.textContent?.includes('All')
+    ) as HTMLElement
+
+    fireEvent.click(all)
+    fireEvent.click(hash)
+    expect(hash).toHaveAttribute('aria-pressed', 'true')
+    expect(accept).toBeEnabled()
+    fireEvent.click(hash)
+    expect(hash).toHaveAttribute('aria-pressed', 'false')
+    expect(accept).toBeDisabled()
+    expect(onSend).not.toHaveBeenCalled()
+  })
 })

@@ -35,10 +35,10 @@ export function InlineQuestionOptions({
       questions.map((q, i) => {
         const selected = current[i] ?? []
         if (i !== questionIndex) return selected
-        if (!q.multiple) return [optionIndex]
-        return selected.includes(optionIndex)
-          ? selected.filter(index => index !== optionIndex)
-          : [...selected, optionIndex]
+        // A click on a selected option clears it
+        if (selected.includes(optionIndex))
+          return selected.filter(index => index !== optionIndex)
+        return q.multiple ? [...selected, optionIndex] : [optionIndex]
       })
     )
   }

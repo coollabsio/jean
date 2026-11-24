@@ -154,9 +154,10 @@ import { isFirstWorktreeSession } from './setup-script-visibility'
 import { TodoWidget } from './TodoWidget'
 import { AgentWidget } from './AgentWidget'
 import {
-  assistantTextParts,
   normalizeTodosForDisplay,
+  quietTurnSegments,
   restoreOmittedStreamingPrefix,
+  type QuietTurnSegment,
 } from './tool-call-utils'
 import { ImagePreview } from './ImagePreview'
 import { TextFilePreview } from './TextFilePreview'
@@ -293,6 +294,7 @@ import { useMcpServerResolution } from './hooks/useMcpServerResolution'
 import { coordinatorProjectIdForWorktree } from '@/components/agents/agents'
 import { useInstalledBackends } from '@/hooks/useInstalledBackends'
 import { ReplyBubbles } from './ReplyBubble'
+import { SteeredPromptGroup } from './SteeredPromptGroup'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useToolbarHandlers } from './hooks/useToolbarHandlers'
 import { useMessageSending } from './hooks/useMessageSending'
@@ -316,7 +318,7 @@ const MESSAGES_BOTTOM_INSET = 'calc(var(--chat-composer-height, 0px) + 1.5rem)'
 // Using these constants ensures referential equality for empty states
 const EMPTY_TOOL_CALLS: ToolCall[] = []
 const EMPTY_CONTENT_BLOCKS: ContentBlock[] = []
-const EMPTY_TEXT_PARTS: string[] = []
+const EMPTY_QUIET_SEGMENTS: QuietTurnSegment[] = []
 const EMPTY_PENDING_IMAGES: PendingImage[] = []
 const EMPTY_PENDING_TEXT_FILES: PendingTextFile[] = []
 const EMPTY_PENDING_FILES: PendingFile[] = []
@@ -1182,18 +1184,19 @@ const ChatWindowContent = memo(function ChatWindowContent({
       : EMPTY_CONTENT_BLOCKS
   )
   // Quiet (agent) chats hide tool activity: show the agent's text while it
-  // works, one bubble per part, so the user sees its progress messages
-  const quietStreamingParts = useMemo(
+  // works, one bubble per part, so the user sees its progress messages, and
+  // the prompts steered into the turn where they went in
+  const quietStreamingSegments = useMemo(
     () =>
       workingLabel
-        ? assistantTextParts(
+        ? quietTurnSegments(
             restoreOmittedStreamingPrefix(
               streamingContent,
               currentStreamingContentBlocks
             ),
             streamingContent
           )
-        : EMPTY_TEXT_PARTS,
+        : EMPTY_QUIET_SEGMENTS,
     [workingLabel, currentStreamingContentBlocks, streamingContent]
   )
   const agentStatus = useMemo(
@@ -1907,6 +1910,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
     markAtBottom,
     clearInputDraft,
     clearChatInputState: handleClearChatInputState,
+    alwaysSteer: agentChat,
   })
 
   const handleSteer = useCallback(
@@ -3052,15 +3056,37 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                         turnPrompt={streamingTurnPrompt}
                                       />
                                     )}
-                                  {quietStreamingParts.length > 0 &&
+                                  {quietStreamingSegments.length > 0 &&
                                     !isUpdateTurnStreaming &&
                                     !currentToolCalls.some(needsUserInput) && (
-                                      <div className="pb-2">
-                                        <ReplyBubbles
-                                          streaming
-                                          parts={quietStreamingParts}
-                                          sessionId={activeSessionId}
-                                        />
+                                      <div className="flex flex-col gap-3 pb-2">
+                                        {quietStreamingSegments.map(
+                                          (segment, index) =>
+                                            segment.kind === 'steered' ? (
+                                              <SteeredPromptGroup
+                                                // react-doctor-disable-next-line react-doctor/no-array-index-as-key -- streamed segments only append
+                                                key={index}
+                                                bubble
+                                                texts={segment.texts}
+                                                worktreePath={
+                                                  activeWorktreePath
+                                                }
+                                                serverId={targetServerId}
+                                              />
+                                            ) : (
+                                              <ReplyBubbles
+                                                // react-doctor-disable-next-line react-doctor/no-array-index-as-key -- streamed segments only append
+                                                key={index}
+                                                streaming={
+                                                  index ===
+                                                  quietStreamingSegments.length -
+                                                    1
+                                                }
+                                                parts={segment.parts}
+                                                sessionId={activeSessionId}
+                                              />
+                                            )
+                                        )}
                                       </div>
                                     )}
                                   <StreamingStatusBar
