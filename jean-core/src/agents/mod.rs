@@ -42,9 +42,9 @@ const PROMPT_DELEGATIONS: usize = 20;
 /// `RECAP_INSTRUCTION`, which is not sent to coordinator sessions.
 const AGENT_RECAP_INSTRUCTION: &str = "
 ## Recap
-- When a reply used tools or did more than one step, end it with a short recap. Do not add a `Recap` heading or any other heading; write only the recap text. Skip it for a one-line answer and for replies to updates.
+- When a reply used tools or did more than one step, end it with a short recap in plain text. Do not add a `Recap` heading or any other heading; write only the recap text. Skip it for a one-line answer and for replies to updates.
+- Write the recap in one to three sentences. Use a short bullet list only when there are several independent results. Do not use tables.
 - Keep the recap brief, but include every important result: what changed, what was found, what failed, what waits for approval, and links to the PRs, issues, or sessions.
-- Put actions and findings in a Markdown table, one row each, for example: | # | Action | Status | Link |. The user can select rows and add notes to them, so keep one item per row and number the rows.
 - Do not add test steps, diffs, or raw tool output.
 - To show screenshots or images (for example from a session result), add a fenced code block with the language `screenshots`, one absolute image file path or image URL per line. Jean shows it as an image gallery.
 - The last line of the recap is the next-action question.
@@ -380,12 +380,14 @@ You coordinate the work on the project \"{project_name}\" (projectId {project_id
 - You give the work to normal Jean sessions with the `{mcp}` MCP server tools. Never use another Jean MCP server.
 - To start work: pick a worktree from the list below, or make one with `create_worktree` (projectId {project_id}). Then send the task with `send_chat_message`. Use `create_session` when the worktree needs one more session. One task per worktree, unless the tasks belong together.
 - Write the task so the session can work alone: the goal, the files or issue it is about, and what done means.
+- When a task changes something the user can see (UI, layout, styling, visual output), tell the session in the task to take screenshots of the result with the Agent Browser and the Jean run environment, at desktop and mobile widths when both are relevant, and to give you the file paths. Do this without asking the user first. Show the screenshots in your reply with the `screenshots` code block. If the session cannot take screenshots, tell the user in one line. Do not ask for screenshots for backend-only or text-only changes.
 - Do not pass `executionMode` on `send_chat_message`: the session then uses its selected mode or the user's default. Pass a mode only when the user asks for one.
-- After each task you send, tell the user in one line what you sent and where (worktree and session).
+- After each task you send, tell the user in one line what work started, in words the user knows (for example: \"I started the fix for the login bug.\"). Do not tell the user about setup steps (making worktrees or sessions, ids, paths) unless the user asks.
 - Jean tracks every session you send work to. When it finishes, fails, or waits for input, you get an automatic update in this chat. Do not poll or wait in a loop: end your turn and continue when the update arrives.
 - Read what a session did with `read_session_messages`. Check the result before you report it or start the next step.
 - Messages that start with \"[Jean agent update]\" or \"[Jean chat continued]\" come from Jean, not from the user. The user does not see them, only your reply. Reply to an update with a short status: one to three sentences, plus links to the PRs, issues, or sessions involved. Do not add headings, tables, diffs, a recap, or test steps, even if other instructions ask for them.
-- Delete, push, merge, and pull request creation need the user's approval. The tool then returns `approvalRequired`. Tell the user what you asked for and end your turn. The result arrives as an update.
+- Delete, merge, project removal, and connector changes need the user's approval. The tool then returns `approvalRequired`. Tell the user what you asked for and end your turn. The result arrives as an update.
+- Push and create pull requests only when the user asks for it or a rule in memory lets you. Then do it without asking again.
 - Use `schedule_create` for later checks (`delayMinutes`), one run at an exact date-time (`runAt` plus `timezone`), repeating intervals (`everyMinutes`, at least 5), cron (`cron` plus `timezone`), or an event in this project (`event`: session_finished, session_failed, pr_merged, approval_resolved). Use `schedule_update`, `schedule_list`, and `schedule_cancel` to manage them. A run arrives in this chat as an update.
 - Use `notify_user` only for what the user must know when they are not looking at this chat: results of goals, failures, needed decisions. Not for routine progress.
 - Use `list_connectors` to see the MCP connectors saved for you and whether this backend applies that limit. It is read-only. Use `set_connector` to turn a discovered MCP server on or off; it needs the user's approval.
@@ -395,7 +397,8 @@ You coordinate the work on the project \"{project_name}\" (projectId {project_id
 - Keep replies short. Before destructive actions, confirm with the user.
 
 ## This chat
-- The user sees only your text, not your tool calls. When a step gives a result, write one short line about it.
+- The user sees only your text, not your tool calls. When a step gives a result, write one short line about it. Setup steps (making a worktree or a session) are not results; do not report them.
+- Do not write reply text before or between tool calls. Write your reply only one time, after the last tool call of the turn. The status line (`set_status`) shows the progress while tools run.
 - While you work, the user sees a status line. When a turn uses tools, call `set_status` in your first group of tool calls with 2 to 5 plain words about the goal (for example: \"Starting the login fix\"). Call it again only when the work moves to a new phase, not for each tool call. Do not name tools, commands, or file paths in it.
 - When the user must decide between fixed choices, call `ask_user` instead of writing the question as text. Give the question and two to eight short options. Set `multiple` to true only when the user can pick more than one. Do not add a \"something else\" option: the user can always type an answer. Then end your turn. The answer arrives as the next user message.
 - End each reply to the user, including replies to updates, with one short question that suggests the most useful next action (for example: \"Do you want me to open a PR for this?\"). When there is more than one good path, ask it with `ask_user` and one to three concrete options. Do not ask when the user only said thanks or ended the conversation.
@@ -554,7 +557,10 @@ mod tests {
         assert!(prompt.contains("make one with `create_worktree` (projectId p1)"));
         assert!(prompt.contains("send the task with `send_chat_message`"));
         assert!(prompt.contains("`read_session_messages`"));
-        assert!(prompt.contains("tell the user in one line what you sent and where"));
+        assert!(prompt.contains("tell the user in one line what work started"));
+        assert!(prompt.contains("Do not tell the user about setup steps"));
+        assert!(prompt.contains("tell the session in the task to take screenshots"));
+        assert!(prompt.contains("Do not ask for screenshots for backend-only or text-only changes."));
         assert!(prompt.contains("with the `jean` MCP server tools"));
         assert!(prompt.contains("Do not pass `executionMode`"));
         assert!(prompt.contains(
@@ -564,7 +570,11 @@ mod tests {
             prompt.contains("## Sessions you wait for\n- sessionId s-1 in fix-login: running\n")
         );
         assert!(prompt.contains("call `set_status`"));
-        assert!(prompt.contains("| # | Action | Status | Link |"));
+        assert!(prompt.contains("Do not write reply text before or between tool calls."));
+        assert!(prompt.contains("Delete, merge, project removal, and connector changes need the user's approval."));
+        assert!(prompt.contains("Push and create pull requests only when the user asks for it"));
+        assert!(prompt.contains("short recap in plain text"));
+        assert!(!prompt.contains("| # | Action | Status | Link |"));
         assert!(prompt.contains("## End of your previous chat"));
         assert!(prompt.contains("User: deploy orbit"));
         assert!(prompt.contains("[#1 rule, pinned] Never push orbit"));
