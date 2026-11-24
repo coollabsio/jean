@@ -1,6 +1,8 @@
 import { useEffect } from 'react'
 import { toast } from 'sonner'
 import { listen } from '@/lib/transport'
+import { useProjectsStore } from '@/store/projects-store'
+import { isCoordinatorViewActive } from '@/hooks/useMainWindowEventListeners'
 import { coordinatorProjectId } from './agents'
 import { useAgentsEnabled } from './agents-feature'
 import { openProjectCoordinator } from './open-coordinator'
@@ -10,6 +12,8 @@ interface AgentNotificationEvent {
   agentName: string
   level: string
   message: string
+  /** A delegated session's update (not `notify_user`) */
+  sessionUpdate?: boolean
 }
 
 function openAgent(agentId: string) {
@@ -17,7 +21,23 @@ function openAgent(agentId: string) {
   if (projectId) openProjectCoordinator(projectId)
 }
 
-/** Shows a toast when an agent calls `notify_user`. Renders nothing. */
+/** True when the user looks at this coordinator's chat now. */
+export function isCoordinatorChatInView(agentId: string): boolean {
+  const projectId = coordinatorProjectId(agentId)
+  return (
+    projectId !== null &&
+    isCoordinatorViewActive() &&
+    useProjectsStore.getState().selectedProjectId === projectId &&
+    document.hasFocus()
+  )
+}
+
+/**
+ * Shows a toast when a coordinator calls `notify_user`, or when one of its
+ * sessions finishes, fails, or waits for input. A session update is skipped
+ * while that coordinator's chat is in view: its reply shows there. Renders
+ * nothing.
+ */
 export function AgentNotificationsListener() {
   const enabled = useAgentsEnabled()
 
@@ -26,7 +46,9 @@ export function AgentNotificationsListener() {
     let unlisten: (() => void) | undefined
     let disposed = false
     void listen<AgentNotificationEvent>('agents:notification', event => {
-      const { agentId, agentName, level, message } = event.payload
+      const { agentId, agentName, level, message, sessionUpdate } =
+        event.payload
+      if (sessionUpdate && isCoordinatorChatInView(agentId)) return
       const show =
         level === 'error'
           ? toast.error

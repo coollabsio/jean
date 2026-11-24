@@ -143,6 +143,10 @@ send_chat_message (MCP, caller = coordinator chat)
 	└─ record_delegation ──► delegations(active)
 chat:done / chat:error / chat:cancelled (in-process listener)
 	└─ mark delegations of that session ──► check_after = now + 2s
+delegation::report_run_end (every run end, also without a chat:* event)
+	└─ on_run_reported: mark delegations no event marked yet
+mid-run input request (permission, question; see INPUT_REQUEST_EVENTS)
+	└─ active delegation ──► waiting + event (once per wait)
 tick (every 5s, or nudge(); skipped while coordinator_enabled is off)
 	├─ delegation checks ──► event
 	├─ due schedules (one-shot, interval, cron) ──► event
@@ -162,10 +166,11 @@ run nudges the loop, so updates that arrive during a turn go out right after
 it. One delivery counts as one wake.
 
 `next_delivery` marks the updates delivered, then `send_delivery` sends the
-message and waits for the turn. Sometimes the chat does not record the message
-(`UserTurnOutcome::NotAccepted`). The user sent a message first, or the
-session cannot run. Then `db::requeue_events` puts the same updates back in
-the queue, and a later tick sends them. The wake stays counted, so a send that
+message and waits for the turn. Sometimes the message does not stay in the
+chat (`UserTurnOutcome::NotAccepted` or `Withdrawn`, see `delivery_lost`). The
+user sent a message first, the session cannot run, or the run was hidden
+again. Then `db::requeue_events` puts the same updates back in the queue, and
+a later tick sends them. The wake stays counted, so a send that
 keeps failing stops at the hourly budget.
 
 - Wakes never run in Plan mode (`wake_execution_mode`), because Plan mode
@@ -174,8 +179,18 @@ keeps failing stops at the hourly budget.
 - New chat sessions get an implement execution mode, saved once
   (`ensure_session_mode`). Old session JSON with no saved mode still loads as
   Plan, so those sessions are not escalated.
-- At startup, Jean checks the active delegations once. Runs that ended while
-  Jean was closed are still reported.
+- At startup, Jean checks the open delegations (`active` and `waiting`) once.
+  Runs that ended while Jean was closed are still reported. A `waiting`
+  delegation whose session still waits is not reported again
+  (`is_repeat_wait`). The engine starts before Jean resumes detached runs, so
+  a resumed run that ends at once still reaches the listeners.
+- The run-end listeners miss runs that end without a `chat:*` event: a send
+  that fails before its run, or the tail of a resumed run.
+  `chat::delegation::report_run_end` runs on every run end and calls
+  `agents::on_run_reported`. It marks only delegations that no event marked
+  yet (`db::mark_unreported_run_end`), so the event's own kind and error stay.
+  It skips a session that another send still owns: that send reports when it
+  ends.
 
 Test overrides (environment, for isolated test servers only):
 `JEAN_AGENT_CHAT_ROTATE_MESSAGES` and `JEAN_AGENT_CHAT_ROTATE_IDLE_SECS`.
@@ -202,8 +217,22 @@ worktree, and the coordinator session that sent the work.
 `engine::outcome_status` maps a finished session to a status.
 `check_delegation` defers the check while the session still runs, including a
 detached run that resumed after a restart. When the run ends, it queues an
-event with the session name, the verb, the error (for `failed`), and the last
-reply. The event wakes the coordinator chat.
+event with the session name, the verb, the error (for `failed`), the pull
+request of the worktree (`pr_url`, when one is linked), and the last reply.
+The event wakes the coordinator chat.
+
+A session that asks for input in the middle of a run (Claude Supervised
+permission, Codex approvals and questions, OpenCode permissions) emits one of
+`INPUT_REQUEST_EVENTS`. `db::mark_delegations_waiting` moves its active
+delegations to `waiting` and returns them, so each wait queues one update. The
+run end after the answer is reported as usual. Claude's
+`chat:permission_denied` without an `rpc_id` lists denials at the end of a run;
+the run-end check reports those.
+
+Every delegation update also emits `agents:notification` with
+`sessionUpdate: true` (level `info`, `action` for waiting, `error` for
+failed). `AgentNotificationsListener` shows it as a toast, except while that
+coordinator's chat is in view (`isCoordinatorChatInView`).
 
 The UI reads delegations from `get_agent_details`:
 
@@ -543,6 +572,9 @@ coordinator chat as the main panel. The chat is a `ChatWindow` with
 `agentChat` (no Plan mode), bound to the coordinator's current chat session.
 With **Show tool calls in the chat** (`agentsAdvanced`) off, the chat hides
 tool calls and shows "Coordinator is working" while a turn runs.
+
+The "[Jean agent update]" message itself is not shown (`MessageItem`), but the
+coordinator's reply to it stays in the chat, so the user sees every status.
 
 A hidden, embedded `ProjectCanvasView` stays mounted, because its
 `SessionChatModal` opens the sessions that the spawn cards, the Sessions tab

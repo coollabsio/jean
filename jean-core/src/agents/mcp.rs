@@ -386,15 +386,12 @@ pub async fn run(app: &AppHandle, name: &str, args: &Value, source: &str) -> Res
             let notification = super::with_db(app, |conn| {
                 db::add_notification(conn, &agent.id, Some(source), &level, &message)
             })?;
-            use crate::http_server::EmitExt;
-            let _ = app.emit_all(
-                "agents:notification",
-                &json!({
-                    "agentId": agent.id,
-                    "agentName": agent.name,
-                    "level": notification.level,
-                    "message": notification.message,
-                }),
+            emit_notification(
+                app,
+                (&agent.id, &agent.name),
+                &notification.level,
+                &notification.message,
+                false,
             );
             json!({ "notificationId": notification.id, "status": "sent" })
         }
@@ -475,6 +472,30 @@ pub fn approval_gate(app: &AppHandle, name: &str, args: &Value, source: &str) ->
 
 /// An agent session sent work to `target_session_id`: track it so the agent
 /// gets an update when that run ends.
+/// Toast for the user (`AgentNotificationsListener`), with an Open action
+/// for the coordinator. The client skips a `session_update` while that
+/// coordinator's chat is in view.
+pub(crate) fn emit_notification(
+    app: &AppHandle,
+    agent: (&str, &str),
+    level: &str,
+    message: &str,
+    session_update: bool,
+) {
+    use crate::http_server::EmitExt;
+    let (agent_id, agent_name) = agent;
+    let _ = app.emit_all(
+        "agents:notification",
+        &json!({
+            "agentId": agent_id,
+            "agentName": agent_name,
+            "level": level,
+            "message": message,
+            "sessionUpdate": session_update,
+        }),
+    );
+}
+
 pub fn record_delegation(
     app: &AppHandle,
     source: &str,

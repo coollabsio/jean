@@ -201,10 +201,6 @@ import {
 import { ErrorBanner } from './ErrorBanner'
 import type { MessageListHandle } from './message-list-handle'
 import { RecentContexts } from './RecentContexts'
-import {
-  isAgentUpdateTurn,
-  splitAgentUpdateTurns,
-} from './message-content-utils'
 import { useUIStore } from '@/store/ui-store'
 import { buildMcpConfigJson } from '@/services/mcp'
 import { CHECK_GITHUB_ISSUES_PROMPT } from '@/lib/github-discovery-prompt'
@@ -2635,18 +2631,13 @@ const ChatWindowContent = memo(function ChatWindowContent({
       streamingToolCalls: currentToolCalls,
     }
   )
-  // Agent replies to automatic updates show in the agent's Updates panel
   const messages = useMemo(
     () =>
-      splitAgentUpdateTurns(
-        hideTrailingInFlightMessage
-          ? rawSessionMessages.slice(0, -1)
-          : rawSessionMessages
-      ).chat,
+      hideTrailingInFlightMessage
+        ? rawSessionMessages.slice(0, -1)
+        : rawSessionMessages,
     [rawSessionMessages, hideTrailingInFlightMessage]
   )
-  const isUpdateTurnStreaming =
-    isSending && isAgentUpdateTurn(rawSessionMessages)
   const streamingTurnPrompt = useMemo(
     () => findTurnPrompt(rawSessionMessages, rawSessionMessages.length),
     [rawSessionMessages]
@@ -3025,8 +3016,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                   {(currentStreamingContentBlocks.length > 0 ||
                                     currentToolCalls.length > 0 ||
                                     streamingContent.trim().length > 0) &&
-                                    ((!workingLabel &&
-                                      !isUpdateTurnStreaming) ||
+                                    (!workingLabel ||
                                       currentToolCalls.some(
                                         needsUserInput
                                       )) && (
@@ -3057,7 +3047,6 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                       />
                                     )}
                                   {quietStreamingSegments.length > 0 &&
-                                    !isUpdateTurnStreaming &&
                                     !currentToolCalls.some(needsUserInput) && (
                                       <div className="flex flex-col gap-3 pb-2">
                                         {quietStreamingSegments.map(

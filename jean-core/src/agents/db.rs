@@ -997,6 +997,45 @@ pub fn mark_delegation_run_ended(
     .map_err(err)
 }
 
+/// Safety net for run ends that emitted no `chat:*` event (failed sends,
+/// resume tails): mark only delegations that no event marked yet, so the
+/// event's own `done` / `cancelled` / error text is kept.
+pub fn mark_unreported_run_end(
+    conn: &Connection,
+    session_id: &str,
+    error: Option<&str>,
+    check_after: i64,
+) -> Result<usize, String> {
+    let event = if error.is_some() { "error" } else { "done" };
+    conn.execute(
+        "UPDATE delegations SET last_event=?2, last_error=?3, check_after=?4, updated_at=?5
+         WHERE session_id=?1 AND status IN ('active', 'waiting') AND last_event IS NULL",
+        params![session_id, event, error, check_after, now()],
+    )
+    .map_err(err)
+}
+
+/// The session asks for input in the middle of a run (permission, question).
+/// Active delegations become `waiting` and are returned, so each wait is
+/// reported once. The run end is still reported (`waiting` stays checkable).
+pub fn mark_delegations_waiting(
+    conn: &Connection,
+    session_id: &str,
+) -> Result<Vec<Delegation>, String> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "UPDATE delegations SET status='waiting', updated_at=?2
+             WHERE session_id=?1 AND status='active'
+               AND agent_id IN (SELECT id FROM agents WHERE project_id IS NOT NULL)
+             RETURNING {DELEGATION_COLUMNS}"
+        ))
+        .map_err(err)?;
+    let rows = stmt
+        .query_map(params![session_id, now()], delegation_from_row)
+        .map_err(err)?;
+    rows.collect::<Result<_, _>>().map_err(err)
+}
+
 pub fn due_delegation_checks(conn: &Connection, at: i64) -> Result<Vec<Delegation>, String> {
     let mut stmt = conn
         .prepare(&format!(
@@ -1023,6 +1062,8 @@ pub fn defer_delegation_check(
     Ok(())
 }
 
+/// The run end was reported. It is cleared, so a `waiting` delegation waits
+/// for the next run end (event or `mark_unreported_run_end`).
 pub fn finish_delegation(
     conn: &Connection,
     id: i64,
@@ -1030,18 +1071,19 @@ pub fn finish_delegation(
     summary: &str,
 ) -> Result<(), String> {
     conn.execute(
-        "UPDATE delegations SET status=?2, last_summary=?3, check_after=NULL, updated_at=?4 WHERE id=?1",
+        "UPDATE delegations SET status=?2, last_summary=?3, last_event=NULL, last_error=NULL, check_after=NULL, updated_at=?4 WHERE id=?1",
         params![id, status, summary, now()],
     )
     .map_err(err)?;
     Ok(())
 }
 
-/// Active delegations without a queued check (used once at startup, so runs
-/// that ended while Jean was closed are still reported).
+/// Open delegations without a queued check (used once at startup, so runs
+/// that ended while Jean was closed are still reported). `waiting` is
+/// included: the user may have answered and the next run ended meanwhile.
 pub fn requeue_active_delegations(conn: &Connection, check_after: i64) -> Result<usize, String> {
     conn.execute(
-        "UPDATE delegations SET check_after=?1 WHERE status='active' AND check_after IS NULL",
+        "UPDATE delegations SET check_after=?1 WHERE status IN ('active', 'waiting') AND check_after IS NULL",
         [check_after],
     )
     .map_err(err)
@@ -3094,15 +3136,144 @@ mod tests {
         );
     }
 
+    fn delegation_of(conn: &Connection, session_id: &str) -> Delegation {
+        list_delegations(conn, COORD, 50)
+            .unwrap()
+            .into_iter()
+            .find(|d| d.session_id == session_id)
+            .unwrap()
+    }
+
     #[test]
-    fn requeue_only_touches_active_unqueued_delegations() {
+    fn requeue_touches_open_unqueued_delegations() {
+        let conn = db();
+        for session in ["s1", "s2", "s3"] {
+            upsert_delegation(&conn, COORD, session, "wt", 0, None).unwrap();
+        }
+        finish_delegation(&conn, delegation_of(&conn, "s2").id, "done", "").unwrap();
+        // Regression: a waiting session answered while Jean was closed must
+        // be checked again at startup.
+        finish_delegation(&conn, delegation_of(&conn, "s3").id, "waiting", "").unwrap();
+        assert_eq!(requeue_active_delegations(&conn, 5).unwrap(), 2);
+        let due: Vec<String> = due_delegation_checks(&conn, 5)
+            .unwrap()
+            .into_iter()
+            .map(|d| d.session_id)
+            .collect();
+        assert_eq!(due.len(), 2);
+        assert!(due.contains(&"s1".to_string()) && due.contains(&"s3".to_string()));
+    }
+
+    #[test]
+    fn unreported_run_end_marks_only_unmarked_delegations() {
         let conn = db();
         upsert_delegation(&conn, COORD, "s1", "wt", 0, None).unwrap();
-        upsert_delegation(&conn, COORD, "s2", "wt", 0, None).unwrap();
-        let d2 = list_delegations(&conn, COORD, 10).unwrap();
-        let s2 = d2.iter().find(|d| d.session_id == "s2").unwrap();
-        finish_delegation(&conn, s2.id, "done", "").unwrap();
-        assert_eq!(requeue_active_delegations(&conn, 5).unwrap(), 1);
+        // Regression: a send that failed before its run emitted no event.
+        assert_eq!(
+            mark_unreported_run_end(&conn, "s1", Some("Session not found"), 7).unwrap(),
+            1
+        );
+        let d = delegation_of(&conn, "s1");
+        assert_eq!(d.last_event.as_deref(), Some("error"));
+        assert_eq!(d.last_error.as_deref(), Some("Session not found"));
+        assert_eq!(d.check_after, Some(7));
+
+        // The event of the run came first: its kind and error are kept.
+        upsert_delegation(&conn, COORD, "s1", "wt", 0, None).unwrap();
+        mark_delegation_run_ended(&conn, "s1", "cancelled", None, 10).unwrap();
+        assert_eq!(mark_unreported_run_end(&conn, "s1", None, 20).unwrap(), 0);
+        let d = delegation_of(&conn, "s1");
+        assert_eq!(d.last_event.as_deref(), Some("cancelled"));
+        assert_eq!(d.check_after, Some(10));
+
+        // A clean end without an event (resume tail) is checked as done.
+        upsert_delegation(&conn, COORD, "s1", "wt", 0, None).unwrap();
+        assert_eq!(mark_unreported_run_end(&conn, "s1", None, 30).unwrap(), 1);
+        assert_eq!(
+            delegation_of(&conn, "s1").last_event.as_deref(),
+            Some("done")
+        );
+
+        // Finished delegations are not touched.
+        finish_delegation(&conn, delegation_of(&conn, "s1").id, "done", "").unwrap();
+        assert_eq!(mark_unreported_run_end(&conn, "s1", None, 40).unwrap(), 0);
+    }
+
+    #[test]
+    fn reported_wait_takes_the_next_unreported_run_end() {
+        let conn = db();
+        upsert_delegation(&conn, COORD, "s1", "wt", 0, None).unwrap();
+        mark_delegation_run_ended(&conn, "s1", "done", None, 10).unwrap();
+        // The session waits for plan approval; that was reported.
+        finish_delegation(&conn, delegation_of(&conn, "s1").id, "waiting", "").unwrap();
+        assert_eq!(delegation_of(&conn, "s1").last_event, None);
+        // Regression: the run after the answer ended without an event.
+        assert_eq!(mark_unreported_run_end(&conn, "s1", None, 20).unwrap(), 1);
+        assert_eq!(due_delegation_checks(&conn, 20).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn mid_run_wait_is_reported_once_and_run_end_still_counts() {
+        let conn = db();
+        upsert_delegation(&conn, COORD, "s1", "wt", 0, None).unwrap();
+        let waiting = mark_delegations_waiting(&conn, "s1").unwrap();
+        assert_eq!(waiting.len(), 1);
+        assert_eq!(waiting[0].status, "waiting");
+        // A second request in the same wait does not report again.
+        assert!(mark_delegations_waiting(&conn, "s1").unwrap().is_empty());
+        assert!(mark_delegations_waiting(&conn, "other").unwrap().is_empty());
+        // The run end after the answer is still checked.
+        assert_eq!(
+            mark_delegation_run_ended(&conn, "s1", "done", None, 10).unwrap(),
+            1
+        );
+        assert_eq!(due_delegation_checks(&conn, 10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn sessions_ending_together_each_queue_an_update() {
+        let conn = db();
+        for session in ["s1", "s2", "s3"] {
+            upsert_delegation(&conn, COORD, session, "wt", 0, None).unwrap();
+            mark_delegation_run_ended(&conn, session, "done", None, 10).unwrap();
+        }
+        for d in due_delegation_checks(&conn, 10).unwrap() {
+            let body = format!("{} finished", d.session_id);
+            add_event(
+                &conn,
+                &NewEvent {
+                    agent_id: COORD,
+                    kind: "delegation",
+                    body: &body,
+                    hop: 0,
+                },
+            )
+            .unwrap();
+            finish_delegation(&conn, d.id, "done", "").unwrap();
+        }
+        let bodies: Vec<String> = pending_events(&conn, COORD)
+            .unwrap()
+            .into_iter()
+            .map(|e| e.body)
+            .collect();
+        assert_eq!(bodies, ["s1 finished", "s2 finished", "s3 finished"]);
+    }
+
+    #[test]
+    fn follow_up_run_is_reported_again() {
+        let conn = db();
+        upsert_delegation(&conn, COORD, "s1", "wt", 0, None).unwrap();
+        mark_delegation_run_ended(&conn, "s1", "done", None, 10).unwrap();
+        finish_delegation(&conn, delegation_of(&conn, "s1").id, "done", "").unwrap();
+        // The coordinator sends a second message to the same session.
+        upsert_delegation(&conn, COORD, "s1", "wt", 0, None).unwrap();
+        let d = delegation_of(&conn, "s1");
+        assert_eq!((d.status.as_str(), d.last_event), ("active", None));
+        assert_eq!(
+            mark_delegation_run_ended(&conn, "s1", "done", None, 20).unwrap(),
+            1
+        );
+        assert_eq!(due_delegation_checks(&conn, 20).unwrap().len(), 1);
     }
 
     #[test]

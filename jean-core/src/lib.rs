@@ -5670,6 +5670,14 @@ pub fn initialize_runtime(context: &RuntimeContext) -> Result<(), String> {
     if let Err(error) = chat::wakeup::load_all_from_disk(context) {
         log::warn!("Failed to restore scheduled wakeups: {error}");
     }
+    // Coordinators keep working without clients: open their database and
+    // start the loop. The loop idles while `coordinator_enabled` is off.
+    // Start before resuming runs, so a resumed delegated run that ends at
+    // once still reaches its coordinator's listeners.
+    match agents::init(context) {
+        Ok(()) => agents::start(context.clone()),
+        Err(error) => log::error!("Agents are unavailable: {error}"),
+    }
     // Finish runs orphaned by a crash/reboot before any client connects.
     // Headless servers otherwise only recover on a full page load, so an
     // open web tab that just reconnects keeps showing the dead run as running.
@@ -5688,12 +5696,6 @@ pub fn initialize_runtime(context: &RuntimeContext) -> Result<(), String> {
     context.manage(task_manager);
     chat::auth_failure::start_auth_failure_listener(context);
     auto_fix::scheduler::start_auto_fix_scheduler(context.clone());
-    // Coordinators keep working without clients: open their database and
-    // start the loop. The loop idles while `coordinator_enabled` is off.
-    match agents::init(context) {
-        Ok(()) => agents::start(context.clone()),
-        Err(error) => log::error!("Agents are unavailable: {error}"),
-    }
 
     // Closed sessions stay on disk for DELETED_ITEM_RETENTION_DAYS. Purge once
     // now and then daily, for the desktop app and the headless server alike.
