@@ -98,6 +98,7 @@ function renderUseMessageSending({
   piAutoSteer,
   grokAutoSteer,
   claudeAutoSteer,
+  alwaysSteer,
   inputValue = '/goal Ship the feature',
   selectedBackend = 'codex',
   selectedModel = 'gpt-5.5',
@@ -123,6 +124,7 @@ function renderUseMessageSending({
   piAutoSteer?: boolean
   grokAutoSteer?: boolean
   claudeAutoSteer?: boolean
+  alwaysSteer?: boolean
   inputValue?: string
   selectedBackend?:
     | 'claude'
@@ -189,6 +191,7 @@ function renderUseMessageSending({
       markAtBottom: vi.fn(),
       clearInputDraft: vi.fn(),
       clearChatInputState: vi.fn(),
+      alwaysSteer,
     })
   )
 
@@ -1475,6 +1478,32 @@ describe('useMessageSending Codex auto-steer', () => {
       noSteer: true,
     })
     expect(useChatStore.getState().messageQueues['session-1']).toHaveLength(1)
+  })
+
+  it('always steers agent chat prompts into a running turn, even with forceQueue', async () => {
+    useChatStore.setState({ sendingSessionIds: { 'session-1': true } })
+    vi.mocked(steerCodexTurn).mockResolvedValue(undefined)
+    const { result } = renderUseMessageSending({
+      selectedBackend: 'codex',
+      autoSteer: false,
+      alwaysSteer: true,
+      inputValue: 'also check the tests',
+    })
+
+    await act(async () => {
+      await result.current.handleSubmit(
+        { preventDefault: vi.fn() } as unknown as React.FormEvent,
+        { forceQueue: true }
+      )
+    })
+
+    expect(steerCodexTurn).toHaveBeenCalledWith(
+      'worktree-1',
+      'session-1',
+      'also check the tests'
+    )
+    expect(persistEnqueue).not.toHaveBeenCalled()
+    expect(useChatStore.getState().messageQueues['session-1'] ?? []).toEqual([])
   })
 
   it('steers claude prompts with attachments as path refs', async () => {
