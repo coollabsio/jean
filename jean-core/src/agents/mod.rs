@@ -390,7 +390,8 @@ You coordinate the work on the project \"{project_name}\" (projectId {project_id
 - Jean tracks every session you send work to. When it finishes, fails, or waits for input, you get an automatic update in this chat. Do not poll or wait in a loop: end your turn and continue when the update arrives.
 - Read what a session did with `read_session_messages`. Check the result before you report it or start the next step.
 - Messages that start with \"[Jean agent update]\" or \"[Jean chat continued]\" come from Jean, not from the user. The user does not see them, only your reply. Reply to an update with a short status: one to three sentences, plus links to the PRs, issues, or sessions involved. Do not add headings, tables, diffs, a recap, or test steps, even if other instructions ask for them.
-- Delete, merge, project removal, and connector changes need the user's approval. The tool then returns `approvalRequired`. Tell the user what you asked for and end your turn. The result arrives as an update.
+- When a PR is merged (a pr_merged update, or after you merge it), delete its worktree with `delete_worktree` immediately. Do not ask the user. This also removes its branch. Do not delete the base worktree or a worktree with work that is not merged.
+- Other deletes, merge, project removal, and connector changes need the user's approval. The tool then returns `approvalRequired`. Tell the user what you asked for and end your turn. The result arrives as an update.
 - Push and create pull requests only when the user asks for it or a rule in memory lets you. Then do it without asking again.
 - Use `schedule_create` for later checks (`delayMinutes`), one run at an exact date-time (`runAt` plus `timezone`), repeating intervals (`everyMinutes`, at least 5), cron (`cron` plus `timezone`), or an event in this project (`event`: session_finished, session_failed, pr_merged, approval_resolved). Use `schedule_update`, `schedule_list`, and `schedule_cancel` to manage them. A run arrives in this chat as an update.
 - Use `notify_user` only for what the user must know when they are not looking at this chat: results of goals, failures, needed decisions. Not for routine progress.
@@ -398,7 +399,7 @@ You coordinate the work on the project \"{project_name}\" (projectId {project_id
 - Use `memory_save` for lasting rules, facts the code does not show, and open work. Do not save live state (worktree lists, PR status) or secrets. scope `user` is only for facts about the user (name, timezone, preferences). scope `shared` is for facts that hold in every project; the coordinators of the other projects see it too. Omit scope for a memory of this project.
 - Use `memory_search` to pull more than the prompt shows. Filter with kind, scope, pinned, and from/to (unix seconds on updated_at). Use `memory_update` to edit a rule, `memory_supersede` to correct a fact (the old text is kept in the change record), and `memory_forget` to delete one.
 - Use `journal_add` for what happened, a decision, or an outcome. Use `journal_search` to recall by text or date, including chats that were archived. Journal is history, not a lasting fact.
-- Keep replies short. Before destructive actions, confirm with the user.
+- Keep replies short. Before other destructive actions, confirm with the user.
 
 ## This chat
 - The user sees only your text, not your tool calls. When a step gives a result, write one short line about it. Setup steps (making a worktree or a session) are not results; do not report them.
@@ -564,14 +565,20 @@ mod tests {
             "decide: does it go to a running or recent session, or to a new worktree and session?"
         ));
         assert!(prompt.contains("Do not start a second session on that worktree."));
-        assert!(prompt.contains("makes the open PR larger or harder to review, or the earlier work is merged"));
-        assert!(prompt.contains("use a new session for unrelated work and the same session for direct follow-ups"));
+        assert!(prompt.contains(
+            "makes the open PR larger or harder to review, or the earlier work is merged"
+        ));
+        assert!(prompt.contains(
+            "use a new session for unrelated work and the same session for direct follow-ups"
+        ));
         assert!(!prompt.contains("One task per worktree"));
         assert!(prompt.contains("`read_session_messages`"));
         assert!(prompt.contains("tell the user in one line what work started"));
         assert!(prompt.contains("Do not tell the user about setup steps"));
         assert!(prompt.contains("tell the session in the task to take screenshots"));
-        assert!(prompt.contains("Do not ask for screenshots for backend-only or text-only changes."));
+        assert!(
+            prompt.contains("Do not ask for screenshots for backend-only or text-only changes.")
+        );
         assert!(prompt.contains("with the `jean` MCP server tools"));
         assert!(prompt.contains("Do not pass `executionMode`"));
         assert!(prompt.contains(
@@ -582,7 +589,11 @@ mod tests {
         );
         assert!(prompt.contains("call `set_status`"));
         assert!(prompt.contains("Do not write reply text before or between tool calls."));
-        assert!(prompt.contains("Delete, merge, project removal, and connector changes need the user's approval."));
+        assert!(prompt.contains("When a PR is merged (a pr_merged update, or after you merge it), delete its worktree with `delete_worktree` immediately. Do not ask the user."));
+        assert!(prompt.contains(
+            "Do not delete the base worktree or a worktree with work that is not merged."
+        ));
+        assert!(prompt.contains("Other deletes, merge, project removal, and connector changes need the user's approval."));
         assert!(prompt.contains("Push and create pull requests only when the user asks for it"));
         assert!(prompt.contains("short recap in plain text"));
         assert!(!prompt.contains("| # | Action | Status | Link |"));
