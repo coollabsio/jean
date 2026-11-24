@@ -150,6 +150,7 @@ export {
   Trash2,
   Undo,
   Upload,
+  User,
   Users,
   Wand2,
   WifiOff,
