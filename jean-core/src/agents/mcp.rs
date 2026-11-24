@@ -5,6 +5,7 @@ use serde_json::{json, Value};
 use tauri::AppHandle;
 
 use super::db;
+use crate::projects::types::{SessionType, Worktree};
 
 /// Tools an agent may only run after the user approves.
 pub const APPROVAL_TOOLS: &[&str] = &[
@@ -419,11 +420,37 @@ pub async fn run(app: &AppHandle, name: &str, args: &Value, source: &str) -> Res
     Ok(result)
 }
 
+/// The worktree's PR is merged (cached status), so deleting it removes no
+/// unmerged work. Merged is a terminal state; a stale cache only means the
+/// delete falls back to the approval flow.
+fn worktree_pr_merged(wt: &Worktree) -> bool {
+    wt.session_type != SessionType::Base
+        && wt.pr_number.is_some()
+        && wt
+            .cached_pr_status
+            .as_deref()
+            .is_some_and(|status| status.eq_ignore_ascii_case("merged"))
+}
+
+/// `delete_worktree` of a worktree whose PR is merged runs without approval.
+fn deletes_merged_worktree(app: &AppHandle, name: &str, args: &Value) -> bool {
+    if name != "delete_worktree" {
+        return false;
+    }
+    let Some(worktree_id) = args.get("worktreeId").and_then(Value::as_str) else {
+        return false;
+    };
+    crate::projects::storage::load_projects_data(app)
+        .ok()
+        .and_then(|data| data.find_worktree(worktree_id).map(worktree_pr_merged))
+        .unwrap_or(false)
+}
+
 /// When an agent session calls a destructive tool, store an approval request
 /// instead of running it. Returns the tool result to send back, or `None`
 /// when the call may run now.
 pub fn approval_gate(app: &AppHandle, name: &str, args: &Value, source: &str) -> Option<Value> {
-    if !APPROVAL_TOOLS.contains(&name) {
+    if !APPROVAL_TOOLS.contains(&name) || deletes_merged_worktree(app, name, args) {
         return None;
     }
     let agent = super::agent_for_session(app, source)?;
@@ -599,6 +626,36 @@ mod tests {
         // Push and PR creation are reversible: the coordinator runs them without approval.
         assert!(!APPROVAL_TOOLS.contains(&"push_worktree"));
         assert!(!APPROVAL_TOOLS.contains(&"create_pull_request"));
+    }
+
+    #[test]
+    fn only_a_worktree_with_a_merged_pr_skips_delete_approval() {
+        let wt = |extra: Value| -> Worktree {
+            let mut base = json!({
+                "id": "wt-1", "project_id": "p1", "name": "fix", "path": "/tmp/fix",
+                "branch": "fix", "created_at": 1,
+            });
+            base.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            serde_json::from_value(base).unwrap()
+        };
+        assert!(worktree_pr_merged(&wt(
+            json!({"pr_number": 7, "cached_pr_status": "merged"})
+        )));
+        assert!(worktree_pr_merged(&wt(
+            json!({"pr_number": 7, "cached_pr_status": "MERGED"})
+        )));
+        for not_merged in [
+            json!({}),
+            json!({"pr_number": 7}),
+            json!({"pr_number": 7, "cached_pr_status": "open"}),
+            json!({"pr_number": 7, "cached_pr_status": "closed"}),
+            json!({"cached_pr_status": "merged"}),
+            json!({"pr_number": 7, "cached_pr_status": "merged", "session_type": "base"}),
+        ] {
+            assert!(!worktree_pr_merged(&wt(not_merged)));
+        }
     }
 
     #[test]
