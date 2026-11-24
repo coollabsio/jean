@@ -26,6 +26,7 @@ import {
 } from '@/services/agents'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
+import type { ProjectViewMode } from '@/store/ui-store'
 import type { Project } from '@/types/projects'
 import { AgentMemoryView } from './AgentMemoryView'
 import { AgentSchedules } from './AgentSchedules'
@@ -69,13 +70,13 @@ function unavailableMessage(error: unknown): string {
 function CoordinatorDetails({
   project,
   agent,
-  coordinatorWorktreeId,
+  agentId,
   onClose,
   onOpenSession,
 }: {
   project: Project
   agent: AgentSummary | undefined
-  coordinatorWorktreeId: string | undefined
+  agentId: string | undefined
   onClose: () => void
   onOpenSession?: () => void
 }) {
@@ -121,7 +122,7 @@ function CoordinatorDetails({
         {tab === 'worktrees' ? (
           <CoordinatorWorktrees
             project={project}
-            coordinatorWorktreeId={coordinatorWorktreeId}
+            agentId={agentId}
             onOpen={onOpenSession}
           />
         ) : !agent ? (
@@ -150,17 +151,20 @@ function CoordinatorDetails({
 }
 
 /**
- * A project with its coordinator chat as the main panel and its details in a
+ * A project with its coordinator chat (or, in `sessions` mode, the worktree
+ * sessions the coordinator started) as the main panel and its details in a
  * right sidebar (a full-screen sheet on mobile). `sessionModalHost` stays
  * mounted, never shown, because its session modal opens the sessions the
- * coordinator and the Worktrees tab point to.
+ * coordinator and the worktree lists point to.
  */
 export function CoordinatorView({
   project,
+  mode = 'coordinator',
   viewSwitch,
   sessionModalHost,
 }: {
   project: Project
+  mode?: ProjectViewMode
   /** Coordinator | Sessions switch for the header */
   viewSwitch: ReactNode
   sessionModalHost: ReactNode
@@ -241,6 +245,10 @@ export function CoordinatorView({
         {unavailableMessage(error)}
       </span>
     </Placeholder>
+  ) : mode === 'sessions' ? (
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      <CoordinatorWorktrees project={project} agentId={coordinator?.agentId} />
+    </div>
   ) : coordinator ? (
     <Suspense fallback={<Placeholder>Loading coordinator…</Placeholder>}>
       <ChatWindow
@@ -259,7 +267,7 @@ export function CoordinatorView({
     <CoordinatorDetails
       project={project}
       agent={agent}
-      coordinatorWorktreeId={coordinator?.worktreeId}
+      agentId={coordinator?.agentId}
       onClose={() => setDetailsOpen(false)}
       onOpenSession={isMobile ? () => setMobileOpen(false) : undefined}
     />

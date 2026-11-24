@@ -20,7 +20,6 @@ import {
   useRef,
   useState,
   Suspense,
-  type ReactNode,
 } from 'react'
 import { useQueries, useQueryClient } from '@tanstack/react-query'
 import { invoke } from '@/lib/transport'
@@ -144,8 +143,6 @@ import { getEditorLabel, getTerminalLabel } from '@/types/preferences'
 import type { LabelData, Session, WorktreeSessions } from '@/types/chat'
 import { countUnreadFailedWorkflowRuns } from '@/components/shared/workflow-run-utils'
 import { SessionChatModal } from '@/components/chat/SessionChatModal'
-import { useCoordinatorDelegations } from '@/components/agents/agents'
-import { CoordinatorBadge } from '@/components/agents/CoordinatorBadge'
 import {
   getStackedBaseBranch,
   resolveStackedOnPr,
@@ -271,8 +268,6 @@ import { resolveModalWorktreeSnapshot } from './modal-worktree-snapshot'
 interface ProjectCanvasViewProps {
   projectId: string
   project: Project
-  /** Shown beside the project name (the Coordinator | Sessions switch) */
-  headerAccessory?: ReactNode
   /**
    * Worktrees list beside the coordinator chat: compact rows, no keyboard
    * navigation or restored selection, so canvas shortcuts stay inert while
@@ -561,7 +556,6 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
   onSetLabels,
   onResolveConflicts,
   disableTextSelection = false,
-  coordinated = false,
 }: {
   worktree: Worktree
   projectId: string
@@ -578,8 +572,6 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
   onSetLabels?: (worktree: Worktree) => void
   onResolveConflicts?: (worktree: Worktree) => void
   disableTextSelection?: boolean
-  /** The project coordinator waits for a session here */
-  coordinated?: boolean
 }) {
   const { elementRef: rowVisibilityRef, isVisible } = useCanvasRowVisibility()
   const stackedBaseBranch = getStackedBaseBranch(
@@ -775,7 +767,6 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <div className="flex min-w-0 items-center gap-1.5">
           <span className="min-w-0 truncate">{rowTitle}</span>
-          {coordinated && <CoordinatorBadge />}
           {compactLabels.length > 0 && !labelsExpanded && (
             <button
               type="button"
@@ -927,7 +918,6 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
             <span className="flex min-w-0 flex-1 flex-col gap-1 font-medium sm:flex-row sm:items-center sm:gap-1.5">
               <span className="flex min-w-0 items-center gap-1.5">
                 <span className="min-w-0 flex-1 truncate">{rowTitle}</span>
-                {coordinated && <CoordinatorBadge />}
                 {showBranchBadge && (
                   <span className="hidden items-center gap-1 rounded border border-border/50 px-1.5 py-0.5 text-2xs font-normal text-muted-foreground sm:inline-flex">
                     {stackedBaseBranch && (
@@ -1141,7 +1131,6 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
 export function ProjectCanvasView({
   projectId,
   project,
-  headerAccessory,
   embedded = false,
 }: ProjectCanvasViewProps) {
   useEffect(
@@ -1149,10 +1138,6 @@ export function ProjectCanvasView({
     []
   )
   const { data: preferences } = usePreferences(project.serverId)
-  const coordinatorDelegations = useCoordinatorDelegations(
-    projectId,
-    !!preferences?.coordinator_enabled && !project.server
-  )
   const worktreeSortMode = useProjectsStore(
     state =>
       state.projectCanvasSettings[projectId]?.worktreeSortMode ?? 'created'
@@ -3313,7 +3298,6 @@ export function ProjectCanvasView({
                 <h2 className="truncate text-sm font-normal text-muted-foreground">
                   {project.name}
                 </h2>
-                {headerAccessory}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
@@ -4005,9 +3989,6 @@ export function ProjectCanvasView({
                             }
                             onResolveConflicts={handleCanvasResolveConflicts}
                             disableTextSelection={disableWorktreeTextSelection}
-                            coordinated={coordinatorDelegations.worktreeIds.has(
-                              section.worktree.id
-                            )}
                           />
                           {activeFilterTab === 'auto_fix' && (
                             <MrRobotProgress

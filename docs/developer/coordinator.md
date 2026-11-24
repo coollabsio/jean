@@ -526,9 +526,11 @@ stack. Put new command groups in a separate function and call it through
 
 `ProjectView` (`src/components/dashboard/ProjectView.tsx`) shows a
 **Coordinator | Sessions** switch in the project header when the flag is on for
-the project's server. Folders and server projects never get the switch.
-**Sessions** is the classic `ProjectCanvasView`. The last choice per project is
-stored in `projectViewModes` (UI store, client view state). The default is
+the project's server. Folders and server projects never get the switch, and
+show the classic `ProjectCanvasView`. With the switch, both modes render
+`CoordinatorView`: **Coordinator** shows the coordinator chat, **Sessions**
+shows the coordinator's worktree list (see below). The last choice per project
+is stored in `projectViewModes` (UI store, client view state). The default is
 **Coordinator**. `openProjectCoordinator(projectId)` opens a project in
 coordinator mode. The command palette uses it in its **Coordinators** group,
 and the notification toast uses it for **Open**.
@@ -537,27 +539,28 @@ and the notification toast uses it for **Open**.
 
 `CoordinatorView` (`src/components/agents/CoordinatorView.tsx`) shows the
 coordinator chat as the main panel. The chat is a `ChatWindow` with
-`agentChat` (no Plan mode), bound to the coordinator's current chat session. The header has
-four tabs:
+`agentChat` (no Plan mode), bound to the coordinator's current chat session.
+With **Show tool calls in the chat** (`agentsAdvanced`) off, the chat hides
+tool calls and shows "Coordinator is working" while a turn runs.
 
-| Tab       | Component                                                                                |
-| --------- | ---------------------------------------------------------------------------------------- |
-| Chat      | `ChatWindow`                                                                             |
-| Memory    | `AgentMemoryView`                                                                        |
-| Schedules | `AgentSchedules`                                                                         |
-| Settings  | `AgentSettings`: run configuration (`AgentRunFields`) and connectors (`AgentConnectors`) |
-
-The Settings tab also has **Show tool calls in the chat** (`agentsAdvanced`).
-With it off, the chat hides tool calls and shows "Coordinator is working"
-while a turn runs.
+A hidden, embedded `ProjectCanvasView` stays mounted, because its
+`SessionChatModal` opens the sessions that the spawn cards and the worktree
+list link to (`open-session-modal` event).
 
 If `get_project_coordinator` fails with "Unknown command", the view says that
 the server needs an update.
 
-### Worktree sidebar
+### Details sidebar
 
-The right sidebar shows the project's worktrees through an embedded
-`ProjectCanvasView`. It is closed by default.
+The right sidebar has four tabs. It is closed by default. On mobile it opens
+as a full-screen sheet.
+
+| Tab       | Component                                                                                                                 |
+| --------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Worktrees | `CoordinatorWorktrees`                                                                                                    |
+| Memory    | `AgentMemoryView`                                                                                                         |
+| Schedules | `AgentSchedules`                                                                                                          |
+| Settings  | `AgentSettings`: run configuration (`AgentRunFields`), connectors (`AgentConnectors`) and **Show tool calls in the chat** |
 
 | Item      | Value                                                                                 |
 | --------- | ------------------------------------------------------------------------------------- |
@@ -565,8 +568,15 @@ The right sidebar shows the project's worktrees through an embedded
 | Width     | 280 to 640 px, drag the left edge                                                     |
 | Persisted | `coordinatorSidebarOpen` and `coordinatorSidebarWidth` in client view state           |
 
-The embedded canvas stays mounted while the sidebar is closed, because its
-`SessionChatModal` opens the sessions that the spawn cards link to.
+### Coordinator worktree list
+
+`CoordinatorWorktrees` is a plain list of the sessions the coordinator
+started: the `delegations` from `get_agent_details` (newest 30, every
+status), resolved to worktree and session through `get_recent_worktrees` with
+`includeSessionIds`. Base sessions are left out. Each row has a status dot
+(running, waiting, failed or done), the worktree name, the session name and
+the relative time. Running rows go first, then waiting. A click opens the
+session. The Worktrees tab and the **Sessions** mode use this same list.
 
 ### Spawn cards and badge
 
@@ -577,9 +587,8 @@ has a short quote of the message (`messageSnippet`) and a status chip (see
 the session. In the receiving session, the message shows as one
 "Message from" line.
 
-`CoordinatorBadge` ("Coord.") marks worktree rows in `ProjectCanvasView` and
-session tabs in `SessionChatModal` that have an open delegation
-(`useCoordinatorDelegations`).
+`CoordinatorBadge` ("Coord.") marks session tabs in `SessionChatModal` that
+have an open delegation (`useCoordinatorDelegations`).
 
 ### Mobile and web access
 
@@ -587,5 +596,5 @@ Web access uses the same components. All commands go through
 `dispatch_agents_command`, so they work over WebSocket.
 
 On mobile, `ProjectView` shows the same switch and the same `CoordinatorView`.
-The worktree sidebar never opens on mobile. To see the worktrees, switch to
-**Sessions**.
+The details sidebar opens as a full-screen sheet, and opening a session from
+its Worktrees tab closes the sheet.
