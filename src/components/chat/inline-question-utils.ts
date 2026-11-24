@@ -185,6 +185,6 @@ export function inlineQuestionsAnswer(
   )
   if (questions.length === 1) return answers[0] ?? ''
   return questions
-    .map((q, i) => `${q.question}\n${answers[i] ?? ''}`)
+    .map((q, i) => `${q.question}\n${answers[i] || 'No answer'}`)
     .join('\n\n')
 }

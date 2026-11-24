@@ -17,7 +17,7 @@ describe('InlineQuestionOptions', () => {
     expect(onSend).toHaveBeenCalledWith('2. B')
   })
 
-  it('sends all answers with Accept after every question has a pick', () => {
+  it('sends all answers with Accept', () => {
     const onSend = vi.fn()
     render(
       <InlineQuestionOptions
@@ -41,9 +41,9 @@ describe('InlineQuestionOptions', () => {
         b.textContent?.includes(name)
       ) as HTMLElement
 
+    expect(accept).toBeDisabled()
     fireEvent.click(option(mode, 'Hash'))
     fireEvent.click(option(mode, 'Full'))
-    expect(accept).toBeDisabled()
     fireEvent.click(option(timeouts, 'Remote'))
     fireEvent.click(option(timeouts, 'Local'))
     expect(onSend).not.toHaveBeenCalled()
@@ -81,7 +81,33 @@ describe('InlineQuestionOptions', () => {
     expect(accept).toBeEnabled()
     fireEvent.click(hash)
     expect(hash).toHaveAttribute('aria-pressed', 'false')
+    // Scope still has a pick
+    expect(accept).toBeEnabled()
+    fireEvent.click(all)
     expect(accept).toBeDisabled()
     expect(onSend).not.toHaveBeenCalled()
+  })
+
+  it('sends one answered question and marks the other as not answered', () => {
+    const onSend = vi.fn()
+    render(
+      <InlineQuestionOptions
+        questions={[
+          { question: 'Mode?', options: ['Hash', 'Full'], multiple: false },
+          {
+            question: 'Timeouts?',
+            options: ['Local', 'Remote'],
+            multiple: true,
+          },
+        ]}
+        disabled={false}
+        onSend={onSend}
+      />
+    )
+    fireEvent.click(screen.getByRole('button', { name: /Full/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Accept' }))
+    expect(onSend).toHaveBeenCalledWith(
+      'Mode?\n2. Full\n\nTimeouts?\nNo answer'
+    )
   })
 })

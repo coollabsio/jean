@@ -10,8 +10,8 @@ import {
 /**
  * Numbered questions that the assistant asked as text, with their options as
  * buttons. One single-choice question: a click sends "N. option" as the next
- * user message. Otherwise the user picks options for each question and sends
- * all answers with Accept.
+ * user message. Otherwise the user picks options and sends them with Accept.
+ * Accept needs one pick; questions without a pick are skipped.
  */
 export function InlineQuestionOptions({
   questions,
@@ -24,7 +24,8 @@ export function InlineQuestionOptions({
 }) {
   const [picks, setPicks] = useState<number[][]>(() => questions.map(() => []))
   const sendOnClick = questions.length === 1 && !questions[0]?.multiple
-  const complete = questions.every((_, i) => (picks[i]?.length ?? 0) > 0)
+  // Questions without a pick are sent as not answered
+  const anyPick = picks.some(selected => selected.length > 0)
 
   const pick = (questionIndex: number, optionIndex: number) => {
     if (sendOnClick) {
@@ -93,7 +94,7 @@ export function InlineQuestionOptions({
       {!sendOnClick && (
         <Button
           size="sm"
-          disabled={disabled || !complete}
+          disabled={disabled || !anyPick}
           onClick={() => onSend(inlineQuestionsAnswer(questions, picks))}
         >
           Accept
