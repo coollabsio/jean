@@ -9,9 +9,7 @@ use super::db;
 /// Tools an agent may only run after the user approves.
 pub const APPROVAL_TOOLS: &[&str] = &[
     "delete_worktree",
-    "push_worktree",
     "merge_pull_request",
-    "create_pull_request",
     "remove_project",
     "set_connector",
 ];
@@ -598,6 +596,9 @@ mod tests {
         for tool in APPROVAL_TOOLS {
             assert!(!is_agent_tool(tool));
         }
+        // Push and PR creation are reversible: the coordinator runs them without approval.
+        assert!(!APPROVAL_TOOLS.contains(&"push_worktree"));
+        assert!(!APPROVAL_TOOLS.contains(&"create_pull_request"));
     }
 
     #[test]
