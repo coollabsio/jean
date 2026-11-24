@@ -71,7 +71,7 @@ export function ProjectView({
       viewSwitch={
         <ProjectViewSwitch projectId={projectId} mode="coordinator" />
       }
-      worktrees={
+      sessionModalHost={
         <ProjectCanvasView projectId={projectId} project={project} embedded />
       }
     />

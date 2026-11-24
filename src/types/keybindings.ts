@@ -333,8 +333,8 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
   },
   {
     action: 'toggle_coordinator_sidebar',
-    label: 'Toggle worktrees sidebar',
-    description: 'Show or hide the worktrees beside the project coordinator',
+    label: 'Toggle coordinator details',
+    description: 'Show or hide the details beside the project coordinator',
     default_shortcut: 'mod+shift+w',
     category: 'navigation',
   },

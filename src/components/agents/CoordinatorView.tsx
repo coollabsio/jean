@@ -7,19 +7,30 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { PanelRight, PanelRightClose } from '@/components/icons/reicon'
+import { PanelRight, PanelRightClose, X } from '@/components/icons/reicon'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetTitle,
+} from '@/components/ui/sheet'
 import { MODAL_TERMINAL_PRIMARY_ROW_CLASS } from '@/components/chat/modal-terminal-layout'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { cn } from '@/lib/utils'
-import { useAgentsList, useProjectCoordinator } from '@/services/agents'
+import {
+  useAgentsList,
+  useProjectCoordinator,
+  type AgentSummary,
+} from '@/services/agents'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import type { Project } from '@/types/projects'
 import { AgentMemoryView } from './AgentMemoryView'
 import { AgentSchedules } from './AgentSchedules'
 import { AgentSettings } from './AgentSettings'
+import { CoordinatorWorktrees } from './CoordinatorWorktrees'
 import { useAgentsEnabledServers } from './agents-feature'
 
 const ChatWindow = lazy(() =>
@@ -28,10 +39,10 @@ const ChatWindow = lazy(() =>
   }))
 )
 
-type CoordinatorTab = 'chat' | 'memory' | 'schedules' | 'settings'
+type DetailsTab = 'worktrees' | 'memory' | 'schedules' | 'settings'
 
-const TABS: { id: CoordinatorTab; label: string }[] = [
-  { id: 'chat', label: 'Chat' },
+const TABS: { id: DetailsTab; label: string }[] = [
+  { id: 'worktrees', label: 'Worktrees' },
   { id: 'memory', label: 'Memory' },
   { id: 'schedules', label: 'Schedules' },
   { id: 'settings', label: 'Settings' },
@@ -54,31 +65,122 @@ function unavailableMessage(error: unknown): string {
     : `The coordinator is unavailable: ${String(error)}`
 }
 
+/** The coordinator's details: active worktrees, memory, schedules, settings. */
+function CoordinatorDetails({
+  project,
+  agent,
+  coordinatorWorktreeId,
+  onClose,
+  onOpenSession,
+}: {
+  project: Project
+  agent: AgentSummary | undefined
+  coordinatorWorktreeId: string | undefined
+  onClose: () => void
+  onOpenSession?: () => void
+}) {
+  const [tab, setTab] = useState<DetailsTab>('worktrees')
+  const advanced = useUIStore(state => state.agentsAdvanced)
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex shrink-0 items-center gap-1 border-b border-border/20 px-2 py-1.5">
+        <div
+          className="scrollbar-hide flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto"
+          role="tablist"
+          aria-label="Coordinator details"
+        >
+          {TABS.map(({ id, label }) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={tab === id}
+              className={cn(
+                'flex h-7 shrink-0 items-center whitespace-nowrap rounded-md px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                tab === id
+                  ? 'bg-muted text-foreground'
+                  : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
+              )}
+              onClick={() => setTab(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          className="text-muted-foreground"
+          onClick={onClose}
+          aria-label="Close details"
+        >
+          <X />
+        </Button>
+      </div>
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto">
+        {tab === 'worktrees' ? (
+          <CoordinatorWorktrees
+            project={project}
+            coordinatorWorktreeId={coordinatorWorktreeId}
+            onOpen={onOpenSession}
+          />
+        ) : !agent ? (
+          <Placeholder>Loading coordinator…</Placeholder>
+        ) : tab === 'memory' ? (
+          <AgentMemoryView agent={agent} />
+        ) : tab === 'schedules' ? (
+          <AgentSchedules agent={agent} />
+        ) : (
+          <>
+            <AgentSettings agent={agent} />
+            <label className="flex shrink-0 cursor-pointer items-center gap-2 px-4 pb-6 text-sm text-muted-foreground select-none hover:text-foreground">
+              <Checkbox
+                checked={advanced}
+                onCheckedChange={value =>
+                  useUIStore.getState().setAgentsAdvanced(value === true)
+                }
+              />
+              Show tool calls in the chat
+            </label>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 /**
- * A project with its coordinator chat as the main panel, tabs for its memory,
- * schedules and settings, and the project's worktrees in a right sidebar.
- * `worktrees` stays mounted while the sidebar is closed (and on mobile, where
- * it never shows) because its session modal opens the coordinator's spawns.
+ * A project with its coordinator chat as the main panel and its details in a
+ * right sidebar (a full-screen sheet on mobile). `sessionModalHost` stays
+ * mounted, never shown, because its session modal opens the sessions the
+ * coordinator and the Worktrees tab point to.
  */
 export function CoordinatorView({
   project,
   viewSwitch,
-  worktrees,
+  sessionModalHost,
 }: {
   project: Project
   /** Coordinator | Sessions switch for the header */
   viewSwitch: ReactNode
-  worktrees: ReactNode
+  sessionModalHost: ReactNode
 }) {
   const isMobile = useIsMobile()
-  const [tab, setTab] = useState<CoordinatorTab>('chat')
   const { data: coordinator, error } = useProjectCoordinator(project.id)
   const agent = useAgentsList(useAgentsEnabledServers()).data?.find(
     item => item.projectId === project.id
   )
   const advanced = useUIStore(state => state.agentsAdvanced)
-  const sidebarOpen =
-    useUIStore(state => state.coordinatorSidebarOpen) && !isMobile
+  // Mobile opens the details as a sheet each time; the stored state is the
+  // desktop sidebar's
+  const [mobileOpen, setMobileOpen] = useState(false)
+  const storedOpen = useUIStore(state => state.coordinatorSidebarOpen)
+  const sidebarOpen = !isMobile && storedOpen
+  const detailsOpen = isMobile ? mobileOpen : storedOpen
+  const setDetailsOpen = (open: boolean) => {
+    if (isMobile) setMobileOpen(open)
+    else useUIStore.getState().setCoordinatorSidebarOpen(open)
+  }
   const sidebarWidth = useUIStore(state => state.coordinatorSidebarWidth)
   const sidebarRef = useRef<HTMLElement>(null)
 
@@ -100,13 +202,16 @@ export function CoordinatorView({
 
   useEffect(() => {
     const toggle = () => {
-      const ui = useUIStore.getState()
-      ui.setCoordinatorSidebarOpen(!ui.coordinatorSidebarOpen)
+      if (isMobile) setMobileOpen(open => !open)
+      else {
+        const ui = useUIStore.getState()
+        ui.setCoordinatorSidebarOpen(!ui.coordinatorSidebarOpen)
+      }
     }
     window.addEventListener('toggle-coordinator-sidebar', toggle)
     return () =>
       window.removeEventListener('toggle-coordinator-sidebar', toggle)
-  }, [])
+  }, [isMobile])
 
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -136,43 +241,28 @@ export function CoordinatorView({
         {unavailableMessage(error)}
       </span>
     </Placeholder>
-  ) : tab === 'chat' ? (
-    coordinator ? (
-      <Suspense fallback={<Placeholder>Loading coordinator…</Placeholder>}>
-        <ChatWindow
-          isModal
-          worktreeId={coordinator.worktreeId}
-          worktreePath={coordinator.worktreePath}
-          workingLabel={advanced ? undefined : 'Coordinator is working'}
-          agentChat
-        />
-      </Suspense>
-    ) : (
-      <Placeholder>Loading coordinator…</Placeholder>
-    )
-  ) : !agent ? (
-    <Placeholder>Loading coordinator…</Placeholder>
+  ) : coordinator ? (
+    <Suspense fallback={<Placeholder>Loading coordinator…</Placeholder>}>
+      <ChatWindow
+        isModal
+        worktreeId={coordinator.worktreeId}
+        worktreePath={coordinator.worktreePath}
+        workingLabel={advanced ? undefined : 'Coordinator is working'}
+        agentChat
+      />
+    </Suspense>
   ) : (
-    <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto">
-      {tab === 'memory' ? (
-        <AgentMemoryView agent={agent} />
-      ) : tab === 'schedules' ? (
-        <AgentSchedules agent={agent} />
-      ) : (
-        <>
-          <AgentSettings agent={agent} />
-          <label className="flex shrink-0 cursor-pointer items-center gap-2 px-4 pb-6 text-sm text-muted-foreground select-none hover:text-foreground">
-            <Checkbox
-              checked={advanced}
-              onCheckedChange={value =>
-                useUIStore.getState().setAgentsAdvanced(value === true)
-              }
-            />
-            Show tool calls in the chat
-          </label>
-        </>
-      )}
-    </div>
+    <Placeholder>Loading coordinator…</Placeholder>
+  )
+
+  const details = (
+    <CoordinatorDetails
+      project={project}
+      agent={agent}
+      coordinatorWorktreeId={coordinator?.worktreeId}
+      onClose={() => setDetailsOpen(false)}
+      onOpenSession={isMobile ? () => setMobileOpen(false) : undefined}
+    />
   )
 
   return (
@@ -180,7 +270,7 @@ export function CoordinatorView({
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div
           className={cn(
-            'grid shrink-0 grid-cols-[auto_1fr_auto] items-center gap-2 border-b border-border/20 px-4 sm:gap-4',
+            'flex shrink-0 justify-between items-center gap-2 border-b border-border/20 px-4 sm:gap-4',
             MODAL_TERMINAL_PRIMARY_ROW_CLASS
           )}
         >
@@ -190,45 +280,18 @@ export function CoordinatorView({
             </h2>
             {viewSwitch}
           </div>
-          <div
-            className="scrollbar-hide flex min-w-0 items-center justify-center gap-0.5 overflow-x-auto"
-            role="tablist"
-            aria-label="Coordinator"
-          >
-            {TABS.map(({ id, label }) => (
-              <button
-                key={id}
-                type="button"
-                role="tab"
-                aria-selected={tab === id}
-                className={cn(
-                  'flex h-7 shrink-0 items-center whitespace-nowrap rounded-md px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-                  tab === id
-                    ? 'bg-muted text-foreground'
-                    : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
-                )}
-                onClick={() => setTab(id)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
           <div className="flex justify-end">
-            {!isMobile && (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="text-muted-foreground"
-                aria-label={sidebarOpen ? 'Hide worktrees' : 'Show worktrees'}
-                aria-pressed={sidebarOpen}
-                title={sidebarOpen ? 'Hide worktrees' : 'Show worktrees'}
-                onClick={() =>
-                  useUIStore.getState().setCoordinatorSidebarOpen(!sidebarOpen)
-                }
-              >
-                {sidebarOpen ? <PanelRightClose /> : <PanelRight />}
-              </Button>
-            )}
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="text-muted-foreground"
+              aria-label={detailsOpen ? 'Hide details' : 'Show details'}
+              aria-pressed={detailsOpen}
+              title={detailsOpen ? 'Hide details' : 'Show details'}
+              onClick={() => setDetailsOpen(!detailsOpen)}
+            >
+              {detailsOpen ? <PanelRightClose /> : <PanelRight />}
+            </Button>
           </div>
         </div>
         {body}
@@ -238,24 +301,42 @@ export function CoordinatorView({
           role="separator"
           tabIndex={-1}
           aria-orientation="vertical"
-          aria-label="Resize worktrees sidebar"
+          aria-label="Resize details sidebar"
           className="relative h-full w-px shrink-0 bg-border/40"
           onMouseDown={handleResizeStart}
         >
           <div className="absolute inset-y-0 -left-1.5 -right-1.5 cursor-col-resize" />
         </div>
       )}
-      <aside
-        ref={sidebarRef}
-        aria-label="Worktrees"
-        className={cn(
-          'h-full min-h-0 shrink-0 overflow-hidden',
-          !sidebarOpen && 'hidden'
-        )}
-        style={{ width: sidebarWidth }}
-      >
-        {worktrees}
-      </aside>
+      {sidebarOpen && (
+        <aside
+          ref={sidebarRef}
+          aria-label="Coordinator details"
+          className="h-full min-h-0 shrink-0 overflow-hidden"
+          style={{ width: sidebarWidth }}
+        >
+          {details}
+        </aside>
+      )}
+      {isMobile && (
+        <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+          <SheetContent
+            side="right"
+            showCloseButton={false}
+            className="w-full gap-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] sm:max-w-none"
+            aria-label="Coordinator details"
+          >
+            <SheetTitle className="shrink-0 truncate px-3 pt-3 text-sm">
+              {project.name}
+            </SheetTitle>
+            <SheetDescription className="sr-only">
+              Coordinator worktrees, memory, schedules and settings
+            </SheetDescription>
+            {details}
+          </SheetContent>
+        </Sheet>
+      )}
+      <div hidden>{sessionModalHost}</div>
     </div>
   )
 }
