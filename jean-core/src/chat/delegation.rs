@@ -107,6 +107,8 @@ pub fn arm(
 /// is sent, so a second call for the same run end does nothing. A session
 /// whose last run is still live keeps its link.
 pub fn report_run_end(app: &AppHandle, session_id: &str, error: Option<&str>) {
+    // Project coordinators track their sessions separately.
+    crate::agents::on_run_reported(app, session_id, error);
     let armed = load_metadata(app, session_id)
         .ok()
         .flatten()

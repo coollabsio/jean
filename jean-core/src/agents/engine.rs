@@ -78,6 +78,21 @@ pub fn start(app: AppHandle) {
         });
     }
 
+    for event_name in INPUT_REQUEST_EVENTS {
+        let listener_app = app.clone();
+        app.listen(event_name, move |event| {
+            if !super::enabled(&listener_app) {
+                return;
+            }
+            let Ok(payload) = serde_json::from_str::<Value>(event.payload()) else {
+                return;
+            };
+            if let Some(session_id) = input_request_session(event_name, &payload) {
+                on_input_requested(&listener_app, session_id);
+            }
+        });
+    }
+
     {
         let listener_app = app.clone();
         app.listen("pr:status-update", move |event| {
@@ -176,6 +191,100 @@ fn on_run_ended(app: &AppHandle, session_id: &str, kind: &str, error: Option<&st
         _ => format!("Session {session_id} finished."),
     };
     emit_schedule_trigger(app, &project_id, trigger, &key, &context);
+}
+
+/// Called for every run end, also the ones that emit no `chat:*` event (a
+/// send that failed before its run, a resumed run's tail). A session another
+/// send still owns reports when that send ends.
+pub fn on_run_reported(app: &AppHandle, session_id: &str, error: Option<&str>) {
+    if crate::chat::registry::is_session_actively_managed(session_id) || !super::enabled(app) {
+        return;
+    }
+    let marked = super::with_db(app, |conn| {
+        db::mark_unreported_run_end(conn, session_id, error, db::now() + CHECK_DELAY_SECS)
+    })
+    .unwrap_or(0);
+    if marked > 0 {
+        super::notify_changed(app);
+    }
+}
+
+/// Events for a session that waits for the user in the middle of a run.
+const INPUT_REQUEST_EVENTS: &[&str] = &[
+    "chat:permission_denied",
+    "chat:codex_command_approval_request",
+    "chat:codex_permission_request",
+    "chat:codex_user_input_request",
+    "chat:codex_mcp_elicitation_request",
+    "chat:opencode_permission_request",
+];
+
+/// Session of a mid-run input request. Claude's `chat:permission_denied` is
+/// also sent for denials at the end of a run (no `rpc_id`); the run-end check
+/// reports those.
+pub(crate) fn input_request_session<'a>(event_name: &str, payload: &'a Value) -> Option<&'a str> {
+    if event_name == "chat:permission_denied" {
+        let live = payload
+            .get("denials")
+            .and_then(Value::as_array)
+            .is_some_and(|denials| {
+                denials
+                    .iter()
+                    .any(|d| d.get("rpc_id").is_some_and(|id| !id.is_null()))
+            });
+        if !live {
+            return None;
+        }
+    }
+    payload
+        .get("session_id")
+        .or_else(|| payload.get("sessionId"))
+        .and_then(Value::as_str)
+}
+
+fn on_input_requested(app: &AppHandle, session_id: &str) {
+    let waiting = match super::with_db(app, |conn| db::mark_delegations_waiting(conn, session_id)) {
+        Ok(waiting) => waiting,
+        Err(e) => {
+            log::warn!("[Agents] waiting delegation for {session_id} failed: {e}");
+            return;
+        }
+    };
+    if waiting.is_empty() {
+        return;
+    }
+    let name = crate::chat::storage::load_metadata(app, session_id)
+        .ok()
+        .flatten()
+        .map(|metadata| metadata.name)
+        .unwrap_or_default();
+    for d in &waiting {
+        let label = worktree_label(app, &d.worktree_id);
+        let body = format!(
+            "Session \"{name}\" ({label}, sessionId {session_id}) is waiting for the user: it asks for a permission or an answer in the middle of its run."
+        );
+        let added = super::with_db(app, |conn| db::add_event(conn, &follow_up_event(d, &body)));
+        match added {
+            Ok(_) => notify_user_of(app, &d.agent_id, "action", first_line(&body)),
+            Err(e) => log::warn!("[Agents] waiting update for {session_id} failed: {e}"),
+        }
+    }
+    super::notify_changed(app);
+}
+
+/// Show the update in the user's notifications (`agents:notification`), so
+/// it is seen when the coordinator chat is not open.
+fn notify_user_of(app: &AppHandle, agent_id: &str, level: &str, message: &str) {
+    let name = super::with_db(app, |conn| db::get_agent(conn, agent_id))
+        .ok()
+        .flatten()
+        .map(|agent| agent.name)
+        .unwrap_or_default();
+    super::mcp::emit_notification(app, (agent_id, &name), level, message, true);
+}
+
+fn first_line(text: &str) -> &str {
+    text.lines().next().unwrap_or_default()
 }
 
 /// `done` / `error` on a project session. Sessions that already wake a
@@ -374,6 +483,11 @@ async fn check_delegation(app: &AppHandle, d: &db::Delegation) -> Result<bool, S
         d.last_event.as_deref(),
         session.last_run_status.as_ref(),
     );
+    // A startup check of a wait that was already reported, with no run since.
+    if is_repeat_wait(d, status) {
+        super::with_db(app, |conn| db::defer_delegation_check(conn, d.id, None))?;
+        return Ok(false);
+    }
     let reply = last_reply(&session, SUMMARY_CHARS);
     let verb = match status {
         "waiting" => match session.waiting_for_input_type.as_deref() {
@@ -392,6 +506,9 @@ async fn check_delegation(app: &AppHandle, d: &db::Delegation) -> Result<bool, S
     if let Some(error) = d.last_error.as_deref().filter(|_| status == "failed") {
         body.push_str(&format!("\nError: {}", truncate(error, 500)));
     }
+    if let Some(pr_url) = worktree_pr_url(app, &d.worktree_id) {
+        body.push_str(&format!("\nPull request: {pr_url}"));
+    }
     if !reply.is_empty() {
         body.push_str(&format!("\nLast reply:\n{reply}"));
     }
@@ -400,7 +517,29 @@ async fn check_delegation(app: &AppHandle, d: &db::Delegation) -> Result<bool, S
         db::add_event(conn, &follow_up_event(d, &body))?;
         db::finish_delegation(conn, d.id, status, &summary)
     })?;
+    let level = match status {
+        "waiting" => "action",
+        "failed" => "error",
+        _ => "info",
+    };
+    notify_user_of(app, &d.agent_id, level, first_line(&body));
     Ok(true)
+}
+
+/// A `waiting` delegation checked again with no run end since (the startup
+/// requeue). Its wait was already reported.
+pub(crate) fn is_repeat_wait(d: &db::Delegation, status: &str) -> bool {
+    d.status == "waiting" && d.last_event.is_none() && status == "waiting"
+}
+
+/// Pull request linked to a worktree (created by Jean or detected).
+fn worktree_pr_url(app: &AppHandle, worktree_id: &str) -> Option<String> {
+    crate::projects::storage::load_projects_data(app)
+        .ok()?
+        .find_worktree(worktree_id)?
+        .pr_url
+        .clone()
+        .filter(|url| !url.trim().is_empty())
 }
 
 /// Update about delegated work, for the coordinator that started it.
@@ -913,9 +1052,9 @@ pub(crate) async fn next_delivery(
 
 /// Send one wake-up and wait for its turn. Returns true when the update is
 /// in the chat. A send the chat never recorded (the user sent a message
-/// first, or the session cannot run) puts the updates back in the queue, so
-/// a later tick delivers them. The wake stays counted, which bounds retries
-/// by the hourly budget.
+/// first, the session cannot run, or the run was withdrawn) puts the updates
+/// back in the queue, so a later tick delivers them. The wake stays counted,
+/// which bounds retries by the hourly budget.
 pub(crate) async fn send_delivery(app: &AppHandle, delivery: Delivery) -> bool {
     let agent_id = &delivery.agent.id;
     let Err(error) = send_to_session(
@@ -931,13 +1070,19 @@ pub(crate) async fn send_delivery(app: &AppHandle, delivery: Delivery) -> bool {
         return true;
     };
     log::warn!("[Agents] wake of {agent_id} failed: {}", error.message);
-    if error.user_turn != crate::chat::types::UserTurnOutcome::NotAccepted {
+    if !delivery_lost(error.user_turn) {
         return true;
     }
     if let Err(e) = super::with_db(app, |conn| db::requeue_events(conn, &delivery.event_ids)) {
         log::error!("[Agents] updates of {agent_id} were not queued again: {e}");
     }
     false
+}
+
+/// The update is not in the chat history: the send was rejected, or its run
+/// was hidden again (withdrawn). Both must be sent again.
+pub(crate) fn delivery_lost(user_turn: crate::chat::types::UserTurnOutcome) -> bool {
+    user_turn != crate::chat::types::UserTurnOutcome::Persisted
 }
 
 /// Start delivery of the queued updates of one coordinator. Returns true
@@ -1206,6 +1351,64 @@ pub async fn decide_approval(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn delegation(status: &str, last_event: Option<&str>) -> db::Delegation {
+        db::Delegation {
+            id: 1,
+            agent_id: "coord_p1".to_string(),
+            session_id: "s1".to_string(),
+            worktree_id: "wt".to_string(),
+            hop: 0,
+            status: status.to_string(),
+            last_event: last_event.map(str::to_string),
+            last_error: None,
+            last_summary: None,
+            check_after: None,
+            updated_at: 0,
+            origin_session_id: None,
+        }
+    }
+
+    #[test]
+    fn startup_recheck_of_a_reported_wait_is_skipped() {
+        assert!(is_repeat_wait(&delegation("waiting", None), "waiting"));
+        // A run ended after the wait: report it.
+        assert!(!is_repeat_wait(
+            &delegation("waiting", Some("done")),
+            "waiting"
+        ));
+        assert!(!is_repeat_wait(&delegation("waiting", None), "done"));
+        assert!(!is_repeat_wait(&delegation("active", None), "waiting"));
+    }
+
+    #[test]
+    fn withdrawn_or_rejected_wakes_are_sent_again() {
+        use crate::chat::types::UserTurnOutcome;
+        assert!(delivery_lost(UserTurnOutcome::NotAccepted));
+        // Regression: a withdrawn wake run is not in the chat history.
+        assert!(delivery_lost(UserTurnOutcome::Withdrawn));
+        assert!(!delivery_lost(UserTurnOutcome::Persisted));
+    }
+
+    #[test]
+    fn input_requests_name_their_session() {
+        let codex = json!({"session_id": "s1", "worktree_id": "w", "request": {}});
+        assert_eq!(
+            input_request_session("chat:codex_user_input_request", &codex),
+            Some("s1")
+        );
+        let live = json!({"session_id": "s2", "denials": [{"tool_name": "Bash", "rpc_id": 4}]});
+        assert_eq!(
+            input_request_session("chat:permission_denied", &live),
+            Some("s2")
+        );
+        // Denials listed at the end of a run are reported by the run-end check.
+        let ended = json!({"session_id": "s3", "denials": [{"tool_name": "Bash", "rpc_id": null}]});
+        assert_eq!(
+            input_request_session("chat:permission_denied", &ended),
+            None
+        );
+    }
 
     #[test]
     fn outcome_status_mapping() {

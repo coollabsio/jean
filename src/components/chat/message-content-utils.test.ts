@@ -6,9 +6,7 @@ import {
   encodePromptAttachmentMetadata,
   extractDirectoryMentionPaths,
   isAgentUpdateMessage,
-  isAgentUpdateTurn,
   parsePlainTextPromptMetadata,
-  splitAgentUpdateTurns,
   stripAllMarkers,
   chatContinuedJournalId,
   isChatContinuedMessage,
@@ -104,14 +102,9 @@ describe('chat continued message', () => {
   const content =
     '[Jean chat continued] Automatic message from Jean, not from the user.\nYour previous chat (42 messages) was long, so Jean archived it. Jean saved its end as journal entry #17.'
 
-  it('reads the journal entry and stays in the chat with its recap', () => {
+  it('reads the journal entry', () => {
     expect(isChatContinuedMessage(content)).toBe(true)
     expect(chatContinuedJournalId(content)).toBe(17)
-    const messages = [
-      { role: 'user', content },
-      { role: 'assistant', content: 'Saved. Recap: ...' },
-    ]
-    expect(splitAgentUpdateTurns(messages).chat).toEqual(messages)
   })
 
   it('has no journal entry when the save failed', () => {
@@ -121,43 +114,5 @@ describe('chat continued message', () => {
       )
     ).toBeNull()
     expect(isChatContinuedMessage('hello')).toBe(false)
-  })
-})
-
-describe('splitAgentUpdateTurns', () => {
-  const update = '[Jean agent update] Automatic message from Jean.'
-  const msgs = [
-    { role: 'user', content: 'Fix 10 issues' },
-    { role: 'assistant', content: 'Started 10 sessions.' },
-    { role: 'user', content: update },
-    { role: 'assistant', content: '#1 is done.' },
-    { role: 'assistant', content: 'Nine still run.' },
-    { role: 'user', content: 'Status?' },
-    { role: 'assistant', content: 'Nine still run.' },
-  ]
-
-  it('moves update turns out of the chat', () => {
-    const { chat, updates } = splitAgentUpdateTurns(msgs)
-    expect(chat.map(m => m.content)).toEqual([
-      'Fix 10 issues',
-      'Started 10 sessions.',
-      'Status?',
-      'Nine still run.',
-    ])
-    expect(updates.map(m => m.content)).toEqual([
-      '#1 is done.',
-      'Nine still run.',
-    ])
-  })
-
-  it('returns the same array without updates', () => {
-    const plain = msgs.slice(0, 2)
-    expect(splitAgentUpdateTurns(plain).chat).toBe(plain)
-  })
-
-  it('detects an update turn by the newest user message', () => {
-    expect(isAgentUpdateTurn(msgs.slice(0, 4))).toBe(true)
-    expect(isAgentUpdateTurn(msgs)).toBe(false)
-    expect(isAgentUpdateTurn([])).toBe(false)
   })
 })

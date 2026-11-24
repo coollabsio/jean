@@ -26,7 +26,7 @@ use rusqlite::Connection;
 use tauri::AppHandle;
 
 pub use db::{is_agent_worktree_id, Agent};
-pub use engine::{nudge, start};
+pub use engine::{nudge, on_run_reported, start};
 
 /// Managed state: the single agents database connection of this process.
 pub struct AgentsDb(Mutex<Connection>);
