@@ -518,7 +518,7 @@ export const MessageItem = memo(function MessageItem({
   }, [shouldRenderTimeline, message.role, displayContent])
   const shouldRenderDisplayContent =
     Boolean(showContent) && !isDuplicateAssistantPlanContent
-  const durationBadge =
+  const durationRow =
     message.role === 'assistant' && durationMs != null && durationMs > 0 ? (
       <span
         className={cn(
@@ -537,6 +537,8 @@ export const MessageItem = memo(function MessageItem({
         )}
       </span>
     ) : null
+  // Bubble replies show the row below the bubble, not inside it
+  const durationBadge = bubble ? null : durationRow
 
   const messageBoxContent = (
     <>
@@ -1096,15 +1098,19 @@ export const MessageItem = memo(function MessageItem({
       ) : (
         <div className="group/message group relative text-foreground/90 w-full min-w-0 break-words">
           {bubble ? (
-            <ReplyBubble>{messageBoxContent}</ReplyBubble>
+            <>
+              <ReplyBubble>{messageBoxContent}</ReplyBubble>
+              {durationRow}
+            </>
           ) : (
             messageBoxContent
           )}
           {!zenMode && assistantResponse && (
             <div
               className={cn(
-                'mt-1 flex justify-end',
-                durationBadge && 'md:hidden',
+                'mt-1 flex',
+                bubble ? 'justify-start' : 'justify-end',
+                durationRow && 'md:hidden',
                 ASSISTANT_HOVER_REVEAL
               )}
             >
