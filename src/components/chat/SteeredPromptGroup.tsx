@@ -60,7 +60,13 @@ export const SteeredPromptGroup = memo(function SteeredPromptGroup({
   const model = bubble ? undefined : settings?.model
   return (
     <div className="flex justify-end">
-      <div className="group flex max-w-[85%] min-w-0 flex-col items-end gap-1 sm:max-w-[70%]">
+      <div
+        className={cn(
+          'group flex max-w-[85%] min-w-0 items-end gap-1 sm:max-w-[70%]',
+          // Pill prompts: chrome left of the bubble, so its hidden row adds no height
+          bubble ? 'flex-row-reverse' : 'flex-col'
+        )}
+      >
         {/* react-doctor-disable-next-line react-doctor/no-static-element-interactions, react-doctor/click-events-have-key-events -- touch-only tap reveal; fine pointers/keyboard reveal details via group-hover/focus-within */}
         <div
           onClick={handleBubbleClick}

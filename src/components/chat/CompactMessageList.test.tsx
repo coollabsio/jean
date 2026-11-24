@@ -727,6 +727,57 @@ describe('CompactMessageList', () => {
           Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
   })
+
+  it('shows an approval card in agent chats after the prompts steered into its turn', async () => {
+    vi.mocked(invoke).mockImplementation((async (command: string) =>
+      command === 'get_agent_details'
+        ? {
+            approvals: [
+              {
+                id: 13,
+                agentId: 'coord_p1',
+                tool: 'delete_worktree',
+                args: { worktreePath: '/tmp/old-feature' },
+                status: 'pending',
+                result: null,
+                createdAt: 1,
+              },
+            ],
+          }
+        : null) as typeof invoke)
+    const follows = (a: Node, b: Node) =>
+      Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)
+    renderCompact(
+      [
+        message('user-1', 'user', 100, 'remove the merged worktree'),
+        message('assistant-1', 'assistant', 104, 'Approve the card.', {
+          tool_calls: [
+            {
+              id: 'tool-1',
+              name: 'mcp__jean__delete_worktree',
+              input: { worktreeId: 'wt-1' },
+              output: '{"approvalId": 13, "approvalRequired": true}',
+            },
+            { id: 'tool-2', name: 'Bash', input: {}, output: 'ok' },
+          ],
+          content_blocks: [
+            { type: 'tool_use', tool_call_id: 'tool-1' },
+            { type: 'tool_use', tool_call_id: 'tool-2' },
+            { type: 'user_input', text: 'hello' },
+            { type: 'text', text: 'Approve the card.' },
+          ],
+        }),
+      ],
+      { hideToolActivity: true, worktreeId: '__coord_p1__' }
+    )
+
+    const card = await screen.findByText('Delete worktree old-feature?')
+    const prompt = screen.getByText('remove the merged worktree')
+    const steered = screen.getByText('hello')
+    expect(follows(prompt, steered)).toBe(true)
+    expect(follows(steered, card)).toBe(true)
+    expect(follows(card, screen.getByText('Approve the card.'))).toBe(true)
+  })
 })
 
 describe('CompactMessageList request_secret', () => {

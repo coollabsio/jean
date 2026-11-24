@@ -171,17 +171,41 @@ type SteerSegment =
   | { kind: 'steered'; texts: string[]; key: string }
 
 /**
+ * Quiet chats show tool calls only as cards (approvals, agent messages), and a
+ * card between the turn's prompt and its steered prompts splits the user's
+ * bubbles. Move tool calls from before the last steered prompt to after it,
+ * so the cards show with the reply.
+ */
+function deferToolsPastSteeredInputs(blocks: ContentBlock[]): ContentBlock[] {
+  const lastSteer = blocks.reduce(
+    (last, block, index) => (block.type === 'user_input' ? index : last),
+    -1
+  )
+  const before = blocks.slice(0, lastSteer + 1)
+  const tools = before.filter(block => block.type === 'tool_use')
+  if (tools.length === 0) return blocks
+  return [
+    ...before.filter(block => block.type !== 'tool_use'),
+    ...tools,
+    ...blocks.slice(lastSteer + 1),
+  ]
+}
+
+/**
  * Splits an assistant message at mid-turn steered user prompts (Codex
  * `turn/steer`, `user_input` blocks) so the compact view can interleave them
  * chronologically: activity before a steer renders before its bubble, and
- * activity after the steer renders after it. Returns null when the message
- * contains no steered input.
+ * activity after the steer renders after it. `quiet` chats show tool cards
+ * after the steered prompts. Returns null when the message contains no
+ * steered input.
  */
 function splitMessageAtSteeredInputs(
-  message: ChatMessage
+  message: ChatMessage,
+  quiet: boolean
 ): SteerSegment[] | null {
-  const blocks = message.content_blocks ?? []
-  if (!blocks.some(block => block.type === 'user_input')) return null
+  const allBlocks = message.content_blocks ?? []
+  if (!allBlocks.some(block => block.type === 'user_input')) return null
+  const blocks = quiet ? deferToolsPastSteeredInputs(allBlocks) : allBlocks
 
   const segments: SteerSegment[] = []
   let current: ContentBlock[] = []
@@ -889,7 +913,10 @@ export const CompactMessageList = memo(
         // user prompts are split at each steer so the visible order matches
         // chronology: activity → steered bubble → activity after the steer.
         const pushBuffered = (message: ChatMessage, globalIndex: number) => {
-          const segments = splitMessageAtSteeredInputs(message)
+          const segments = splitMessageAtSteeredInputs(
+            message,
+            hideToolActivity
+          )
           if (!segments) {
             buffer.push({ message, globalIndex })
             return
@@ -948,7 +975,7 @@ export const CompactMessageList = memo(
 
         flush()
         return items
-      }, [messages, lastIndex, hasFollowUpMap])
+      }, [messages, lastIndex, hasFollowUpMap, hideToolActivity])
 
       const renderMessageItem = useCallback(
         (
