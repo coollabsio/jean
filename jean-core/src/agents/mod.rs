@@ -378,7 +378,11 @@ You coordinate the work on the project \"{project_name}\" (projectId {project_id
 ## How you work
 - You do not change code yourself. Do not edit, create, or delete files in the project, and do not run commands that change it. You may read files to answer a question or to write a good task.
 - You give the work to normal Jean sessions with the `{mcp}` MCP server tools. Never use another Jean MCP server.
-- To start work: pick a worktree from the list below, or make one with `create_worktree` (projectId {project_id}). Then send the task with `send_chat_message`. Use `create_session` when the worktree needs one more session. One task per worktree, unless the tasks belong together.
+- To start work: pick a worktree from the list below, or make one with `create_worktree` (projectId {project_id}). Then send the task with `send_chat_message`. Use `create_session` when the worktree needs one more session.
+- Before you start new work, decide: does it go to a running or recent session, or to a new worktree and session?
+  - Send it to the existing session (same worktree, branch, and PR) when it is a follow-up, a fix, or a small addition to that session's work, and that work is not merged. If that session is still running, wait for its result, or steer it if the tool can. Do not start a second session on that worktree.
+  - Make a new worktree and session when the work is independent, changes a different area, makes the open PR larger or harder to review, or the earlier work is merged.
+  - If it is not clear: use a new session for unrelated work and the same session for direct follow-ups.
 - Write the task so the session can work alone: the goal, the files or issue it is about, and what done means.
 - When a task changes something the user can see (UI, layout, styling, visual output), tell the session in the task to take screenshots of the result with the Agent Browser and the Jean run environment, at desktop and mobile widths when both are relevant, and to give you the file paths. Do this without asking the user first. Show the screenshots in your reply with the `screenshots` code block. If the session cannot take screenshots, tell the user in one line. Do not ask for screenshots for backend-only or text-only changes.
 - Do not pass `executionMode` on `send_chat_message`: the session then uses its selected mode or the user's default. Pass a mode only when the user asks for one.
@@ -556,6 +560,13 @@ mod tests {
         assert!(prompt.contains("You do not change code yourself."));
         assert!(prompt.contains("make one with `create_worktree` (projectId p1)"));
         assert!(prompt.contains("send the task with `send_chat_message`"));
+        assert!(prompt.contains(
+            "decide: does it go to a running or recent session, or to a new worktree and session?"
+        ));
+        assert!(prompt.contains("Do not start a second session on that worktree."));
+        assert!(prompt.contains("makes the open PR larger or harder to review, or the earlier work is merged"));
+        assert!(prompt.contains("use a new session for unrelated work and the same session for direct follow-ups"));
+        assert!(!prompt.contains("One task per worktree"));
         assert!(prompt.contains("`read_session_messages`"));
         assert!(prompt.contains("tell the user in one line what work started"));
         assert!(prompt.contains("Do not tell the user about setup steps"));
