@@ -272,9 +272,10 @@ interface ProjectCanvasViewProps {
   /** Shown beside the project name (the Coordinator | Sessions switch) */
   headerAccessory?: ReactNode
   /**
-   * Worktrees list beside the coordinator chat: compact rows, no keyboard
+   * Session modal host for the coordinator view: hidden, with no keyboard
    * navigation or restored selection, so canvas shortcuts stay inert while
-   * the chat has focus. Its session modal still opens worktrees.
+   * the chat has focus. It covers its positioned parent while its session
+   * modal is open.
    */
   embedded?: boolean
 }
@@ -3284,9 +3285,19 @@ export function ProjectCanvasView({
 
   // Track global card index for refs
   let cardIndex = 0
+  const sessionModalOpen =
+    !!selectedWorktreeModal && !!selectedModalWorktree && !!project
 
   return (
-    <div className="relative flex h-full flex-col">
+    <div
+      // Embedded: hidden until its session modal opens, then it covers the
+      // host view (the modal renders inline, not in a portal)
+      hidden={embedded && !sessionModalOpen}
+      className={cn(
+        'relative flex h-full flex-col',
+        embedded && 'absolute inset-0 z-20 bg-background'
+      )}
+    >
       <div className="flex-1 flex flex-col overflow-auto">
         {/* Header and filters - sticky together over content */}
         <div className="sticky top-0 z-10 bg-background/60 backdrop-blur-md">
@@ -4082,7 +4093,7 @@ export function ProjectCanvasView({
         worktreePath={selectedWorktreeModal?.worktreePath ?? ''}
         worktree={selectedModalWorktree}
         project={project ?? null}
-        isOpen={!!selectedWorktreeModal && !!selectedModalWorktree && !!project}
+        isOpen={sessionModalOpen}
         onClose={handleCloseSessionModal}
         onRequestCloseWorktree={handleRequestCloseModalWorktree}
       />

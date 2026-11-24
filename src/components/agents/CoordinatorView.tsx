@@ -152,8 +152,8 @@ function CoordinatorDetails({
 /**
  * A project with its coordinator chat as the main panel and its details in a
  * right sidebar (a full-screen sheet on mobile). `sessionModalHost` stays
- * mounted, never shown, because its session modal opens the sessions the
- * coordinator and the Sessions tab point to.
+ * mounted and hidden; it covers this view only while its session modal shows
+ * a session the header, the coordinator or the Sessions tab opened.
  */
 export function CoordinatorView({
   project,
@@ -336,7 +336,7 @@ export function CoordinatorView({
           </SheetContent>
         </Sheet>
       )}
-      <div hidden>{sessionModalHost}</div>
+      {sessionModalHost}
     </div>
   )
 }
