@@ -35,9 +35,9 @@ function ProjectViewSwitch({
 
 /**
  * A project page. With Project Coordinator on, the user switches between the
- * coordinator chat and the list of sessions the coordinator started (last
- * choice per project; coordinator first). Without it, and for folders and
- * servers, it is the sessions canvas.
+ * coordinator chat and the sessions canvas (last choice per project;
+ * coordinator first). Without it, and for folders and servers, it is the
+ * sessions canvas.
  */
 export function ProjectView({
   projectId,
@@ -53,13 +53,25 @@ export function ProjectView({
     state => state.projectViewModes[projectId] ?? 'coordinator'
   )
 
-  if (!hasCoordinator)
-    return <ProjectCanvasView projectId={projectId} project={project} />
+  if (!hasCoordinator || mode === 'sessions') {
+    return (
+      <ProjectCanvasView
+        projectId={projectId}
+        project={project}
+        headerAccessory={
+          hasCoordinator ? (
+            <ProjectViewSwitch projectId={projectId} mode="sessions" />
+          ) : undefined
+        }
+      />
+    )
+  }
   return (
     <CoordinatorView
       project={project}
-      mode={mode}
-      viewSwitch={<ProjectViewSwitch projectId={projectId} mode={mode} />}
+      viewSwitch={
+        <ProjectViewSwitch projectId={projectId} mode="coordinator" />
+      }
       sessionModalHost={
         <ProjectCanvasView projectId={projectId} project={project} embedded />
       }

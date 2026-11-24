@@ -26,7 +26,6 @@ import {
 } from '@/services/agents'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
-import type { ProjectViewMode } from '@/store/ui-store'
 import type { Project } from '@/types/projects'
 import { AgentMemoryView } from './AgentMemoryView'
 import { AgentSchedules } from './AgentSchedules'
@@ -40,10 +39,10 @@ const ChatWindow = lazy(() =>
   }))
 )
 
-type DetailsTab = 'worktrees' | 'memory' | 'schedules' | 'settings'
+type DetailsTab = 'sessions' | 'memory' | 'schedules' | 'settings'
 
 const TABS: { id: DetailsTab; label: string }[] = [
-  { id: 'worktrees', label: 'Worktrees' },
+  { id: 'sessions', label: 'Sessions' },
   { id: 'memory', label: 'Memory' },
   { id: 'schedules', label: 'Schedules' },
   { id: 'settings', label: 'Settings' },
@@ -66,7 +65,7 @@ function unavailableMessage(error: unknown): string {
     : `The coordinator is unavailable: ${String(error)}`
 }
 
-/** The coordinator's details: active worktrees, memory, schedules, settings. */
+/** The coordinator's details: its sessions, memory, schedules, settings. */
 function CoordinatorDetails({
   project,
   agent,
@@ -80,7 +79,7 @@ function CoordinatorDetails({
   onClose: () => void
   onOpenSession?: () => void
 }) {
-  const [tab, setTab] = useState<DetailsTab>('worktrees')
+  const [tab, setTab] = useState<DetailsTab>('sessions')
   const advanced = useUIStore(state => state.agentsAdvanced)
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -119,7 +118,7 @@ function CoordinatorDetails({
         </Button>
       </div>
       <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto">
-        {tab === 'worktrees' ? (
+        {tab === 'sessions' ? (
           <CoordinatorWorktrees
             project={project}
             agentId={agentId}
@@ -151,20 +150,17 @@ function CoordinatorDetails({
 }
 
 /**
- * A project with its coordinator chat (or, in `sessions` mode, the worktree
- * sessions the coordinator started) as the main panel and its details in a
+ * A project with its coordinator chat as the main panel and its details in a
  * right sidebar (a full-screen sheet on mobile). `sessionModalHost` stays
  * mounted, never shown, because its session modal opens the sessions the
- * coordinator and the worktree lists point to.
+ * coordinator and the Sessions tab point to.
  */
 export function CoordinatorView({
   project,
-  mode = 'coordinator',
   viewSwitch,
   sessionModalHost,
 }: {
   project: Project
-  mode?: ProjectViewMode
   /** Coordinator | Sessions switch for the header */
   viewSwitch: ReactNode
   sessionModalHost: ReactNode
@@ -245,10 +241,6 @@ export function CoordinatorView({
         {unavailableMessage(error)}
       </span>
     </Placeholder>
-  ) : mode === 'sessions' ? (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      <CoordinatorWorktrees project={project} agentId={coordinator?.agentId} />
-    </div>
   ) : coordinator ? (
     <Suspense fallback={<Placeholder>Loading coordinator…</Placeholder>}>
       <ChatWindow
@@ -338,7 +330,7 @@ export function CoordinatorView({
               {project.name}
             </SheetTitle>
             <SheetDescription className="sr-only">
-              Coordinator worktrees, memory, schedules and settings
+              Coordinator sessions, memory, schedules and settings
             </SheetDescription>
             {details}
           </SheetContent>

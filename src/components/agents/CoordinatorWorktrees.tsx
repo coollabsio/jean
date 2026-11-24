@@ -132,7 +132,7 @@ export function CoordinatorWorktrees({
   if (error)
     return (
       <p className="px-4 py-6 text-sm text-destructive" role="alert">
-        Could not load worktrees: {String(error)}
+        Could not load sessions: {String(error)}
       </p>
     )
   if (!delegations || (sessionIds.length > 0 && !items))
@@ -141,7 +141,7 @@ export function CoordinatorWorktrees({
     return <Message>The coordinator has not started any work yet.</Message>
 
   return (
-    <ul className="flex flex-col py-1" aria-label="Coordinator worktrees">
+    <ul className="flex flex-col py-1" aria-label="Coordinator sessions">
       {rows.map(({ item, tone }) => (
         <li key={item.session.id}>
           <button

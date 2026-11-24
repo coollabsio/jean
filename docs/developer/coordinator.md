@@ -526,10 +526,11 @@ stack. Put new command groups in a separate function and call it through
 
 `ProjectView` (`src/components/dashboard/ProjectView.tsx`) shows a
 **Coordinator | Sessions** switch in the project header when the flag is on for
-the project's server. Folders and server projects never get the switch, and
-show the classic `ProjectCanvasView`. With the switch, both modes render
-`CoordinatorView`: **Coordinator** shows the coordinator chat, **Sessions**
-shows the coordinator's worktree list (see below). The last choice per project
+the project's server. Folders and server projects never get the switch.
+**Coordinator** renders `CoordinatorView`. **Sessions** is the classic
+`ProjectCanvasView` (all worktrees and sessions, search, New worktree, filters
+and Base Session), with the switch in its header (`headerAccessory`). The last
+choice per project
 is stored in `projectViewModes` (UI store, client view state). The default is
 **Coordinator**. `openProjectCoordinator(projectId)` opens a project in
 coordinator mode. The command palette uses it in its **Coordinators** group,
@@ -544,8 +545,8 @@ With **Show tool calls in the chat** (`agentsAdvanced`) off, the chat hides
 tool calls and shows "Coordinator is working" while a turn runs.
 
 A hidden, embedded `ProjectCanvasView` stays mounted, because its
-`SessionChatModal` opens the sessions that the spawn cards and the worktree
-list link to (`open-session-modal` event).
+`SessionChatModal` opens the sessions that the spawn cards and the
+Sessions tab link to (`open-session-modal` event).
 
 If `get_project_coordinator` fails with "Unknown command", the view says that
 the server needs an update.
@@ -557,7 +558,7 @@ as a full-screen sheet.
 
 | Tab       | Component                                                                                                                 |
 | --------- | ------------------------------------------------------------------------------------------------------------------------- |
-| Worktrees | `CoordinatorWorktrees`                                                                                                    |
+| Sessions  | `CoordinatorWorktrees`                                                                                                    |
 | Memory    | `AgentMemoryView`                                                                                                         |
 | Schedules | `AgentSchedules`                                                                                                          |
 | Settings  | `AgentSettings`: run configuration (`AgentRunFields`), connectors (`AgentConnectors`) and **Show tool calls in the chat** |
@@ -568,7 +569,7 @@ as a full-screen sheet.
 | Width     | 280 to 640 px, drag the left edge                                                     |
 | Persisted | `coordinatorSidebarOpen` and `coordinatorSidebarWidth` in client view state           |
 
-### Coordinator worktree list
+### Coordinator sessions list
 
 `CoordinatorWorktrees` is a plain list of the sessions the coordinator
 started: the `delegations` from `get_agent_details` (newest 30, every
@@ -576,7 +577,7 @@ status), resolved to worktree and session through `get_recent_worktrees` with
 `includeSessionIds`. Base sessions are left out. Each row has a status dot
 (running, waiting, failed or done), the worktree name, the session name and
 the relative time. Running rows go first, then waiting. A click opens the
-session. The Worktrees tab and the **Sessions** mode use this same list.
+session. Only the Sessions tab of the details sidebar shows this list.
 
 ### Spawn cards and badge
 
@@ -595,6 +596,7 @@ have an open delegation (`useCoordinatorDelegations`).
 Web access uses the same components. All commands go through
 `dispatch_agents_command`, so they work over WebSocket.
 
-On mobile, `ProjectView` shows the same switch and the same `CoordinatorView`.
+On mobile, `ProjectView` shows the same switch, the same `CoordinatorView` and
+the same `ProjectCanvasView` (with its mobile layout).
 The details sidebar opens as a full-screen sheet, and opening a session from
-its Worktrees tab closes the sheet.
+its Sessions tab closes the sheet.
