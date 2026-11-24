@@ -716,6 +716,32 @@ describe('MessageItem', () => {
     expect(screen.getByText(new RegExp(longUrl))).toBeInTheDocument()
   })
 
+  it('shows the duration of a bubble reply below the bubble, not inside it', () => {
+    render(
+      <MessageItem
+        {...baseProps}
+        bubble
+        durationMs={5_000}
+        message={{
+          ...baseMessage,
+          content: 'Bubble reply',
+          tool_calls: [],
+          content_blocks: [],
+        }}
+      />
+    )
+
+    const bubble = screen
+      .getByText('Bubble reply')
+      .closest('.rounded-\\[22px\\]') as HTMLElement
+    const timing = screen.getByText(/^5s/)
+    expect(bubble).toBeTruthy()
+    expect(bubble.contains(timing)).toBe(false)
+    expect(
+      bubble.compareDocumentPosition(timing) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+  })
+
   it('shows a custom context menu on right-click instead of browser defaults', async () => {
     const user = userEvent.setup()
     const original = window.getSelection

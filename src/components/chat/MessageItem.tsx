@@ -518,7 +518,7 @@ export const MessageItem = memo(function MessageItem({
   }, [shouldRenderTimeline, message.role, displayContent])
   const shouldRenderDisplayContent =
     Boolean(showContent) && !isDuplicateAssistantPlanContent
-  const durationBadge =
+  const durationRow =
     message.role === 'assistant' && durationMs != null && durationMs > 0 ? (
       <span
         className={cn(
@@ -537,6 +537,8 @@ export const MessageItem = memo(function MessageItem({
         )}
       </span>
     ) : null
+  // Bubble replies show the row below the bubble, not inside it
+  const durationBadge = bubble ? null : durationRow
 
   const messageBoxContent = (
     <>
@@ -1036,7 +1038,13 @@ export const MessageItem = memo(function MessageItem({
       )}
     >
       {message.role === 'user' ? (
-        <div className="group flex max-w-[85%] min-w-0 flex-col items-end gap-1 sm:max-w-[70%]">
+        <div
+          className={cn(
+            'group flex max-w-[85%] min-w-0 items-end gap-1 sm:max-w-[70%]',
+            // Pill prompts: chrome left of the bubble, so its hidden row adds no height
+            hideSettingsBadges ? 'flex-row-reverse' : 'flex-col'
+          )}
+        >
           {/* react-doctor-disable-next-line react-doctor/no-static-element-interactions, react-doctor/click-events-have-key-events -- touch-only tap reveal; fine pointers/keyboard reveal details via group-hover/focus-within */}
           <div
             onClick={handleUserBubbleClick}
@@ -1090,15 +1098,19 @@ export const MessageItem = memo(function MessageItem({
       ) : (
         <div className="group/message group relative text-foreground/90 w-full min-w-0 break-words">
           {bubble ? (
-            <ReplyBubble>{messageBoxContent}</ReplyBubble>
+            <>
+              <ReplyBubble>{messageBoxContent}</ReplyBubble>
+              {durationRow}
+            </>
           ) : (
             messageBoxContent
           )}
           {!zenMode && assistantResponse && (
             <div
               className={cn(
-                'mt-1 flex justify-end',
-                durationBadge && 'md:hidden',
+                'mt-1 flex',
+                bubble ? 'justify-start' : 'justify-end',
+                durationRow && 'md:hidden',
                 ASSISTANT_HOVER_REVEAL
               )}
             >
