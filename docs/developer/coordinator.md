@@ -545,8 +545,11 @@ With **Show tool calls in the chat** (`agentsAdvanced`) off, the chat hides
 tool calls and shows "Coordinator is working" while a turn runs.
 
 A hidden, embedded `ProjectCanvasView` stays mounted, because its
-`SessionChatModal` opens the sessions that the spawn cards and the
-Sessions tab link to (`open-session-modal` event).
+`SessionChatModal` opens the sessions that the spawn cards, the Sessions tab
+(`open-session-modal` event) and the title bar unread list (auto-open queue)
+link to. `SessionChatModal` renders inline, not in a portal, so the embedded
+canvas shows itself over the whole coordinator view while its modal is open.
+Do not wrap it in a hidden element.
 
 If `get_project_coordinator` fails with "Unknown command", the view says that
 the server needs an update.
