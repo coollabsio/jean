@@ -778,6 +778,49 @@ describe('CompactMessageList', () => {
     expect(follows(steered, card)).toBe(true)
     expect(follows(card, screen.getByText('Approve the card.'))).toBe(true)
   })
+
+  it('shows the screenshots gallery of a coordinator reply to an automatic update', () => {
+    // Regression: the coordinator chat dropped every reply to a
+    // `[Jean agent update]`, so a gallery sent in such a reply never showed.
+    const shots = [
+      '/root/.local/share/com.jean.desktop/browser-screenshots/reply-desktop.png',
+      '/root/.local/share/com.jean.desktop/browser-screenshots/reply-mobile.png',
+    ]
+    const reply = `PR #962 is ready.\n\n\`\`\`screenshots\n${shots.join('\n')}\n\`\`\`\n\nMerge it?`
+    renderCompact(
+      [
+        message('user-1', 'user', 100, 'fix the reply bubble'),
+        message('assistant-1', 'assistant', 104, 'I started the fix.'),
+        message(
+          'update-1',
+          'user',
+          200,
+          '[Jean agent update] Automatic message from Jean, not from the user.\n\n### 1. delegation\nSession "Reply bubble" finished.'
+        ),
+        message('assistant-2', 'assistant', 204, reply, {
+          tool_calls: [{ id: 'tool-1', name: 'Bash', input: {}, output: 'ok' }],
+          content_blocks: [
+            { type: 'tool_use', tool_call_id: 'tool-1' },
+            { type: 'text', text: reply },
+          ],
+        }),
+      ],
+      { hideToolActivity: true, worktreeId: '__coord_p1__' }
+    )
+
+    expect(screen.queryByText(/Jean agent update/)).not.toBeInTheDocument()
+    expect(screen.getByText('PR #962 is ready.')).toBeVisible()
+    expect(
+      screen.getByRole('img', { name: 'reply-desktop.png' })
+    ).toHaveAttribute(
+      'src',
+      expect.stringContaining(
+        '/api/files/browser-screenshots/reply-desktop.png'
+      )
+    )
+    expect(screen.getByRole('img', { name: 'reply-mobile.png' })).toBeVisible()
+    expect(screen.queryByText(shots[0] ?? '')).not.toBeInTheDocument()
+  })
 })
 
 describe('CompactMessageList request_secret', () => {
