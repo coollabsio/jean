@@ -78,7 +78,6 @@ import {
 import { cn } from '@/lib/utils'
 import { DesktopBackendModelPicker } from '@/components/chat/toolbar/DesktopBackendModelPicker'
 import { ExecutionModeDropdown } from '@/components/chat/toolbar/ExecutionModeDropdown'
-import { DockBurgerButton } from '@/components/chat/toolbar/DockBurgerButton'
 import { ReasoningLevelList } from '@/components/chat/toolbar/ReasoningLevelDropdown'
 import type { ModelReasoningCapability } from '@/services/model-catalog'
 
@@ -116,7 +115,6 @@ interface DesktopToolbarControlsProps {
 
   availableMcpServers: McpServerInfo[]
   enabledMcpServers: string[]
-  activeMcpCount: number
   isHealthChecking: boolean
   mcpStatuses: Record<string, McpHealthStatus> | undefined
 
@@ -181,7 +179,6 @@ export function DesktopToolbarControls({
   worktreeId,
   availableMcpServers: _availableMcpServers,
   enabledMcpServers: _enabledMcpServers,
-  activeMcpCount,
   isHealthChecking: _isHealthChecking,
   mcpStatuses: _mcpStatuses,
   loadedIssueContexts,
@@ -414,11 +411,6 @@ export function DesktopToolbarControls({
 
   return (
     <>
-      <DockBurgerButton
-        activeMcpCount={activeMcpCount}
-        className="hidden @xl:flex"
-      />
-
       {onOpenMagicModal && (
         <Tooltip>
           <TooltipTrigger asChild>

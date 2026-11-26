@@ -50,7 +50,7 @@ export interface UsageEntry {
 }
 
 /**
- * Usage of every installed + authenticated backend, for the quick menus.
+ * Usage of every installed + authenticated backend, for the thread details and usage menus.
  * `fetchEnabled` gates the usage queries (status/auth always run).
  */
 export function useUsageEntries(fetchEnabled: boolean): UsageEntry[] {

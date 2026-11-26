@@ -12,6 +12,9 @@ export const TITLEBAR_ACTIONS_SLOT_ID = 'titlebar-actions-slot'
 /** Title bar slot (left of the right-panel toggle) for right panel actions. */
 export const TITLEBAR_RIGHT_PANEL_SLOT_ID = 'titlebar-right-panel-slot'
 
+/** Title bar slot (left of the right-panel toggle) for the thread details button. */
+export const TITLEBAR_THREAD_DETAILS_SLOT_ID = 'titlebar-thread-details-slot'
+
 /** Title bar slot (center) for the view search box. */
 export const TITLEBAR_CENTER_SLOT_ID = 'titlebar-center-slot'
 

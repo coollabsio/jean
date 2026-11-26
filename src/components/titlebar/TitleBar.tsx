@@ -33,6 +33,7 @@ import {
   TITLEBAR_ACTIONS_SLOT_ID,
   TITLEBAR_PROJECT_MENU_SLOT_ID,
   TITLEBAR_RIGHT_PANEL_SLOT_ID,
+  TITLEBAR_THREAD_DETAILS_SLOT_ID,
   titleBarSlotRef,
 } from './breadcrumb-slot'
 
@@ -290,6 +291,13 @@ export function TitleBar({
         {!zenMode && (
           <>
             <UpdatesIndicator />
+            {/* The session view portals its actions and close button here */}
+            {!isMobile && (
+              <div
+                ref={titleBarSlotRef(TITLEBAR_ACTIONS_SLOT_ID)}
+                className="flex items-center gap-1"
+              />
+            )}
             {/* The right panel portals its Open in / Add tab actions here */}
             {!isMobile && (
               <div
@@ -297,6 +305,12 @@ export function TitleBar({
                 className="flex items-center gap-1"
               />
             )}
+            {/* The chat toolbar portals its thread details menu here, next to
+                the right panel toggle in the top right corner */}
+            <div
+              ref={titleBarSlotRef(TITLEBAR_THREAD_DETAILS_SLOT_ID)}
+              className="flex items-center"
+            />
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -323,13 +337,6 @@ export function TitleBar({
                 </kbd>
               </TooltipContent>
             </Tooltip>
-            {/* The session view portals its actions and close button here */}
-            {!isMobile && (
-              <div
-                ref={titleBarSlotRef(TITLEBAR_ACTIONS_SLOT_ID)}
-                className="flex items-center gap-1"
-              />
-            )}
           </>
         )}
         {native && isClientLinux && <LinuxWindowControls />}

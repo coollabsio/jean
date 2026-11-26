@@ -1,5 +1,6 @@
 import { DevinLocationPicker } from '@/components/chat/toolbar/DevinLocationPicker'
 import { memo, useCallback, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Zap } from '@/components/icons/reicon'
 import { dismissibleToast } from '@/lib/dismissible-toast'
 import { invoke } from '@/lib/transport'
@@ -32,7 +33,14 @@ import {
 } from '@/components/chat/toolbar/MobileSettingsMenu'
 import { MobileBackendModelPickerSheet } from '@/components/chat/toolbar/MobileBackendModelPickerSheet'
 import { DesktopToolbarControls } from '@/components/chat/toolbar/DesktopToolbarControls'
-import { DockBurgerButton } from '@/components/chat/toolbar/DockBurgerButton'
+import {
+  ThreadDetailsButton,
+  buildThreadContextItems,
+} from '@/components/chat/toolbar/ThreadDetailsButton'
+import {
+  TITLEBAR_THREAD_DETAILS_SLOT_ID,
+  useTitleBarSlot,
+} from '@/components/titlebar/breadcrumb-slot'
 import { ExecutionModeDropdown } from '@/components/chat/toolbar/ExecutionModeDropdown'
 import { SendCancelButton } from '@/components/chat/toolbar/SendCancelButton'
 import { ContextViewerDialog } from '@/components/chat/toolbar/ContextViewerDialog'
@@ -161,6 +169,10 @@ export const ChatToolbar = memo(function ChatToolbar({
   const mobileSettingsMenuRef = useRef<MobileSettingsMenuHandle>(null)
   const isMobile = useIsMobile()
   const zenMode = useUIStore(state => state.zenMode)
+  const threadDetailsSlot = useTitleBarSlot(
+    TITLEBAR_THREAD_DETAILS_SLOT_ID,
+    !zenMode
+  )
   const [revertConfirmOpen, setRevertConfirmOpen] = useState(false)
 
   const pickRemoteOrRun = useRemotePicker(
@@ -443,6 +455,37 @@ export const ChatToolbar = memo(function ChatToolbar({
         onConfirm={executeRevertLastCommit}
       />
 
+      {threadDetailsSlot &&
+        createPortal(
+          <ThreadDetailsButton
+            worktreeId={worktreeId}
+            contexts={buildThreadContextItems({
+              issues: loadedIssueContexts,
+              prs: loadedPRContexts,
+              discussions: loadedDiscussionContexts,
+              security: loadedSecurityContexts,
+              advisories: loadedAdvisoryContexts,
+              linear: loadedLinearContexts,
+              sentry: loadedSentryContexts,
+              saved: attachedSavedContexts,
+              onViewIssue: handleViewIssue,
+              onViewPR: handleViewPR,
+              onViewDiscussion: handleViewDiscussion,
+              onViewSecurityAlert: handleViewSecurityAlert,
+              onViewAdvisory: handleViewAdvisory,
+              onViewLinear: handleViewLinear,
+              onViewSentry: handleViewSentry,
+              onViewSavedContext: handleViewSavedContext,
+            })}
+            availableMcpServers={availableMcpServers}
+            enabledMcpServers={enabledMcpServers}
+            mcpStatuses={mcpStatuses}
+            onManageContexts={onLoadContext}
+            onOpen={checkHealth}
+          />,
+          threadDetailsSlot
+        )}
+
       <div className="@container flex px-4 py-2 md:px-6">
         <div className="flex w-full min-w-0 flex-nowrap items-center overflow-x-auto whitespace-nowrap bg-transparent scrollbar-hide">
           {selectedBackend === 'devin' && (
@@ -454,11 +497,6 @@ export const ChatToolbar = memo(function ChatToolbar({
             />
           )}
           <div className={zenMode ? 'hidden' : 'contents'}>
-            <DockBurgerButton
-              activeMcpCount={activeMcpCount}
-              className="flex @xl:hidden"
-            />
-
             {onOpenMagicModal && (
               <MobileToolbarMenu
                 isDisabled={false}
@@ -592,7 +630,6 @@ export const ChatToolbar = memo(function ChatToolbar({
               worktreeId={worktreeId}
               availableMcpServers={availableMcpServers}
               enabledMcpServers={enabledMcpServers}
-              activeMcpCount={activeMcpCount}
               isHealthChecking={isHealthChecking}
               mcpStatuses={mcpStatuses}
               loadedIssueContexts={loadedIssueContexts}

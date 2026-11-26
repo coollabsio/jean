@@ -56,7 +56,6 @@ function renderDesktopToolbarControls(
     worktreeId: null,
     availableMcpServers: [],
     enabledMcpServers: [],
-    activeMcpCount: 0,
     isHealthChecking: false,
     mcpStatuses: undefined,
     loadedIssueContexts: [],
