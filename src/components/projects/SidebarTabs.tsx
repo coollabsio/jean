@@ -25,7 +25,7 @@ export function SidebarTabs() {
 
   return (
     <div
-      className="@container flex h-10 shrink-0 items-center gap-1 px-3 pt-1"
+      className="@container flex h-10 shrink-0 items-start gap-1 px-3 pt-2"
       onContextMenu={suppressSidebarChromeContextMenu}
     >
       <div

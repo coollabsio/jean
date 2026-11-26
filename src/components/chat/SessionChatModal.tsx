@@ -1367,7 +1367,7 @@ export const SessionChatModal = memo(function SessionChatModal({
           {!zenMode && showSessionTabs && (
             <div
               className={cn(
-                'relative flex shrink-0 items-center gap-0.5 border-b border-border/20 pr-4',
+                'relative flex shrink-0 items-start gap-0.5 border-b border-border/20 pr-4',
                 MODAL_TERMINAL_SECONDARY_ROW_CLASS
               )}
             >
