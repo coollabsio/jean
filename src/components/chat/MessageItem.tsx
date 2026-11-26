@@ -37,6 +37,10 @@ import {
 } from './tool-call-utils'
 import { PlanDisplay } from './PlanFileDisplay'
 import { ImageLightbox } from './ImageLightbox'
+import {
+  ScreenshotGallery,
+  extractScreenshotBlocks,
+} from '@/components/ui/screenshot-gallery'
 import { parseServerResourceKey } from '@/lib/server-resource'
 import { TextFileLightbox } from './TextFileLightbox'
 import { FileMentionBadge } from './FileMentionBadge'
@@ -442,6 +446,8 @@ export const MessageItem = memo(function MessageItem({
       }
     })
     let lastVisibleTextKey: string | undefined
+    // Screenshots from all text items show in one gallery at the bottom.
+    const screenshotPaths = new Set<string>()
     const textInfo = timeline.map(item => {
       if (item.type !== 'text') return null
       const textBlockIndex = firstTextBlockIndex.get(item.text)
@@ -450,15 +456,19 @@ export const MessageItem = memo(function MessageItem({
           hiddenPlanTextBlockIndices.has(textBlockIndex)) ||
         isDuplicatePlanTextBlock(item.text, resolvedPlan.content)
       if (hidden) return { hidden: true as const }
+      const { text, paths } = extractScreenshotBlocks(item.text)
+      paths.forEach(path => screenshotPaths.add(path))
+      if (!text.trim()) return { hidden: true as const }
       lastVisibleTextKey = item.key
-      if (!hasReviewFindings(item.text)) {
-        return { hidden: false as const, review: null }
+      if (!hasReviewFindings(text)) {
+        return { hidden: false as const, text, review: null }
       }
       return {
         hidden: false as const,
+        text,
         review: {
-          findings: parseReviewFindings(item.text),
-          strippedText: stripFindingBlocks(item.text),
+          findings: parseReviewFindings(text),
+          strippedText: stripFindingBlocks(text),
         },
       }
     })
@@ -468,6 +478,7 @@ export const MessageItem = memo(function MessageItem({
       timeline,
       textInfo,
       lastVisibleTextKey,
+      screenshotPaths: [...screenshotPaths],
       hasRenderedPlanItem: timeline.some(item => item.type === 'exitPlanMode'),
       fallbackAssistantIntro: !hasRenderedTextItem
         ? (fallbackPrePlanText ??
@@ -636,9 +647,11 @@ export const MessageItem = memo(function MessageItem({
                 timeline,
                 textInfo,
                 lastVisibleTextKey,
+                screenshotPaths,
                 hasRenderedPlanItem,
                 fallbackAssistantIntro,
               } = timelineData
+              const hasScreenshots = screenshotPaths.length > 0
               return (
                 <>
                   {fallbackAssistantIntro && (
@@ -650,7 +663,7 @@ export const MessageItem = memo(function MessageItem({
                       >
                         {fallbackAssistantIntro}
                       </Markdown>
-                      {!lastVisibleTextKey && durationRow}
+                      {!lastVisibleTextKey && !hasScreenshots && durationRow}
                     </>
                   )}
                   {timeline.map((item, itemIdx) => (
@@ -698,6 +711,7 @@ export const MessageItem = memo(function MessageItem({
                                     />
                                   )}
                                   {item.key === lastVisibleTextKey &&
+                                    !hasScreenshots &&
                                     durationRow}
                                 </div>
                               )
@@ -710,10 +724,12 @@ export const MessageItem = memo(function MessageItem({
                                   sessionId={sessionId}
                                 >
                                   {item.key === lastVisibleTextKey
-                                    ? withoutShownQuestion(item.text)
-                                    : item.text}
+                                    ? withoutShownQuestion(info.text)
+                                    : info.text}
                                 </Markdown>
-                                {item.key === lastVisibleTextKey && durationRow}
+                                {item.key === lastVisibleTextKey &&
+                                  !hasScreenshots &&
+                                  durationRow}
                               </>
                             )
                           }
@@ -865,6 +881,19 @@ export const MessageItem = memo(function MessageItem({
                         message.plan_approved || hasFollowUpMessage
                       }
                     />
+                  )}
+                  {hasScreenshots && (
+                    <div>
+                      <ScreenshotGallery
+                        paths={screenshotPaths}
+                        serverId={
+                          messageServerId === 'local'
+                            ? undefined
+                            : messageServerId
+                        }
+                      />
+                      {durationRow}
+                    </div>
                   )}
                 </>
               )
