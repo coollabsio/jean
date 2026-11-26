@@ -244,23 +244,28 @@ export const SessionChatModal = memo(function SessionChatModal({
     isModOnlyHeld,
     isOpen && isNativeApp() && !isMobile && !recentShortcutsActive
   )
-  // Left-edge swipe right: open the sidebar without leaving the worktree.
+  // Left-edge swipe right: on mobile, go back to the worktree list. Elsewhere
+  // (tablets, or servers that have no worktree list), open the sidebar
+  // without leaving the worktree.
+  const swipeGoesBack = isMobile && !isServer
   const swipeOpenSidebar = useCallback(() => {
     useUIStore.getState().setLeftSidebarVisible(true)
   }, [])
   const swipe = useSwipeBack({
-    onSwipeBack: swipeOpenSidebar,
+    onSwipeBack: swipeGoesBack ? onClose : swipeOpenSidebar,
     enabled: isTouch && isOpen && !leftSidebarVisible,
     animateToEnd: false,
     visualFeedback: true,
   })
   useEffect(() => {
+    // Only drag the sidebar in when the swipe opens it.
+    if (swipeGoesBack) return
     useUIStore.getState().setLeftSidebarSwipe({
       isDragging: swipe.isSwiping,
       dragOffset: swipe.translateX,
       dragTransition: swipe.transitionStyle,
     })
-  }, [swipe.isSwiping, swipe.translateX, swipe.transitionStyle])
+  }, [swipeGoesBack, swipe.isSwiping, swipe.translateX, swipe.transitionStyle])
   useEffect(() => {
     return () => {
       useUIStore.getState().setLeftSidebarSwipe({

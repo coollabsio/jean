@@ -6,20 +6,23 @@ const readSource = (path: string) =>
   readFileSync(join(process.cwd(), path), 'utf8')
 
 describe('SessionChatModal removal behavior', () => {
-  it('opens the sidebar on a worktree swipe without closing the session or terminal', () => {
+  it('goes back to the worktree list on mobile, else opens the sidebar on a left-edge swipe', () => {
     const source = readSource('src/components/chat/SessionChatModal.tsx')
-    const start = source.indexOf('const swipeOpenSidebar = useCallback(')
+    const start = source.indexOf('const swipeGoesBack = ')
     const end = source.indexOf('const { data: sessionsData }', start)
     const gesture = source.slice(start, end)
 
     expect(start).toBeGreaterThan(-1)
     expect(gesture).toContain('setLeftSidebarVisible(true)')
-    expect(gesture).toContain('onSwipeBack: swipeOpenSidebar')
+    expect(gesture).toContain('const swipeGoesBack = isMobile && !isServer')
+    expect(gesture).toContain(
+      'onSwipeBack: swipeGoesBack ? onClose : swipeOpenSidebar'
+    )
+    expect(gesture).toContain('if (swipeGoesBack) return')
     expect(gesture).toContain(
       'enabled: isTouch && isOpen && !leftSidebarVisible'
     )
     expect(gesture).toContain('animateToEnd: false')
-    expect(gesture).not.toContain('onClose()')
     expect(gesture).not.toContain('closeChatTerminal')
     expect(source).not.toContain(
       'transform: `translateX(${swipe.translateX}px)`'
