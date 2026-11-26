@@ -4,6 +4,7 @@ import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 import App from './App'
 import { queryClient } from './lib/query-client'
 import { installModifierHints } from './lib/modifier-hints'
+import { installSpinnerPhaseSync } from './lib/spinner-phase-sync'
 import { selectLocalConnectionForNativeClient } from './lib/remote-connections'
 
 selectLocalConnectionForNativeClient(
@@ -12,6 +13,7 @@ selectLocalConnectionForNativeClient(
 )
 
 installModifierHints()
+installSpinnerPhaseSync()
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <QueryClientProvider client={queryClient}>
