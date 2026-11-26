@@ -661,6 +661,53 @@ body:not(.native-app) kbd:not([data-web-visible]) {
   }
 }
 
+/* Mobile: dropdown menus open as bottom sheets (see ui/dropdown-menu.tsx).
+   Radix positions the popper wrapper with inline styles next to the trigger,
+   so pin it to the bottom edge here. */
+[data-radix-popper-content-wrapper]:has(> [data-mobile-sheet]) {
+  position: fixed !important;
+  inset: auto 0 0 0 !important;
+  transform: none !important;
+  min-width: 0 !important;
+}
+
+/* Dimmed backdrop behind the root sheet. A tap on it lands outside the menu
+   content, so Radix closes the menu. */
+[data-radix-popper-content-wrapper]:has(
+    > [data-mobile-sheet][data-slot='dropdown-menu-content']
+  )::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: rgb(0 0 0 / 0.5);
+}
+
+[data-mobile-sheet]
+  :is(
+    [data-slot='dropdown-menu-item'],
+    [data-slot='dropdown-menu-checkbox-item'],
+    [data-slot='dropdown-menu-radio-item'],
+    [data-slot='dropdown-menu-sub-trigger']
+  ) {
+  min-height: 3rem;
+  gap: 0.75rem;
+  border-radius: var(--radius-lg);
+  padding-right: 0.75rem;
+}
+
+[data-mobile-sheet]
+  :is(
+    [data-slot='dropdown-menu-item'],
+    [data-slot='dropdown-menu-sub-trigger']
+  ):not([data-inset]) {
+  padding-left: 0.75rem;
+}
+
+[data-mobile-sheet] [data-slot='dropdown-menu-label'] {
+  padding: 0.75rem 0.75rem 0.25rem;
+}
+
 /* Modifier shortcut hints show only while the user holds ⌘/Ctrl/Alt. */
 html:not([data-mod-held]) [data-mod-hint] {
   display: none !important;

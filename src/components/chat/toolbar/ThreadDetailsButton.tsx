@@ -18,7 +18,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuShortcut,
   DropdownMenuTrigger,
@@ -269,9 +268,6 @@ export function ThreadDetailsButton({
       >
         {worktree && (
           <>
-            <DropdownMenuLabel className="text-xs text-muted-foreground">
-              Git
-            </DropdownMenuLabel>
             <div className="flex items-center gap-2 px-2 py-1.5 text-sm">
               <GitBranch className="h-4 w-4 shrink-0 text-muted-foreground" />
               <span className="truncate">{branch ?? 'Detached HEAD'}</span>
@@ -304,9 +300,6 @@ export function ThreadDetailsButton({
           </>
         )}
 
-        <DropdownMenuLabel className="text-xs text-muted-foreground">
-          Context
-        </DropdownMenuLabel>
         {contexts.map(({ key, label, Icon, iconClassName, onSelect }) => (
           <DropdownMenuItem key={key} onClick={onSelect}>
             <Icon className={cn('h-4 w-4 shrink-0', iconClassName)} />

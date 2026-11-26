@@ -146,7 +146,7 @@ describe('ThreadDetailsButton', () => {
       window.dispatchEvent(new CustomEvent('toggle-quick-menu'))
     })
 
-    expect(await screen.findByText('Context')).toBeInTheDocument()
+    expect(await screen.findByText('Attach Context...')).toBeInTheDocument()
   })
 
   it('hides MCP Servers on mobile and shows community links', async () => {

@@ -207,7 +207,7 @@ export function UsageMenuItem({ entry }: { entry: UsageEntry }) {
       className="items-start"
       onClick={() => useUIStore.getState().openPreferencesPane('usage')}
     >
-      <entry.Icon className="mt-0.5 mr-2 h-4 w-4 shrink-0" />
+      <entry.Icon className="mt-0.5 h-4 w-4 shrink-0" />
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <UsageEntryTitle entry={entry} />
         <UsageEntryWindows entry={entry} />
