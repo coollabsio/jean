@@ -57,7 +57,9 @@ import {
   ShieldAlert,
   Code,
   ExternalLink,
+  Category,
   Folder,
+  MoreHorizontal,
   FolderOpen,
   Home,
   Terminal,
@@ -3315,7 +3317,11 @@ export function ProjectCanvasView({
           )}
           aria-label="Project actions"
         >
-          <Folder className={projectMenuSlot ? 'size-3.5' : 'h-4 w-4'} />
+          {projectMenuSlot ? (
+            <Category className="size-3.5" />
+          ) : (
+            <MoreHorizontal className="h-4 w-4" />
+          )}
           {failedWorkflowCount > 0 && (
             <span
               aria-hidden
