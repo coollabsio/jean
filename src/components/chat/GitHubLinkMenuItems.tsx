@@ -1,6 +1,11 @@
 import type React from 'react'
 import { toast } from 'sonner'
-import { GitBranchPlus, Wand2 } from '@/components/icons/reicon'
+import {
+  ExternalLink,
+  GitBranchPlus,
+  MessageSquarePlus,
+  Wand2,
+} from '@/components/icons/reicon'
 import {
   ContextMenuItem,
   ContextMenuSeparator,
@@ -9,22 +14,31 @@ import { useIsMobile } from '@/hooks/use-mobile'
 import { isNativeApp } from '@/lib/environment'
 import { githubLinkRepoArg, type GitHubItemLink } from '@/lib/github-item-link'
 import { getCurrentWorktree } from '@/lib/local-file'
-import { getModifierSymbol } from '@/lib/platform'
+import { getModifierSymbol, openExternal } from '@/lib/platform'
 import { fetchIssueContext, fetchPullRequestContext } from '@/services/github'
+import { usePreferences } from '@/services/preferences'
 import {
   useCreateWorktree,
   useGitHubRemotes,
   useWorktree,
 } from '@/services/projects'
 import { useUIStore } from '@/store/ui-store'
+import type { GitHubIssue, GitHubPullRequest } from '@/types/github'
+import { investigateInNewSession } from './context-mention-investigation'
 
 /**
- * "Open / Investigate in new worktree" items for a GitHub issue or PR link.
- * Mounted only while the menu is open. Shown only when the link belongs to a
- * GitHub remote of the current worktree's project. Cmd/Ctrl+click creates the
- * worktree in the background.
+ * Menu items for a GitHub issue or PR link: open it on the web, and (when the
+ * link belongs to a GitHub remote of the current worktree's project)
+ * investigate it in a new session or open/investigate it in a new worktree.
+ * Mounted only while the menu is open. Cmd/Ctrl+click runs in the background.
  */
-export function GitHubLinkMenuItems({ link }: { link: GitHubItemLink }) {
+export function GitHubLinkMenuItems({
+  link,
+  url,
+}: {
+  link: GitHubItemLink
+  url: string
+}) {
   const isMobile = useIsMobile()
   const worktreeId = getCurrentWorktree().id
   const { data: worktree } = useWorktree(worktreeId)
@@ -33,15 +47,35 @@ export function GitHubLinkMenuItems({ link }: { link: GitHubItemLink }) {
     { worktreeId: worktreeId ?? '' },
     Boolean(worktreeId && worktree)
   )
+  const { data: preferences } = usePreferences()
   const createWorktree = useCreateWorktree()
 
-  if (!worktree || !remotes) return null
-  const repo = githubLinkRepoArg(link, remotes)
-  if (repo === null) return null
-
+  const repo = worktree && remotes ? githubLinkRepoArg(link, remotes) : null
   const label = `${link.kind === 'pr' ? 'PR' : 'Issue'} #${link.number}`
 
-  const run = async (investigate: boolean, background: boolean) => {
+  const openOnWeb = (
+    <ContextMenuItem
+      onSelect={() => {
+        void openExternal(url).catch(error =>
+          toast.error(`Failed to open link: ${error}`)
+        )
+      }}
+    >
+      <ExternalLink className="h-4 w-4" />
+      Open on web
+    </ContextMenuItem>
+  )
+
+  if (!worktree || repo === null) {
+    return (
+      <>
+        {openOnWeb}
+        <ContextMenuSeparator />
+      </>
+    )
+  }
+
+  const runInWorktree = async (investigate: boolean, background: boolean) => {
     const { path, project_id: projectId } = worktree
     const toastId = toast.loading(`Fetching ${label}…`)
     try {
@@ -66,19 +100,64 @@ export function GitHubLinkMenuItems({ link }: { link: GitHubItemLink }) {
     }
   }
 
-  const handleClick = (investigate: boolean) => (event: React.MouseEvent) => {
-    void run(investigate, event.metaKey || event.ctrlKey)
+  // Session context loads from the primary remote only, the same as the
+  // new session context menu.
+  const runInSession = async (background: boolean) => {
+    const toastId = toast.loading(`Starting investigation of ${label}…`)
+    try {
+      const ref = { number: link.number }
+      await investigateInNewSession({
+        items: [
+          {
+            id: `${link.kind}-${link.number}`,
+            type: link.kind,
+            label: `#${link.number}`,
+            title: label,
+            ...(link.kind === 'pr'
+              ? { pr: ref as GitHubPullRequest }
+              : { issue: ref as GitHubIssue }),
+          },
+        ],
+        worktreeId: worktree.id,
+        worktreePath: worktree.path,
+        projectId: worktree.project_id,
+        templates: {
+          issue: preferences?.magic_prompts?.investigate_issue,
+          pr: preferences?.magic_prompts?.investigate_pr,
+        },
+        openSession: !background,
+      })
+      toast.success(`Started investigation of ${label}`, { id: toastId })
+    } catch (error) {
+      toast.error(`Failed to investigate ${label}: ${error}`, { id: toastId })
+    }
   }
+
+  const isBackground = (event: React.MouseEvent) =>
+    event.metaKey || event.ctrlKey
 
   return (
     <>
-      <ContextMenuItem onClick={handleClick(false)}>
-        <GitBranchPlus className="h-4 w-4" />
-        Open in new worktree
-      </ContextMenuItem>
-      <ContextMenuItem onClick={handleClick(true)}>
+      {openOnWeb}
+      {repo === undefined && (
+        <ContextMenuItem
+          onClick={event => void runInSession(isBackground(event))}
+        >
+          <MessageSquarePlus className="h-4 w-4" />
+          Investigate in new session
+        </ContextMenuItem>
+      )}
+      <ContextMenuItem
+        onClick={event => void runInWorktree(true, isBackground(event))}
+      >
         <Wand2 className="h-4 w-4" />
         Investigate in new worktree
+      </ContextMenuItem>
+      <ContextMenuItem
+        onClick={event => void runInWorktree(false, isBackground(event))}
+      >
+        <GitBranchPlus className="h-4 w-4" />
+        Open in new worktree
       </ContextMenuItem>
       {isNativeApp() && !isMobile && (
         <div className="px-2 pb-1 text-xs text-muted-foreground">

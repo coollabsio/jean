@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from '@/test/test-utils'
+import type * as EnvironmentModule from '@/lib/environment'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { FileContentModal } from './FileContentModal'
@@ -14,7 +15,10 @@ vi.mock('@/hooks/use-theme', () => ({ useTheme: () => ({ theme: 'light' }) }))
 vi.mock('@/services/preferences', () => ({
   usePreferences: () => ({ data: undefined }),
 }))
-vi.mock('@/lib/environment', () => ({ canOpenInEditor: () => true }))
+vi.mock('@/lib/environment', async importOriginal => ({
+  ...(await importOriginal<typeof EnvironmentModule>()),
+  canOpenInEditor: () => true,
+}))
 vi.mock('@/hooks/useSyntaxHighlighting', () => ({
   useSyntaxHighlighting: () => ({ html: '', isLoading: false, error: null }),
 }))

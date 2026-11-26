@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Markdown } from '@/components/ui/markdown'
+import { MessageThreadContextMenu } from './message-thread-context-menu'
 import { cn } from '@/lib/utils'
 import { getExtension, getExtensionColor } from '@/lib/file-colors'
 import { getFilename } from '@/lib/path-utils'
@@ -173,7 +174,14 @@ export function FileMentionBadge({
               </div>
             ) : isMarkdownFile(filename) ? (
               <div className="p-3">
-                <Markdown className="text-sm">{content ?? ''}</Markdown>
+                <MessageThreadContextMenu
+                  messageText={content ?? ''}
+                  copyMessageLabel="Copy file"
+                >
+                  <div>
+                    <Markdown className="text-sm">{content ?? ''}</Markdown>
+                  </div>
+                </MessageThreadContextMenu>
               </div>
             ) : (
               <pre className="text-xs font-mono whitespace-pre-wrap break-words p-3 bg-muted rounded-md">

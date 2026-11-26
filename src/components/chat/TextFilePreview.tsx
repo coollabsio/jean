@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/tooltip'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Markdown } from '@/components/ui/markdown'
+import { MessageThreadContextMenu } from './message-thread-context-menu'
 import { useChatStore } from '@/store/chat-store'
 
 function isMarkdownFile(filename: string | undefined): boolean {
@@ -209,9 +210,16 @@ export function TextFilePreview({
               />
             ) : isMarkdownFile(openFile?.filename) ? (
               <div className="p-3 select-text cursor-text">
-                <Markdown className="text-sm">
-                  {openFile?.content ?? ''}
-                </Markdown>
+                <MessageThreadContextMenu
+                  messageText={openFile?.content ?? ''}
+                  copyMessageLabel="Copy file"
+                >
+                  <div>
+                    <Markdown className="text-sm">
+                      {openFile?.content ?? ''}
+                    </Markdown>
+                  </div>
+                </MessageThreadContextMenu>
               </div>
             ) : (
               <pre className="text-xs font-mono whitespace-pre-wrap break-words p-3 bg-muted rounded-md select-text cursor-text">

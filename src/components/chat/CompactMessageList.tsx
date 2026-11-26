@@ -64,6 +64,7 @@ import {
   summarizeToolCall,
 } from './ToolCallInline'
 import type { MessageListHandle } from './message-list-handle'
+import { MessageThreadContextMenu } from './message-thread-context-menu'
 import {
   RECAP_HEADING_RE,
   extractRecapSection,
@@ -1177,16 +1178,24 @@ export const CompactMessageList = memo(
               !(latestTextIsRecap && latestRunHasPlan)
             const surfaceRecap = latestTextIsRecap && showLatestText
             const inlineQuestion = item.inlineQuestion
+            const latestText = latestTextIsRecap
+              ? (item.latestText ?? '').replace(RECAP_HEADING_RE, '').trim()
+              : (item.latestText ?? '')
             const latestTextMarkdown = (
-              <Markdown
-                streaming={false}
-                messageId={item.key}
-                sessionId={sessionId}
+              <MessageThreadContextMenu
+                messageText={latestText}
+                copyMessageLabel="Copy response"
               >
-                {latestTextIsRecap
-                  ? (item.latestText ?? '').replace(RECAP_HEADING_RE, '').trim()
-                  : (item.latestText ?? '')}
-              </Markdown>
+                <div>
+                  <Markdown
+                    streaming={false}
+                    messageId={item.key}
+                    sessionId={sessionId}
+                  >
+                    {latestText}
+                  </Markdown>
+                </div>
+              </MessageThreadContextMenu>
             )
             return (
               <div key={item.key}>

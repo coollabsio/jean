@@ -8,6 +8,7 @@ import {
 } from './message-thread-context-menu'
 import { useUIStore } from '@/store/ui-store'
 import type * as ProjectsModule from '@/services/projects'
+import type * as PlatformModule from '@/lib/platform'
 
 const mocks = vi.hoisted(() => ({
   copyToClipboard: vi.fn(),
@@ -18,6 +19,23 @@ const mocks = vi.hoisted(() => ({
   createWorktree: vi.fn(),
   fetchIssueContext: vi.fn(),
   fetchPullRequestContext: vi.fn(),
+  investigateInNewSession: vi.fn(),
+  openExternal: vi.fn(() => Promise.resolve()),
+}))
+
+vi.mock('./context-mention-investigation', () => ({
+  investigateInNewSession: mocks.investigateInNewSession,
+}))
+
+vi.mock('@/lib/platform', async importOriginal => ({
+  ...(await importOriginal<typeof PlatformModule>()),
+  openExternal: mocks.openExternal,
+}))
+
+vi.mock('@/services/preferences', () => ({
+  usePreferences: () => ({
+    data: { magic_prompts: { investigate_issue: 'I {issueRefs}' } },
+  }),
 }))
 
 vi.mock('@/lib/local-file', () => ({
@@ -479,7 +497,132 @@ describe('MessageThreadContextMenu GitHub links', () => {
     fireEvent.contextMenu(screen.getByText('the link'))
     await screen.findByRole('menuitem', { name: /copy url/i })
     expect(
-      screen.queryByRole('menuitem', { name: /new worktree/i })
+      screen.queryByRole('menuitem', { name: /new worktree|new session/i })
     ).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('menuitem', { name: /open on web/i }))
+    expect(mocks.openExternal).toHaveBeenCalledWith(
+      'https://github.com/other/lib/issues/3'
+    )
+  })
+
+  it('investigates a primary-remote issue in a new session', async () => {
+    mocks.investigateInNewSession.mockReset()
+    mocks.investigateInNewSession.mockResolvedValue(undefined)
+    renderLink('https://github.com/acme/app/issues/7')
+    fireEvent.contextMenu(screen.getByText('the link'))
+    fireEvent.click(
+      await screen.findByRole('menuitem', {
+        name: /investigate in new session/i,
+      })
+    )
+
+    await waitFor(() =>
+      expect(mocks.investigateInNewSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          items: [
+            expect.objectContaining({ type: 'issue', issue: { number: 7 } }),
+          ],
+          worktreeId: 'wt-1',
+          worktreePath: '/repo',
+          projectId: 'proj-1',
+          templates: { issue: 'I {issueRefs}', pr: undefined },
+          openSession: true,
+        })
+      )
+    )
+  })
+
+  it('hides the new session item for a non-primary remote', async () => {
+    renderLink('https://github.com/me/app/pull/9')
+    fireEvent.contextMenu(screen.getByText('the link'))
+    await screen.findByRole('menuitem', {
+      name: /investigate in new worktree/i,
+    })
+    expect(
+      screen.queryByRole('menuitem', { name: /new session/i })
+    ).not.toBeInTheDocument()
+  })
+
+  it('long press on a link in a table row opens the menu, not the row', async () => {
+    const onRowClick = vi.fn()
+    vi.useFakeTimers()
+    try {
+      render(
+        <MessageThreadContextMenu messageText="body">
+          <table>
+            <tbody>
+              <tr onClick={onRowClick}>
+                <td>
+                  <a href="https://github.com/acme/app/pull/12">#12</a>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </MessageThreadContextMenu>
+      )
+      const link = screen.getByText('#12')
+      fireEvent.pointerDown(link, { pointerType: 'touch' })
+      vi.advanceTimersByTime(500)
+      fireEvent.pointerUp(link, { pointerType: 'touch' })
+      fireEvent.click(link)
+    } finally {
+      vi.useRealTimers()
+    }
+    expect(
+      await screen.findByRole('menuitem', {
+        name: /investigate in new session/i,
+      })
+    ).toBeVisible()
+    expect(onRowClick).not.toHaveBeenCalled()
+  })
+
+  it('only the inner of two nested menus runs the long press', async () => {
+    vi.useFakeTimers()
+    try {
+      render(
+        <MessageThreadContextMenu
+          messageText="outer"
+          copyMessageLabel="Copy outer"
+        >
+          <div>
+            <MessageThreadContextMenu
+              messageText="inner"
+              copyMessageLabel="Copy inner"
+            >
+              <div>
+                <a href="https://github.com/acme/app/issues/7">the link</a>
+              </div>
+            </MessageThreadContextMenu>
+          </div>
+        </MessageThreadContextMenu>
+      )
+      const link = screen.getByText('the link')
+      fireEvent.pointerDown(link, { pointerType: 'touch' })
+      vi.advanceTimersByTime(500)
+    } finally {
+      vi.useRealTimers()
+    }
+    expect(
+      await screen.findByRole('menuitem', { name: /copy inner/i })
+    ).toBeVisible()
+    expect(
+      screen.queryByRole('menuitem', { name: /copy outer/i })
+    ).not.toBeInTheDocument()
+  })
+
+  it('opens the menu on a touch long press of a link', async () => {
+    vi.useFakeTimers()
+    try {
+      renderLink('https://github.com/acme/app/pull/12')
+      const link = screen.getByText('the link')
+      fireEvent.pointerDown(link, { pointerType: 'touch' })
+      fireEvent.pointerMove(link, { pointerType: 'touch', clientX: 4 })
+      vi.advanceTimersByTime(500)
+    } finally {
+      vi.useRealTimers()
+    }
+    expect(
+      await screen.findByRole('menuitem', { name: /open on web/i })
+    ).toBeVisible()
   })
 })

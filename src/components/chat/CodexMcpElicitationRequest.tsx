@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { ApprovalCard } from './ApprovalCard'
 import { Markdown } from '@/components/ui/markdown'
+import { MessageThreadContextMenu } from './message-thread-context-menu'
 import { Textarea } from '@/components/ui/textarea'
 import type { CodexMcpElicitationRequest } from '@/types/chat'
 
@@ -58,7 +59,16 @@ export function CodexMcpElicitationRequest({
   return (
     <ApprovalCard
       title={`MCP server “${request.server_name}” needs input`}
-      description={<Markdown>{request.message}</Markdown>}
+      description={
+        <MessageThreadContextMenu
+          messageText={request.message}
+          copyMessageLabel="Copy text"
+        >
+          <div>
+            <Markdown>{request.message}</Markdown>
+          </div>
+        </MessageThreadContextMenu>
+      }
       actions={
         <>
           <Button

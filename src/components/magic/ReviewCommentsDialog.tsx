@@ -48,6 +48,7 @@ import { useInstalledBackends } from '@/hooks/useInstalledBackends'
 import { DesktopBackendModelPicker } from '@/components/chat/toolbar/DesktopBackendModelPicker'
 import type { InvestigateOverride } from '@/components/chat/hooks/useMagicCommands'
 import { Markdown } from '@/components/ui/markdown'
+import { MessageThreadContextMenu } from '@/components/chat/message-thread-context-menu'
 import { cn } from '@/lib/utils'
 import type {
   GitHubReviewComment,
@@ -953,7 +954,14 @@ export function ReviewCommentsDialog() {
                             </button>
                             {isExpanded && (
                               <div className="mt-2 pl-5">
-                                <Markdown compact>{comment.body}</Markdown>
+                                <MessageThreadContextMenu
+                                  messageText={comment.body}
+                                  copyMessageLabel="Copy comment"
+                                >
+                                  <div>
+                                    <Markdown compact>{comment.body}</Markdown>
+                                  </div>
+                                </MessageThreadContextMenu>
                                 <button
                                   type="button"
                                   className="mt-2 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
@@ -1086,7 +1094,14 @@ export function ReviewCommentsDialog() {
                             </button>
                             {isExpanded && (
                               <div className="mt-2 pl-5">
-                                <Markdown compact>{body}</Markdown>
+                                <MessageThreadContextMenu
+                                  messageText={body}
+                                  copyMessageLabel="Copy comment"
+                                >
+                                  <div>
+                                    <Markdown compact>{body}</Markdown>
+                                  </div>
+                                </MessageThreadContextMenu>
                               </div>
                             )}
                           </div>

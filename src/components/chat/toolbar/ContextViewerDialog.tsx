@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Markdown } from '@/components/ui/markdown'
+import { MessageThreadContextMenu } from '../message-thread-context-menu'
 import { LinearIcon } from '@/components/icons/LinearIcon'
 import { useUIStore } from '@/store/ui-store'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -93,12 +94,19 @@ export function ContextViewerDialog({
           </DialogHeader>
         )}
         <ScrollArea className="flex-1 min-h-0">
-          <Markdown
-            compact={isMobile}
-            className={isMobile ? 'p-4 text-sm' : 'p-4'}
+          <MessageThreadContextMenu
+            messageText={viewingContext.content}
+            copyMessageLabel="Copy context"
           >
-            {viewingContext.content}
-          </Markdown>
+            <div>
+              <Markdown
+                compact={isMobile}
+                className={isMobile ? 'p-4 text-sm' : 'p-4'}
+              >
+                {viewingContext.content}
+              </Markdown>
+            </div>
+          </MessageThreadContextMenu>
         </ScrollArea>
       </DialogContent>
     </Dialog>

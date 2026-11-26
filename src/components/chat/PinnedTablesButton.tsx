@@ -18,6 +18,7 @@ import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { COMPOSER_TAB_CLASS } from './composer-surface'
+import { MessageThreadContextMenu } from './message-thread-context-menu'
 
 /** Column names of a markdown table: pinned card title when it has no heading. */
 export function pinnedTableTitle(markdown: string): string {
@@ -113,19 +114,23 @@ export function PinnedTablesButton({
                       <span>Show in chat</span>
                     </button>
                   </div>
-                  <div
-                    className={
-                      isMobile ? 'px-1 text-sm [&_td]:px-2 [&_th]:px-2' : 'px-3'
-                    }
-                  >
-                    <Markdown
-                      sessionId={sessionId}
-                      tableKey={pin.key}
-                      compact={isMobile}
+                  <MessageThreadContextMenu messageText={pin.markdown}>
+                    <div
+                      className={
+                        isMobile
+                          ? 'px-1 text-sm [&_td]:px-2 [&_th]:px-2'
+                          : 'px-3'
+                      }
                     >
-                      {pin.markdown}
-                    </Markdown>
-                  </div>
+                      <Markdown
+                        sessionId={sessionId}
+                        tableKey={pin.key}
+                        compact={isMobile}
+                      >
+                        {pin.markdown}
+                      </Markdown>
+                    </div>
+                  </MessageThreadContextMenu>
                 </section>
               ))}
             </div>

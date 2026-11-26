@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Markdown } from '@/components/ui/markdown'
+import { MessageThreadContextMenu } from '@/components/chat/message-thread-context-menu'
 import { cn } from '@/lib/utils'
 import { Kbd } from '@/components/ui/kbd'
 import { usePreferences } from '@/services/preferences'
@@ -639,9 +640,16 @@ export function LoadContextModal({
                   </DialogTitle>
                 </DialogHeader>
                 <ScrollArea className="flex-1 min-h-0">
-                  <Markdown compact className="p-4 text-sm">
-                    {handlers.viewingContext.content}
-                  </Markdown>
+                  <MessageThreadContextMenu
+                    messageText={handlers.viewingContext.content}
+                    copyMessageLabel="Copy context"
+                  >
+                    <div>
+                      <Markdown compact className="p-4 text-sm">
+                        {handlers.viewingContext.content}
+                      </Markdown>
+                    </div>
+                  </MessageThreadContextMenu>
                 </ScrollArea>
               </DialogContent>
             </Dialog>

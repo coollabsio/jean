@@ -20,6 +20,7 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import { Markdown } from '@/components/ui/markdown'
+import { MessageThreadContextMenu } from './message-thread-context-menu'
 import { useSyntaxHighlighting } from '@/hooks/useSyntaxHighlighting'
 import { getLanguageFromPath } from '@/lib/language-detection'
 import { getFilename } from '@/lib/path-utils'
@@ -500,7 +501,14 @@ export function FileContentModal({
             ) : content !== null ? (
               isMarkdown ? (
                 <div className="p-3 select-text cursor-text break-words [overflow-wrap:anywhere]">
-                  <Markdown className="text-sm">{content}</Markdown>
+                  <MessageThreadContextMenu
+                    messageText={content}
+                    copyMessageLabel="Copy file"
+                  >
+                    <div>
+                      <Markdown className="text-sm">{content}</Markdown>
+                    </div>
+                  </MessageThreadContextMenu>
                 </div>
               ) : (
                 <SyntaxHighlightedCode
