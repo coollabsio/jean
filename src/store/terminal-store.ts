@@ -5,13 +5,8 @@ import {
   serverResourceKey,
 } from '@/lib/server-resource'
 import { generateId } from '@/lib/uuid'
-import type { ModalTerminalDockMode } from '@/types/ui-state'
 import { useBrowserStore } from './browser-store'
-import {
-  isRightPanelShowing,
-  syncRightPanelSurface,
-  usesRightPanelSurfaces,
-} from '@/lib/right-panel'
+import { isRightPanelShowing, syncRightPanelSurface } from '@/lib/right-panel'
 
 /** A single terminal instance */
 export type TerminalKind = 'panel' | 'session'
@@ -60,11 +55,8 @@ interface TerminalState {
   terminalPanelOpen: Record<string, boolean>
   terminalHeight: number
 
-  // Modal terminal drawer state
+  // Terminal tab open in the right panel, per worktree
   modalTerminalOpen: Record<string, boolean>
-  modalTerminalDockMode: ModalTerminalDockMode
-  modalTerminalWidth: number
-  modalTerminalHeight: number
 
   setTerminalVisible: (visible: boolean) => void
   setTerminalVisibleForWorktree: (worktreeId: string, visible: boolean) => void
@@ -74,12 +66,9 @@ interface TerminalState {
   toggleTerminal: (worktreeId: string) => void
   setTerminalHeight: (height: number) => void
 
-  // Modal terminal drawer methods
+  // Right panel terminal tab methods
   setModalTerminalOpen: (worktreeId: string, open: boolean) => void
   toggleModalTerminal: (worktreeId: string) => void
-  setModalTerminalDockMode: (dockMode: ModalTerminalDockMode) => void
-  setModalTerminalWidth: (width: number) => void
-  setModalTerminalHeight: (height: number) => void
 
   // Terminal instance management
   addTerminal: (
@@ -127,25 +116,13 @@ function generateTerminalId(worktreeId: string): string {
     : id
 }
 
-/** Close every browser surface for this worktree — terminal modal and
- * browser surfaces are mutually exclusive. Called inside terminal-store
- * actions when opening the terminal modal. */
+/** Close the browser for this worktree — the terminal and browser are
+ * mutually exclusive. Called when the terminal opens. */
 function closeBrowserSurfacesFor(worktreeId: string): void {
   const browser = useBrowserStore.getState()
-  const sideOpen = browser.sidePaneOpen[worktreeId] ?? false
-  const modalOpen = browser.modalOpen[worktreeId] ?? false
-  const bottomOpen = browser.bottomPanelOpen[worktreeId] ?? false
-  if (!sideOpen && !modalOpen && !bottomOpen) return
+  if (!(browser.modalOpen[worktreeId] ?? false)) return
   useBrowserStore.setState({
-    sidePaneOpen: sideOpen
-      ? { ...browser.sidePaneOpen, [worktreeId]: false }
-      : browser.sidePaneOpen,
-    modalOpen: modalOpen
-      ? { ...browser.modalOpen, [worktreeId]: false }
-      : browser.modalOpen,
-    bottomPanelOpen: bottomOpen
-      ? { ...browser.bottomPanelOpen, [worktreeId]: false }
-      : browser.bottomPanelOpen,
+    modalOpen: { ...browser.modalOpen, [worktreeId]: false },
   })
 }
 
@@ -168,9 +145,6 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   terminalPanelOpen: {},
   terminalHeight: 30,
   modalTerminalOpen: {},
-  modalTerminalDockMode: 'floating',
-  modalTerminalWidth: 400,
-  modalTerminalHeight: 280,
 
   setTerminalVisible: visible =>
     set(state =>
@@ -244,30 +218,10 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   },
 
   toggleModalTerminal: worktreeId => {
-    const open = usesRightPanelSurfaces()
-      ? !isRightPanelShowing('terminal')
-      : !(useTerminalStore.getState().modalTerminalOpen[worktreeId] ?? false)
-    useTerminalStore.getState().setModalTerminalOpen(worktreeId, open)
+    useTerminalStore
+      .getState()
+      .setModalTerminalOpen(worktreeId, !isRightPanelShowing('terminal'))
   },
-
-  setModalTerminalDockMode: dockMode =>
-    set(state =>
-      state.modalTerminalDockMode === dockMode
-        ? state
-        : { modalTerminalDockMode: dockMode }
-    ),
-
-  setModalTerminalWidth: width =>
-    set(state =>
-      state.modalTerminalWidth === width ? state : { modalTerminalWidth: width }
-    ),
-
-  setModalTerminalHeight: height =>
-    set(state =>
-      state.modalTerminalHeight === height
-        ? state
-        : { modalTerminalHeight: height }
-    ),
 
   addTerminal: (worktreeId, command = null, label, options) => {
     const id = generateTerminalId(worktreeId)

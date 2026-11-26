@@ -1,7 +1,6 @@
 import { useChatStore } from '@/store/chat-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore, type RightPanelTab } from '@/store/ui-store'
-import { isMobileViewport } from '@/lib/viewport'
 
 interface RightPanelWorktreeSources {
   sessionChatModalOpen: boolean
@@ -30,14 +29,6 @@ export function currentRightPanelWorktreeId(): string | null {
   })
 }
 
-/**
- * Desktop hosts the terminal and browser as right panel tabs. Mobile keeps
- * the floating drawers in the session view.
- */
-export function usesRightPanelSurfaces(): boolean {
-  return !isMobileViewport()
-}
-
 export function isRightPanelShowing(tab: RightPanelTab): boolean {
   const ui = useUIStore.getState()
   return ui.fileBrowserVisible && ui.rightPanelTab === tab
@@ -52,7 +43,6 @@ export function syncRightPanelSurface(
   tab: RightPanelTab,
   open: boolean
 ): void {
-  if (!usesRightPanelSurfaces()) return
   const ui = useUIStore.getState()
   if (open) {
     ui.openRightPanelTab(tab)

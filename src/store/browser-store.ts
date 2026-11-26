@@ -1,12 +1,8 @@
 import { create } from 'zustand'
 import { generateId } from '@/lib/uuid'
-import type { BrowserTab, ModalBrowserDockMode } from '@/types/browser'
+import type { BrowserTab } from '@/types/browser'
 import { useTerminalStore } from './terminal-store'
-import {
-  isRightPanelShowing,
-  syncRightPanelSurface,
-  usesRightPanelSurfaces,
-} from '@/lib/right-panel'
+import { isRightPanelShowing, syncRightPanelSurface } from '@/lib/right-panel'
 
 // Opaque data: URL instead of about:blank — WKWebView renders about:blank
 // as a transparent surface, so a previous tab's pixels can bleed through when
@@ -29,10 +25,6 @@ export function blankTabUrl(): string {
 // Users cannot navigate to data: URLs in this app (normalizeUrl rejects them).
 export const isBlankTabUrl = (u: string): boolean =>
   !u || u === 'about:blank' || u.startsWith('data:')
-const DEFAULT_SIDE_PANE_WIDTH = 520
-const DEFAULT_BOTTOM_PANEL_HEIGHT = 360
-const DEFAULT_MODAL_WIDTH = 520
-const DEFAULT_MODAL_HEIGHT = 400
 
 interface BrowserState {
   // Per-worktree tab list
@@ -40,26 +32,13 @@ interface BrowserState {
   // Active tab id per worktree
   activeTabIds: Record<string, string>
 
-  // Side pane (Phase 1)
-  sidePaneOpen: Record<string, boolean>
-  sidePaneWidth: number
-
-  // Modal drawer (Phase 2)
+  // Browser tab open in the right panel, per worktree
   modalOpen: Record<string, boolean>
-  modalDockMode: ModalBrowserDockMode
-  modalWidth: number
-  modalHeight: number
-
-  // Bottom panel (Phase 3)
-  bottomPanelOpen: Record<string, boolean>
-  bottomPanelHeight: number
 
   // Selectors
   getTabs: (worktreeId: string) => BrowserTab[]
   getActiveTab: (worktreeId: string) => BrowserTab | null
-  isSidePaneOpen: (worktreeId: string) => boolean
   isModalOpen: (worktreeId: string) => boolean
-  isBottomPanelOpen: (worktreeId: string) => boolean
 
   // Tab actions
   addTab: (worktreeId: string, url?: string) => string
@@ -79,24 +58,9 @@ interface BrowserState {
     activeTabIds: Record<string, string>
   ) => void
 
-  // Side pane actions
-  setSidePaneOpen: (worktreeId: string, open: boolean) => void
-  toggleSidePane: (worktreeId: string) => void
-  setSidePaneWidth: (width: number) => void
-
-  // Modal actions
+  // Right panel browser tab actions
   setModalOpen: (worktreeId: string, open: boolean) => void
   toggleModal: (worktreeId: string) => void
-  setModalDockMode: (mode: ModalBrowserDockMode) => void
-  setModalWidth: (width: number) => void
-  setModalHeight: (height: number) => void
-
-  // Bottom panel actions
-  setBottomPanelOpen: (worktreeId: string, open: boolean) => void
-  toggleBottomPanel: (worktreeId: string) => void
-  setBottomPanelHeight: (height: number) => void
-  // Shortcut / View menu. See toggleBrowserSurface.
-  toggleBrowserSurface: (worktreeId: string, sessionModalOpen: boolean) => void
 }
 
 function findWorktreeForTab(
@@ -126,14 +90,7 @@ function closeTerminalModalFor(worktreeId: string): void {
 export const useBrowserStore = create<BrowserState>((set, get) => ({
   tabs: {},
   activeTabIds: {},
-  sidePaneOpen: {},
-  sidePaneWidth: DEFAULT_SIDE_PANE_WIDTH,
   modalOpen: {},
-  modalDockMode: 'floating',
-  modalWidth: DEFAULT_MODAL_WIDTH,
-  modalHeight: DEFAULT_MODAL_HEIGHT,
-  bottomPanelOpen: {},
-  bottomPanelHeight: DEFAULT_BOTTOM_PANEL_HEIGHT,
 
   getTabs: worktreeId => get().tabs[worktreeId] ?? [],
 
@@ -143,9 +100,7 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
     return tabs.find(t => t.id === activeId) ?? null
   },
 
-  isSidePaneOpen: worktreeId => get().sidePaneOpen[worktreeId] ?? false,
   isModalOpen: worktreeId => get().modalOpen[worktreeId] ?? false,
-  isBottomPanelOpen: worktreeId => get().bottomPanelOpen[worktreeId] ?? false,
 
   addTab: (worktreeId, url = blankTabUrl()) => {
     const id = generateId()
@@ -179,22 +134,15 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
         currentActive === tabId
           ? (filtered[filtered.length - 1]?.id ?? '')
           : currentActive
-      // Closing the last tab also closes every open browser surface for
-      // this worktree — mirrors how closing the last terminal tab dismisses
-      // the terminal panel.
+      // Closing the last tab also closes the browser for this worktree —
+      // mirrors how closing the last terminal tab dismisses the terminal.
       const closedAll = filtered.length === 0
       return {
         tabs: { ...state.tabs, [worktreeId]: filtered },
         activeTabIds: { ...state.activeTabIds, [worktreeId]: newActive },
-        sidePaneOpen: closedAll
-          ? { ...state.sidePaneOpen, [worktreeId]: false }
-          : state.sidePaneOpen,
         modalOpen: closedAll
           ? { ...state.modalOpen, [worktreeId]: false }
           : state.modalOpen,
-        bottomPanelOpen: closedAll
-          ? { ...state.bottomPanelOpen, [worktreeId]: false }
-          : state.bottomPanelOpen,
       }
     }),
 
@@ -205,25 +153,14 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
       tabIds.length > 0 ||
       worktreeId in state.tabs ||
       worktreeId in state.activeTabIds ||
-      worktreeId in state.sidePaneOpen ||
-      worktreeId in state.modalOpen ||
-      worktreeId in state.bottomPanelOpen
+      worktreeId in state.modalOpen
     if (!hasWorktreeState) return []
 
     set(current => {
       const { [worktreeId]: _tabs, ...tabs } = current.tabs
       const { [worktreeId]: _activeTab, ...activeTabIds } = current.activeTabIds
-      const { [worktreeId]: _sidePane, ...sidePaneOpen } = current.sidePaneOpen
       const { [worktreeId]: _modal, ...modalOpen } = current.modalOpen
-      const { [worktreeId]: _bottomPanel, ...bottomPanelOpen } =
-        current.bottomPanelOpen
-      return {
-        tabs,
-        activeTabIds,
-        sidePaneOpen,
-        modalOpen,
-        bottomPanelOpen,
-      }
+      return { tabs, activeTabIds, modalOpen }
     })
 
     return tabIds
@@ -272,42 +209,6 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
 
   hydrateTabs: (tabs, activeTabIds) => set({ tabs, activeTabIds }),
 
-  setSidePaneOpen: (worktreeId, open) => {
-    const current = useBrowserStore.getState().sidePaneOpen[worktreeId] ?? false
-    if (current === open) return
-    if (open) closeTerminalModalFor(worktreeId)
-    // Surfaces are mutually exclusive (one tab → one webview → one position).
-    set(state => ({
-      sidePaneOpen: { ...state.sidePaneOpen, [worktreeId]: open },
-      modalOpen: open
-        ? { ...state.modalOpen, [worktreeId]: false }
-        : state.modalOpen,
-      bottomPanelOpen: open
-        ? { ...state.bottomPanelOpen, [worktreeId]: false }
-        : state.bottomPanelOpen,
-    }))
-  },
-
-  toggleSidePane: worktreeId => {
-    const current = useBrowserStore.getState().sidePaneOpen[worktreeId] ?? false
-    const next = !current
-    if (next) closeTerminalModalFor(worktreeId)
-    set(state => ({
-      sidePaneOpen: { ...state.sidePaneOpen, [worktreeId]: next },
-      modalOpen: next
-        ? { ...state.modalOpen, [worktreeId]: false }
-        : state.modalOpen,
-      bottomPanelOpen: next
-        ? { ...state.bottomPanelOpen, [worktreeId]: false }
-        : state.bottomPanelOpen,
-    }))
-  },
-
-  setSidePaneWidth: width =>
-    set(state =>
-      state.sidePaneWidth === width ? state : { sidePaneWidth: width }
-    ),
-
   setModalOpen: (worktreeId, open) => {
     syncRightPanelSurface(worktreeId, 'browser', open)
     const current = useBrowserStore.getState().modalOpen[worktreeId] ?? false
@@ -315,97 +216,12 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
     if (open) closeTerminalModalFor(worktreeId)
     set(state => ({
       modalOpen: { ...state.modalOpen, [worktreeId]: open },
-      sidePaneOpen: open
-        ? { ...state.sidePaneOpen, [worktreeId]: false }
-        : state.sidePaneOpen,
-      bottomPanelOpen: open
-        ? { ...state.bottomPanelOpen, [worktreeId]: false }
-        : state.bottomPanelOpen,
     }))
   },
 
   toggleModal: worktreeId => {
-    const open = usesRightPanelSurfaces()
-      ? !isRightPanelShowing('browser')
-      : !(useBrowserStore.getState().modalOpen[worktreeId] ?? false)
-    useBrowserStore.getState().setModalOpen(worktreeId, open)
+    useBrowserStore
+      .getState()
+      .setModalOpen(worktreeId, !isRightPanelShowing('browser'))
   },
-
-  setModalDockMode: mode =>
-    set(state =>
-      state.modalDockMode === mode ? state : { modalDockMode: mode }
-    ),
-
-  setModalWidth: width =>
-    set(state => (state.modalWidth === width ? state : { modalWidth: width })),
-
-  setModalHeight: height =>
-    set(state =>
-      state.modalHeight === height ? state : { modalHeight: height }
-    ),
-
-  setBottomPanelOpen: (worktreeId, open) => {
-    const current =
-      useBrowserStore.getState().bottomPanelOpen[worktreeId] ?? false
-    if (current === open) return
-    if (open) closeTerminalModalFor(worktreeId)
-    set(state => ({
-      bottomPanelOpen: { ...state.bottomPanelOpen, [worktreeId]: open },
-      sidePaneOpen: open
-        ? { ...state.sidePaneOpen, [worktreeId]: false }
-        : state.sidePaneOpen,
-      modalOpen: open
-        ? { ...state.modalOpen, [worktreeId]: false }
-        : state.modalOpen,
-    }))
-  },
-
-  toggleBottomPanel: worktreeId => {
-    const current =
-      useBrowserStore.getState().bottomPanelOpen[worktreeId] ?? false
-    const next = !current
-    if (next) closeTerminalModalFor(worktreeId)
-    set(state => ({
-      bottomPanelOpen: { ...state.bottomPanelOpen, [worktreeId]: next },
-      sidePaneOpen: next
-        ? { ...state.sidePaneOpen, [worktreeId]: false }
-        : state.sidePaneOpen,
-      modalOpen: next
-        ? { ...state.modalOpen, [worktreeId]: false }
-        : state.modalOpen,
-    }))
-  },
-
-  // Shortcut and View → Toggle Browser.
-  // Session chat: closed → modal drawer → bottom panel → closed.
-  // Main window: closed → side pane → bottom panel → closed.
-  // Opening a surface closes the other browser surfaces and the terminal modal.
-  toggleBrowserSurface: (worktreeId, sessionModalOpen) => {
-    const state = get()
-    const sideOpen = state.sidePaneOpen[worktreeId] ?? false
-    const modalOpen = state.modalOpen[worktreeId] ?? false
-    const bottomOpen = state.bottomPanelOpen[worktreeId] ?? false
-
-    if (sessionModalOpen) {
-      // Open modal drawer → bottom panel. Open bottom panel → closed.
-      if (bottomOpen || modalOpen) {
-        get().toggleBottomPanel(worktreeId)
-        return
-      }
-      get().toggleModal(worktreeId)
-      return
-    }
-
-    // Main window: side pane first, then the bottom panel, then close.
-    if (bottomOpen || sideOpen) {
-      get().toggleBottomPanel(worktreeId)
-      return
-    }
-    get().toggleSidePane(worktreeId)
-  },
-
-  setBottomPanelHeight: height =>
-    set(state =>
-      state.bottomPanelHeight === height ? state : { bottomPanelHeight: height }
-    ),
 }))

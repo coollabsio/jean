@@ -27,6 +27,7 @@ import { BrowserView } from '@/components/browser/BrowserView'
 import { FileBrowserSidebar } from '@/components/file-browser/FileBrowserSidebar'
 import { cn } from '@/lib/utils'
 import { isNativeApp } from '@/lib/environment'
+import { useIsMobile } from '@/hooks/use-mobile'
 import { resolveRightPanelWorktreeId } from '@/lib/right-panel'
 import { useUIStore, type RightPanelTab } from '@/store/ui-store'
 import { useChatStore } from '@/store/chat-store'
@@ -149,6 +150,7 @@ function ScriptsTab({
 export function RightPanel() {
   const tab = useUIStore(state => state.rightPanelTab)
   const openTabs = useUIStore(state => state.rightPanelOpenTabs)
+  const isMobile = useIsMobile()
   const panelWidth = useUIStore(state => state.fileBrowserSize)
   const worktreeId = useRightPanelWorktreeId()
   const { data: worktree } = useWorktree(worktreeId)
@@ -248,6 +250,17 @@ export function RightPanel() {
             branch={worktree?.branch}
             server={project?.server}
           />
+        )}
+        {isMobile && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 shrink-0"
+            onClick={() => useUIStore.getState().setFileBrowserVisible(false)}
+            aria-label="Close right panel"
+          >
+            <X className="size-4" />
+          </Button>
         )}
       </div>
 

@@ -20,9 +20,6 @@ describe('TerminalStore', () => {
       terminalPanelOpen: {},
       terminalHeight: 30,
       modalTerminalOpen: {},
-      modalTerminalDockMode: 'floating',
-      modalTerminalWidth: 400,
-      modalTerminalHeight: 280,
     })
   })
 
@@ -81,23 +78,6 @@ describe('TerminalStore', () => {
 
       setTerminalHeight(50)
       expect(useTerminalStore.getState().terminalHeight).toBe(50)
-    })
-
-    it('sets modal terminal dock mode', () => {
-      const { setModalTerminalDockMode } = useTerminalStore.getState()
-
-      setModalTerminalDockMode('right')
-      expect(useTerminalStore.getState().modalTerminalDockMode).toBe('right')
-
-      setModalTerminalDockMode('bottom')
-      expect(useTerminalStore.getState().modalTerminalDockMode).toBe('bottom')
-    })
-
-    it('sets modal terminal height', () => {
-      const { setModalTerminalHeight } = useTerminalStore.getState()
-
-      setModalTerminalHeight(320)
-      expect(useTerminalStore.getState().modalTerminalHeight).toBe(320)
     })
 
     it('avoids replacing modal terminal open state on no-op updates', () => {

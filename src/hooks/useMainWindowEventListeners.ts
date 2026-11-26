@@ -4,10 +4,7 @@ import { isNativeApp, hasBackend } from '@/lib/environment'
 import { notify } from '@/lib/notifications'
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useUIStore } from '@/store/ui-store'
-import {
-  currentRightPanelWorktreeId,
-  usesRightPanelSurfaces,
-} from '@/lib/right-panel'
+import { currentRightPanelWorktreeId } from '@/lib/right-panel'
 import { useProjectsStore } from '@/store/projects-store'
 import { useChatStore } from '@/store/chat-store'
 import { isPanelTerminal, useTerminalStore } from '@/store/terminal-store'
@@ -562,25 +559,12 @@ export function switchActiveTerminalTabByIndexForShortcut(
 }
 
 /**
- * View → Toggle Browser and the `toggle_browser` shortcut.
- * Session chat cycles closed → modal drawer → bottom panel → closed.
- * The main window cycles closed → side pane → bottom panel → closed.
+ * View → Toggle Browser and the `toggle_browser` shortcut: toggles the
+ * right panel's Browser tab for the current worktree.
  */
 export function toggleBrowserKeybinding(): void {
-  const uiState = useUIStore.getState()
-  const chatState = useChatStore.getState()
-  const worktreeId = uiState.sessionChatModalOpen
-    ? (uiState.sessionChatModalWorktreeId ?? chatState.activeWorktreeId)
-    : chatState.activeWorktreeId
-  if (usesRightPanelSurfaces()) {
-    const panelWorktreeId = currentRightPanelWorktreeId()
-    if (panelWorktreeId) useBrowserStore.getState().toggleModal(panelWorktreeId)
-    return
-  }
-  if (!worktreeId) return
-  useBrowserStore
-    .getState()
-    .toggleBrowserSurface(worktreeId, uiState.sessionChatModalOpen)
+  const worktreeId = currentRightPanelWorktreeId()
+  if (worktreeId) useBrowserStore.getState().toggleModal(worktreeId)
 }
 
 /**
@@ -883,19 +867,8 @@ function executeKeybindingAction(
       break
     case 'toggle_terminal': {
       logger.debug('Keybinding: toggle_terminal')
-      const uiState = useUIStore.getState()
-      const chatState = useChatStore.getState()
-      if (usesRightPanelSurfaces()) {
-        const wid = currentRightPanelWorktreeId()
-        if (wid) useTerminalStore.getState().toggleModalTerminal(wid)
-      } else if (uiState.sessionChatModalOpen) {
-        const wid =
-          uiState.sessionChatModalWorktreeId ?? chatState.activeWorktreeId
-        if (wid) useTerminalStore.getState().toggleModalTerminal(wid)
-      } else {
-        const wid = chatState.activeWorktreeId
-        if (wid) useTerminalStore.getState().toggleTerminal(wid)
-      }
+      const wid = currentRightPanelWorktreeId()
+      if (wid) useTerminalStore.getState().toggleModalTerminal(wid)
       break
     }
     case 'toggle_browser': {

@@ -1,9 +1,5 @@
 import type { LabelData } from '@/types/chat'
-import type {
-  ModalBrowserDockMode,
-  ModalTerminalDockMode,
-  ProjectCanvasSettingsState,
-} from '@/types/ui-state'
+import type { ProjectCanvasSettingsState } from '@/types/ui-state'
 
 export const CLIENT_VIEW_STATE_STORAGE_KEY = 'jean-client-view-state-v1'
 export const CLIENT_VIEW_STATE_VERSION = 1
@@ -31,17 +27,7 @@ export interface ClientViewState {
   terminal_visible: boolean
   terminal_height: number
   modal_terminal_open: Record<string, boolean>
-  modal_terminal_dock_mode: ModalTerminalDockMode
-  modal_terminal_width: number
-  modal_terminal_height: number
-  browser_side_pane_open: Record<string, boolean>
-  browser_side_pane_width: number
   browser_modal_open: Record<string, boolean>
-  browser_modal_dock_mode: ModalBrowserDockMode
-  browser_modal_width: number
-  browser_modal_height: number
-  browser_bottom_panel_open: Record<string, boolean>
-  browser_bottom_panel_height: number
 }
 
 export const defaultClientViewState: ClientViewState = {
@@ -59,7 +45,7 @@ export const defaultClientViewState: ClientViewState = {
   left_sidebar_visible: false,
   left_sidebar_size: 250,
   file_browser_visible: false,
-  file_browser_size: 280,
+  file_browser_size: 400,
   right_sidebar_visible: false,
   zen_mode: false,
   terminal_visible_by_worktree: {},
@@ -67,17 +53,7 @@ export const defaultClientViewState: ClientViewState = {
   terminal_visible: false,
   terminal_height: 30,
   modal_terminal_open: {},
-  modal_terminal_dock_mode: 'floating',
-  modal_terminal_width: 400,
-  modal_terminal_height: 280,
-  browser_side_pane_open: {},
-  browser_side_pane_width: 520,
   browser_modal_open: {},
-  browser_modal_dock_mode: 'floating',
-  browser_modal_width: 520,
-  browser_modal_height: 400,
-  browser_bottom_panel_open: {},
-  browser_bottom_panel_height: 360,
 }
 
 type UnknownRecord = Record<string, unknown>
@@ -115,13 +91,6 @@ const isCanvasFilter = (value: unknown): value is string =>
   (typeof value === 'string' && value.startsWith('label:') && value.length > 6)
 const isNumber = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value)
-const isDockMode = (
-  value: unknown
-): value is ModalTerminalDockMode | ModalBrowserDockMode =>
-  value === 'floating' ||
-  value === 'left' ||
-  value === 'right' ||
-  value === 'bottom'
 
 function isLabel(value: unknown): value is LabelData {
   return (
@@ -212,12 +181,6 @@ function parseClientViewState(value: unknown): ClientViewState {
     'left_sidebar_size',
     'file_browser_size',
     'terminal_height',
-    'modal_terminal_width',
-    'modal_terminal_height',
-    'browser_side_pane_width',
-    'browser_modal_width',
-    'browser_modal_height',
-    'browser_bottom_panel_height',
   ] as const) {
     if (isNumber(value[key])) assign(key, value[key])
   }
@@ -225,16 +188,10 @@ function parseClientViewState(value: unknown): ClientViewState {
     'terminal_visible_by_worktree',
     'terminal_panel_open',
     'modal_terminal_open',
-    'browser_side_pane_open',
     'browser_modal_open',
-    'browser_bottom_panel_open',
   ] as const) {
     assign(key, recordOf(value[key], isBoolean))
   }
-  if (isDockMode(value.modal_terminal_dock_mode))
-    assign('modal_terminal_dock_mode', value.modal_terminal_dock_mode)
-  if (isDockMode(value.browser_modal_dock_mode))
-    assign('browser_modal_dock_mode', value.browser_modal_dock_mode)
   return state
 }
 

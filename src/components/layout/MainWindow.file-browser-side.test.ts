@@ -4,9 +4,7 @@ import { describe, expect, it } from 'vitest'
 describe('MainWindow file-browser side', () => {
   it('places the desktop right panel after the main content', () => {
     const source = readFileSync('src/components/layout/MainWindow.tsx', 'utf8')
-    const mainContent = source.indexOf(
-      '{/* Main Content + bottom browser panel stacked vertically */}'
-    )
+    const mainContent = source.indexOf('{/* Main Content */}')
     const resizeHandle = source.indexOf(
       '{/* Desktop: resize handle for the right panel */}'
     )

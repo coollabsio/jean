@@ -67,8 +67,6 @@ import { isNativeApp } from '@/lib/environment'
 import { isImeComposingEvent } from '@/lib/ime-composition'
 import { toast } from 'sonner'
 import { ChatWindow } from './ChatWindow'
-import { ModalTerminalDrawer } from './ModalTerminalDrawer'
-import { ModalBrowserDrawer } from '@/components/browser/ModalBrowserDrawer'
 import { DevToolsDropdown } from './DevToolsDropdown'
 import { TerminalMagicButton } from './TerminalMagicButton'
 import { formatShortcutDisplay } from '@/types/keybindings'
@@ -230,9 +228,6 @@ export const SessionChatModal = memo(function SessionChatModal({
   const isTouch = useIsTouchDevice()
   const isServer = !!project?.server
   const zenMode = useUIStore(state => state.zenMode)
-  const isModalTerminalOpen = useTerminalStore(
-    state => state.modalTerminalOpen[worktreeId] ?? false
-  )
   const leftSidebarVisible = useUIStore(state => state.leftSidebarVisible)
   // While the Recent list is visible, Cmd/Ctrl+1-9 opens Recent sessions,
   // so the session tab number hints are hidden.
@@ -324,22 +319,6 @@ export const SessionChatModal = memo(function SessionChatModal({
   const { data: packageScripts = [] } = usePackageScripts(worktreePath, {
     worktreeId,
   })
-  const modalTerminalDockMode = useTerminalStore(
-    state => state.modalTerminalDockMode
-  )
-  const hasBottomTerminal =
-    isModalTerminalOpen && modalTerminalDockMode === 'bottom'
-  const isBrowserModalOpen = useBrowserStore(
-    state => state.modalOpen[worktreeId] ?? false
-  )
-  const browserModalDockMode = useBrowserStore(state => state.modalDockMode)
-  const hasBottomBrowser =
-    isBrowserModalOpen && browserModalDockMode === 'bottom'
-  // Desktop shows the terminal and browser as right panel tabs; mobile
-  // keeps them as drawers in this view.
-  const showSurfaceDrawers = isMobile
-  const hasBottomDock =
-    showSurfaceDrawers && (hasBottomTerminal || hasBottomBrowser)
   const titleBarSlot = useTitleBarBreadcrumbSlot(!isMobile)
   // Horizontal scroll on session tabs
   const modalTabScrollRef = useRef<HTMLDivElement>(null)
@@ -1202,8 +1181,7 @@ export const SessionChatModal = memo(function SessionChatModal({
         ref={isTouch ? swipe.containerRef : undefined}
         className={cn(
           'absolute inset-0 z-10 flex min-w-0 overflow-hidden bg-background',
-          !isMobile && 'pb-2',
-          hasBottomDock ? 'flex-col' : 'flex-row'
+          !isMobile && 'pb-2'
         )}
         data-testid="session-chat-modal-swipe"
       >
@@ -1222,18 +1200,6 @@ export const SessionChatModal = memo(function SessionChatModal({
               }}
             />
           </div>
-        )}
-        {showSurfaceDrawers && (
-          <>
-            {isModalTerminalOpen && modalTerminalDockMode === 'left' && (
-              <ModalTerminalDrawer
-                worktreeId={worktreeId}
-                worktreePath={worktreePath}
-                dockMode="left"
-              />
-            )}
-            <ModalBrowserDrawer worktreeId={worktreeId} dockMode="left" />
-          </>
         )}
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           {!zenMode && (
@@ -1547,38 +1513,6 @@ export const SessionChatModal = memo(function SessionChatModal({
             )}
           </div>
         </div>
-
-        {showSurfaceDrawers && (
-          <>
-            {isModalTerminalOpen && modalTerminalDockMode === 'right' && (
-              <ModalTerminalDrawer
-                worktreeId={worktreeId}
-                worktreePath={worktreePath}
-                dockMode="right"
-              />
-            )}
-            <ModalBrowserDrawer worktreeId={worktreeId} dockMode="right" />
-            {isModalTerminalOpen && modalTerminalDockMode === 'bottom' && (
-              <ModalTerminalDrawer
-                worktreeId={worktreeId}
-                worktreePath={worktreePath}
-                dockMode="bottom"
-              />
-            )}
-            {/* Browser bottom drawer sits at outer-flex bottom row alongside
-                terminal-bottom; outer flex flips to flex-col when either is
-                docked at bottom (see hasBottomDock). */}
-            <ModalBrowserDrawer worktreeId={worktreeId} dockMode="bottom" />
-            {modalTerminalDockMode === 'floating' && (
-              <ModalTerminalDrawer
-                worktreeId={worktreeId}
-                worktreePath={worktreePath}
-                dockMode="floating"
-              />
-            )}
-            <ModalBrowserDrawer worktreeId={worktreeId} dockMode="floating" />
-          </>
-        )}
       </div>
       <LabelModal
         isOpen={labelModalOpen}

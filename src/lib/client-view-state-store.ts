@@ -49,17 +49,7 @@ export function captureClientViewState(): ClientViewState {
     terminal_visible: terminal.terminalVisible,
     terminal_height: terminal.terminalHeight,
     modal_terminal_open: terminal.modalTerminalOpen,
-    modal_terminal_dock_mode: terminal.modalTerminalDockMode,
-    modal_terminal_width: terminal.modalTerminalWidth,
-    modal_terminal_height: terminal.modalTerminalHeight,
-    browser_side_pane_open: browser.sidePaneOpen,
-    browser_side_pane_width: browser.sidePaneWidth,
     browser_modal_open: browser.modalOpen,
-    browser_modal_dock_mode: browser.modalDockMode,
-    browser_modal_width: browser.modalWidth,
-    browser_modal_height: browser.modalHeight,
-    browser_bottom_panel_open: browser.bottomPanelOpen,
-    browser_bottom_panel_height: browser.bottomPanelHeight,
   }
 }
 
@@ -106,20 +96,8 @@ export function applyClientViewState(state: ClientViewState): void {
     terminalVisible: state.terminal_visible,
     terminalHeight: state.terminal_height,
     modalTerminalOpen: state.modal_terminal_open,
-    modalTerminalDockMode: state.modal_terminal_dock_mode,
-    modalTerminalWidth: state.modal_terminal_width,
-    modalTerminalHeight: state.modal_terminal_height,
   })
-  useBrowserStore.setState({
-    sidePaneOpen: state.browser_side_pane_open,
-    sidePaneWidth: state.browser_side_pane_width,
-    modalOpen: state.browser_modal_open,
-    modalDockMode: state.browser_modal_dock_mode,
-    modalWidth: state.browser_modal_width,
-    modalHeight: state.browser_modal_height,
-    bottomPanelOpen: state.browser_bottom_panel_open,
-    bottomPanelHeight: state.browser_bottom_panel_height,
-  })
+  useBrowserStore.setState({ modalOpen: state.browser_modal_open })
 }
 
 /** Add the active server owner to raw IDs from legacy server UI state. */
@@ -152,8 +130,6 @@ export function scopeClientViewStateResources(
     terminal_visible_by_worktree: scopeKeys(state.terminal_visible_by_worktree),
     terminal_panel_open: scopeKeys(state.terminal_panel_open),
     modal_terminal_open: scopeKeys(state.modal_terminal_open),
-    browser_side_pane_open: scopeKeys(state.browser_side_pane_open),
     browser_modal_open: scopeKeys(state.browser_modal_open),
-    browser_bottom_panel_open: scopeKeys(state.browser_bottom_panel_open),
   }
 }

@@ -671,33 +671,6 @@ export function useUIStatePersistence() {
       })
       useTerminalStore.setState({ modalTerminalOpen })
     }
-    const modalTerminalDockMode =
-      uiState.modal_terminal_dock_mode ??
-      (uiState.modal_terminal_pinned ? 'right' : 'floating')
-    if (modalTerminalDockMode) {
-      logger.debug('Restoring modal terminal dock mode', {
-        dockMode: modalTerminalDockMode,
-      })
-      useTerminalStore.setState({
-        modalTerminalDockMode,
-      })
-    }
-    if (uiState.modal_terminal_width != null) {
-      logger.debug('Restoring modal terminal width', {
-        width: uiState.modal_terminal_width,
-      })
-      useTerminalStore.setState({
-        modalTerminalWidth: uiState.modal_terminal_width,
-      })
-    }
-    if (uiState.modal_terminal_height != null) {
-      logger.debug('Restoring modal terminal height', {
-        height: uiState.modal_terminal_height,
-      })
-      useTerminalStore.setState({
-        modalTerminalHeight: uiState.modal_terminal_height,
-      })
-    }
 
     const restoreTerminalRuntimeState = async (shouldCancel: () => boolean) => {
       if (isLocalBackend() || shouldCancel()) return
@@ -1060,95 +1033,16 @@ export function useUIStatePersistence() {
       })
       useBrowserStore.getState().hydrateTabs(hydratedTabs, browserActiveTabIds)
     }
-    // Browser surfaces are mutually exclusive per worktree (one webview, one
-    // position). If persisted state has multiple flags true (legacy bug or
-    // hand-edited file), keep only one with priority: modal > sidePane > bottom.
-    const persistedSidePaneOpen = uiState.browser_side_pane_open ?? {}
-    const persistedModalOpen = uiState.browser_modal_open ?? {}
-    const persistedBottomOpen = uiState.browser_bottom_panel_open ?? {}
-    const sanitizedSidePane: Record<string, boolean> = {}
-    const sanitizedModal: Record<string, boolean> = {}
-    const sanitizedBottom: Record<string, boolean> = {}
-    const allWorktreeIds = new Set([
-      ...Object.keys(persistedSidePaneOpen),
-      ...Object.keys(persistedModalOpen),
-      ...Object.keys(persistedBottomOpen),
-    ])
-    for (const wid of allWorktreeIds) {
-      if (persistedModalOpen[wid]) {
-        sanitizedModal[wid] = true
-      } else if (persistedSidePaneOpen[wid]) {
-        sanitizedSidePane[wid] = true
-      } else if (persistedBottomOpen[wid]) {
-        sanitizedBottom[wid] = true
-      }
-    }
-    if (Object.keys(sanitizedSidePane).length > 0) {
-      useBrowserStore.setState({ sidePaneOpen: sanitizedSidePane })
-    }
-    if (Object.keys(sanitizedModal).length > 0) {
-      useBrowserStore.setState({ modalOpen: sanitizedModal })
-    }
-    if (Object.keys(sanitizedBottom).length > 0) {
-      useBrowserStore.setState({ bottomPanelOpen: sanitizedBottom })
-    }
-    if (uiState.browser_side_pane_width != null) {
-      useBrowserStore.setState({
-        sidePaneWidth: uiState.browser_side_pane_width,
-      })
-    }
-    if (uiState.browser_modal_dock_mode) {
-      useBrowserStore.setState({
-        modalDockMode: uiState.browser_modal_dock_mode,
-      })
-    }
-    if (uiState.browser_modal_width != null) {
-      useBrowserStore.setState({ modalWidth: uiState.browser_modal_width })
-    }
-    if (uiState.browser_modal_height != null) {
-      useBrowserStore.setState({ modalHeight: uiState.browser_modal_height })
-    }
-    if (uiState.browser_bottom_panel_height != null) {
-      useBrowserStore.setState({
-        bottomPanelHeight: uiState.browser_bottom_panel_height,
-      })
-    }
-    // Cross-pane mutual exclusion: browser surfaces and terminal modal are
-    // mutually exclusive per worktree. If both restored as open for the same
-    // worktree (legacy/hand-edited state), close every browser surface there
-    // and let the terminal win — terminal is the more recently used surface
-    // for most users and avoids reopening into a broken layout.
-    {
-      const terminalState = useTerminalStore.getState()
-      const fixedSidePane = { ...sanitizedSidePane }
-      const fixedModal = { ...sanitizedModal }
-      const fixedBottom = { ...sanitizedBottom }
-      let changed = false
-      for (const wid of Object.keys(terminalState.modalTerminalOpen)) {
-        if (!terminalState.modalTerminalOpen[wid]) continue
-        if (fixedSidePane[wid]) {
-          fixedSidePane[wid] = false
-          changed = true
-        }
-        if (fixedModal[wid]) {
-          fixedModal[wid] = false
-          changed = true
-        }
-        if (fixedBottom[wid]) {
-          fixedBottom[wid] = false
-          changed = true
-        }
-      }
-      if (changed) {
-        logger.debug(
-          'Resolving browser/terminal mutual exclusion on hydrate (closing browser)'
-        )
-        useBrowserStore.setState({
-          sidePaneOpen: fixedSidePane,
-          modalOpen: fixedModal,
-          bottomPanelOpen: fixedBottom,
-        })
-      }
+    // The terminal and browser are mutually exclusive per worktree. If both
+    // restored as open (legacy or hand-edited state), the terminal wins.
+    const terminalModalOpen = useTerminalStore.getState().modalTerminalOpen
+    const restoredBrowserOpen = Object.fromEntries(
+      Object.entries(uiState.browser_modal_open ?? {}).filter(
+        ([wid, open]) => open && !terminalModalOpen[wid]
+      )
+    )
+    if (Object.keys(restoredBrowserOpen).length > 0) {
+      useBrowserStore.setState({ modalOpen: restoredBrowserOpen })
     }
 
     // Restore last opened worktree+session per project (convert snake_case → camelCase keys)

@@ -207,8 +207,6 @@ import { Toaster } from '@/components/ui/sonner'
 import { PreviewDialogHost } from '@/components/ui/preview-dialog-host'
 import { MobileLeftSidebar } from './MobileLeftSidebar'
 import { resolveWindowTitle } from './window-title'
-import { BrowserSidePane } from '@/components/browser/BrowserSidePane'
-import { BrowserPanel } from '@/components/browser/BrowserPanel'
 import { useBrowserEvents } from '@/hooks/useBrowserPane'
 import { parseServerResourceKey } from '@/lib/server-resource'
 import { useToasterOffset } from '@/hooks/useToasterOffset'
@@ -704,7 +702,7 @@ export function MainWindow() {
           />
         )}
 
-        {/* Mobile: file browser overlay drawer */}
+        {/* Mobile: right panel overlay drawer */}
         {isMobile && isInitialized && (
           <Suspense fallback={null}>
             <MobileFileBrowser
@@ -714,7 +712,7 @@ export function MainWindow() {
           </Suspense>
         )}
 
-        {/* Main Content + bottom browser panel stacked vertically */}
+        {/* Main Content */}
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden pt-8">
           <div className="relative min-w-0 flex-1 overflow-hidden">
             <MainWindowContent
@@ -724,8 +722,6 @@ export function MainWindow() {
               sidebarSwipeIndicator={sidebarSwipeIndicator}
             />
           </div>
-          {/* Browser bottom panel - native-only, pinned to bottom */}
-          <BrowserPanel />
         </div>
 
         {/* Desktop: resize handle for the right panel */}
@@ -754,9 +750,6 @@ export function MainWindow() {
             </Suspense>
           </div>
         )}
-
-        {/* Browser side pane - native-only, mounts on right edge */}
-        <BrowserSidePane />
       </div>
 
       {/* Global UI Components (hidden until triggered) */}

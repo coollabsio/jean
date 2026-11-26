@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderHook } from '@testing-library/react'
 import { useChatStore } from '@/store/chat-store'
 import { useTerminalStore } from '@/store/terminal-store'
@@ -279,9 +279,6 @@ describe('useMainWindowEventListeners terminal shortcuts', () => {
       terminalPanelOpen: {},
       terminalHeight: 30,
       modalTerminalOpen: {},
-      modalTerminalDockMode: 'floating',
-      modalTerminalWidth: 400,
-      modalTerminalHeight: 280,
     })
 
     useUIStore.setState({
@@ -363,7 +360,6 @@ describe('useMainWindowEventListeners terminal shortcuts', () => {
     })
     useTerminalStore.setState({
       modalTerminalOpen: { 'modal-worktree': true },
-      modalTerminalDockMode: 'bottom',
     })
 
     expect(getTerminalShortcutWorktreeId()).toBe('modal-worktree')
@@ -1130,110 +1126,6 @@ describe('removed keybindings', () => {
   })
 })
 
-describe('toggleBrowserKeybinding', () => {
-  const desktopWidth = window.innerWidth
-  afterEach(() => {
-    window.innerWidth = desktopWidth
-  })
-  beforeEach(() => {
-    // The surface cycle only runs on mobile; desktop uses the right panel.
-    window.innerWidth = 500
-    useChatStore.setState({ activeWorktreeId: null })
-    useUIStore.setState({
-      sessionChatModalOpen: false,
-      sessionChatModalWorktreeId: null,
-    })
-    useBrowserStore.setState({
-      sidePaneOpen: {},
-      modalOpen: {},
-      bottomPanelOpen: {},
-    })
-    useTerminalStore.setState({ modalTerminalOpen: {} })
-  })
-
-  it('does nothing when no worktree is active', () => {
-    toggleBrowserKeybinding()
-
-    expect(useBrowserStore.getState().sidePaneOpen).toEqual({})
-    expect(useBrowserStore.getState().modalOpen).toEqual({})
-    expect(useBrowserStore.getState().bottomPanelOpen).toEqual({})
-  })
-
-  it('cycles the main-window shortcut from the side pane to the bottom panel', () => {
-    useChatStore.setState({ activeWorktreeId: 'canvas-wt' })
-    useUIStore.setState({
-      sessionChatModalOpen: false,
-      sessionChatModalWorktreeId: 'ignored',
-    })
-
-    toggleBrowserKeybinding()
-
-    expect(useBrowserStore.getState().sidePaneOpen['canvas-wt']).toBe(true)
-    expect(useBrowserStore.getState().sidePaneOpen).not.toHaveProperty(
-      'ignored'
-    )
-
-    toggleBrowserKeybinding()
-
-    expect(useBrowserStore.getState().bottomPanelOpen['canvas-wt']).toBe(true)
-    expect(useBrowserStore.getState().sidePaneOpen['canvas-wt']).toBe(false)
-
-    toggleBrowserKeybinding()
-
-    expect(useBrowserStore.getState().bottomPanelOpen['canvas-wt']).toBe(false)
-  })
-
-  it('cycles the session shortcut from the modal drawer to the bottom panel', () => {
-    useChatStore.setState({ activeWorktreeId: 'active-wt' })
-    useUIStore.setState({
-      sessionChatModalOpen: true,
-      sessionChatModalWorktreeId: 'modal-wt',
-    })
-
-    toggleBrowserKeybinding()
-
-    expect(useBrowserStore.getState().modalOpen['modal-wt']).toBe(true)
-    expect(useBrowserStore.getState().modalOpen).not.toHaveProperty('active-wt')
-
-    toggleBrowserKeybinding()
-
-    expect(useBrowserStore.getState().bottomPanelOpen['modal-wt']).toBe(true)
-    expect(useBrowserStore.getState().modalOpen['modal-wt']).toBe(false)
-    expect(useBrowserStore.getState().sidePaneOpen['modal-wt']).toBe(false)
-
-    toggleBrowserKeybinding()
-
-    expect(useBrowserStore.getState().bottomPanelOpen['modal-wt']).toBe(false)
-  })
-
-  it('uses the active worktree when the session modal has no worktree id', () => {
-    useChatStore.setState({ activeWorktreeId: 'active-wt' })
-    useUIStore.setState({
-      sessionChatModalOpen: true,
-      sessionChatModalWorktreeId: null,
-    })
-
-    toggleBrowserKeybinding()
-
-    expect(useBrowserStore.getState().modalOpen['active-wt']).toBe(true)
-  })
-
-  it('closes the terminal modal when the shortcut opens the bottom panel', () => {
-    useChatStore.setState({ activeWorktreeId: 'canvas-wt' })
-    useBrowserStore.getState().setSidePaneOpen('canvas-wt', true)
-    useTerminalStore.setState({
-      modalTerminalOpen: { 'canvas-wt': true },
-    })
-
-    toggleBrowserKeybinding()
-
-    expect(useBrowserStore.getState().bottomPanelOpen['canvas-wt']).toBe(true)
-    expect(useTerminalStore.getState().modalTerminalOpen['canvas-wt']).toBe(
-      false
-    )
-  })
-})
-
 describe('Recent session navigation shortcuts', () => {
   function pressArrow(key: 'ArrowUp' | 'ArrowDown', shiftKey: boolean) {
     const event = new KeyboardEvent('keydown', {
@@ -1328,9 +1220,7 @@ describe('toggleBrowserKeybinding (desktop right panel)', () => {
       rightPanelTab: 'files',
     })
     useBrowserStore.setState({
-      sidePaneOpen: {},
       modalOpen: {},
-      bottomPanelOpen: {},
     })
     useTerminalStore.setState({ modalTerminalOpen: {} })
   })
@@ -1341,8 +1231,6 @@ describe('toggleBrowserKeybinding (desktop right panel)', () => {
     expect(useUIStore.getState().fileBrowserVisible).toBe(true)
     expect(useUIStore.getState().rightPanelTab).toBe('browser')
     expect(useBrowserStore.getState().modalOpen['modal-wt']).toBe(true)
-    expect(useBrowserStore.getState().sidePaneOpen['modal-wt']).toBeFalsy()
-    expect(useBrowserStore.getState().bottomPanelOpen['modal-wt']).toBeFalsy()
 
     toggleBrowserKeybinding()
 

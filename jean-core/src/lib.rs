@@ -3800,25 +3800,9 @@ pub struct UIState {
     #[serde(default)]
     pub review_sidebar_visible: Option<bool>,
 
-    /// Modal terminal drawer open state per worktree
+    /// Right panel terminal tab open state per worktree
     #[serde(default)]
     pub modal_terminal_open: std::collections::HashMap<String, bool>,
-
-    /// Modal terminal dock mode
-    #[serde(default)]
-    pub modal_terminal_dock_mode: Option<String>,
-
-    /// Legacy pinned state; maps to right dock when true
-    #[serde(default)]
-    pub modal_terminal_pinned: Option<bool>,
-
-    /// Modal terminal width in pixels for left/right dock
-    #[serde(default)]
-    pub modal_terminal_width: Option<f64>,
-
-    /// Modal terminal height in pixels for bottom dock
-    #[serde(default)]
-    pub modal_terminal_height: Option<f64>,
 
     /// Terminal instances persisted per worktree for restoration after web refresh
     #[serde(default)]
@@ -3856,37 +3840,9 @@ pub struct UIState {
     #[serde(default)]
     pub browser_active_tab_ids: std::collections::HashMap<String, String>,
 
-    /// Browser side-pane open state per worktree
-    #[serde(default)]
-    pub browser_side_pane_open: std::collections::HashMap<String, bool>,
-
-    /// Browser side-pane width in pixels (global)
-    #[serde(default)]
-    pub browser_side_pane_width: Option<f64>,
-
-    /// Browser modal drawer open state per worktree
+    /// Right panel browser tab open state per worktree
     #[serde(default)]
     pub browser_modal_open: std::collections::HashMap<String, bool>,
-
-    /// Browser modal drawer dock mode
-    #[serde(default)]
-    pub browser_modal_dock_mode: Option<String>,
-
-    /// Browser modal drawer width in pixels for left/right dock
-    #[serde(default)]
-    pub browser_modal_width: Option<f64>,
-
-    /// Browser modal drawer height in pixels for bottom dock
-    #[serde(default)]
-    pub browser_modal_height: Option<f64>,
-
-    /// Browser bottom panel open state per worktree
-    #[serde(default)]
-    pub browser_bottom_panel_open: std::collections::HashMap<String, bool>,
-
-    /// Browser bottom panel height in pixels (global)
-    #[serde(default)]
-    pub browser_bottom_panel_height: Option<f64>,
 
     /// Last-accessed timestamps per project for recency sorting (projectId → unix ms)
     #[serde(default)]
@@ -4055,10 +4011,6 @@ impl Default for UIState {
             expanded_queued_prompts_sessions: Vec::new(),
             review_sidebar_visible: None,
             modal_terminal_open: std::collections::HashMap::new(),
-            modal_terminal_dock_mode: None,
-            modal_terminal_pinned: None,
-            modal_terminal_width: None,
-            modal_terminal_height: None,
             terminal_instances: std::collections::HashMap::new(),
             terminal_active_ids: std::collections::HashMap::new(),
             terminal_panel_open: std::collections::HashMap::new(),
@@ -4068,14 +4020,7 @@ impl Default for UIState {
             session_primary_surface: std::collections::HashMap::new(),
             browser_tabs: std::collections::HashMap::new(),
             browser_active_tab_ids: std::collections::HashMap::new(),
-            browser_side_pane_open: std::collections::HashMap::new(),
-            browser_side_pane_width: None,
             browser_modal_open: std::collections::HashMap::new(),
-            browser_modal_dock_mode: None,
-            browser_modal_width: None,
-            browser_modal_height: None,
-            browser_bottom_panel_open: std::collections::HashMap::new(),
-            browser_bottom_panel_height: None,
             project_access_timestamps: std::collections::HashMap::new(),
             dashboard_worktree_collapse_overrides: std::collections::HashMap::new(),
             project_canvas_settings: std::collections::HashMap::new(),
@@ -4766,6 +4711,32 @@ mod ui_state_pin_tests {
 
     fn write_state(path: &std::path::Path, ui_state: &UIState) {
         std::fs::write(path, serde_json::to_string_pretty(ui_state).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn reads_state_saved_with_removed_dock_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ui-state.json");
+        std::fs::write(
+            &path,
+            r#"{
+                "active_worktree_id": "worktree-1",
+                "modal_terminal_open": { "worktree-1": true },
+                "modal_terminal_dock_mode": "right",
+                "modal_terminal_pinned": true,
+                "modal_terminal_width": 480,
+                "browser_side_pane_open": { "worktree-1": true },
+                "browser_modal_dock_mode": "bottom",
+                "browser_bottom_panel_open": { "worktree-1": true },
+                "browser_bottom_panel_height": 390
+            }"#,
+        )
+        .unwrap();
+
+        let state = read_ui_state_file(&path).unwrap();
+
+        assert_eq!(state.active_worktree_id.as_deref(), Some("worktree-1"));
+        assert_eq!(state.modal_terminal_open.get("worktree-1"), Some(&true));
     }
 
     #[test]
