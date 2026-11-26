@@ -61,6 +61,8 @@ interface BackendModelPickerContentProps {
   onModelChange: (model: string) => void
   onBackendModelChange: (backend: CliBackend, model: string) => void
   onRequestClose: () => void
+  /** Close after a model pick. False keeps the picker open for more changes. */
+  closeOnSelect?: boolean
   /** Called after a model is applied and the picker has been asked to close. */
   onAfterSelect?: (backend: CliBackend, model: string) => void
   defaultModelOption?: { value: string; label: string }
@@ -82,6 +84,7 @@ export function BackendModelPickerContent({
   onModelChange,
   onBackendModelChange,
   onRequestClose,
+  closeOnSelect = true,
   onAfterSelect,
   defaultModelOption,
   searchPlaceholder,
@@ -375,10 +378,11 @@ export function BackendModelPickerContent({
       } else {
         onBackendModelChange(backend, resolved)
       }
-      onRequestClose()
+      if (closeOnSelect) onRequestClose()
       onAfterSelect?.(backend, resolved)
     },
     [
+      closeOnSelect,
       isFastRemembered,
       modelCatalog,
       onAfterSelect,
@@ -433,11 +437,12 @@ export function BackendModelPickerContent({
     } else {
       onBackendModelChange(activeBackend, fastInfo.fastModel)
     }
-    onRequestClose()
+    if (closeOnSelect) onRequestClose()
     onAfterSelect?.(activeBackend, fastInfo.fastModel)
     return true
   }, [
     activeBackend,
+    closeOnSelect,
     highlightedOption,
     modelCatalog,
     onAfterSelect,

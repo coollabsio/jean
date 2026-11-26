@@ -42,6 +42,8 @@ interface ExecutionModeDropdownProps {
   onCloseAutoFocus?: (event: Event) => void
   /** Show only the mode icon; the label moves to a tooltip */
   iconOnly?: boolean
+  /** Set false when nested in a popover, so the popover keeps pointer events */
+  modal?: boolean
 }
 
 const PERMISSIONS: Record<
@@ -94,6 +96,7 @@ export function ExecutionModeDropdown({
   align = 'start',
   onCloseAutoFocus,
   iconOnly = false,
+  modal = true,
 }: ExecutionModeDropdownProps) {
   const rememberedPermission = useChatStore(state =>
     sessionId ? state.permissionModes[sessionId] : undefined
@@ -119,7 +122,7 @@ export function ExecutionModeDropdown({
 
   return (
     <div className={cn('flex items-center shrink-0', className)}>
-      <DropdownMenu>
+      <DropdownMenu modal={modal}>
         <Tooltip>
           <TooltipTrigger asChild>
             <DropdownMenuTrigger asChild>

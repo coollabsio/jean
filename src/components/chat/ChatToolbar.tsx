@@ -168,6 +168,10 @@ export const ChatToolbar = memo(function ChatToolbar({
     useState(false)
   const mobileSettingsMenuRef = useRef<MobileSettingsMenuHandle>(null)
   const isMobile = useIsMobile()
+  const focusChatInputOnClose = useCallback((event: Event) => {
+    event.preventDefault()
+    window.dispatchEvent(new CustomEvent('focus-chat-input'))
+  }, [])
   const zenMode = useUIStore(state => state.zenMode)
   const threadDetailsSlot = useTitleBarSlot(
     TITLEBAR_THREAD_DETAILS_SLOT_ID,
@@ -602,6 +606,7 @@ export const ChatToolbar = memo(function ChatToolbar({
               className="flex @xl:hidden shrink-0"
               align="end"
               iconOnly
+              onCloseAutoFocus={isMobile ? undefined : focusChatInputOnClose}
             />
 
             <DesktopToolbarControls

@@ -76,6 +76,8 @@ interface DesktopBackendModelPickerProps {
   footer?: ReactNode
   /** Extra text after the model name in the trigger */
   triggerSuffix?: ReactNode
+  /** Close after a model pick. False keeps the picker open for more changes. */
+  closeOnSelect?: boolean
 }
 
 export function DesktopBackendModelPicker({
@@ -98,6 +100,7 @@ export function DesktopBackendModelPicker({
   sidePanel,
   footer,
   triggerSuffix,
+  closeOnSelect = true,
 }: DesktopBackendModelPickerProps) {
   const isMobile = useIsMobile()
   const [open, setOpen] = useState(false)
@@ -370,6 +373,7 @@ export function DesktopBackendModelPicker({
             onModelChange={onModelChange}
             onBackendModelChange={onBackendModelChange}
             onRequestClose={() => handleOpenChange(false)}
+            closeOnSelect={closeOnSelect}
             defaultModelOption={defaultModelOption}
           />
           {sidePanel}

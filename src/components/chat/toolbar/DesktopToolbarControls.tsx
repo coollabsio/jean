@@ -328,8 +328,10 @@ export function DesktopToolbarControls({
   const showCodexProviders =
     customCodexProviders.length > 0 && selectedBackend === 'codex'
   const showProviderDropdown = showClaudeProviders || showCodexProviders
+  // Non-modal: a modal menu turns off pointer events on the picker popover,
+  // so clicks fall through to the chat input and close the whole picker.
   const providerMenu = showProviderDropdown ? (
-    <DropdownMenu>
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
         <button
           type="button"
@@ -406,6 +408,7 @@ export function DesktopToolbarControls({
       className={hideModelPicker ? 'hidden @xl:flex' : 'ml-auto'}
       align="end"
       onCloseAutoFocus={hideModelPicker ? focusChatInput : undefined}
+      modal={hideModelPicker}
     />
   )
 
@@ -830,6 +833,7 @@ export function DesktopToolbarControls({
             </>
           }
           sidePanel={reasoningPanel}
+          closeOnSelect={false}
           footer={
             <>
               {providerMenu}

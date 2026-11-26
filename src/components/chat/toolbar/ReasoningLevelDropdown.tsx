@@ -21,6 +21,17 @@ export interface ReasoningLevelOption {
   tokens?: string
 }
 
+const MAX_INLINE_HINT_LENGTH = 24
+
+/** Short hint next to the label. Long catalog sentences go to the tooltip only. */
+function inlineHint(option: ReasoningLevelOption): string | undefined {
+  if (option.tokens) return option.tokens
+  if (!option.description) return undefined
+  return option.description.length <= MAX_INLINE_HINT_LENGTH
+    ? option.description
+    : undefined
+}
+
 const TRIGGER_CLASS =
   'flex h-8 items-center gap-1.5 px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50'
 
@@ -113,12 +124,16 @@ export function ReasoningLevelDropdown({
       >
         <DropdownMenuRadioGroup value={value} onValueChange={onValueChange}>
           {options.map((option, i) => (
-            <DropdownMenuRadioItem key={option.value} value={option.value}>
+            <DropdownMenuRadioItem
+              key={option.value}
+              value={option.value}
+              title={option.description}
+            >
               <Brain className="mr-2 h-4 w-4" />
               {option.label}
-              {(option.tokens ?? option.description) && (
+              {inlineHint(option) && (
                 <span className="ml-auto pl-4 text-xs text-muted-foreground">
-                  {option.tokens ?? option.description}
+                  {inlineHint(option)}
                 </span>
               )}
               {showShortcuts && <Kbd className="ml-2 text-2xs">{i + 1}</Kbd>}
@@ -161,12 +176,14 @@ export function ReasoningLevelList({
       >
         {options.map(option => {
           const checked = option.value === value
+          const hint = inlineHint(option)
           return (
             <button
               key={option.value}
               type="button"
               role="radio"
               aria-checked={checked}
+              title={option.description}
               onClick={() => onValueChange(option.value)}
               className={cn(
                 'flex items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground',
@@ -175,9 +192,9 @@ export function ReasoningLevelList({
               )}
             >
               <span className="min-w-0 flex-1 truncate">{option.label}</span>
-              {(option.tokens ?? option.description) && (
+              {hint && (
                 <span className="shrink-0 text-xs text-muted-foreground">
-                  {option.tokens ?? option.description}
+                  {hint}
                 </span>
               )}
               <Check
