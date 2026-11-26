@@ -41,17 +41,14 @@ vi.mock('@/services/projects', () => ({
     ],
   }),
 }))
-vi.mock('@/components/agents/AgentNotificationsListener', () => ({
-  AgentNotificationsListener: () => null,
-}))
 vi.mock('@/hooks/useInstalledBackends', () => ({
   useInstalledBackends: () => ({ installedBackends: [], isLoading: false }),
 }))
 vi.mock('@/components/chat/ChatWindow', () => ({
   ChatWindow: () => <div data-testid="chat-window">Chat</div>,
 }))
-vi.mock('@/components/dashboard/ProjectView', () => ({
-  ProjectView: () => <div data-testid="project-canvas">Canvas</div>,
+vi.mock('@/components/dashboard/ProjectCanvasView', () => ({
+  ProjectCanvasView: () => <div data-testid="project-canvas">Canvas</div>,
 }))
 
 describe('MainWindowContent with an unreachable server', () => {

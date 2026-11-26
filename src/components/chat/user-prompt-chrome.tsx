@@ -15,6 +15,10 @@ import {
   stripAllMarkers,
 } from './message-content-utils'
 
+/** Chat user prompt: a subtle bordered card. */
+export const USER_CARD_BUBBLE_CLASS =
+  'min-w-0 break-words [overflow-wrap:anywhere] rounded-lg border border-border/20 bg-muted/20 px-3 py-2 text-foreground'
+
 // Per-message chrome (settings, copy, restore, duration) appears on hover or
 // keyboard focus. Touch devices have no hover, so it stays visible there.
 export const USER_HOVER_REVEAL =

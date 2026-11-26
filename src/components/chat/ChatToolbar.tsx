@@ -84,7 +84,6 @@ export const ChatToolbar = memo(function ChatToolbar({
   hasPendingAttachments,
   hasInputValue,
   executionMode,
-  hidePlanMode = false,
   selectedBackend,
   selectedModel,
   selectedProvider,
@@ -222,9 +221,7 @@ export const ChatToolbar = memo(function ChatToolbar({
     availableMcpServers,
     enabledMcpServers,
   })
-  const availableExecutionModes = getSupportedExecutionModes(
-    selectedBackend
-  ).filter(mode => !hidePlanMode || mode !== 'plan')
+  const availableExecutionModes = getSupportedExecutionModes(selectedBackend)
   const hasMultipleBackendModelChoices =
     backendModelSections.reduce(
       (count, section) => count + section.options.length,

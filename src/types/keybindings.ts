@@ -48,7 +48,6 @@ export type KeybindingAction =
   | 'search_chat'
   | 'toggle_zen_mode'
   | 'clear_session_context'
-  | 'toggle_coordinator_sidebar'
 
 // Shortcut string format: "mod+key" where mod is cmd/ctrl
 // Examples: "mod+l", "mod+shift+p", "mod+1"
@@ -116,7 +115,6 @@ export const DEFAULT_KEYBINDINGS: KeybindingsMap = {
   toggle_zen_mode: 'mod+shift+z',
   // Destructive (wipes the transcript in place), so unbound by default (#693).
   clear_session_context: '',
-  toggle_coordinator_sidebar: 'mod+shift+w',
 }
 
 // UI definitions for the settings pane
@@ -329,13 +327,6 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
     description:
       'Full-screen the active session: hide session tabs and top chrome',
     default_shortcut: 'mod+shift+z',
-    category: 'navigation',
-  },
-  {
-    action: 'toggle_coordinator_sidebar',
-    label: 'Toggle coordinator details',
-    description: 'Show or hide the details beside the project coordinator',
-    default_shortcut: 'mod+shift+w',
     category: 'navigation',
   },
   {

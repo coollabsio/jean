@@ -11,9 +11,7 @@
 //! A `<stem>.json` file beside each value holds its label and ids, so the
 //! `list_secrets` card can list and delete secrets without reading values.
 //!
-//! Secrets are scoped to an owner: the project of a worktree session, or the
-//! project coordinator of a coordinator chat (those sessions live in the
-//! virtual `__coord_<project_id>__` worktree, which has no worktree record).
+//! Secrets are scoped to an owner: the project of a worktree session.
 //! Sessions list and reuse (`get_secret`) only their owner's secrets, so a
 //! scheduled task in a new session can find a key saved earlier. This is not
 //! a security wall: every agent runs as the same OS user and can read the
@@ -55,10 +53,10 @@ pub struct SecretEntry {
     pub label: String,
     pub session_id: String,
     pub tool_call_id: String,
-    /// `project:<id>` or `agent:<id>`. Empty for secrets saved before scope.
+    /// `project:<id>`. Empty for secrets saved before scope.
     #[serde(default, alias = "projectId")]
     pub owner_id: String,
-    /// Project or agent name; project names refresh when listed.
+    /// Project name; refreshed when listed.
     #[serde(default, alias = "projectName")]
     pub owner_name: String,
     pub retention: SecretRetention,
@@ -67,20 +65,16 @@ pub struct SecretEntry {
 }
 
 const PROJECT_OWNER: &str = "project:";
-const AGENT_OWNER: &str = "agent:";
 
-/// Owner (id, name) of a session: its agent, else its worktree's project.
+/// Owner (id, name) of a session: its worktree's project.
 fn session_owner(app: &tauri::AppHandle, session_id: &str) -> Result<(String, String), String> {
-    if let Some(agent) = crate::agents::agent_for_session(app, session_id) {
-        return Ok((format!("{AGENT_OWNER}{}", agent.id), agent.name));
-    }
     let metadata = super::storage::load_mcp_session_metadata(app, session_id)?
         .ok_or_else(|| format!("Unknown session: {session_id}"))?;
     let data = crate::projects::storage::load_projects_data(app)?;
     let project = data
         .find_worktree(&metadata.worktree_id)
         .and_then(|worktree| data.find_project(&worktree.project_id))
-        .ok_or_else(|| "The session has no project or agent".to_string())?;
+        .ok_or_else(|| "The session has no project".to_string())?;
     Ok((
         format!("{PROJECT_OWNER}{}", project.id),
         project.name.clone(),
@@ -209,10 +203,10 @@ fn find_by_label(dir: &Path, owner_id: &str, label: &str) -> Result<SavedSecret,
         .ok_or_else(|| {
             let labels: Vec<&str> = entries.iter().map(|entry| entry.label.as_str()).collect();
             if labels.is_empty() {
-                "No saved secrets in this project or agent. Ask the user with request_secret.".to_string()
+                "No saved secrets in this project. Ask the user with request_secret.".to_string()
             } else {
                 format!(
-                    "No saved secret with that label in this project or agent. Saved labels: {}. Or ask the user with request_secret.",
+                    "No saved secret with that label in this project. Saved labels: {}. Or ask the user with request_secret.",
                     labels.join(", ")
                 )
             }
@@ -529,7 +523,7 @@ mod tests {
         write_meta(tmp.path(), &mine, &entry(&mine, "Deploy token", 10)).unwrap();
         write_secret_file(tmp.path(), &other, "v2", SecretRetention::Forever).unwrap();
         let mut foreign = entry(&other, "Other token", 20);
-        foreign.owner_id = "agent:a1".to_string();
+        foreign.owner_id = "project:p2".to_string();
         write_meta(tmp.path(), &other, &foreign).unwrap();
 
         let found = find_by_label(tmp.path(), "project:p1", "  deploy TOKEN ").unwrap();
@@ -541,7 +535,7 @@ mod tests {
             !err.contains("Other token"),
             "other owner labels stay hidden"
         );
-        assert!(find_by_label(tmp.path(), "agent:a1", "Other token").is_ok());
+        assert!(find_by_label(tmp.path(), "project:p2", "Other token").is_ok());
         assert!(find_by_label(tmp.path(), "project:p3", "Deploy token")
             .unwrap_err()
             .contains("No saved secrets"));

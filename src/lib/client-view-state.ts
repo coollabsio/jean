@@ -26,12 +26,6 @@ export interface ClientViewState {
   file_browser_size: number
   right_sidebar_visible: boolean
   zen_mode: boolean
-  /** Per project: coordinator chat or sessions canvas as the main panel */
-  project_view_modes: Record<string, 'coordinator' | 'sessions'>
-  coordinator_sidebar_open: boolean
-  coordinator_sidebar_width: number
-  /** Coordinator chat shows tool activity */
-  agents_advanced: boolean
   terminal_visible_by_worktree: Record<string, boolean>
   terminal_panel_open: Record<string, boolean>
   terminal_visible: boolean
@@ -68,10 +62,6 @@ export const defaultClientViewState: ClientViewState = {
   file_browser_size: 280,
   right_sidebar_visible: false,
   zen_mode: false,
-  project_view_modes: {},
-  coordinator_sidebar_open: false,
-  coordinator_sidebar_width: 360,
-  agents_advanced: false,
   terminal_visible_by_worktree: {},
   terminal_panel_open: {},
   terminal_visible: false,
@@ -115,8 +105,6 @@ function recordOf<T>(
 const isBoolean = (value: unknown): value is boolean =>
   typeof value === 'boolean'
 const isString = (value: unknown): value is string => typeof value === 'string'
-const isViewMode = (value: unknown): value is 'coordinator' | 'sessions' =>
-  value === 'coordinator' || value === 'sessions'
 const isCanvasFilter = (value: unknown): value is string =>
   value === 'all' ||
   value === 'manual' ||
@@ -217,7 +205,6 @@ function parseClientViewState(value: unknown): ClientViewState {
     'right_sidebar_visible',
     'zen_mode',
     'terminal_visible',
-    'coordinator_sidebar_open',
   ] as const) {
     if (isBoolean(value[key])) assign(key, value[key])
   }
@@ -231,7 +218,6 @@ function parseClientViewState(value: unknown): ClientViewState {
     'browser_modal_width',
     'browser_modal_height',
     'browser_bottom_panel_height',
-    'coordinator_sidebar_width',
   ] as const) {
     if (isNumber(value[key])) assign(key, value[key])
   }
@@ -245,9 +231,6 @@ function parseClientViewState(value: unknown): ClientViewState {
   ] as const) {
     assign(key, recordOf(value[key], isBoolean))
   }
-  assign('project_view_modes', recordOf(value.project_view_modes, isViewMode))
-  if (isBoolean(value.agents_advanced))
-    assign('agents_advanced', value.agents_advanced)
   if (isDockMode(value.modal_terminal_dock_mode))
     assign('modal_terminal_dock_mode', value.modal_terminal_dock_mode)
   if (isDockMode(value.browser_modal_dock_mode))

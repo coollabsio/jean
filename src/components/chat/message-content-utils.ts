@@ -1,5 +1,3 @@
-import { stripMentionRefs } from './agent-mentions'
-
 /** Regex to extract image paths from message content */
 const IMAGE_ATTACHMENT_REGEX =
   /\[Image attached: (.+?) - Use the Read tool to view this image\]/g
@@ -216,29 +214,9 @@ export function stripSkillMarkers(content: string): string {
 
 /** Strip all attachment markers from message content */
 export function stripAllMarkers(content: string): string {
-  return stripMentionRefs(
-    stripSkillMarkers(
-      stripDirectoryMentionMarkers(
-        stripFileMentionMarkers(
-          stripTextFileMarkers(stripImageMarkers(content))
-        )
-      )
+  return stripSkillMarkers(
+    stripDirectoryMentionMarkers(
+      stripFileMentionMarkers(stripTextFileMarkers(stripImageMarkers(content)))
     )
   )
-}
-
-/** Automatic update that Jean sends to an agent session (see `compose_update` in jean-core) */
-export function isAgentUpdateMessage(content: string): boolean {
-  return stripAllMarkers(content).startsWith('[Jean agent update]')
-}
-
-/** First message of an agent chat that continues a long, archived chat (see `chat_continued_message` in jean-core) */
-export function isChatContinuedMessage(content: string): boolean {
-  return stripAllMarkers(content).startsWith('[Jean chat continued]')
-}
-
-/** Journal entry that holds the archived chat, or null when it was not saved */
-export function chatContinuedJournalId(content: string): number | null {
-  const match = /journal entry #(\d+)/.exec(content)
-  return match?.[1] ? Number(match[1]) : null
 }

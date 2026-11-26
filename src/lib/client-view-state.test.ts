@@ -68,50 +68,6 @@ describe('client view state', () => {
     expect(loadClientViewState()).toEqual(state)
   })
 
-  it('restores project view modes and the coordinator sidebar', () => {
-    saveClientViewState({
-      ...defaultClientViewState,
-      project_view_modes: { p1: 'sessions', 'srv:p2': 'coordinator' },
-      coordinator_sidebar_open: true,
-      coordinator_sidebar_width: 420,
-    })
-    const loaded = loadClientViewState()
-    expect(loaded.project_view_modes).toEqual({
-      p1: 'sessions',
-      'srv:p2': 'coordinator',
-    })
-    expect(loaded.coordinator_sidebar_open).toBe(true)
-    expect(loaded.coordinator_sidebar_width).toBe(420)
-
-    const saved = JSON.parse(storage.get(CLIENT_VIEW_STATE_STORAGE_KEY) ?? '{}')
-    storage.set(
-      CLIENT_VIEW_STATE_STORAGE_KEY,
-      JSON.stringify({
-        ...saved,
-        project_view_modes: { p1: 'bogus', p2: 'sessions' },
-        coordinator_sidebar_open: 'yes',
-        coordinator_sidebar_width: 'wide',
-      })
-    )
-    const fallback = loadClientViewState()
-    expect(fallback.project_view_modes).toEqual({ p2: 'sessions' })
-    expect(fallback.coordinator_sidebar_open).toBe(false)
-    expect(fallback.coordinator_sidebar_width).toBe(360)
-  })
-
-  it('keeps the agents Advanced toggle and defaults it to off', () => {
-    expect(loadClientViewState().agents_advanced).toBe(false)
-    saveClientViewState({ ...defaultClientViewState, agents_advanced: true })
-    expect(loadClientViewState().agents_advanced).toBe(true)
-
-    const saved = JSON.parse(storage.get(CLIENT_VIEW_STATE_STORAGE_KEY) ?? '{}')
-    storage.set(
-      CLIENT_VIEW_STATE_STORAGE_KEY,
-      JSON.stringify({ ...saved, agents_advanced: 'yes' })
-    )
-    expect(loadClientViewState().agents_advanced).toBe(false)
-  })
-
   it('opens the Projects view for a saved Servers tab', () => {
     saveClientViewState({ ...defaultClientViewState })
     const saved = JSON.parse(storage.get(CLIENT_VIEW_STATE_STORAGE_KEY) ?? '{}')

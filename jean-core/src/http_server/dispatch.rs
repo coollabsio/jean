@@ -131,7 +131,7 @@ where
 }
 
 /// `send_chat_message` from command args. The typed error tells in-process
-/// callers (the agents engine) whether the prompt reached the chat.
+/// callers whether the prompt reached the chat.
 pub(crate) async fn send_chat_message_from_args(
     app: &AppHandle,
     args: &Value,
@@ -4242,10 +4242,6 @@ pub async fn dispatch_command(
         // =====================================================================
         // Unknown command
         // =====================================================================
-        // Agents: a separate (boxed) function keeps this function's stack frame small.
-        agent_command if AGENT_COMMANDS.contains(&agent_command) => {
-            Box::pin(dispatch_agents_command(app, agent_command, &args)).await
-        }
         muse_command if MUSE_CLI_COMMANDS.contains(&muse_command) => {
             Box::pin(dispatch_muse_cli_command(app, muse_command, &args)).await
         }
@@ -4345,192 +4341,6 @@ fn emit_cache_invalidation(app: &AppHandle, keys: &[&str]) {
 // =============================================================================
 // Helper functions for JSON deserialization
 // =============================================================================
-
-const AGENT_COMMANDS: &[&str] = &[
-    "get_project_coordinator",
-    "get_agent_workdir",
-    "list_agents",
-    "get_agent_details",
-    "update_agent",
-    "decide_agent_approval",
-    "cancel_agent_schedule",
-    "create_agent_schedule",
-    "update_agent_schedule",
-    "save_agent_memory",
-    "search_agent_memory",
-    "update_agent_memory",
-    "delete_agent_memory",
-    "supersede_agent_memory",
-    "export_agent_memory",
-    "save_agent_journal",
-    "search_agent_journal",
-    "get_agent_connector_catalog",
-];
-
-/// Agent commands (see `crate::agents::commands`).
-async fn dispatch_agents_command(
-    app: &AppHandle,
-    command: &str,
-    args: &Value,
-) -> Result<Value, String> {
-    {
-        match command {
-            "get_project_coordinator" => {
-                let project_id: String = field(args, "projectId", "project_id")?;
-                let coordinator =
-                    crate::agents::commands::get_project_coordinator(app, &project_id).await?;
-                to_value(coordinator)
-            }
-            "get_agent_workdir" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                to_value(crate::agents::commands::agent_workdir(app, &agent_id)?)
-            }
-            "list_agents" => to_value(crate::agents::commands::list_agents(app)?),
-            "get_agent_details" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                to_value(crate::agents::commands::get_agent_details(app, &agent_id)?)
-            }
-            "update_agent" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                let patch: crate::agents::db::AgentPatch = from_field(args, "patch")?;
-                to_value(crate::agents::commands::update_agent(app, &agent_id, patch).await?)
-            }
-            "decide_agent_approval" => {
-                let approval_id: i64 = field(args, "approvalId", "approval_id")?;
-                let approve: bool = from_field(args, "approve")?;
-                to_value(crate::agents::commands::decide_approval(app, approval_id, approve).await?)
-            }
-            "cancel_agent_schedule" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                let schedule_id: i64 = field(args, "scheduleId", "schedule_id")?;
-                crate::agents::commands::cancel_schedule(app, &agent_id, schedule_id)?;
-                Ok(Value::Null)
-            }
-            "create_agent_schedule" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                let input: crate::agents::commands::ScheduleCommandInput =
-                    serde_json::from_value(args.clone())
-                        .map_err(|e| format!("Invalid schedule: {e}"))?;
-                to_value(crate::agents::commands::create_schedule_for_agent(
-                    app, &agent_id, input,
-                )?)
-            }
-            "update_agent_schedule" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                let schedule_id: i64 = field(args, "scheduleId", "schedule_id")?;
-                let patch: crate::agents::commands::ScheduleCommandPatch =
-                    serde_json::from_value(args.clone())
-                        .map_err(|e| format!("Invalid schedule: {e}"))?;
-                to_value(crate::agents::commands::update_schedule_for_agent(
-                    app,
-                    &agent_id,
-                    schedule_id,
-                    patch,
-                )?)
-            }
-            "save_agent_memory" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                let content: String = from_field(args, "content")?;
-                let kind: String = from_field(args, "kind")?;
-                let scope: Option<String> = from_field_opt(args, "scope")?;
-                let shared: Option<bool> = from_field_opt(args, "shared")?;
-                let pinned: Option<bool> = from_field_opt(args, "pinned")?;
-                let project_id: Option<String> = field_opt(args, "projectId", "project_id")?;
-                to_value(crate::agents::commands::save_memory(
-                    app,
-                    &agent_id,
-                    &content,
-                    &kind,
-                    scope.as_deref(),
-                    shared.unwrap_or(false),
-                    pinned.unwrap_or(false),
-                    project_id.as_deref(),
-                )?)
-            }
-            "search_agent_memory" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                let query: Option<String> = from_field_opt(args, "query")?;
-                let kind: Option<String> = from_field_opt(args, "kind")?;
-                let scope: Option<String> = from_field_opt(args, "scope")?;
-                let project_id: Option<String> = field_opt(args, "projectId", "project_id")?;
-                let pinned: Option<bool> = from_field_opt(args, "pinned")?;
-                let from: Option<i64> = from_field_opt(args, "from")?;
-                let to: Option<i64> = from_field_opt(args, "to")?;
-                let limit: Option<i64> = from_field_opt(args, "limit")?;
-                to_value(crate::agents::commands::search_memory(
-                    app,
-                    &agent_id,
-                    crate::agents::commands::MemorySearchRequest {
-                        query,
-                        kind,
-                        scope,
-                        project_id,
-                        pinned,
-                        from,
-                        to,
-                        limit,
-                    },
-                )?)
-            }
-            "update_agent_memory" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                let memory_id: i64 = field(args, "memoryId", "memory_id")?;
-                let patch: crate::agents::db::MemoryPatch = from_field(args, "patch")?;
-                to_value(crate::agents::commands::update_memory(
-                    app, &agent_id, memory_id, patch,
-                )?)
-            }
-            "delete_agent_memory" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                let memory_id: i64 = field(args, "memoryId", "memory_id")?;
-                crate::agents::commands::delete_memory(app, &agent_id, memory_id)?;
-                Ok(Value::Null)
-            }
-            "supersede_agent_memory" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                let memory_id: i64 = field(args, "memoryId", "memory_id")?;
-                let content: String = from_field(args, "content")?;
-                to_value(crate::agents::commands::supersede_memory(
-                    app, &agent_id, memory_id, &content,
-                )?)
-            }
-            "save_agent_journal" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                let content: String = from_field(args, "content")?;
-                let occurred_at: Option<i64> = field_opt(args, "occurredAt", "occurred_at")?;
-                let project_id: Option<String> = field_opt(args, "projectId", "project_id")?;
-                to_value(crate::agents::commands::save_journal(
-                    app,
-                    &agent_id,
-                    &content,
-                    occurred_at,
-                    project_id.as_deref(),
-                )?)
-            }
-            "search_agent_journal" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                let query: Option<String> = from_field_opt(args, "query")?;
-                let from: Option<i64> = from_field_opt(args, "from")?;
-                let to: Option<i64> = from_field_opt(args, "to")?;
-                let limit: Option<i64> = from_field_opt(args, "limit")?;
-                to_value(crate::agents::commands::search_journal(
-                    app,
-                    &agent_id,
-                    query.as_deref(),
-                    from,
-                    to,
-                    limit,
-                )?)
-            }
-            "export_agent_memory" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                to_value(crate::agents::commands::export_memory(app, &agent_id)?)
-            }
-            "get_agent_connector_catalog" => to_value(crate::agents::connectors::catalog_payload()),
-            _ => Err(format!("Unknown command: {command}")),
-        }
-    }
-}
 
 pub(crate) fn to_value<T: serde::Serialize>(val: T) -> Result<Value, String> {
     serde_json::to_value(val).map_err(|e| format!("Serialization error: {e}"))

@@ -747,7 +747,6 @@ fn build_kimi_system_prompt(
     worktree_id: &str,
     ai_language: Option<&str>,
     parallel_prompt: Option<&str>,
-    agent_prompt: Option<&str>,
     include_recap: bool,
     local_files_available: bool,
 ) -> Option<String> {
@@ -761,7 +760,6 @@ fn build_kimi_system_prompt(
         parallel_prompt,
         resolve_session_global_system_prompt(app, worktree_id, preferences.as_ref()),
     );
-    super::push_trimmed_prompt(&mut parts, agent_prompt);
     if let Ok(data) = load_projects_data(app) {
         if let Some(project) = data.project_for_worktree(worktree_id) {
             if let Some(prompt) = project
@@ -1834,11 +1832,6 @@ fn build_queued_message_with_refs(queued: &Value) -> Result<String, String> {
         .unwrap_or_default()
         .to_string();
 
-    let mention_refs = queued_mention_refs(queued);
-    if !mention_refs.is_empty() {
-        message = append_refs(message, mention_refs);
-    }
-
     let pending_files = queued
         .get("pendingFiles")
         .and_then(Value::as_array)
@@ -1941,48 +1934,6 @@ fn build_queued_message_with_refs(queued: &Value) -> Result<String, String> {
     Ok(message)
 }
 
-/// Context lines for `@` mentions in agent chats (`mentions` on a queued
-/// message). Keep in sync with `mentionRef` in
-/// src/components/chat/agent-mentions.ts.
-fn queued_mention_refs(queued: &Value) -> String {
-    queued
-        .get("mentions")
-        .and_then(Value::as_array)
-        .map(Vec::as_slice)
-        .unwrap_or(&[])
-        .iter()
-        .filter_map(mention_ref)
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn mention_ref(mention: &Value) -> Option<String> {
-    let text = |key: &str| {
-        mention
-            .get(key)
-            .and_then(Value::as_str)
-            .filter(|value| !value.is_empty())
-    };
-    let (label, id_label) = match text("type")? {
-        "agent" => ("agent", "agentId"),
-        "project" => ("project", "projectId"),
-        "remote_jean" => ("remote Jean", "serverId"),
-        _ => return None,
-    };
-    let mut details = vec![format!("{id_label}: {}", text("id")?)];
-    if let Some(server) = text("serverName") {
-        details.push(format!("on remote Jean: {server}"));
-    }
-    if let Some(url) = text("url") {
-        details.push(format!("url: {url}"));
-    }
-    let name = text("name")?;
-    Some(format!(
-        "[Mentioned {label}: {name} ({})]",
-        details.join(", ")
-    ))
-}
-
 fn queued_file_path(file: &Value) -> Result<String, String> {
     let relative_path = file
         .get("relativePath")
@@ -2027,11 +1978,7 @@ fn queued_message_base_prompt(queued: &Value) -> String {
 
 fn codex_steer_input_from_queued_message(queued: &Value) -> Result<Vec<Value>, String> {
     let mut input = Vec::new();
-    let mut message = queued_message_base_prompt(queued);
-    let mention_refs = queued_mention_refs(queued);
-    if !mention_refs.is_empty() {
-        message = append_refs(message, mention_refs);
-    }
+    let message = queued_message_base_prompt(queued);
     if !message.trim().is_empty() {
         input.push(serde_json::json!({
             "type": "text",
@@ -2605,7 +2552,7 @@ pub async fn close_session(
 
 /// Remove a session from its worktree index and delete its data on disk.
 ///
-/// Used by the retention purge and by the agents engine. Safe to repeat: a
+/// Used by the retention purge. Safe to repeat: a
 /// session already gone from the index still has its files removed.
 pub(crate) fn purge_session(
     app: &AppHandle,
@@ -3104,9 +3051,6 @@ async fn send_chat_message_inner(
         return Err(SendError::busy());
     }
 
-    // Drops after the claim below, so agent lists see the run end.
-    let _agents_refresh = crate::agents::RefreshOnDrop::for_worktree(&app, &worktree_id);
-
     // Atomically claim the session's send slot for the duration of this call.
     // Two callers can pass the check above concurrently, but only one can take
     // this claim before either caller registers a process.
@@ -3178,11 +3122,8 @@ async fn send_chat_message_inner(
                 let worktree_record = load_projects_data(&app)
                     .ok()
                     .and_then(|data| data.find_worktree(&worktree_id).cloned());
-                // A coordinator chat runs in the project folder: its branch
-                // is the user's, never a placeholder to rename.
                 let generate_branch = is_first_worktree_message
                     && prefs.auto_branch_naming
-                    && !crate::agents::is_agent_worktree_id(&worktree_id)
                     && should_auto_name_branch(worktree_record.as_ref());
                 let generate_session = is_first_session_message && prefs.auto_session_naming;
 
@@ -3786,14 +3727,9 @@ async fn send_chat_message_inner(
     }
 
     // Use passed parameter for parallel execution prompt (None = disabled).
-    // The agent prompt stays separate so turning fan-out off still injects the
-    // "do not spawn sub-agents" policy instead of treating the agent prompt as
-    // that policy.
     let parallel_execution_prompt = crate::upgrade_legacy_parallel_execution_prompt(
         parallel_execution_prompt.filter(|p| !p.trim().is_empty()),
     );
-    let agent_system_prompt =
-        crate::agents::system_prompt_for(&app, &worktree_id, Some(message.as_str()));
 
     // Use passed parameter for Chrome browser integration (default false - beta)
     let chrome = chrome_enabled.unwrap_or(false);
@@ -3872,17 +3808,7 @@ async fn send_chat_message_inner(
     let thread_effort_level = effort_level.clone();
     let thread_allowed_tools = allowed_tools_for_cli.clone();
     let thread_parallel_prompt = parallel_execution_prompt.clone();
-    let thread_agent_prompt = agent_system_prompt.clone();
     let thread_ai_language = ai_language.clone();
-    let backend_name = crate::agents::connectors::backend_label(&effective_backend);
-    let mcp_config = crate::agents::connectors::apply_agent_mcp_allowlist(
-        &app,
-        &session_id,
-        &worktree_path,
-        backend_name,
-        mcp_config,
-    )
-    .await;
     // Always inject Jean MCP for backends that honor runtime mcp_config.
     // Claude uses --mcp-config/--strict-mcp-config; Grok/Cursor use the same
     // JSON to decide which servers (including jean) stay enabled for the turn.
@@ -3925,8 +3851,7 @@ async fn send_chat_message_inner(
     };
     let thread_message = message_for_backend.clone();
     let thread_backend = effective_backend.clone();
-    // Agent sessions get their own recap format in the agent prompt.
-    let thread_include_recap = include_recap.unwrap_or(true) && agent_system_prompt.is_none();
+    let thread_include_recap = include_recap.unwrap_or(true);
     let thread_codex_search = codex_search_enabled;
 
     // For OpenCode sessions: create a cancel flag so we can signal the blocking HTTP thread.
@@ -4000,7 +3925,6 @@ async fn send_chat_message_inner(
                         thread_effort_level.as_ref(),
                         thread_allowed_tools.as_deref(),
                         thread_parallel_prompt.as_deref(),
-                        thread_agent_prompt.as_deref(),
                         thread_ai_language.as_deref(),
                         thread_mcp_config.as_deref(),
                         chrome,
@@ -4257,10 +4181,6 @@ async fn send_chat_message_inner(
                         &mut system_prompt_parts,
                         thread_parallel_prompt.as_deref(),
                         crate::apply_agent_browser_preference(global_prompt, preferences.as_ref()),
-                    );
-                    super::push_trimmed_prompt(
-                        &mut system_prompt_parts,
-                        thread_agent_prompt.as_deref(),
                     );
 
                     // Per-project custom system prompt + linked project instructions
@@ -4632,10 +4552,6 @@ async fn send_chat_message_inner(
                             preferences.as_ref(),
                         ),
                     );
-                    super::push_trimmed_prompt(
-                        &mut system_prompt_parts,
-                        thread_agent_prompt.as_deref(),
-                    );
 
                     // Per-project custom system prompt + linked project instructions
                     if let Ok(data) = load_projects_data(&thread_app) {
@@ -4951,7 +4867,6 @@ async fn send_chat_message_inner(
                             preferences.as_ref(),
                         ),
                     );
-                    super::push_trimmed_prompt(&mut parts, thread_agent_prompt.as_deref());
 
                     if let Ok(data) = load_projects_data(&thread_app) {
                         if let Some(project) = data.project_for_worktree(&thread_worktree_id) {
@@ -5102,7 +5017,6 @@ async fn send_chat_message_inner(
                             preferences.as_ref(),
                         ),
                     );
-                    super::push_trimmed_prompt(&mut parts, thread_agent_prompt.as_deref());
 
                     if let Ok(data) = load_projects_data(&thread_app) {
                         if let Some(project) = data.project_for_worktree(&thread_worktree_id) {
@@ -5207,7 +5121,6 @@ async fn send_chat_message_inner(
                             preferences.as_ref(),
                         ),
                     );
-                    super::push_trimmed_prompt(&mut parts, thread_agent_prompt.as_deref());
 
                     if let Ok(data) = load_projects_data(&thread_app) {
                         if let Some(project) = data.project_for_worktree(&thread_worktree_id) {
@@ -5320,7 +5233,6 @@ async fn send_chat_message_inner(
                     &thread_worktree_id,
                     thread_ai_language.as_deref(),
                     thread_parallel_prompt.as_deref(),
-                    thread_agent_prompt.as_deref(),
                     thread_include_recap,
                     true,
                 );
@@ -5364,7 +5276,6 @@ async fn send_chat_message_inner(
                     &thread_worktree_id,
                     thread_ai_language.as_deref(),
                     thread_parallel_prompt.as_deref(),
-                    thread_agent_prompt.as_deref(),
                     thread_include_recap,
                     devin_location == super::types::DevinLocation::Local,
                 );
@@ -5419,7 +5330,6 @@ async fn send_chat_message_inner(
                     &thread_worktree_id,
                     thread_ai_language.as_deref(),
                     thread_parallel_prompt.as_deref(),
-                    thread_agent_prompt.as_deref(),
                     thread_include_recap,
                     true,
                 );
@@ -5465,7 +5375,6 @@ async fn send_chat_message_inner(
                     &thread_worktree_id,
                     thread_ai_language.as_deref(),
                     thread_parallel_prompt.as_deref(),
-                    thread_agent_prompt.as_deref(),
                     thread_include_recap,
                     true,
                 );
@@ -10484,9 +10393,6 @@ pub struct QueuedMessageEdit {
     pub pending_files: Vec<Value>,
     pub pending_skills: Vec<Value>,
     pub pending_text_files: Vec<Value>,
-    /// Agent chat `@` mentions. `None` leaves the queued mentions unchanged.
-    #[serde(default)]
-    pub mentions: Option<Vec<Value>>,
 }
 
 /// Replace a queued message's text and attachments by its `id` field.
@@ -10521,9 +10427,6 @@ fn apply_queued_message_edit(
         "pendingTextFiles".to_string(),
         Value::Array(edit.pending_text_files.clone()),
     );
-    if let Some(mentions) = &edit.mentions {
-        queued.insert("mentions".to_string(), Value::Array(mentions.clone()));
-    }
     true
 }
 
@@ -13184,35 +13087,6 @@ mod tests {
         assert!(message.contains(
             "[Text file attached: /tmp/notes.txt - Use the Read tool to view this file]"
         ));
-    }
-
-    #[test]
-    fn test_build_queued_message_with_mentions_matches_frontend_format() {
-        // Same input and output as message-with-refs.test.ts
-        let queued = serde_json::json!({
-            "message": "Ask @Reviewer about @coolify on @home",
-            "mentions": [
-                { "type": "agent", "id": "reviewer-1", "name": "Reviewer" },
-                {
-                    "type": "project",
-                    "id": "p-9",
-                    "name": "coolify",
-                    "serverName": "Home"
-                },
-                {
-                    "type": "remote_jean",
-                    "id": "srv-1",
-                    "name": "home",
-                    "url": "https://home.example"
-                },
-                { "type": "unknown", "id": "x", "name": "x" }
-            ]
-        });
-
-        assert_eq!(
-            build_queued_message_with_refs(&queued).unwrap(),
-            "Ask @Reviewer about @coolify on @home\n\n[Mentioned agent: Reviewer (agentId: reviewer-1)]\n[Mentioned project: coolify (projectId: p-9, on remote Jean: Home)]\n[Mentioned remote Jean: home (serverId: srv-1, url: https://home.example)]"
-        );
     }
 
     #[test]

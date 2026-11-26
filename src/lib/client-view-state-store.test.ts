@@ -34,14 +34,9 @@ describe('client view state store bridge', () => {
         expanded_worktree_ids: ['worktree'],
         terminal_visible_by_worktree: { worktree: true },
         browser_modal_open: { worktree: true },
-        project_view_modes: { project: 'sessions' },
       },
       'remote-1'
     )
-
-    expect(scoped.project_view_modes).toEqual({
-      'remote-1:project': 'sessions',
-    })
 
     expect(scoped.project_canvas_settings).toEqual({ 'remote-1:project': {} })
     expect(scoped.expanded_project_ids).toEqual([
@@ -68,9 +63,6 @@ describe('client view state store bridge', () => {
     useUIStore.setState({
       rightSidebarVisible: true,
       zenMode: true,
-      projectViewModes: { 'server:project': 'sessions' },
-      coordinatorSidebarOpen: true,
-      coordinatorSidebarWidth: 410,
     })
     useTerminalStore.setState({
       terminalVisibleByWorktree: { 'server:worktree': true },
@@ -87,19 +79,10 @@ describe('client view state store bridge', () => {
     useUIStore.setState({
       rightSidebarVisible: false,
       zenMode: false,
-      projectViewModes: {},
-      coordinatorSidebarOpen: false,
-      coordinatorSidebarWidth: 360,
     })
     useTerminalStore.setState({ terminalVisibleByWorktree: {} })
 
     applyClientViewState(captured)
-
-    expect(useUIStore.getState().projectViewModes).toEqual({
-      'server:project': 'sessions',
-    })
-    expect(useUIStore.getState().coordinatorSidebarOpen).toBe(true)
-    expect(useUIStore.getState().coordinatorSidebarWidth).toBe(410)
 
     expect(useProjectsStore.getState().expandedProjectIds).toEqual(
       new Set(['server:project'])

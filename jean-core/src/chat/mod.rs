@@ -38,7 +38,6 @@ pub mod types;
 pub mod usage_summary;
 pub mod wakeup;
 
-pub(crate) use commands::default_model_for_backend;
 pub(crate) use commands::purge_session;
 pub use commands::*;
 pub use mcp_auth::*;

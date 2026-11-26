@@ -270,52 +270,6 @@ export function coalesceContentBlocks(blocks: ContentBlock[]): ContentBlock[] {
 }
 
 /**
- * The assistant's text of one turn without tool activity, one part per text
- * run between tool calls (or `content` when it has no blocks). Quiet (agent)
- * chats show only this, each part in its own bubble.
- */
-export function assistantTextParts(
-  blocks: ContentBlock[],
-  content: string
-): string[] {
-  if (blocks.length === 0) return content.trim() ? [content.trim()] : []
-  return coalesceContentBlocks(blocks)
-    .flatMap(block => (block.type === 'text' ? [block.text.trim()] : []))
-    .filter(Boolean)
-}
-
-/** One part of a quiet (agent) chat turn: assistant text or steered prompts. */
-export type QuietTurnSegment =
-  | { kind: 'text'; parts: string[] }
-  | { kind: 'steered'; texts: string[] }
-
-/**
- * `assistantTextParts` with the user prompts steered into the turn
- * (`user_input` blocks) kept in place, so quiet chats show them where they
- * went in. Consecutive parts of one kind share a segment.
- */
-export function quietTurnSegments(
-  blocks: ContentBlock[],
-  content: string
-): QuietTurnSegment[] {
-  if (blocks.length === 0)
-    return content.trim() ? [{ kind: 'text', parts: [content.trim()] }] : []
-  const segments: QuietTurnSegment[] = []
-  for (const block of coalesceContentBlocks(blocks)) {
-    if (block.type !== 'text' && block.type !== 'user_input') continue
-    const text = block.text.trim()
-    if (!text) continue
-    const last = segments[segments.length - 1]
-    if (block.type === 'text') {
-      if (last?.kind === 'text') last.parts.push(text)
-      else segments.push({ kind: 'text', parts: [text] })
-    } else if (last?.kind === 'steered') last.texts.push(block.text)
-    else segments.push({ kind: 'steered', texts: [block.text] })
-  }
-  return segments
-}
-
-/**
  * Live tool blocks can start after the accumulated answer text.
  * Put that missing start back on the first text block while the turn streams.
  * The finished message already has the full text.

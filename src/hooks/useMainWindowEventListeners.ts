@@ -176,16 +176,6 @@ export function findKeybindingAction(
   return null
 }
 
-/**
- * The project coordinator chat is the main panel and no session modal is
- * open. Its chat is one fixed session, so the new-session and close
- * shortcuts must not reach the hidden worktrees list.
- */
-export function isCoordinatorViewActive(): boolean {
-  const { coordinatorViewOpen, sessionChatModalOpen } = useUIStore.getState()
-  return coordinatorViewOpen && !sessionChatModalOpen
-}
-
 export function useWindowKeyboardFocusRestore() {
   const isMobile = useIsMobile()
 
@@ -622,11 +612,6 @@ function executeKeybindingAction(
       const { fileBrowserVisible, setFileBrowserVisible } =
         useUIStore.getState()
       setFileBrowserVisible(!fileBrowserVisible)
-      break
-    }
-    case 'toggle_coordinator_sidebar': {
-      logger.debug('Keybinding: toggle_coordinator_sidebar')
-      window.dispatchEvent(new CustomEvent('toggle-coordinator-sidebar'))
       break
     }
     case 'toggle_zen_mode': {
@@ -1081,17 +1066,6 @@ export function useMainWindowEventListeners() {
       // Ctrl/Cmd+W cascade-closed every terminal/session under the cursor).
       // Consume the event so the browser does not handle the repeated shortcut.
       if (e.repeat && matchedAction && !allowsKeybindingRepeat(matchedAction)) {
-        e.preventDefault()
-        e.stopPropagation()
-        return
-      }
-
-      if (
-        (matchedAction === 'close_session_or_worktree' ||
-          matchedAction === 'new_session' ||
-          matchedAction === 'open_new_session_modal') &&
-        isCoordinatorViewActive()
-      ) {
         e.preventDefault()
         e.stopPropagation()
         return

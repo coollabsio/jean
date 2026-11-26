@@ -16,10 +16,6 @@ import { formatRecentActivity } from '@/components/projects/recent-activity'
 import { getBackendIcon } from '@/components/ui/backend-label'
 import { searchPreferenceEntries } from '@/components/preferences/preferences-search'
 import type { Backend } from '@/types/chat'
-import { useAgentsEnabledServers } from '@/components/agents/agents-feature'
-import { openProjectCoordinator } from '@/components/agents/open-coordinator'
-import { useAgentsList } from '@/services/agents'
-import { AgentIcon } from '@/components/icons/JeanAgentIcon'
 import { Badge } from '@/components/ui/badge'
 import { useProjectsStore } from '@/store/projects-store'
 import { projectAvatarUrl } from '@/lib/project-avatar'
@@ -133,11 +129,6 @@ export function CommandPalette() {
     ? (selectedProject.serverId ?? LOCAL_SERVER_ID)
     : getActiveConnectionId()
 
-  // Project coordinators (only when the Agents feature is on for a server)
-  const agentServers = useAgentsEnabledServers()
-  const { data: agents = [] } = useAgentsList(agentServers)
-  const multiServerAgents = new Set(agents.map(a => a.serverId)).size > 1
-
   // Create dynamic project commands (sorted by last-accessed, most recent first)
   // Current project is excluded so the previous project is first (quick CMD+K → Enter switching).
   const projectCommands = useMemo((): ProjectCommand[] => {
@@ -212,19 +203,6 @@ export function CommandPalette() {
         )
       : projectCommands
 
-    const filteredAgents =
-      agentServers.length === 0
-        ? []
-        : searchLower
-          ? agents.filter(
-              agent =>
-                agent.name.toLowerCase().includes(searchLower) ||
-                agent.serverName.toLowerCase().includes(searchLower) ||
-                'agent'.includes(searchLower) ||
-                'coordinator'.includes(searchLower)
-            )
-          : agents
-
     // Group static commands
     const staticGroups = staticCommands.reduce(
       (acc, command) => {
@@ -240,16 +218,8 @@ export function CommandPalette() {
       staticGroups,
       projectCommands: filteredProjectCommands.filter(cmd => !cmd.isServer),
       serverCommands: filteredProjectCommands.filter(cmd => cmd.isServer),
-      agents: filteredAgents,
     }
-  }, [
-    commandContext,
-    search,
-    searchLower,
-    projectCommands,
-    agents,
-    agentServers.length,
-  ])
+  }, [commandContext, search, searchLower, projectCommands])
 
   const sessionResults = useMemo((): SessionResult[] => {
     if (!searchLower || !allSessions) return []
@@ -322,15 +292,6 @@ export function CommandPalette() {
     [closePalette]
   )
 
-  const handleCoordinatorSelect = useCallback(
-    (projectId: string) => {
-      setCommandPaletteOpen(false)
-      setSearch('')
-      openProjectCoordinator(projectId)
-    },
-    [setCommandPaletteOpen]
-  )
-
   // Handle command execution
   const handleCommandSelect = useCallback(
     async (commandId: string) => {
@@ -391,26 +352,6 @@ export function CommandPalette() {
         </Badge>
       )}
     </CommandItem>
-  )
-
-  const agentsGroup = commandGroups.agents.length > 0 && (
-    <CommandGroup heading="Coordinators">
-      {commandGroups.agents.map(agent => (
-        <CommandItem
-          key={agent.id}
-          value={`agent-${agent.id} ${agent.name} ${agent.serverName}`}
-          onSelect={() => handleCoordinatorSelect(agent.projectId)}
-        >
-          <AgentIcon icon={agent.icon} className="size-4 shrink-0" />
-          <span className="min-w-0 truncate">{agent.name}</span>
-          {multiServerAgents && (
-            <Badge variant="subtle" className="max-w-[45%] shrink truncate">
-              {agent.serverName}
-            </Badge>
-          )}
-        </CommandItem>
-      ))}
-    </CommandGroup>
   )
 
   const renderSessionItem = (row: SessionResult, group: string) => {
@@ -480,7 +421,6 @@ export function CommandPalette() {
             {commandGroups.serverCommands.map(renderProjectItem)}
           </CommandGroup>
         )}
-        {agentsGroup}
         {sessionResults.length > 0 && (
           <CommandGroup heading="Sessions">
             {sessionResults.map(row => renderSessionItem(row, 'session'))}

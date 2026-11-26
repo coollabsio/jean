@@ -22,8 +22,6 @@ pub const JEAN_MCP_SOCKET_ENV: &str = "JEAN_MCP_SOCKET";
 pub const JEAN_MCP_TOKEN_ENV: &str = "JEAN_MCP_TOKEN";
 pub const JEAN_MCP_SESSION_ENV: &str = "JEAN_MCP_SESSION";
 pub const JEAN_MCP_DEPTH_ENV: &str = "JEAN_MCP_DEPTH";
-/// `method` of a local IPC request that asks for the caller's tool list.
-pub const TOOLS_LIST_METHOD: &str = "tools/list";
 /// Tool Claude CLI calls via `--permission-prompt-tool` (Supervised and YOLO + Chrome runs).
 pub const CLAUDE_PERMISSION_PROMPT_TOOL: &str = "claude_permission_prompt";
 
@@ -48,19 +46,10 @@ const RATE_LIMITED_TOOLS: &[&str] = &[
     "remove_project",
     "run_review",
     "send_chat_message",
-    "set_connector",
     "set_session_model",
     "set_session_settings",
     "start_run_environment",
     "unlink_worktree_pr",
-    // Agent tools that write
-    "schedule_create",
-    "schedule_update",
-    "memory_save",
-    "memory_update",
-    "memory_forget",
-    "memory_supersede",
-    "journal_add",
 ];
 const DEFAULT_MCP_DIFF_MAX_BYTES: usize = 60_000;
 const MAX_MCP_DIFF_BYTES: usize = 200_000;
@@ -109,26 +98,9 @@ pub fn initialize_result() -> Value {
     })
 }
 
-/// `tools/list` for one caller. Coordinator tools are listed only for a
-/// coordinator session; every other caller gets the project tools.
-pub fn tools_list_result(coordinator: bool) -> Value {
-    let mut tools = tool_registry();
-    if !coordinator {
-        if let Some(list) = tools.as_array_mut() {
-            list.retain(|tool| {
-                !tool
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .is_some_and(crate::agents::mcp::is_agent_tool)
-            });
-        }
-    }
-    json!({ "tools": tools })
-}
-
-/// `tools/list` for the session behind an MCP connection.
-pub fn tools_list_for_source(app: &AppHandle, source: &str) -> Value {
-    tools_list_result(crate::agents::agent_for_session(app, source).is_some())
+/// `tools/list` result.
+pub fn tools_list_result() -> Value {
+    json!({ "tools": tool_registry() })
 }
 
 #[derive(Debug)]
@@ -204,7 +176,6 @@ pub fn extract_tool_call(params: Value) -> Result<ToolCallRequest, ToolError> {
 
 pub fn handle_protocol_message(
     body: Value,
-    list_tools: impl FnOnce() -> Value,
     call_tool: impl FnMut(ToolCallRequest) -> Result<Value, String>,
 ) -> Option<Value> {
     let id = body.get("id").cloned();
@@ -214,7 +185,7 @@ pub fn handle_protocol_message(
     match method {
         "initialize" => Some(jsonrpc_ok(id, initialize_result())),
         "notifications/initialized" => None,
-        "tools/list" => Some(jsonrpc_ok(id, list_tools())),
+        "tools/list" => Some(jsonrpc_ok(id, tools_list_result())),
         "tools/call" => Some(
             match extract_tool_call(params)
                 .map_err(|e| e.message)
@@ -233,8 +204,7 @@ pub fn handle_protocol_message(
     }
 }
 
-/// Every Jean MCP tool, coordinator tools included. A caller sees the list
-/// from [`tools_list_result`].
+/// Every Jean MCP tool.
 pub fn tool_registry() -> Value {
     // Split into multiple json! arrays so the macro does not hit recursion_limit.
     let mut tools = tool_registry_core().as_array().cloned().unwrap_or_default();
@@ -243,9 +213,6 @@ pub fn tool_registry() -> Value {
     }
     if let Some(ship) = tool_registry_ship_loop().as_array() {
         tools.extend(ship.iter().cloned());
-    }
-    if let Some(agent_tools) = crate::agents::mcp::tool_definitions().as_array() {
-        tools.extend(agent_tools.iter().cloned());
     }
     Value::Array(tools)
 }
@@ -256,8 +223,7 @@ fn tool_registry_core() -> Value {
         {"name":"add_project","description":"Add an existing local git repository as a Jean project. Path must already be a git repo (use init_project for a new folder, or clone_project for a remote URL). Returns the created project (id, name, path, default_branch).","inputSchema":{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to an existing local git repository."},"parentId":{"type":"string","description":"Optional Jean folder/project parent id for nesting in the project list."}},"required":["path"],"additionalProperties":false}},
         {"name":"clone_project","description":"Clone a remote git repository to a local path and add it as a Jean project. Returns the created project.","inputSchema":{"type":"object","properties":{"url":{"type":"string","description":"Git remote URL to clone (https or ssh)."},"path":{"type":"string","description":"Absolute local path where the repo should be cloned."},"parentId":{"type":"string","description":"Optional Jean folder/project parent id for nesting in the project list."}},"required":["url","path"],"additionalProperties":false}},
         {"name":"init_project","description":"Create a new git repository at path (creating the directory if needed) and add it as a Jean project. Use add_project instead when the path is already a git repo. Returns the created project.","inputSchema":{"type":"object","properties":{"path":{"type":"string","description":"Absolute path for the new project directory."},"parentId":{"type":"string","description":"Optional Jean folder/project parent id for nesting in the project list."}},"required":["path"],"additionalProperties":false}},
-        {"name":"remove_project","description":"Remove a project from Jean (same as the UI \"Remove project\"). Repository files on disk are kept. Fails if the project has worktrees. Does not remove folders. Needs user approval.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"}},"required":["projectId"],"additionalProperties":false}},
-        {"name":"set_connector","description":"Turn a discovered MCP server (connector) on or off, like the MCP Servers switches in settings. scope global: the default servers for new sessions. scope project (projectId): the project's own server list; enable on a project without a list starts one with only this server. scope agent (agentId): the agent's connector limit; enable on an agent without a limit starts one with only this server. Disable fails when no list is saved. backend and name identify the server (the backend's own MCP config, as listed in settings). Does not add or edit server definitions and never returns server config. Needs user approval.","inputSchema":{"type":"object","properties":{"scope":{"type":"string","enum":["global","project","agent"]},"action":{"type":"string","enum":["enable","disable"]},"backend":{"type":"string","description":"CLI backend that owns the server, for example claude or codex."},"name":{"type":"string","description":"Server name in that backend's MCP config."},"projectId":{"type":"string","description":"Required for scope project."},"agentId":{"type":"string","description":"Required for scope agent."}},"required":["scope","action","backend","name"],"additionalProperties":false}},
+        {"name":"remove_project","description":"Remove a project from Jean (same as the UI \"Remove project\"). Repository files on disk are kept. Fails if the project has worktrees. Does not remove folders.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"}},"required":["projectId"],"additionalProperties":false}},
         {"name":"list_worktrees","description":"List all worktrees for a project.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"}},"required":["projectId"],"additionalProperties":false}},
         {"name":"get_worktree","description":"Get a single worktree by id (path, branch, status, etc.).","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"}},"required":["worktreeId"],"additionalProperties":false}},
         {"name":"get_project_context","description":"Get project-level context needed by orchestration agents: project settings, linked projects, default branch/backend, and worktree counts. Does not read arbitrary repo files.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"}},"required":["projectId"],"additionalProperties":false}},
@@ -351,9 +317,9 @@ fn tool_registry_session() -> Value {
         {"name":"get_worktree_changes","description":"Get a bounded summary of a worktree's git changes: porcelain status, ahead/behind counts, diff stats, and changed files. Does not return full diffs.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"maxFiles":{"type":"integer","minimum":1,"maximum":500,"default":100}},"required":["worktreeId"],"additionalProperties":false}},
         {"name":"get_worktree_diff","description":"Get a bounded unified git diff for a worktree. diffType is uncommitted (HEAD vs working tree) or branch (origin/base...HEAD). Optional path limits to one pathspec; maxBytes is capped.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"diffType":{"type":"string","enum":["uncommitted","branch"],"default":"uncommitted"},"path":{"type":"string"},"maxBytes":{"type":"integer","minimum":1,"maximum":200000,"default":60000}},"required":["worktreeId"],"additionalProperties":false}},
         {"name":"get_current_context","description":"Return the calling session's context: sessionId, worktreeId, projectId, projectPath, projectName. Use this so the agent knows what 'this project' refers to without guessing.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
-        {"name":"request_secret","description":"Ask the user for a secret (API key, token, auth key) in a private card in this chat. First call get_secret: a secret saved earlier for this project (or for you, in an agent session) can be reused without asking. You never see the value. Never ask for secrets in chat text and never invent one. End your turn after the call. When the user saves, the next user message gives a private file path that holds only the value. Read it only inside a shell command, for example TOKEN=\"$(cat '<path>')\" mycli login. Do not print, echo, or copy the value. The user picks how long the file is kept (until they delete it, or 24 hours) and can delete it at any time. If the file is gone, call request_secret again. For a value with several lines, such as a whole .env file, set multiline and give an example.","inputSchema":{"type":"object","properties":{"label":{"type":"string","maxLength":80,"description":"Card title, for example 'Tailscale auth key'."},"reason":{"type":"string","maxLength":500,"description":"What the secret is for and where the user can create it."},"placeholder":{"type":"string","maxLength":80,"description":"Optional input placeholder, for example 'tskey-auth-...'."},"multiline":{"type":"boolean","description":"Show a multi-line text area instead of a one-line input. Use it for values with several lines, such as a whole .env file or a private key."},"example":{"type":"string","maxLength":1000,"description":"Optional example of the expected format with fake values, shown on the card. Give one for multi-line values, for example 'DATABASE_URL=postgresql://user:password@host/db\\nRESEND_API_KEY=re_...'."}},"required":["label","reason"],"additionalProperties":false}},
-        {"name":"get_secret","description":"Get the private file path of a secret saved earlier (from a request_secret card), by its label. Secrets belong to the project of a worktree session, or to the project coordinator in its chat. Use it in new sessions and scheduled tasks to reuse a saved key without asking again. Read the path only inside a shell command, for example TOKEN=\"$(cat '<path>')\". Never print the value. Fails with the saved labels of this project or agent when none matches; then call request_secret.","inputSchema":{"type":"object","properties":{"label":{"type":"string","maxLength":80,"description":"Label of the saved secret (case-insensitive)."}},"required":["label"],"additionalProperties":false}},
-        {"name":"list_secrets","description":"Show the user the secrets saved for this project (or this agent, in an agent session) from request_secret cards, in a card in this chat with a Delete button for each. Use it when the user asks to see, manage, or delete saved secrets. Returns labels, retention, and save time only; never values or file paths. You cannot delete secrets: the user deletes them on the card. End your turn after the call.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
+        {"name":"request_secret","description":"Ask the user for a secret (API key, token, auth key) in a private card in this chat. First call get_secret: a secret saved earlier for this project can be reused without asking. You never see the value. Never ask for secrets in chat text and never invent one. End your turn after the call. When the user saves, the next user message gives a private file path that holds only the value. Read it only inside a shell command, for example TOKEN=\"$(cat '<path>')\" mycli login. Do not print, echo, or copy the value. The user picks how long the file is kept (until they delete it, or 24 hours) and can delete it at any time. If the file is gone, call request_secret again. For a value with several lines, such as a whole .env file, set multiline and give an example.","inputSchema":{"type":"object","properties":{"label":{"type":"string","maxLength":80,"description":"Card title, for example 'Tailscale auth key'."},"reason":{"type":"string","maxLength":500,"description":"What the secret is for and where the user can create it."},"placeholder":{"type":"string","maxLength":80,"description":"Optional input placeholder, for example 'tskey-auth-...'."},"multiline":{"type":"boolean","description":"Show a multi-line text area instead of a one-line input. Use it for values with several lines, such as a whole .env file or a private key."},"example":{"type":"string","maxLength":1000,"description":"Optional example of the expected format with fake values, shown on the card. Give one for multi-line values, for example 'DATABASE_URL=postgresql://user:password@host/db\\nRESEND_API_KEY=re_...'."}},"required":["label","reason"],"additionalProperties":false}},
+        {"name":"get_secret","description":"Get the private file path of a secret saved earlier (from a request_secret card), by its label. Secrets belong to the project of the worktree session. Use it in new sessions and scheduled tasks to reuse a saved key without asking again. Read the path only inside a shell command, for example TOKEN=\"$(cat '<path>')\". Never print the value. Fails with the saved labels of this project when none matches; then call request_secret.","inputSchema":{"type":"object","properties":{"label":{"type":"string","maxLength":80,"description":"Label of the saved secret (case-insensitive)."}},"required":["label"],"additionalProperties":false}},
+        {"name":"list_secrets","description":"Show the user the secrets saved for this project from request_secret cards, in a card in this chat with a Delete button for each. Use it when the user asks to see, manage, or delete saved secrets. Returns labels, retention, and save time only; never values or file paths. You cannot delete secrets: the user deletes them on the card. End your turn after the call.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
         {"name":"get_run_environments","description":"List Jean Run-command / panel-command dev environments. Returns whether each is running, worktree/base-session identity, startup command, listening/configured ports, and http URL when a port is known. Optional worktreeId or projectId filters. Does not include full-screen CLI session terminals.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string","description":"Optional worktree id to filter to one worktree or base session."},"projectId":{"type":"string","description":"Optional project id to filter to that project's worktrees."}},"additionalProperties":false}}
         ,{"name":"start_run_environment","description":"Start or reuse a Jean-managed Run environment for a worktree using a run command configured in jean.json. When command is omitted, uses the first configured run command. Returns the environment identity, command, running state, ports, and URL when detected.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string","description":"Worktree whose configured Run environment should start."},"command":{"type":"string","description":"Optional exact jean.json run command to start. Must be one of the configured run commands."}},"required":["worktreeId"],"additionalProperties":false}}
     ])
@@ -379,12 +345,6 @@ pub async fn call_tool(
     source: &str,
     depth: u32,
 ) -> Result<Value, ToolError> {
-    // Reserved for replays of approved tools. A caller cannot claim it.
-    if source == crate::agents::mcp::APPROVED_REPLAY_SOURCE {
-        return Err(ToolError::invalid_params(format!(
-            "Source {source} is reserved"
-        )));
-    }
     let prefs = crate::load_preferences(app.clone())
         .await
         .map_err(ToolError::internal)?;
@@ -409,21 +369,7 @@ pub async fn call_tool(
         }
     }
 
-    // A saved Jean-tool allowlist refuses the call before the approval gate,
-    // so a blocked destructive tool does not create an approval request.
-    if let Some(agent) = crate::agents::agent_for_session(app, source) {
-        if !crate::agents::connectors::jean_tool_allowed(agent.jean_tools.as_deref(), name) {
-            return Err(ToolError::internal(format!(
-                "This agent is not allowed to use the Jean tool {name}"
-            )));
-        }
-    }
-
-    // Agent sessions need the user's approval for destructive tools.
-    let result_json = match crate::agents::mcp::approval_gate(app, name, &arguments, source) {
-        Some(pending) => pending,
-        None => run_tool(app, name, arguments, source).await?,
-    };
+    let result_json = run_tool(app, name, arguments, source).await?;
     Ok(json!({
         "content": [{
             "type": "text",
@@ -443,26 +389,6 @@ async fn dispatch_command(app: &AppHandle, command: &str, args: Value) -> Result
         args,
     ))
     .await
-}
-
-/// Run a tool that the user approved for an agent (no approval gate).
-/// Boxed: approvals are decided through `dispatch_command`, which this tool
-/// call can reach again, so the future type would otherwise be recursive.
-pub fn run_approved_tool(
-    app: AppHandle,
-    name: String,
-    args: Value,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, String>> + Send>> {
-    Box::pin(async move {
-        run_tool(
-            &app,
-            &name,
-            args,
-            crate::agents::mcp::APPROVED_REPLAY_SOURCE,
-        )
-        .await
-        .map_err(|e| e.message)
-    })
 }
 
 async fn run_tool(
@@ -639,9 +565,6 @@ async fn run_tool(
             .await
             .map_err(ToolError::internal)
         }
-        "set_connector" => crate::agents::connectors::set_connector(app, &args)
-            .await
-            .map_err(ToolError::internal),
         "remove_project" => {
             let project_id = require_str(&args, "projectId")?;
             dispatch_command(app, "remove_project", json!({ "projectId": project_id }))
@@ -1059,20 +982,11 @@ async fn run_tool(
                     "ultracode",
                 ],
             )?;
-            // Agent callers: the agent gets an update when this session's run ends.
-            crate::agents::mcp::record_delegation(app, source, &session_id, &worktree_id);
             // Chat callers: the end of this run comes back as a queued message.
             if let Some(origin) = chat_delegation_origin(app, source, &session_id) {
                 crate::chat::delegation::arm(app, &origin, &session_id)
                     .map_err(ToolError::invalid_params)?;
             }
-            // Agent callers: mark the sender so the chat shows one "Message from" line
-            let message = match crate::agents::agent_for_session(app, source) {
-                Some(agent) if source != session_id => {
-                    crate::agents::agent_message_text(&agent.name, &agent.id, &message)
-                }
-                _ => message,
-            };
             let session_name = crate::chat::storage::load_mcp_session_metadata(app, &session_id)
                 .ok()
                 .flatten()
@@ -1914,12 +1828,6 @@ async fn run_tool(
             }))
         }
         CLAUDE_PERMISSION_PROMPT_TOOL => Ok(claude_permission_prompt(app, source, &args).await),
-        // Boxed: keeps this large function's stack frame small.
-        agent_tool if crate::agents::mcp::is_agent_tool(agent_tool) => {
-            Box::pin(crate::agents::mcp::run(app, agent_tool, &args, source))
-                .await
-                .map_err(ToolError::invalid_params)
-        }
         other => Err(ToolError::invalid_params(format!("Unknown tool: {other}"))),
     }
 }
@@ -3029,10 +2937,6 @@ fn resolve_project_path(app: &AppHandle, project_id: &str) -> Result<String, Too
 }
 
 fn resolve_worktree_path(app: &AppHandle, worktree_id: &str) -> Result<String, ToolError> {
-    // Coordinator sessions run in the project folder (no worktree record).
-    if let Some(path) = crate::agents::workdir_for_worktree(app, worktree_id) {
-        return Ok(path);
-    }
     let data = crate::projects::storage::load_projects_data(app)
         .map_err(|e| ToolError::internal(format!("load_projects_data: {e}")))?;
     data.find_worktree(worktree_id)
@@ -3099,9 +3003,8 @@ fn ensure_mcp_worktree_can_link_pr(app: &AppHandle, worktree_id: &str) -> Result
 }
 
 /// The chat session behind an MCP call, when there is one: manual MCP
-/// clients (`manual-dev`, `manual-prod`) have no session, agents report
-/// through their own delegation table, and a session sending to itself owes
-/// itself nothing.
+/// clients (`manual-dev`, `manual-prod`) have no session, and a session
+/// sending to itself owes itself nothing.
 fn chat_delegation_origin(
     app: &AppHandle,
     source: &str,
@@ -3110,11 +3013,7 @@ fn chat_delegation_origin(
     if source == target_session_id {
         return None;
     }
-    let origin = crate::chat::storage::load_metadata(app, source).ok()??;
-    if crate::agents::is_agent_worktree_id(&origin.worktree_id) {
-        return None;
-    }
-    Some(origin)
+    crate::chat::storage::load_metadata(app, source).ok()?
 }
 
 /// Reject MCP send_chat_message when the session was deleted or its worktree is inactive.
@@ -3436,9 +3335,6 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"F
     fn chat_delegation_origin_is_only_a_real_chat_session() {
         let (_temp, app) = session_lookup_app();
         saved_session(&app, "origin");
-        let mut agent = saved_session(&app, "agent-chat");
-        agent.worktree_id = "__agent_release__".to_string();
-        crate::chat::storage::save_metadata(&app, &agent).unwrap();
 
         assert_eq!(
             chat_delegation_origin(&app, "origin", "target").map(|m| m.id),
@@ -3447,7 +3343,6 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"F
         assert!(chat_delegation_origin(&app, "manual-dev", "target").is_none());
         assert!(chat_delegation_origin(&app, "manual-prod", "target").is_none());
         assert!(chat_delegation_origin(&app, "test", "target").is_none());
-        assert!(chat_delegation_origin(&app, "agent-chat", "target").is_none());
         assert!(chat_delegation_origin(&app, "origin", "origin").is_none());
     }
 
@@ -4608,21 +4503,7 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"F
     }
 
     #[test]
-    fn set_connector_is_registered_rate_limited_and_needs_approval() {
-        let tools = tool_registry();
-        let tool = find_tool(&tools, "set_connector");
-        assert_eq!(
-            tool["inputSchema"]["required"],
-            json!(["scope", "action", "backend", "name"])
-        );
-        assert!(RATE_LIMITED_TOOLS.contains(&"set_connector"));
-        assert!(crate::agents::mcp::APPROVAL_TOOLS.contains(&"set_connector"));
-        // Not an agent-only tool: an approved call replays through run_tool.
-        assert!(!crate::agents::mcp::is_agent_tool("set_connector"));
-    }
-
-    #[test]
-    fn remove_project_is_registered_rate_limited_and_needs_approval() {
+    fn remove_project_is_registered_and_rate_limited() {
         let tools = tool_registry();
         let remove = find_tool(&tools, "remove_project");
         assert_eq!(remove["inputSchema"]["required"], json!(["projectId"]));
@@ -4631,7 +4512,6 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"F
             .unwrap()
             .contains("files on disk are kept"));
         assert!(RATE_LIMITED_TOOLS.contains(&"remove_project"));
-        assert!(crate::agents::mcp::APPROVAL_TOOLS.contains(&"remove_project"));
     }
 
     #[test]

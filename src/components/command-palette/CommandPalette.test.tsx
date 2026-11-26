@@ -17,9 +17,7 @@ const {
   isNativeApp,
   getActiveConnectionId,
   projectStoreState,
-  setProjectViewMode,
   clearActiveWorktree,
-  agentState,
   openSessionInWorktree,
   openPreferencesEntry,
   sessionState,
@@ -42,25 +40,12 @@ const {
     projectAccessTimestamps: {} as Record<string, number>,
     selectedProjectId: null as string | null,
   },
-  setProjectViewMode: vi.fn(),
   clearActiveWorktree: vi.fn(),
   openSessionInWorktree: vi.fn(),
   openPreferencesEntry: vi.fn(),
   sessionState: {
     entries: [] as unknown[],
     hits: [] as unknown[],
-  },
-  agentState: {
-    servers: [] as string[],
-    agents: [] as {
-      id: string
-      projectId: string
-      name: string
-      description: string
-      icon: string
-      serverId: string
-      serverName: string
-    }[],
   },
 }))
 
@@ -90,19 +75,10 @@ vi.mock('@/store/ui-store', () => ({
     },
     {
       getState: () => ({
-        setProjectViewMode,
         openPreferencesEntry,
       }),
     }
   ),
-}))
-
-vi.mock('@/components/agents/agents-feature', () => ({
-  useAgentsEnabledServers: () => agentState.servers,
-}))
-
-vi.mock('@/services/agents', () => ({
-  useAgentsList: () => ({ data: agentState.agents }),
 }))
 
 vi.mock('@/hooks/use-command-context', () => ({
@@ -257,8 +233,6 @@ describe('CommandPalette projects', () => {
     isNativeApp.mockReturnValue(true)
     getActiveConnectionId.mockReturnValue('remote-1')
     projectStoreState.selectedProjectId = null
-    agentState.servers = []
-    agentState.agents = []
   })
 
   it('does not offer global server switching', () => {
@@ -378,67 +352,9 @@ describe('CommandPalette projects', () => {
   })
 })
 
-describe('CommandPalette coordinators', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    isNativeApp.mockReturnValue(true)
-    getActiveConnectionId.mockReturnValue('local')
-    projectStoreState.selectedProjectId = null
-    projectStoreState.projectAccessTimestamps = {}
-    agentState.servers = ['local']
-    agentState.agents = [
-      {
-        id: 'coord_p1',
-        projectId: 'p1',
-        name: 'Jean',
-        description: '',
-        icon: 'jean',
-        serverId: 'local',
-        serverName: 'Local',
-      },
-      {
-        id: 'remote-2:coord_p2',
-        projectId: 'remote-2:p2',
-        name: 'Orbit',
-        description: '',
-        icon: 'blue',
-        serverId: 'remote-2',
-        serverName: 'Build server',
-      },
-    ]
-  })
-
-  it("lists coordinators and opens the project's coordinator view", () => {
-    render(<CommandPalette />)
-
-    const row = screen.getByText('Orbit').closest('[cmdk-item]')
-    expect(row?.closest('[cmdk-group]')).toHaveTextContent(/^Coordinators/)
-    expect(row).toHaveTextContent('Build server')
-
-    fireEvent.click(row as Element)
-
-    expect(clearActiveWorktree).toHaveBeenCalled()
-    expect(selectProject).toHaveBeenCalledWith('remote-2:p2')
-    expect(setProjectViewMode).toHaveBeenCalledWith(
-      'remote-2:p2',
-      'coordinator'
-    )
-  })
-
-  it('hides coordinators when the feature is off', () => {
-    agentState.servers = []
-
-    render(<CommandPalette />)
-
-    expect(screen.queryByText('Orbit')).not.toBeInTheDocument()
-  })
-})
-
 describe('CommandPalette search', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    agentState.servers = []
-    agentState.agents = []
     sessionState.entries = [worktreeEntry]
     sessionState.hits = []
   })

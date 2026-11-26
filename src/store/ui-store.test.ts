@@ -421,23 +421,3 @@ describe('mobile left sidebar closes when a surface opens over it', () => {
     expect(useUIStore.getState()).toBe(before)
   })
 })
-
-describe('project view mode', () => {
-  beforeEach(() => {
-    useUIStore.setState({ projectViewModes: {} })
-  })
-
-  it('stores the last choice per project and skips no-op updates', () => {
-    const ui = () => useUIStore.getState()
-    ui().setProjectViewMode('p1', 'sessions')
-    ui().setProjectViewMode('srv:p2', 'coordinator')
-    expect(ui().projectViewModes).toEqual({
-      p1: 'sessions',
-      'srv:p2': 'coordinator',
-    })
-
-    const before = ui().projectViewModes
-    ui().setProjectViewMode('p1', 'sessions')
-    expect(ui().projectViewModes).toBe(before)
-  })
-})

@@ -35,7 +35,6 @@ import {
   normalizeQuestionMultipleField,
 } from '@/types/chat'
 import { MessageItem } from './MessageItem'
-import { ReplyBubble, ReplyBubbles } from './ReplyBubble'
 import { getProviderChangeBeforeMessage } from './message-settings-labels'
 import { ProviderChangeSeparator } from './ProviderChangeSeparator'
 import { AskUserQuestion } from './AskUserQuestion'
@@ -50,25 +49,14 @@ import {
 import { SteeredPromptGroup } from './SteeredPromptGroup'
 import { findTurnPrompt } from './user-prompt-chrome'
 import { parseServerResourceKey } from '@/lib/server-resource'
-import {
-  assistantTextParts,
-  buildTimeline,
-  coalesceContentBlocks,
-} from './tool-call-utils'
+import { buildTimeline, coalesceContentBlocks } from './tool-call-utils'
 import { MessageTiming } from './MessageTiming'
 import { getAssistantDurationMs } from './time-utils'
-import { AgentApprovalInline } from '@/components/agents/AgentActivity'
-import { AgentMessageLinkRow } from '@/components/agents/AgentMessageLink'
-import { AgentQuestionCard } from '@/components/agents/AgentQuestionCard'
 import {
   parseInlineQuestions,
   type InlineQuestions,
 } from './inline-question-utils'
 import { InlineQuestionOptions } from './InlineQuestionOptions'
-import {
-  assistantReplyItems,
-  nextUserAnswers,
-} from '@/components/agents/agent-messages'
 import {
   TOOL_CALL_ROW_CLASS,
   TOOL_CALL_DETAIL_PILL_CLASS,
@@ -125,8 +113,6 @@ interface CompactMessageListProps {
   shouldScrollToBottom?: boolean
   onScrollToBottomHandled?: () => void
   completedDurationMs?: number | null
-  /** Show only assistant prose: no tool activity rows or edited files */
-  hideToolActivity?: boolean
   /** Sends a user message to this session (answers to `ask_user` questions) */
   onSendAnswer?: (text: string) => void
 }
@@ -171,41 +157,17 @@ type SteerSegment =
   | { kind: 'steered'; texts: string[]; key: string }
 
 /**
- * Quiet chats show tool calls only as cards (approvals, agent messages), and a
- * card between the turn's prompt and its steered prompts splits the user's
- * bubbles. Move tool calls from before the last steered prompt to after it,
- * so the cards show with the reply.
- */
-function deferToolsPastSteeredInputs(blocks: ContentBlock[]): ContentBlock[] {
-  const lastSteer = blocks.reduce(
-    (last, block, index) => (block.type === 'user_input' ? index : last),
-    -1
-  )
-  const before = blocks.slice(0, lastSteer + 1)
-  const tools = before.filter(block => block.type === 'tool_use')
-  if (tools.length === 0) return blocks
-  return [
-    ...before.filter(block => block.type !== 'tool_use'),
-    ...tools,
-    ...blocks.slice(lastSteer + 1),
-  ]
-}
-
-/**
  * Splits an assistant message at mid-turn steered user prompts (Codex
  * `turn/steer`, `user_input` blocks) so the compact view can interleave them
  * chronologically: activity before a steer renders before its bubble, and
- * activity after the steer renders after it. `quiet` chats show tool cards
- * after the steered prompts. Returns null when the message contains no
- * steered input.
+ * activity after the steer renders after it. Returns null when the message
+ * contains no steered input.
  */
 function splitMessageAtSteeredInputs(
-  message: ChatMessage,
-  quiet: boolean
+  message: ChatMessage
 ): SteerSegment[] | null {
-  const allBlocks = message.content_blocks ?? []
-  if (!allBlocks.some(block => block.type === 'user_input')) return null
-  const blocks = quiet ? deferToolsPastSteeredInputs(allBlocks) : allBlocks
+  const blocks = message.content_blocks ?? []
+  if (!blocks.some(block => block.type === 'user_input')) return null
 
   const segments: SteerSegment[] = []
   let current: ContentBlock[] = []
@@ -255,15 +217,6 @@ function splitMessageAtSteeredInputs(
   flushBlocks()
 
   return segments
-}
-
-/** All assistant prose of a compact group, tool calls left out. */
-function collectAssistantText(group: { message: ChatMessage }[]): string[] {
-  return group.flatMap(({ message }) =>
-    message.role === 'assistant'
-      ? assistantTextParts(message.content_blocks ?? [], message.content ?? '')
-      : []
-  )
 }
 
 function isPureTextAssistantMessage(message: ChatMessage): boolean {
@@ -591,7 +544,6 @@ interface CompactQuestionMessageProps {
   ) => React.ReactNode
   hasFollowUpFor: (globalIndex: number) => boolean
   durationFor: (globalIndex: number, message: ChatMessage) => number | null
-  hideToolActivity: boolean
   isSending: boolean
   onSendAnswer?: (text: string) => void
 }
@@ -618,7 +570,6 @@ function CompactQuestionMessage({
   renderMessage,
   hasFollowUpFor,
   durationFor,
-  hideToolActivity,
   isSending,
   onSendAnswer,
 }: CompactQuestionMessageProps) {
@@ -663,32 +614,17 @@ function CompactQuestionMessage({
     [stripped, globalIndex]
   )
 
-  const hiddenToolsText = useMemo(
-    () => (hideToolActivity ? collectAssistantText(activityGroup) : []),
-    [hideToolActivity, activityGroup]
-  )
-
   return (
     <>
-      {hideToolActivity
-        ? hiddenToolsText.length > 0 && (
-            <div className="pb-4">
-              <ReplyBubbles
-                parts={hiddenToolsText}
-                messageId={message.id}
-                sessionId={sessionId}
-              />
-            </div>
-          )
-        : hasNonQuestionContent && (
-            <CompactActivityRow
-              group={activityGroup}
-              total={1}
-              renderMessage={renderMessage}
-              hasFollowUpFor={hasFollowUpFor}
-              durationFor={durationFor}
-            />
-          )}
+      {hasNonQuestionContent && (
+        <CompactActivityRow
+          group={activityGroup}
+          total={1}
+          renderMessage={renderMessage}
+          hasFollowUpFor={hasFollowUpFor}
+          durationFor={durationFor}
+        />
+      )}
       {questionItems.map(item => {
         const isAnswered =
           hasFollowUpMessage ||
@@ -797,7 +733,6 @@ export const CompactMessageList = memo(
         shouldScrollToBottom,
         onScrollToBottomHandled,
         completedDurationMs,
-        hideToolActivity = false,
         onSendAnswer,
       },
       ref
@@ -839,11 +774,6 @@ export const CompactMessageList = memo(
         }
         return map
       }, [messages])
-
-      const userAnswers = useMemo(
-        () => (hideToolActivity ? nextUserAnswers(messages) : []),
-        [hideToolActivity, messages]
-      )
 
       const hasFollowUpFor = useCallback(
         (globalIndex: number) => hasFollowUpMap.get(globalIndex) ?? false,
@@ -896,9 +826,7 @@ export const CompactMessageList = memo(
           // A numbered question shows as a question block below the text
           const asked = shown ? parseInlineQuestions(shown) : null
           const askedBefore =
-            !asked && text && text !== shown
-              ? parseInlineQuestions(text)
-              : null
+            !asked && text && text !== shown ? parseInlineQuestions(text) : null
           items.push({
             kind: 'compact',
             messages: buffer,
@@ -913,10 +841,7 @@ export const CompactMessageList = memo(
         // user prompts are split at each steer so the visible order matches
         // chronology: activity → steered bubble → activity after the steer.
         const pushBuffered = (message: ChatMessage, globalIndex: number) => {
-          const segments = splitMessageAtSteeredInputs(
-            message,
-            hideToolActivity
-          )
+          const segments = splitMessageAtSteeredInputs(message)
           if (!segments) {
             buffer.push({ message, globalIndex })
             return
@@ -975,7 +900,7 @@ export const CompactMessageList = memo(
 
         flush()
         return items
-      }, [messages, lastIndex, hasFollowUpMap, hideToolActivity])
+      }, [messages, lastIndex, hasFollowUpMap])
 
       const renderMessageItem = useCallback(
         (
@@ -984,7 +909,6 @@ export const CompactMessageList = memo(
             hasFollowUpMessage: boolean
             durationMs: number | null
             hideCancelledIndicator?: boolean
-            bubble?: boolean
             /** Only for messages shown on their own, not inside a compact row */
             onSendAnswer?: (text: string) => void
           }
@@ -1027,8 +951,6 @@ export const CompactMessageList = memo(
             onCopyToInput={onCopyToInput}
             hideApproveButtons={hideApproveButtons}
             hideCancelledIndicator={extra.hideCancelledIndicator}
-            bubble={extra.bubble}
-            hideSettingsBadges={hideToolActivity}
             durationMs={extra.durationMs}
             onSendAnswer={extra.onSendAnswer}
           />
@@ -1063,7 +985,6 @@ export const CompactMessageList = memo(
           isFindingFixed,
           onCopyToInput,
           hideApproveButtons,
-          hideToolActivity,
         ]
       )
 
@@ -1183,7 +1104,6 @@ export const CompactMessageList = memo(
                     renderMessage={renderMessageItem}
                     hasFollowUpFor={hasFollowUpFor}
                     durationFor={durationFor}
-                    hideToolActivity={hideToolActivity}
                     isSending={isSending}
                     onSendAnswer={onSendAnswer}
                   />
@@ -1196,7 +1116,6 @@ export const CompactMessageList = memo(
                 <div key={item.key} className="pb-4">
                   <SteeredPromptGroup
                     texts={item.texts}
-                    bubble={hideToolActivity}
                     settings={findTurnPrompt(messages, item.globalIndex)}
                     worktreePath={worktreePath}
                     serverId={
@@ -1232,62 +1151,12 @@ export const CompactMessageList = memo(
                 >
                   {renderMessageItem(singleMessage, {
                     hasFollowUpMessage,
-                    bubble: hideToolActivity,
                     onSendAnswer,
                     durationMs: durationFor(
                       singleMessage.globalIndex,
                       singleMessage.message
                     ),
                   })}
-                </div>
-              )
-            }
-
-            if (hideToolActivity) {
-              // Messages to other agents or sessions, approvals, and questions: one row each
-              const replyItems = assistantReplyItems(item.messages)
-              if (replyItems.length === 0) return null
-              return (
-                <div key={item.key} className="flex flex-col gap-1.5 pb-4">
-                  {replyItems.map((reply, index) =>
-                    reply.type === 'text' ? (
-                      <ReplyBubbles
-                        // react-doctor-disable-next-line react-doctor/no-array-index-as-key -- text groups are derived in stream order and only append; messageId is positional too
-                        key={`text-${index}`}
-                        parts={reply.texts}
-                        messageId={
-                          index === 0 ? item.key : `${item.key}:group${index}`
-                        }
-                        sessionId={sessionId}
-                      />
-                    ) : reply.type === 'question' ? (
-                      <AgentQuestionCard
-                        key={reply.toolId}
-                        id={reply.toolId}
-                        question={reply.question}
-                        answer={
-                          userAnswers[
-                            item.messages[item.messages.length - 1]
-                              ?.globalIndex ?? -1
-                          ]
-                        }
-                        disabled={isSending}
-                        onSend={onSendAnswer}
-                      />
-                    ) : reply.type === 'approval' ? (
-                      <AgentApprovalInline
-                        key={reply.toolId}
-                        approvalId={reply.approvalId}
-                        worktreeId={worktreeId}
-                      />
-                    ) : (
-                      <AgentMessageLinkRow
-                        key={reply.link.toolId}
-                        link={reply.link}
-                        worktreeId={worktreeId}
-                      />
-                    )
-                  )}
                 </div>
               )
             }
@@ -1331,11 +1200,7 @@ export const CompactMessageList = memo(
                 />
                 {showLatestText && (
                   <div className="pb-4">
-                    {hideToolActivity ? (
-                      <ReplyBubble>{latestTextMarkdown}</ReplyBubble>
-                    ) : (
-                      latestTextMarkdown
-                    )}
+                    {latestTextMarkdown}
                     {inlineQuestion && onSendAnswer && (
                       <InlineQuestionOptions
                         questions={inlineQuestion.questions}

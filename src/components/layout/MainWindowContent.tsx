@@ -21,7 +21,6 @@ import { scheduleIdleWork } from '@/lib/idle'
 import { lazyWithPreload, preloadWhenIdle } from '@/lib/lazy-preload'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { JeanLoadingScreen } from '@/components/shared/JeanLoadingScreen'
-import { AgentNotificationsListener } from '@/components/agents/AgentNotificationsListener'
 import { ServerOfflineView, useUnreachableServer } from './ServerOfflineView'
 
 const ChatWindow = lazyWithPreload(() =>
@@ -30,9 +29,9 @@ const ChatWindow = lazyWithPreload(() =>
   }))
 )
 
-const ProjectView = lazyWithPreload(() =>
-  import('@/components/dashboard/ProjectView').then(mod => ({
-    default: mod.ProjectView,
+const ProjectCanvasView = lazyWithPreload(() =>
+  import('@/components/dashboard/ProjectCanvasView').then(mod => ({
+    default: mod.ProjectCanvasView,
   }))
 )
 
@@ -74,7 +73,7 @@ export const MainWindowContent = memo(function MainWindowContent({
   useEffect(() => scheduleIdleWork(() => setBackendCheckReady(true), 1500), [])
   // Switching between canvas and chat must not wait for the other view's chunk.
   useEffect(
-    () => preloadWhenIdle([ChatWindow.preload, ProjectView.preload]),
+    () => preloadWhenIdle([ChatWindow.preload, ProjectCanvasView.preload]),
     []
   )
 
@@ -128,7 +127,7 @@ export const MainWindowContent = memo(function MainWindowContent({
     <ServerOfflineView server={unreachableServer} />
   ) : selectedProjectId && selectedProject ? (
     <Suspense fallback={<JeanLoadingScreen />}>
-      <ProjectView
+      <ProjectCanvasView
         key={selectedProjectId}
         projectId={selectedProjectId}
         project={selectedProject}
@@ -204,7 +203,6 @@ export const MainWindowContent = memo(function MainWindowContent({
         className
       )}
     >
-      <AgentNotificationsListener />
       {sidebarSwipeIndicator?.isSwiping && (
         <div
           className="pointer-events-none absolute top-1/2 z-[60] flex -translate-y-1/2 items-center justify-center"

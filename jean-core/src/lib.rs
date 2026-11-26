@@ -41,7 +41,6 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod agent_browser;
-pub mod agents;
 mod antigravity_cli;
 mod auto_fix;
 mod background_tasks;
@@ -283,8 +282,6 @@ pub struct AppPreferences {
     pub auto_delete_worktree_on_pr_merged: bool, // Delete a worktree when its linked PR is merged (default: true)
     #[serde(default)]
     pub debug_mode_enabled: bool, // Show debug panel in chat sessions (default: false)
-    #[serde(default, alias = "agents_enabled")]
-    pub coordinator_enabled: bool, // Experimental: project coordinators and their engine (default: false)
     #[serde(default)]
     pub default_enabled_mcp_servers: Vec<String>, // MCP server names enabled by default (empty = none)
     #[serde(default)]
@@ -1046,31 +1043,12 @@ mod tests {
     }
 
     #[test]
-    fn coordinator_flag_loads_from_the_old_agents_enabled_key() {
-        let mut saved = serde_json::to_value(AppPreferences::default()).unwrap();
-        let object = saved.as_object_mut().unwrap();
-        object.remove("coordinator_enabled");
-        object.insert("agents_enabled".to_string(), json!(true));
-
-        let preferences: AppPreferences = serde_json::from_value(saved).unwrap();
-
-        assert!(preferences.coordinator_enabled);
-        let written = serde_json::to_value(&preferences).unwrap();
-        assert_eq!(written["coordinator_enabled"], json!(true));
-        assert!(written.get("agents_enabled").is_none());
-    }
-
-    #[test]
     fn preference_patch_with_an_old_key_sets_the_renamed_field() {
         let current = AppPreferences::default();
 
-        let merged = merge_preferences_patch(
-            &current,
-            &json!({ "agents_enabled": true, "gemini_cli_source": "path" }),
-        )
-        .unwrap();
+        let merged =
+            merge_preferences_patch(&current, &json!({ "gemini_cli_source": "path" })).unwrap();
 
-        assert!(merged.coordinator_enabled);
         assert_eq!(merged.antigravity_cli_source, "path");
     }
 
@@ -3637,7 +3615,6 @@ impl Default for AppPreferences {
             auto_pull_base_branch: default_auto_pull_base_branch(),
             auto_delete_worktree_on_pr_merged: default_auto_delete_worktree_on_pr_merged(),
             debug_mode_enabled: false,
-            coordinator_enabled: false,
             default_effort_level: default_effort_level(),
             default_enabled_mcp_servers: Vec::new(),
             known_mcp_servers: Vec::new(),
@@ -4356,8 +4333,6 @@ async fn save_preferences(app: AppHandle, mut preferences: AppPreferences) -> Re
     );
 
     schedule_jean_mcp_socket_sync(app.clone());
-    // `coordinator_enabled` may have changed: let the coordinator loop see it now.
-    agents::nudge();
 
     Ok(())
 }
@@ -4374,7 +4349,6 @@ async fn patch_preferences(app: AppHandle, patch: Value) -> Result<(), String> {
 /// A patch from an older client still uses the old key. Merged as-is, the
 /// object would hold both keys and serde rejects it as a duplicate field.
 const RENAMED_PREFERENCE_KEYS: &[(&str, &str)] = &[
-    ("agents_enabled", "coordinator_enabled"),
     ("selected_gemini_model", "selected_antigravity_model"),
     (
         "gemini_auto_steer_enabled",
@@ -5669,14 +5643,6 @@ pub fn initialize_runtime(context: &RuntimeContext) -> Result<(), String> {
 
     if let Err(error) = chat::wakeup::load_all_from_disk(context) {
         log::warn!("Failed to restore scheduled wakeups: {error}");
-    }
-    // Coordinators keep working without clients: open their database and
-    // start the loop. The loop idles while `coordinator_enabled` is off.
-    // Start before resuming runs, so a resumed delegated run that ends at
-    // once still reaches its coordinator's listeners.
-    match agents::init(context) {
-        Ok(()) => agents::start(context.clone()),
-        Err(error) => log::error!("Agents are unavailable: {error}"),
     }
     // Finish runs orphaned by a crash/reboot before any client connects.
     // Headless servers otherwise only recover on a full page load, so an

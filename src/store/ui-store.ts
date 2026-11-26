@@ -123,21 +123,8 @@ export interface MinimizedCliUpdate {
   progress: number | null
 }
 
-/** Main panel of a project: its coordinator chat or the sessions canvas */
-export type ProjectViewMode = 'coordinator' | 'sessions'
-
 interface UIState {
   leftSidebarVisible: boolean
-  /** Per project: last main panel chosen (unset = coordinator) */
-  projectViewModes: Record<string, ProjectViewMode>
-  /** Coordinator view: worktrees sidebar on the right */
-  coordinatorSidebarOpen: boolean
-  /** Coordinator worktrees sidebar width in pixels */
-  coordinatorSidebarWidth: number
-  /** A project's coordinator chat is the main panel now (not persisted) */
-  coordinatorViewOpen: boolean
-  /** Coordinator chat shows tool activity (off: prose and spawn cards) */
-  agentsAdvanced: boolean
   leftSidebarSize: number // Width in pixels, persisted across sessions
   /** File browser (worktree explorer) visibility */
   fileBrowserVisible: boolean
@@ -265,11 +252,6 @@ interface UIState {
   availableCliUpdates: PendingCliUpdate[]
   toggleLeftSidebar: () => void
   setLeftSidebarVisible: (visible: boolean) => void
-  setProjectViewMode: (projectId: string, mode: ProjectViewMode) => void
-  setCoordinatorSidebarOpen: (open: boolean) => void
-  setCoordinatorSidebarWidth: (width: number) => void
-  setCoordinatorViewOpen: (open: boolean) => void
-  setAgentsAdvanced: (advanced: boolean) => void
   setLeftSidebarSize: (size: number) => void
   leftSidebarSwipe: {
     isDragging: boolean
@@ -441,11 +423,6 @@ export const useUIStore = create<UIState>()(
   devtools(
     (set, get) => ({
       leftSidebarVisible: false,
-      projectViewModes: {},
-      coordinatorSidebarOpen: false,
-      coordinatorSidebarWidth: 360,
-      coordinatorViewOpen: false,
-      agentsAdvanced: false,
       leftSidebarSize: 250, // Default width in pixels
       leftSidebarSwipe: {
         isDragging: false,
@@ -574,61 +551,6 @@ export const useUIStore = create<UIState>()(
               : { leftSidebarVisible: visible },
           undefined,
           'setLeftSidebarVisible'
-        ),
-
-      setProjectViewMode: (projectId, mode) =>
-        set(
-          state =>
-            state.projectViewModes[projectId] === mode
-              ? state
-              : {
-                  projectViewModes: {
-                    ...state.projectViewModes,
-                    [projectId]: mode,
-                  },
-                },
-          undefined,
-          'setProjectViewMode'
-        ),
-
-      setCoordinatorSidebarOpen: open =>
-        set(
-          state =>
-            state.coordinatorSidebarOpen === open
-              ? state
-              : { coordinatorSidebarOpen: open },
-          undefined,
-          'setCoordinatorSidebarOpen'
-        ),
-
-      setCoordinatorSidebarWidth: width =>
-        set(
-          state =>
-            state.coordinatorSidebarWidth === width
-              ? state
-              : { coordinatorSidebarWidth: width },
-          undefined,
-          'setCoordinatorSidebarWidth'
-        ),
-
-      setCoordinatorViewOpen: open =>
-        set(
-          state =>
-            state.coordinatorViewOpen === open
-              ? state
-              : { coordinatorViewOpen: open },
-          undefined,
-          'setCoordinatorViewOpen'
-        ),
-
-      setAgentsAdvanced: advanced =>
-        set(
-          state =>
-            state.agentsAdvanced === advanced
-              ? state
-              : { agentsAdvanced: advanced },
-          undefined,
-          'setAgentsAdvanced'
         ),
 
       toggleRightSidebar: () =>

@@ -504,15 +504,10 @@ impl ProjectsData {
         self.worktrees.iter().find(|w| w.id == id)
     }
 
-    /// Project a worktree ID belongs to. A coordinator worktree ID
-    /// (`__coord_<project_id>__`) has no worktree record and belongs to its
-    /// project, so project settings also apply to the coordinator chat.
+    /// Project a worktree ID belongs to.
     pub fn project_for_worktree(&self, worktree_id: &str) -> Option<&Project> {
-        let project_id = match self.find_worktree(worktree_id) {
-            Some(worktree) => worktree.project_id.as_str(),
-            None => crate::agents::db::project_id_from_coordinator_worktree(worktree_id)?,
-        };
-        self.find_project(project_id)
+        let worktree = self.find_worktree(worktree_id)?;
+        self.find_project(&worktree.project_id)
     }
 
     /// Find a worktree by ID (mutable)

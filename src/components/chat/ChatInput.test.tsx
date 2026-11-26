@@ -3,7 +3,6 @@ import { QueryClient } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@/test/test-utils'
 import { ChatInput } from './ChatInput'
-import { withUniqueTokens, type MentionCandidate } from './agent-mentions'
 import { invoke } from '@/lib/transport'
 import { queryClient } from '@/lib/query-client'
 import { preferencesQueryKeys } from '@/services/preferences'
@@ -921,90 +920,6 @@ describe('ChatInput attachments', () => {
       )
     })
     expect(textarea.value).toBe('')
-  })
-})
-
-describe('ChatInput @ mentions', () => {
-  const candidates = withUniqueTokens([
-    { type: 'agent', id: 'jean', name: 'Jean', icon: 'jean' },
-    { type: 'agent', id: 'rev', name: 'Code Reviewer', icon: 'blue' },
-    { type: 'remote_jean', id: 'srv-1', name: 'Home', url: 'https://home' },
-    { type: 'project', id: 'p1', name: 'coolify' },
-  ])
-
-  const renderInput = (mentionCandidates?: MentionCandidate[]) => {
-    render(
-      <ChatInput
-        activeSessionId="session-1"
-        activeWorktreePath="/tmp/worktree"
-        isSending={false}
-        executionMode="build"
-        focusChatShortcut="⌘K"
-        onSubmit={vi.fn()}
-        onCancel={vi.fn()}
-        formRef={createRef<HTMLFormElement>()}
-        inputRef={createRef<HTMLTextAreaElement>()}
-        mentionCandidates={mentionCandidates}
-      />
-    )
-    return screen.getByRole('textbox') as HTMLTextAreaElement
-  }
-
-  beforeEach(() => {
-    Element.prototype.scrollIntoView = vi.fn()
-    storeState.setInputDraft.mockReset()
-    storeState.getPendingFiles.mockReturnValue([])
-    storeState.inputDrafts = {}
-  })
-
-  it('keeps the file picker in project chats', () => {
-    const textarea = renderInput()
-    fireEvent.change(textarea, { target: { value: '@' } })
-
-    expect(screen.getByText('File picker')).toBeInTheDocument()
-    expect(screen.queryByText('Agents')).not.toBeInTheDocument()
-  })
-
-  it('shows agents, remote Jeans, and projects in agent chats', () => {
-    const textarea = renderInput(candidates)
-    fireEvent.change(textarea, { target: { value: '@' } })
-
-    expect(screen.queryByText('File picker')).not.toBeInTheDocument()
-    expect(screen.getByText('Agents')).toBeInTheDocument()
-    expect(screen.getByText('Remote Jeans')).toBeInTheDocument()
-    expect(screen.getByText('Projects')).toBeInTheDocument()
-    expect(screen.getByText('Code Reviewer')).toBeInTheDocument()
-  })
-
-  it('filters while typing and inserts the selected token with the keyboard', async () => {
-    const textarea = renderInput(candidates)
-    fireEvent.change(textarea, { target: { value: 'ask @' } })
-    fireEvent.change(textarea, { target: { value: 'ask @co' } })
-
-    expect(screen.queryByText('Jean')).not.toBeInTheDocument()
-    expect(screen.getByText('coolify')).toBeInTheDocument()
-
-    // Best match (Code Reviewer) is selected; ArrowUp moves to coolify
-    fireEvent.keyDown(textarea, { key: 'ArrowUp' })
-    fireEvent.keyDown(textarea, { key: 'Enter' })
-
-    expect(textarea.value).toBe('ask @coolify ')
-    expect(storeState.setInputDraft).toHaveBeenLastCalledWith(
-      'session-1',
-      'ask @coolify '
-    )
-    await waitFor(() =>
-      expect(screen.queryByText('Projects')).not.toBeInTheDocument()
-    )
-  })
-
-  it('closes the agent picker on Escape without changing the text', () => {
-    const textarea = renderInput(candidates)
-    fireEvent.change(textarea, { target: { value: '@Je' } })
-    fireEvent.keyDown(textarea, { key: 'Escape' })
-
-    expect(screen.queryByText('Agents')).not.toBeInTheDocument()
-    expect(textarea.value).toBe('@Je')
   })
 })
 

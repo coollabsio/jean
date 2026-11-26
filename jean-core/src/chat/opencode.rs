@@ -1555,18 +1555,6 @@ pub(super) fn permission_rules_for_mode(mode: &str) -> Option<serde_json::Value>
     }
 }
 
-/// Rules for a run. `read_only_code` (coordinator chats) adds a last rule
-/// that denies file edits in every mode; the last matching rule wins.
-pub(super) fn permission_rules(mode: &str, read_only_code: bool) -> Option<serde_json::Value> {
-    let mut rules = permission_rules_for_mode(mode)?;
-    if read_only_code {
-        rules.as_array_mut()?.push(serde_json::json!(
-            { "permission": "edit", "pattern": "*", "action": "deny" }
-        ));
-    }
-    Some(rules)
-}
-
 fn verify_permission_rules_applied(
     response: &serde_json::Value,
     rules: &serde_json::Value,
@@ -3146,10 +3134,7 @@ pub fn execute_opencode_http(
         opencode_session_id.clone(),
         working_dir_string.clone(),
     );
-    if let Some(rules) = permission_rules(
-        execution_mode.unwrap_or("build"),
-        crate::agents::code_is_read_only(worktree_id),
-    ) {
+    if let Some(rules) = permission_rules_for_mode(execution_mode.unwrap_or("build")) {
         let policy_url = format!("{base_url}/session/{opencode_session_id}");
         let response = client
             .patch(&policy_url)
@@ -4285,27 +4270,6 @@ mod tests {
             &rules
         )
         .is_err());
-    }
-
-    #[test]
-    fn coordinator_chats_end_with_an_edit_deny_rule() {
-        assert_eq!(
-            permission_rules("yolo", true).unwrap(),
-            serde_json::json!([
-                { "permission": "*", "pattern": "*", "action": "allow" },
-                { "permission": "external_directory", "pattern": "*", "action": "allow" },
-                { "permission": "edit", "pattern": "*", "action": "deny" }
-            ])
-        );
-        let build = permission_rules("build", true).unwrap();
-        assert_eq!(
-            build.as_array().unwrap().last().unwrap(),
-            &serde_json::json!({ "permission": "edit", "pattern": "*", "action": "deny" })
-        );
-        assert_eq!(
-            permission_rules("build", false),
-            permission_rules_for_mode("build")
-        );
     }
 
     #[test]

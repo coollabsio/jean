@@ -736,8 +736,7 @@ fn cleanup_orphaned_session_indexes_in_dir(
             continue;
         };
 
-        // Agent sessions use reserved IDs with no worktree record.
-        if valid_index_stems.contains(stem) || crate::agents::is_agent_worktree_id(stem) {
+        if valid_index_stems.contains(stem) {
             continue;
         }
 
@@ -1885,10 +1884,6 @@ mod tests {
         std::fs::write(index_dir.join("orphan-wt.json"), "{}").expect("write orphan index");
         std::fs::write(index_dir.join("base-old-project.json"), "{}").expect("write stale base");
         std::fs::write(index_dir.join("notes.txt"), "ignore").expect("write non-json");
-        let jean_agent_index = "__jean_agent__.json";
-        let custom_agent_index = "__agent_reviewer__.json";
-        std::fs::write(index_dir.join(jean_agent_index), "{}").expect("write jean agent index");
-        std::fs::write(index_dir.join(custom_agent_index), "{}").expect("write agent index");
 
         let valid_stems = HashSet::from(["wt-1".to_string(), "base-project-1".to_string()]);
 
@@ -1901,8 +1896,6 @@ mod tests {
         assert!(!index_dir.join("orphan-wt.json").exists());
         assert!(!index_dir.join("base-old-project.json").exists());
         assert!(index_dir.join("notes.txt").exists());
-        assert!(index_dir.join(jean_agent_index).exists());
-        assert!(index_dir.join(custom_agent_index).exists());
     }
 
     #[test]

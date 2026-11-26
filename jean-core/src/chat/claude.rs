@@ -380,12 +380,7 @@ fn split_fast_model(model: &str) -> (&str, bool) {
     }
 }
 
-/// File-writing tools removed from runs that must not change code
-/// (coordinator chats). Bash stays: the coordinator needs it to read the
-/// repository, so shell writes are limited by the prompt only.
-const READ_ONLY_CODE_DISALLOWED_TOOLS: &str = "Edit,Write,MultiEdit,NotebookEdit";
-
-fn disallowed_tools_args(execution_mode: Option<&str>, read_only_code: bool) -> Vec<String> {
+fn disallowed_tools_args(execution_mode: Option<&str>) -> Vec<String> {
     let mut tools = Vec::new();
     // In build/yolo, remove ExitPlanMode entirely so Claude can't loop back
     // into plan-approval after the user already approved one.
@@ -394,9 +389,6 @@ fn disallowed_tools_args(execution_mode: Option<&str>, read_only_code: bool) -> 
         "build" | "yolo" | "auto" | "supervised"
     ) {
         tools.push("ExitPlanMode");
-    }
-    if read_only_code {
-        tools.push(READ_ONLY_CODE_DISALLOWED_TOOLS);
     }
     tools
         .into_iter()
@@ -660,7 +652,6 @@ fn build_claude_args(
     effort_level: Option<&EffortLevel>,
     allowed_tools: Option<&[String]>,
     parallel_execution_prompt: Option<&str>,
-    agent_system_prompt: Option<&str>,
     ai_language: Option<&str>,
     mcp_config: Option<&str>,
     chrome_enabled: bool,
@@ -758,10 +749,7 @@ fn build_claude_args(
         env_vars.push(("IS_SANDBOX".to_string(), "1".to_string()));
     }
 
-    args.extend(disallowed_tools_args(
-        execution_mode,
-        crate::agents::code_is_read_only(worktree_id),
-    ));
+    args.extend(disallowed_tools_args(execution_mode));
 
     if should_mirror_custom_profile_env_for_detached() {
         env_vars.extend(load_custom_profile_env_vars(custom_profile_name));
@@ -927,9 +915,6 @@ fn build_claude_args(
     if let Some(mode_instruction) = execution_mode_instruction(execution_mode) {
         system_prompt_parts.push(mode_instruction.to_string());
     }
-
-    // Agent role prompt. Kept after the global prompt, separate from fan-out.
-    super::push_trimmed_prompt(&mut system_prompt_parts, agent_system_prompt);
 
     // Per-project custom system prompt + linked project instructions
     if let Ok(data) = load_projects_data(app) {
@@ -1510,7 +1495,6 @@ pub fn execute_claude_detached(
     effort_level: Option<&EffortLevel>,
     allowed_tools: Option<&[String]>,
     parallel_execution_prompt: Option<&str>,
-    agent_system_prompt: Option<&str>,
     ai_language: Option<&str>,
     mcp_config: Option<&str>,
     chrome_enabled: bool,
@@ -1556,7 +1540,6 @@ pub fn execute_claude_detached(
         effort_level,
         allowed_tools,
         parallel_execution_prompt,
-        agent_system_prompt,
         ai_language,
         mcp_config,
         chrome_enabled,
@@ -3137,21 +3120,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn coordinator_chats_lose_the_file_writing_tools() {
+    fn build_and_yolo_disallow_exit_plan_mode() {
         assert_eq!(
-            disallowed_tools_args(Some("build"), true),
-            [
-                "--disallowedTools",
-                "ExitPlanMode",
-                "--disallowedTools",
-                "Edit,Write,MultiEdit,NotebookEdit"
-            ]
-        );
-        assert_eq!(
-            disallowed_tools_args(Some("yolo"), false),
+            disallowed_tools_args(Some("yolo")),
             ["--disallowedTools", "ExitPlanMode"]
         );
-        assert_eq!(disallowed_tools_args(Some("plan"), false), [] as [&str; 0]);
+        assert_eq!(disallowed_tools_args(Some("plan")), [] as [&str; 0]);
     }
 
     #[test]

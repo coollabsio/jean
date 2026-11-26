@@ -898,7 +898,7 @@ describe('applyCacheInvalidationKeys', () => {
   })
 })
 
-describe('close shortcut on the coordinator view', () => {
+describe('close shortcut', () => {
   function renderListeners(queryClient: QueryClient) {
     return renderHook(() => useMainWindowEventListeners(), {
       wrapper: ({ children }) => (
@@ -925,7 +925,6 @@ describe('close shortcut on the coordinator view', () => {
   beforeEach(() => {
     document.body.innerHTML = ''
     useUIStore.setState({
-      coordinatorViewOpen: false,
       sessionChatModalOpen: false,
       commandPaletteOpen: false,
       preferencesOpen: false,
@@ -933,64 +932,7 @@ describe('close shortcut on the coordinator view', () => {
     })
   })
 
-  it('does nothing while the coordinator chat is the main panel', () => {
-    const queryClient = new QueryClient()
-    useUIStore.setState({ coordinatorViewOpen: true })
-    const onClose = vi.fn()
-    window.addEventListener('close-session-or-worktree', onClose)
-    const { unmount } = renderListeners(queryClient)
-
-    const event = pressCloseShortcut()
-
-    expect(onClose).not.toHaveBeenCalled()
-    expect(event.defaultPrevented).toBe(true)
-    unmount()
-    window.removeEventListener('close-session-or-worktree', onClose)
-  })
-
-  it.each([
-    ['new session', { key: 't', code: 'KeyT', shiftKey: false }],
-    ['new session picker', { key: 'T', code: 'KeyT', shiftKey: true }],
-  ])('blocks the %s shortcut on the coordinator view', (_, keys) => {
-    const queryClient = new QueryClient()
-    useUIStore.setState({ coordinatorViewOpen: true })
-    const onCreate = vi.fn()
-    window.addEventListener('create-new-session', onCreate)
-    const { unmount } = renderListeners(queryClient)
-
-    const event = new KeyboardEvent('keydown', {
-      ...keys,
-      metaKey: true,
-      ctrlKey: true,
-      bubbles: true,
-      cancelable: true,
-    })
-    document.body.dispatchEvent(event)
-
-    expect(onCreate).not.toHaveBeenCalled()
-    expect(event.defaultPrevented).toBe(true)
-    unmount()
-    window.removeEventListener('create-new-session', onCreate)
-  })
-
-  it('closes the session of a modal opened over the coordinator view', () => {
-    const queryClient = new QueryClient()
-    useUIStore.setState({
-      coordinatorViewOpen: true,
-      sessionChatModalOpen: true,
-    })
-    const onClose = vi.fn()
-    window.addEventListener('close-session-or-worktree', onClose)
-    const { unmount } = renderListeners(queryClient)
-
-    pressCloseShortcut()
-
-    expect(onClose).toHaveBeenCalledTimes(1)
-    unmount()
-    window.removeEventListener('close-session-or-worktree', onClose)
-  })
-
-  it('still closes the session or worktree in the projects view', () => {
+  it('closes the session or worktree in the projects view', () => {
     const queryClient = new QueryClient()
     const onClose = vi.fn()
     window.addEventListener('close-session-or-worktree', onClose)
@@ -1001,38 +943,6 @@ describe('close shortcut on the coordinator view', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
     unmount()
     window.removeEventListener('close-session-or-worktree', onClose)
-  })
-})
-
-describe('coordinator sidebar shortcut', () => {
-  it('asks the coordinator view to toggle its worktrees sidebar', () => {
-    document.body.innerHTML = ''
-    const onToggle = vi.fn()
-    window.addEventListener('toggle-coordinator-sidebar', onToggle)
-    const queryClient = new QueryClient()
-    const { unmount } = renderHook(() => useMainWindowEventListeners(), {
-      wrapper: ({ children }) => (
-        <QueryClientProvider client={queryClient}>
-          {children}
-        </QueryClientProvider>
-      ),
-    })
-
-    document.body.dispatchEvent(
-      new KeyboardEvent('keydown', {
-        key: 'w',
-        code: 'KeyW',
-        metaKey: true,
-        ctrlKey: true,
-        shiftKey: true,
-        bubbles: true,
-        cancelable: true,
-      })
-    )
-
-    expect(onToggle).toHaveBeenCalledTimes(1)
-    unmount()
-    window.removeEventListener('toggle-coordinator-sidebar', onToggle)
   })
 })
 

@@ -1223,8 +1223,8 @@ export default function useStreamingEvents({
         chatQueryKeys.session(sessionId)
       )?.backend
       // Without a local send, nothing replaces the optimistic message with
-      // the persisted one, and live blocks can miss text parts (reconnects,
-      // agent wakes). Load the persisted message instead.
+      // the persisted one, and live blocks can miss text parts (reconnects).
+      // Load the persisted message instead.
       const needsBackendHydration = shouldHydrateCompletedSessionFromBackend(
         content ?? '',
         contentBlocks ?? [],

@@ -1,13 +1,5 @@
 import { memo, useCallback, useMemo, useState } from 'react'
-import { AgentMessageFromRow } from '@/components/agents/AgentMessageLink'
-import { parseAgentSentMessage } from '@/components/agents/agent-messages'
 import { toast } from 'sonner'
-import {
-  ReplyBubble,
-  USER_CARD_BUBBLE_CLASS,
-  USER_PILL_BUBBLE_CLASS,
-} from './ReplyBubble'
-import { ChatContinuedNotice } from './ChatContinuedNotice'
 import { SessionUpdateLine } from './SessionDelegation'
 import { parseSessionUpdates } from './session-update'
 import {
@@ -23,6 +15,7 @@ import { MessageThreadContextMenu } from './message-thread-context-menu'
 import {
   CopyIconButton,
   findTurnPrompt,
+  USER_CARD_BUBBLE_CLASS,
   USER_HOVER_REVEAL,
   USER_TAP_HIDDEN,
 } from './user-prompt-chrome'
@@ -73,8 +66,6 @@ import {
   extractDirectoryMentionPaths,
   extractSkillPaths,
   stripAllMarkers,
-  isAgentUpdateMessage,
-  isChatContinuedMessage,
 } from './message-content-utils'
 import {
   getAskUserQuestions,
@@ -184,10 +175,6 @@ interface MessageItemProps {
   hideCancelledIndicator?: boolean
   /** Duration of this assistant message in ms (computed from user→assistant timestamp delta) */
   durationMs?: number | null
-  /** Render the assistant reply in a bubble */
-  bubble?: boolean
-  /** Agent chat: hide backend, model, mode, and effort under the user prompt and show it as a pill */
-  hideSettingsBadges?: boolean
   /** Sends a user message (answers to inline numbered questions) */
   onSendAnswer?: (text: string) => void
 }
@@ -231,8 +218,6 @@ export const MessageItem = memo(function MessageItem({
   hideApproveButtons,
   hideCancelledIndicator,
   durationMs,
-  bubble = false,
-  hideSettingsBadges = false,
   onSendAnswer,
 }: MessageItemProps) {
   const zenMode = useUIStore(state => state.zenMode)
@@ -384,7 +369,7 @@ export const MessageItem = memo(function MessageItem({
     return turnHasFileEdits(getMessages(), messageIndex)
   }, [message.role, getMessages, messageIndex])
 
-  const showSettingsBadges = !hideSettingsBadges && Boolean(message.model)
+  const showSettingsBadges = Boolean(message.model)
 
   // Only offer Restore after the agent turn finishes (not mid-stream).
   const showTurnRestore = useMemo(() => {
@@ -537,8 +522,6 @@ export const MessageItem = memo(function MessageItem({
         )}
       </span>
     ) : null
-  // Bubble replies show the row below the bubble, not inside it
-  const durationBadge = bubble ? null : durationRow
 
   const messageBoxContent = (
     <>
@@ -667,7 +650,7 @@ export const MessageItem = memo(function MessageItem({
                       >
                         {fallbackAssistantIntro}
                       </Markdown>
-                      {!lastVisibleTextKey && durationBadge}
+                      {!lastVisibleTextKey && durationRow}
                     </>
                   )}
                   {timeline.map((item, itemIdx) => (
@@ -715,7 +698,7 @@ export const MessageItem = memo(function MessageItem({
                                     />
                                   )}
                                   {item.key === lastVisibleTextKey &&
-                                    durationBadge}
+                                    durationRow}
                                 </div>
                               )
                             }
@@ -730,8 +713,7 @@ export const MessageItem = memo(function MessageItem({
                                     ? withoutShownQuestion(item.text)
                                     : item.text}
                                 </Markdown>
-                                {item.key === lastVisibleTextKey &&
-                                  durationBadge}
+                                {item.key === lastVisibleTextKey && durationRow}
                               </>
                             )
                           }
@@ -739,7 +721,6 @@ export const MessageItem = memo(function MessageItem({
                             return (
                               <SteeredPromptGroup
                                 texts={item.texts}
-                                bubble={hideSettingsBadges}
                                 settings={turnPrompt}
                                 worktreePath={worktreePath}
                                 serverId={
@@ -921,7 +902,7 @@ export const MessageItem = memo(function MessageItem({
               >
                 {fallbackPrePlanText}
               </Markdown>
-              {durationBadge}
+              {durationRow}
             </>
           )}
           {/* Fallback: Show tool calls first for assistant messages (old format) */}
@@ -968,7 +949,7 @@ export const MessageItem = memo(function MessageItem({
                     isFixedFn={handleIsFindingFixed}
                     disabled={isSending}
                   />
-                  {!fallbackPrePlanText && durationBadge}
+                  {!fallbackPrePlanText && durationRow}
                 </>
               ) : message.role === 'user' ? (
                 <div className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
@@ -983,7 +964,7 @@ export const MessageItem = memo(function MessageItem({
                   >
                     {withoutShownQuestion(displayContent)}
                   </Markdown>
-                  {!fallbackPrePlanText && durationBadge}
+                  {!fallbackPrePlanText && durationRow}
                 </>
               )}
             </div>
@@ -1038,22 +1019,11 @@ export const MessageItem = memo(function MessageItem({
       )}
     >
       {message.role === 'user' ? (
-        <div
-          className={cn(
-            'group flex max-w-[85%] min-w-0 items-end gap-1 sm:max-w-[70%]',
-            // Pill prompts: chrome left of the bubble, so its hidden row adds no height
-            hideSettingsBadges ? 'flex-row-reverse' : 'flex-col'
-          )}
-        >
+        <div className="group flex max-w-[85%] min-w-0 flex-col items-end gap-1 sm:max-w-[70%]">
           {/* react-doctor-disable-next-line react-doctor/no-static-element-interactions, react-doctor/click-events-have-key-events -- touch-only tap reveal; fine pointers/keyboard reveal details via group-hover/focus-within */}
           <div
             onClick={handleUserBubbleClick}
-            className={cn(
-              'max-w-full',
-              hideSettingsBadges
-                ? USER_PILL_BUBBLE_CLASS
-                : USER_CARD_BUBBLE_CLASS
-            )}
+            className={cn('max-w-full', USER_CARD_BUBBLE_CLASS)}
           >
             {messageBoxContent}
           </div>
@@ -1097,19 +1067,11 @@ export const MessageItem = memo(function MessageItem({
         </div>
       ) : (
         <div className="group/message group relative text-foreground/90 w-full min-w-0 break-words">
-          {bubble ? (
-            <>
-              <ReplyBubble>{messageBoxContent}</ReplyBubble>
-              {durationRow}
-            </>
-          ) : (
-            messageBoxContent
-          )}
+          {messageBoxContent}
           {!zenMode && assistantResponse && (
             <div
               className={cn(
-                'mt-1 flex',
-                bubble ? 'justify-start' : 'justify-end',
+                'mt-1 flex justify-end',
                 durationRow && 'md:hidden',
                 ASSISTANT_HOVER_REVEAL
               )}
@@ -1127,29 +1089,9 @@ export const MessageItem = memo(function MessageItem({
 
   // Custom right-click menu replaces the unusable browser default on the thread.
   if (message.role === 'user') {
-    // Jean's automatic agent updates are for the agent only; show its reply.
-    if (isAgentUpdateMessage(message.content)) return null
-    if (isChatContinuedMessage(message.content))
-      return (
-        <ChatContinuedNotice
-          content={message.content}
-          worktreeId={worktreeId}
-        />
-      )
     // Sub-session results live in the side panel; the stream keeps one line
     const sessionUpdates = parseSessionUpdates(message.content)
     if (sessionUpdates) return <SessionUpdateLine updates={sessionUpdates} />
-    // A message from an agent: one line that opens the conversation
-    const agentSent = parseAgentSentMessage(message.content)
-    if (agentSent)
-      return (
-        <AgentMessageFromRow
-          sent={agentSent}
-          sessionId={sessionId}
-          worktreeId={worktreeId}
-          worktreePath={worktreePath}
-        />
-      )
     return (
       <MessageThreadContextMenu
         messageText={displayContent}

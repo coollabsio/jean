@@ -23,7 +23,6 @@ interface UseChatWindowEventsParams {
   activeWorktreePath: string | null | undefined
   isModal: boolean
   /** False in agent chats: Shift+Tab does not toggle Plan mode */
-  allowPlanMode: boolean
   session: Session | null | undefined
   // Git diff
   gitStatus: { base_branch?: string; base_remote?: string } | null | undefined
@@ -72,7 +71,6 @@ export function useChatWindowEvents({
   activeWorktreeId,
   activeWorktreePath,
   isModal,
-  allowPlanMode,
   session,
   gitStatus,
   setDiffRequest,
@@ -191,7 +189,7 @@ export function useChatWindowEvents({
 
   // SHIFT+TAB: Toggle Plan mode (only dispatched while the composer is focused)
   useEffect(() => {
-    if (!activeSessionId || !allowPlanMode) return
+    if (!activeSessionId) return
     const handler = () => {
       const store = useChatStore.getState()
       store.cycleExecutionMode(activeSessionId)
@@ -217,7 +215,7 @@ export function useChatWindowEvents({
     }
     window.addEventListener('cycle-execution-mode', handler)
     return () => window.removeEventListener('cycle-execution-mode', handler)
-  }, [activeSessionId, activeWorktreeId, activeWorktreePath, allowPlanMode])
+  }, [activeSessionId, activeWorktreeId, activeWorktreePath])
 
   // CMD+G: Open git diff (also handles button clicks that dispatch with detail.type)
   useEffect(() => {

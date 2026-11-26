@@ -4265,26 +4265,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             )}
           </SettingsSection>
 
-          <SettingsSection
-            title="Experimental"
-            anchorId="pref-general-section-experimental"
-            collapsible
-            defaultOpen={false}
-          >
-            <InlineField
-              id="pref-general-coordinator"
-              label="Project Coordinator"
-              description="One coordinator chat per project that spawns worktrees and sessions for you."
-            >
-              <Switch
-                checked={preferences?.coordinator_enabled ?? false}
-                onCheckedChange={checked =>
-                  patchPreferences.mutate({ coordinator_enabled: checked })
-                }
-              />
-            </InlineField>
-          </SettingsSection>
-
           <div
             id="pref-general-section-version"
             className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-xs text-muted-foreground"

@@ -14,9 +14,8 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use crate::jean_mcp_core::{
-    handle_protocol_message, jsonrpc_error, tools_list_result, ToolCallRequest,
-    CLAUDE_PERMISSION_PROMPT_TOOL, JEAN_MCP_DEPTH_ENV, JEAN_MCP_SESSION_ENV, JEAN_MCP_SOCKET_ENV,
-    JEAN_MCP_TOKEN_ENV, TOOLS_LIST_METHOD,
+    handle_protocol_message, jsonrpc_error, ToolCallRequest, CLAUDE_PERMISSION_PROMPT_TOOL,
+    JEAN_MCP_DEPTH_ENV, JEAN_MCP_SESSION_ENV, JEAN_MCP_SOCKET_ENV, JEAN_MCP_TOKEN_ENV,
 };
 
 /// Default wait for a parent response.
@@ -69,7 +68,7 @@ fn handle_message(line: &str) -> Option<Value> {
         Err(e) => return Some(jsonrpc_error(None, -32700, &format!("Parse error: {e}"))),
     };
 
-    handle_protocol_message(body, list_tools, proxy_tool_call)
+    handle_protocol_message(body, proxy_tool_call)
 }
 
 /// (socket, token, calling session) of the Jean app this process talks to.
@@ -80,23 +79,6 @@ fn parent_connection() -> Result<(String, String, String), String> {
         std::env::var(JEAN_MCP_TOKEN_ENV).map_err(|_| format!("Missing {JEAN_MCP_TOKEN_ENV}"))?;
     let source = std::env::var(JEAN_MCP_SESSION_ENV).unwrap_or_else(|_| "anon".to_string());
     Ok((socket, token, source))
-}
-
-/// The tools the calling session may see. Only the Jean app knows whether the
-/// session is a coordinator chat. When it cannot be asked, the coordinator
-/// tools are left out.
-fn list_tools() -> Value {
-    parent_connection()
-        .and_then(|(socket, token, source)| {
-            proxy_to_parent(
-                &socket,
-                RESPONSE_TIMEOUT,
-                json!({ "token": token, "source": source, "method": TOOLS_LIST_METHOD }),
-            )
-        })
-        .ok()
-        .filter(|result| result.get("tools").is_some_and(Value::is_array))
-        .unwrap_or_else(|| tools_list_result(false))
 }
 
 fn proxy_tool_call(tool_call: ToolCallRequest) -> Result<Value, String> {

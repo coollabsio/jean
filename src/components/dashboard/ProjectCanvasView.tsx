@@ -20,7 +20,6 @@ import {
   useRef,
   useState,
   Suspense,
-  type ReactNode,
 } from 'react'
 import { useQueries, useQueryClient } from '@tanstack/react-query'
 import { invoke } from '@/lib/transport'
@@ -269,15 +268,6 @@ import { resolveModalWorktreeSnapshot } from './modal-worktree-snapshot'
 interface ProjectCanvasViewProps {
   projectId: string
   project: Project
-  /** Shown beside the project name (the Coordinator | Sessions switch) */
-  headerAccessory?: ReactNode
-  /**
-   * Session modal host for the coordinator view: hidden, with no keyboard
-   * navigation or restored selection, so canvas shortcuts stay inert while
-   * the chat has focus. It covers its positioned parent while its session
-   * modal is open.
-   */
-  embedded?: boolean
 }
 
 const EMPTY_PINNED_LABELS: LabelData[] = []
@@ -1135,8 +1125,6 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
 export function ProjectCanvasView({
   projectId,
   project,
-  headerAccessory,
-  embedded = false,
 }: ProjectCanvasViewProps) {
   useEffect(
     () => preloadWhenIdle([GitDiffModal.preload, LinkedProjectsModal.preload]),
@@ -2028,8 +2016,7 @@ export function ProjectCanvasView({
   const selectedWorktreeModalLatestRef = useLatestRef(selectedWorktreeModal)
   const handleCloseSessionModal = useCallback(() => {
     setSelectedWorktreeModal(null)
-    if (embedded) setSelectedIndex(null)
-  }, [embedded])
+  }, [])
   const handleRequestCloseModalWorktree = useCallback(() => {
     const modal = selectedWorktreeModalLatestRef.current
     if (modal) {
@@ -2331,7 +2318,7 @@ export function ProjectCanvasView({
   // of this project in the modal; otherwise only selects a card visually.
   // Prefers last opened per project, then persisted active session per worktree, falls back to first card
   useEffect(() => {
-    if (embedded || selectedIndex !== null || selectedWorktreeModal) return
+    if (selectedIndex !== null || selectedWorktreeModal) return
     if (flatCards.length === 0) return
 
     const { activeSessionIds, lastActiveWorktreeId, lastOpenedPerProject } =
@@ -2459,7 +2446,6 @@ export function ProjectCanvasView({
     }
   }, [
     flatCards,
-    embedded,
     selectedIndex,
     selectedWorktreeModal,
     projectId,
@@ -3103,7 +3089,7 @@ export function ProjectCanvasView({
     onNavigateRight: handleNavigateFilterTabRight,
     onMoveUp: () => moveSelectedWorktreeByKeyboard(-1),
     onMoveDown: () => moveSelectedWorktreeByKeyboard(1),
-    enabled: !isModalOpen && !embedded,
+    enabled: !isModalOpen,
     onSelectionChange: syncSelectionToStore,
   })
 
@@ -3289,15 +3275,7 @@ export function ProjectCanvasView({
     !!selectedWorktreeModal && !!selectedModalWorktree && !!project
 
   return (
-    <div
-      // Embedded: hidden until its session modal opens, then it covers the
-      // host view (the modal renders inline, not in a portal)
-      hidden={embedded && !sessionModalOpen}
-      className={cn(
-        'relative flex h-full flex-col',
-        embedded && 'absolute inset-0 z-20 bg-background'
-      )}
-    >
+    <div className="relative flex h-full flex-col">
       <div className="flex-1 flex flex-col overflow-auto">
         {/* Header and filters - sticky together over content */}
         <div className="sticky top-0 z-10 bg-background/60 backdrop-blur-md">
@@ -3313,7 +3291,6 @@ export function ProjectCanvasView({
                 <h2 className="truncate text-sm font-normal text-muted-foreground">
                   {project.name}
                 </h2>
-                {headerAccessory}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
@@ -3993,7 +3970,7 @@ export function ProjectCanvasView({
                             openPRs={openPRs}
                             cards={section.cards}
                             showDetails={true}
-                            compact={isMobile || embedded}
+                            compact={isMobile}
                             isSelected={selectedIndex === currentIndex}
                             rowIndex={currentIndex}
                             onRowClick={handleSectionRowClick}

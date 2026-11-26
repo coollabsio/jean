@@ -49,8 +49,6 @@ export interface ChatToolbarProps {
   hasPendingAttachments: boolean
   hasInputValue: boolean
   executionMode: ExecutionMode
-  /** Agent chats cannot use Plan mode */
-  hidePlanMode?: boolean
   selectedBackend: Backend
   selectedModel: string
   selectedProvider: string | null

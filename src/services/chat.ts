@@ -292,7 +292,7 @@ export const SEND_MESSAGE_MUTATION_KEY = ['chat', 'send-message'] as const
 /**
  * True while this client's useSendMessage call for the session is in flight.
  * Its onSuccess then replaces the chat:done message with the backend one.
- * Turns started elsewhere (agent wakes, MCP, schedules, other clients) have
+ * Turns started elsewhere (MCP, schedules, other clients) have
  * no such call.
  */
 export function hasLocalSendInFlight(

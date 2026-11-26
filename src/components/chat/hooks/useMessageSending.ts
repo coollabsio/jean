@@ -47,7 +47,6 @@ import {
 import { applySessionSettingToSession } from './session-setting-sync'
 import { saveQueuedMessageEdit } from './useQueuedPromptActions'
 import { CODEX_GOAL_TURN_PREFIX } from '../goal-utils'
-import { resolveMentions, type MentionCandidate } from '../agent-mentions'
 
 interface UseMessageSendingParams {
   activeSessionId: string | null | undefined
@@ -64,8 +63,6 @@ interface UseMessageSendingParams {
   mcpServersDataRef: RefObject<McpServerInfo[] | undefined>
   enabledMcpServersRef: RefObject<string[]>
   selectedBackendRef: RefObject<CliBackend>
-  /** Agent chats: `@` mention candidates; undefined in project chats */
-  mentionCandidatesRef?: RefObject<MentionCandidate[] | undefined>
   preferences:
     | {
         custom_cli_profiles?: { name: string }[]
@@ -93,12 +90,6 @@ interface UseMessageSendingParams {
   markAtBottom: () => void
   clearInputDraft: (sessionId: string) => void
   clearChatInputState: () => void
-  /**
-   * Agent (coordinator) chats: a prompt sent while a turn runs always steers
-   * into it on steer-capable backends, never queues (falls back to the queue
-   * only when the steer fails).
-   */
-  alwaysSteer?: boolean
 }
 
 const PLAN_TURN_PROMPT =
@@ -145,7 +136,6 @@ export function useMessageSending({
   mcpServersDataRef,
   enabledMcpServersRef,
   selectedBackendRef,
-  mentionCandidatesRef,
   preferences,
   sendMessage,
   createSession,
@@ -153,7 +143,6 @@ export function useMessageSending({
   markAtBottom,
   clearInputDraft,
   clearChatInputState,
-  alwaysSteer = false,
 }: UseMessageSendingParams) {
   // Installed backends for availability; auth map for login gate at send time.
   const { installedBackends, isLoading: backendsLoading } =
@@ -381,10 +370,6 @@ export function useMessageSending({
       const files = getPendingFiles(activeSessionId ?? '')
       const skills = getPendingSkills(activeSessionId ?? '')
       const textFiles = getPendingTextFiles(activeSessionId ?? '')
-      const mentionCandidates = mentionCandidatesRef?.current
-      const mentions = mentionCandidates
-        ? resolveMentions(textMessage, mentionCandidates)
-        : []
 
       if (
         !textMessage &&
@@ -410,7 +395,6 @@ export function useMessageSending({
             pendingFiles: files,
             pendingSkills: skills,
             pendingTextFiles: textFiles,
-            ...(mentionCandidates ? { mentions } : {}),
           }
         )
         if (saved) {
@@ -712,7 +696,6 @@ export function useMessageSending({
         pendingFiles: files,
         pendingSkills: skills,
         pendingTextFiles: textFiles,
-        ...(mentions.length > 0 ? { mentions } : {}),
         model: selectedModelRef.current,
         provider: selectedProviderRef.current,
         executionMode: mode,
@@ -759,8 +742,7 @@ export function useMessageSending({
         const backend = selectedBackendRef.current
         if (
           isSteerCapableBackend(backend, preferences) &&
-          (alwaysSteer ||
-            options?.forceSteer ||
+          (options?.forceSteer ||
             (!options?.forceQueue &&
               isBackendAutoSteerEnabled(backend, preferences)))
         ) {
@@ -815,10 +797,9 @@ export function useMessageSending({
         }
         console.log(`[Send] handleSubmit ENQUEUING (session is sending)`)
         // An explicit queue must not be steered by the backend queue drain.
-        const toEnqueue =
-          options?.forceQueue && !alwaysSteer
-            ? { ...queuedMessage, noSteer: true }
-            : queuedMessage
+        const toEnqueue = options?.forceQueue
+          ? { ...queuedMessage, noSteer: true }
+          : queuedMessage
         enqueueMessage(activeSessionId, toEnqueue)
         persistEnqueue(
           activeWorktreeId,
@@ -835,7 +816,6 @@ export function useMessageSending({
       activeSessionId,
       activeWorktreeId,
       activeWorktreePath,
-      alwaysSteer,
       authByBackend,
       authLoading,
       backendsLoading,
@@ -848,7 +828,6 @@ export function useMessageSending({
       refetchAuth,
       sendMessageNow,
       inputRef,
-      mentionCandidatesRef,
       selectedBackendRef,
       selectedProviderRef,
       executionModeRef,

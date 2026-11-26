@@ -262,24 +262,6 @@ describe('GeneralPane settings structure', () => {
     }
   })
 
-  it('groups experimental features in the collapsed Experimental section', () => {
-    const source = readFileSync(
-      'src/components/preferences/panes/GeneralPane.tsx',
-      'utf8'
-    )
-    const experimentalIndex = source.indexOf('title="Experimental"')
-    const experimental = source.slice(
-      experimentalIndex,
-      source.indexOf('</SettingsSection>', experimentalIndex)
-    )
-
-    expect(experimentalIndex).toBeGreaterThan(-1)
-    expect(experimental).toContain('defaultOpen={false}')
-    expect(experimental).toContain('coordinator_enabled')
-    // Shown to every user, not only to those who already turned it on
-    expect(source).not.toContain('{preferences?.coordinator_enabled && (')
-  })
-
   it('marks the GitLab CLI settings section as beta', () => {
     const source = readFileSync(
       'src/components/preferences/panes/GeneralPane.tsx',

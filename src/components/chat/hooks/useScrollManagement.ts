@@ -9,7 +9,6 @@ import {
 import type { RefObject } from 'react'
 import type { MessageListHandle } from '../message-list-handle'
 import type { ChatMessage } from '@/types/chat'
-import { isAgentUpdateMessage } from '../message-content-utils'
 import { useIsMobile } from '@/hooks/use-mobile'
 import {
   getDefaultVisibleCount,
@@ -1041,8 +1040,6 @@ export function useScrollManagement({
     // Only a real append (previous tail still present), not a session switch
     // or an optimistic message id swap.
     if (!prevLastId || !messages?.some(m => m.id === prevLastId)) return
-    // Agent update prompts are hidden from the chat transcript.
-    if (isAgentUpdateMessage(last.content)) return
     const viewport = scrollViewportRef.current
     if (viewport) scrollToTail(viewport)
     markAtBottom()
