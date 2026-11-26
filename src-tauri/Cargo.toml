@@ -47,7 +47,7 @@ sha2 = "0.10"
 keyring = { version = "=2.3.3", default-features = false, features = ["platform-macos", "platform-windows"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSColor", "NSResponder"] }
+objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSColor", "NSResponder", "NSButton", "NSControl", "NSView"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Intercept OS file drops at the GTK widget level so WebKitGTK does not navigate
