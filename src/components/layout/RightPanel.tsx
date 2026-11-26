@@ -1,4 +1,9 @@
 import { useCallback } from 'react'
+import { createPortal } from 'react-dom'
+import {
+  TITLEBAR_RIGHT_PANEL_SLOT_ID,
+  useTitleBarSlot,
+} from '@/components/titlebar/breadcrumb-slot'
 import {
   Folder,
   Globe,
@@ -151,6 +156,12 @@ export function RightPanel() {
   const tab = useUIStore(state => state.rightPanelTab)
   const openTabs = useUIStore(state => state.rightPanelOpenTabs)
   const isMobile = useIsMobile()
+  const zenMode = useUIStore(state => state.zenMode)
+  // Desktop: Open in and Add tab live in the window title bar
+  const titleBarSlot = useTitleBarSlot(
+    TITLEBAR_RIGHT_PANEL_SLOT_ID,
+    !isMobile && !zenMode
+  )
   const panelWidth = useUIStore(state => state.fileBrowserSize)
   const worktreeId = useRightPanelWorktreeId()
   const { data: worktree } = useWorktree(worktreeId)
@@ -173,8 +184,67 @@ export function RightPanel() {
   const tabs = openTabs.flatMap(id => available.filter(t => t.id === id))
   const activeTab = tabs.some(t => t.id === tab) ? tab : (tabs[0]?.id ?? null)
 
+  const addTabMenu = (
+    <DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              aria-label="Add tab"
+              data-testid="right-panel-add-tab"
+              className={cn(
+                'shrink-0',
+                titleBarSlot
+                  ? 'rounded-none text-foreground/70 hover:text-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              <Plus className="size-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">Add tab</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent align="start" className="min-w-44">
+        {available.map(({ id, label, icon: Icon, shortcut }) => (
+          <DropdownMenuItem
+            key={id}
+            disabled={id !== 'files' && !canShowWorktreeTab}
+            onSelect={() => selectTab(id, worktreeId)}
+          >
+            <Icon className="size-4" />
+            {label}
+            <DropdownMenuShortcut>{shortcut}</DropdownMenuShortcut>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+  const renderOpenIn = (inTitleBar: boolean) =>
+    worktreeId &&
+    worktreePath && (
+      <OpenInButton
+        inTitleBar={inTitleBar}
+        worktreeId={worktreeId}
+        worktreePath={worktreePath}
+        serverId={worktree?.serverId}
+        branch={worktree?.branch}
+        server={project?.server}
+      />
+    )
+
   return (
     <div className="flex h-full min-h-0 flex-col">
+      {titleBarSlot &&
+        createPortal(
+          <>
+            {renderOpenIn(true)}
+            {addTabMenu}
+          </>,
+          titleBarSlot
+        )}
       <div className="flex h-9 shrink-0 items-center gap-0.5 border-b border-border/20 px-1">
         <div
           role="tablist"
@@ -210,47 +280,9 @@ export function RightPanel() {
               </button>
             </div>
           ))}
-          <DropdownMenu>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    aria-label="Add tab"
-                    data-testid="right-panel-add-tab"
-                    className="shrink-0 text-muted-foreground hover:text-foreground"
-                  >
-                    <Plus className="size-3.5" />
-                  </Button>
-                </DropdownMenuTrigger>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">Add tab</TooltipContent>
-            </Tooltip>
-            <DropdownMenuContent align="start" className="min-w-44">
-              {available.map(({ id, label, icon: Icon, shortcut }) => (
-                <DropdownMenuItem
-                  key={id}
-                  disabled={id !== 'files' && !canShowWorktreeTab}
-                  onSelect={() => selectTab(id, worktreeId)}
-                >
-                  <Icon className="size-4" />
-                  {label}
-                  <DropdownMenuShortcut>{shortcut}</DropdownMenuShortcut>
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {!titleBarSlot && addTabMenu}
         </div>
-        {worktreeId && worktreePath && (
-          <OpenInButton
-            worktreeId={worktreeId}
-            worktreePath={worktreePath}
-            serverId={worktree?.serverId}
-            branch={worktree?.branch}
-            server={project?.server}
-          />
-        )}
+        {!titleBarSlot && renderOpenIn(false)}
         {isMobile && (
           <Button
             variant="ghost"

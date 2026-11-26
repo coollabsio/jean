@@ -51,6 +51,8 @@ interface OpenInButtonProps {
   className?: string
   /** Server project: open its home directory (remote over SSH), no GitHub */
   server?: ProjectServer | null
+  /** Plain text style for the window title bar */
+  inTitleBar?: boolean
 }
 
 export function OpenInButton({
@@ -60,6 +62,7 @@ export function OpenInButton({
   branch: worktreeBranch,
   className,
   server,
+  inTitleBar = false,
 }: OpenInButtonProps) {
   const branch = server ? null : worktreeBranch
   const { data: preferences } = usePreferences()
@@ -175,6 +178,78 @@ export function OpenInButton({
 
   if (!canEditor && !canTerminal && !canFinder) return null
 
+  const menuContent = (
+    <DropdownMenuContent align="end">
+      {canEditor && (
+        <DropdownMenuItem onSelect={() => openAction('editor')}>
+          <Code className="h-4 w-4" />
+          {getOpenInDefaultLabel(
+            'editor',
+            preferences?.editor,
+            preferences?.terminal
+          )}
+        </DropdownMenuItem>
+      )}
+      {canTerminal && (
+        <DropdownMenuItem onSelect={() => openAction('terminal')}>
+          <Terminal className="h-4 w-4" />
+          {getOpenInDefaultLabel(
+            'terminal',
+            preferences?.editor,
+            preferences?.terminal
+          )}
+        </DropdownMenuItem>
+      )}
+      {canFinder && (
+        <DropdownMenuItem onSelect={() => openAction('finder')}>
+          <FolderOpen className="h-4 w-4" />
+          Finder
+        </DropdownMenuItem>
+      )}
+      {branch && (
+        <DropdownMenuItem onSelect={() => openAction('github')}>
+          {gitProvider === 'gitlab' ? (
+            <GitLabIcon className="h-4 w-4" />
+          ) : (
+            <Github className="h-4 w-4" />
+          )}
+          {forgeName}
+        </DropdownMenuItem>
+      )}
+      <DropdownMenuSeparator />
+      <DropdownMenuItem onSelect={() => openPreferencesPane('general')}>
+        <Settings className="h-4 w-4" />
+        Change default...
+      </DropdownMenuItem>
+    </DropdownMenuContent>
+  )
+
+  if (inTitleBar) {
+    return (
+      <div className={cn('flex h-6 items-center', className)}>
+        <button
+          type="button"
+          className="px-1.5 h-full text-xs text-foreground/70 hover:text-foreground"
+          onClick={() => openAction(effectiveDefault)}
+        >
+          Open in {defaultLabel}
+        </button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="flex h-full items-center pr-1 text-foreground/70 hover:text-foreground"
+              aria-label="More open options"
+            >
+              <ChevronDown className="size-3" />
+            </button>
+          </DropdownMenuTrigger>
+          {menuContent}
+        </DropdownMenu>
+      </div>
+    )
+  }
+
   return (
     <div
       className={cn(
@@ -213,49 +288,7 @@ export function OpenInButton({
             <ChevronDown className="size-3" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          {canEditor && (
-            <DropdownMenuItem onSelect={() => openAction('editor')}>
-              <Code className="h-4 w-4" />
-              {getOpenInDefaultLabel(
-                'editor',
-                preferences?.editor,
-                preferences?.terminal
-              )}
-            </DropdownMenuItem>
-          )}
-          {canTerminal && (
-            <DropdownMenuItem onSelect={() => openAction('terminal')}>
-              <Terminal className="h-4 w-4" />
-              {getOpenInDefaultLabel(
-                'terminal',
-                preferences?.editor,
-                preferences?.terminal
-              )}
-            </DropdownMenuItem>
-          )}
-          {canFinder && (
-            <DropdownMenuItem onSelect={() => openAction('finder')}>
-              <FolderOpen className="h-4 w-4" />
-              Finder
-            </DropdownMenuItem>
-          )}
-          {branch && (
-            <DropdownMenuItem onSelect={() => openAction('github')}>
-              {gitProvider === 'gitlab' ? (
-                <GitLabIcon className="h-4 w-4" />
-              ) : (
-                <Github className="h-4 w-4" />
-              )}
-              {forgeName}
-            </DropdownMenuItem>
-          )}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => openPreferencesPane('general')}>
-            <Settings className="h-4 w-4" />
-            Change default...
-          </DropdownMenuItem>
-        </DropdownMenuContent>
+        {menuContent}
       </DropdownMenu>
     </div>
   )

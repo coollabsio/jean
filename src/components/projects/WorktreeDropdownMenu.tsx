@@ -3,6 +3,7 @@ import {
   AlertCircle,
   CircleDot,
   Code,
+  Folder,
   FolderOpen,
   GitBranch,
   GitPullRequestArrow,
@@ -83,6 +84,8 @@ interface WorktreeDropdownMenuProps {
   serverProject?: Project | null
   /** Closes the open chat session (not the worktree) */
   onCloseSession?: () => void
+  /** Renders the trigger as a window title bar button */
+  inTitleBar?: boolean
 }
 
 const BADGE_STALE_TIME = 5 * 60 * 1000
@@ -103,6 +106,7 @@ export function WorktreeDropdownMenu({
   onRunPackageScript,
   serverProject,
   onCloseSession,
+  inTitleBar = false,
 }: WorktreeDropdownMenuProps) {
   const server = serverProject?.server
   const isServer = !!server
@@ -273,15 +277,27 @@ export function WorktreeDropdownMenu({
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className="text-muted-foreground hover:text-foreground"
-            onClick={e => e.stopPropagation()}
-            aria-label="Actions"
-          >
-            <MoreHorizontal className="h-4 w-4" />
-          </Button>
+          {inTitleBar ? (
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              className="rounded-none text-foreground/70 hover:text-foreground"
+              onClick={e => e.stopPropagation()}
+              aria-label="Actions"
+            >
+              <Folder className="size-3.5" />
+            </Button>
+          ) : (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="text-muted-foreground hover:text-foreground"
+              onClick={e => e.stopPropagation()}
+              aria-label="Actions"
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          )}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-48">
           <DropdownMenuItem

@@ -11,11 +11,17 @@ import {
   type RefObject,
 } from 'react'
 import { createPortal } from 'react-dom'
-import { useTitleBarBreadcrumbSlot } from '@/components/titlebar/breadcrumb-slot'
+import {
+  TITLEBAR_BREADCRUMB_SLOT_ID,
+  TITLEBAR_ACTIONS_SLOT_ID,
+  TITLEBAR_PROJECT_MENU_SLOT_ID,
+  useTitleBarSlot,
+} from '@/components/titlebar/breadcrumb-slot'
 import {
   GitBranchPlus,
   GitPullRequestArrow,
   Plus,
+  X,
 } from '@/components/icons/reicon'
 import { ModalCloseButton } from '@/components/ui/modal-close-button'
 import { cn } from '@/lib/utils'
@@ -319,7 +325,19 @@ export const SessionChatModal = memo(function SessionChatModal({
   const { data: packageScripts = [] } = usePackageScripts(worktreePath, {
     worktreeId,
   })
-  const titleBarSlot = useTitleBarBreadcrumbSlot(!isMobile)
+  const titleBarSlot = useTitleBarSlot(TITLEBAR_BREADCRUMB_SLOT_ID, !isMobile)
+  // Desktop: the worktree menu sits next to Settings and the actions on the
+  // right side of the window title bar, so the session header row goes away
+  const titleBarMenuSlot = useTitleBarSlot(
+    TITLEBAR_PROJECT_MENU_SLOT_ID,
+    !isMobile && !zenMode
+  )
+  const titleBarActionsSlot = useTitleBarSlot(
+    TITLEBAR_ACTIONS_SLOT_ID,
+    !isMobile && !zenMode
+  )
+  const headerInTitleBar =
+    !!titleBarSlot && !!titleBarMenuSlot && !!titleBarActionsSlot
   // Horizontal scroll on session tabs
   const modalTabScrollRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -1051,7 +1069,7 @@ export const SessionChatModal = memo(function SessionChatModal({
     <h2
       className={cn(
         'text-sm font-medium min-w-0 truncate',
-        !isMobile && !titleBarSlot && 'flex-1'
+        !isMobile && !headerInTitleBar && 'flex-1'
       )}
     >
       {project && !isMobile && !isServer && (
@@ -1090,6 +1108,7 @@ export const SessionChatModal = memo(function SessionChatModal({
       packageScripts={packageScripts}
       onRunPackageScript={handlePackageScript}
       serverProject={project.server ? project : null}
+      inTitleBar={headerInTitleBar}
       onCloseSession={
         currentSessionId && !isServer
           ? () =>
@@ -1202,7 +1221,56 @@ export const SessionChatModal = memo(function SessionChatModal({
           </div>
         )}
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          {!zenMode && (
+          {!zenMode &&
+            headerInTitleBar &&
+            titleBarSlot &&
+            titleBarMenuSlot &&
+            titleBarActionsSlot && (
+              <>
+                {createPortal(
+                  <div className="flex min-w-0 items-center gap-2">
+                    {sessionTitle}
+                    {gitBadges}
+                  </div>,
+                  titleBarSlot
+                )}
+                {createPortal(worktreeMenu, titleBarMenuSlot)}
+                {createPortal(
+                  <>
+                    {currentSessionId && !project?.server && (
+                      <TerminalMagicButton sessionId={currentSessionId} />
+                    )}
+                    {currentSessionId && (
+                      <DevToolsDropdown
+                        sessionId={currentSessionId}
+                        worktreeId={worktreeId}
+                        worktreePath={worktreePath}
+                        session={currentSession}
+                      />
+                    )}
+                    {!isServer && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-xs"
+                            aria-label="Close"
+                            className="rounded-none text-foreground/70 hover:text-foreground"
+                            onClick={handleClose}
+                          >
+                            <X className="size-3.5" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Close</TooltipContent>
+                      </Tooltip>
+                    )}
+                  </>,
+                  titleBarActionsSlot
+                )}
+              </>
+            )}
+          {!zenMode && !headerInTitleBar && (
             <div className="shrink-0 sm:text-left">
               <div
                 className={cn(
@@ -1225,9 +1293,7 @@ export const SessionChatModal = memo(function SessionChatModal({
                       isMobile ? 'flex min-w-0 items-center gap-2' : 'contents'
                     )}
                   >
-                    {titleBarSlot
-                      ? createPortal(sessionTitle, titleBarSlot)
-                      : sessionTitle}
+                    {sessionTitle}
                     {worktreeMenu}
                   </div>
                   {isMobile ? (
