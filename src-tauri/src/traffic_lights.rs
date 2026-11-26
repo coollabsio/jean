@@ -16,8 +16,6 @@ mod imp {
     struct Defaults {
         /// Close button x, in title bar view points.
         x: f64,
-        /// Distance from the top of the title bar to the button center.
-        center_from_top: f64,
         /// Title bar container height.
         height: f64,
         /// Distance between two button origins.
@@ -27,27 +25,27 @@ mod imp {
     }
 
     static DEFAULTS: OnceLock<Defaults> = OnceLock::new();
-    static ZOOM: Mutex<f64> = Mutex::new(1.0);
+    /// Last `(zoom, center_y)` request; `None` until the frontend sets one.
+    static TARGET: Mutex<Option<(f64, f64)>> = Mutex::new(None);
 
     /// Must run on the main thread.
-    pub fn apply(window: &tauri::Window, zoom: f64) -> Result<f64, String> {
-        *ZOOM.lock().map_err(|error| error.to_string())? = zoom;
-        layout(window, zoom)
+    pub fn apply(window: &tauri::Window, zoom: f64, center_y: f64) -> Result<f64, String> {
+        *TARGET.lock().map_err(|error| error.to_string())? = Some((zoom, center_y));
+        layout(window, zoom, center_y)
     }
 
     /// Must run on the main thread.
     pub fn reapply(window: &tauri::Window) {
-        let zoom = ZOOM.lock().map(|zoom| *zoom).unwrap_or(1.0);
-        if (zoom - 1.0).abs() < 0.001 && DEFAULTS.get().is_none() {
+        let Some((zoom, center_y)) = TARGET.lock().ok().and_then(|target| *target) else {
             return;
-        }
-        if let Err(error) = layout(window, zoom) {
+        };
+        if let Err(error) = layout(window, zoom, center_y) {
             log::warn!("Failed to reposition traffic lights: {error}");
         }
     }
 
     /// Returns the button span in points (from close left to zoom right edge).
-    fn layout(window: &tauri::Window, zoom: f64) -> Result<f64, String> {
+    fn layout(window: &tauri::Window, zoom: f64, center_y: f64) -> Result<f64, String> {
         let pointer = window.ns_window().map_err(|error| error.to_string())?;
         if pointer.is_null() {
             return Err("ns_window pointer is null".to_string());
@@ -80,24 +78,16 @@ mod imp {
         let button_frame = close.frame();
         let button_height = button_frame.size.height;
         let defaults = *DEFAULTS.get_or_init(|| {
-            let view_height = title_bar_view.frame().size.height;
-            let center = button_frame.origin.y + button_height / 2.0;
             let zoom_frame = zoom_button.frame();
             Defaults {
                 x: button_frame.origin.x,
-                center_from_top: if title_bar_view.isFlipped() {
-                    center
-                } else {
-                    view_height - center
-                },
                 height: container.frame().size.height,
                 spacing: minimize.frame().origin.x - button_frame.origin.x,
                 span: zoom_frame.origin.x + zoom_frame.size.width - button_frame.origin.x,
             }
         });
 
-        let center_from_top = defaults.center_from_top * zoom;
-        let height = (defaults.height * zoom).max(center_from_top + button_height / 2.0);
+        let height = (defaults.height * zoom).max(center_y + button_height / 2.0);
 
         let mut container_frame = container.frame();
         container_frame.size.height = height;
@@ -109,15 +99,15 @@ mod imp {
         view_frame.size.height = height;
         title_bar_view.setFrame(view_frame);
 
-        let center_y = if title_bar_view.isFlipped() {
-            center_from_top
+        let center = if title_bar_view.isFlipped() {
+            center_y
         } else {
-            height - center_from_top
+            height - center_y
         };
         for (index, button) in [&close, &minimize, &zoom_button].into_iter().enumerate() {
             let mut origin = button.frame().origin;
             origin.x = defaults.x * zoom + index as f64 * defaults.spacing;
-            origin.y = center_y - button_height / 2.0;
+            origin.y = center - button_height / 2.0;
             button.setFrameOrigin(origin);
         }
 
@@ -126,15 +116,21 @@ mod imp {
 }
 
 /// Moves the traffic lights to match the UI zoom (1.0 = 100%).
+/// `center_y` is the button center from the window top, in points, so the
+/// buttons line up with the web title bar icons.
 /// Returns the button group width in points, or `None` off macOS.
 /// Sync command: Tauri runs it on the main thread, which AppKit requires.
 #[tauri::command]
-pub fn set_traffic_light_zoom(window: tauri::Window, zoom: f64) -> Result<Option<f64>, String> {
-    if !zoom.is_finite() || zoom <= 0.0 {
-        return Err(format!("invalid zoom: {zoom}"));
+pub fn set_traffic_light_zoom(
+    window: tauri::Window,
+    zoom: f64,
+    center_y: f64,
+) -> Result<Option<f64>, String> {
+    if !zoom.is_finite() || zoom <= 0.0 || !center_y.is_finite() || center_y <= 0.0 {
+        return Err(format!("invalid traffic light zoom: {zoom}, {center_y}"));
     }
     #[cfg(target_os = "macos")]
-    return imp::apply(&window, zoom).map(Some);
+    return imp::apply(&window, zoom, center_y).map(Some);
     #[cfg(not(target_os = "macos"))]
     {
         let _ = window;

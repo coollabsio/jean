@@ -10,6 +10,11 @@ const tickValues = zoomLevelTicks.map(t => t.value)
 
 /** Gap from the window edge to the title bar actions at 100% zoom (CSS px). */
 const MAC_TITLEBAR_ACTION_LEFT_INSET = 68
+/**
+ * Center of the title bar icons from the window top (CSS px): the h-8 bar
+ * centers the actions, and their 4px top padding moves the icons down 2px.
+ */
+const MAC_TITLEBAR_ICON_CENTER = 18
 
 function findNearestTickIndex(zoom: number): number {
   let closest = 0
@@ -60,14 +65,16 @@ async function applyZoom(scaleFactor: number) {
 }
 
 /**
- * Move the native macOS traffic lights with the zoom. AppKit buttons keep
- * their size, so only their position scales; the action inset follows them.
+ * Move the native macOS traffic lights with the zoom and center them on the
+ * title bar icons. AppKit buttons keep their size, so only their position
+ * scales; the action inset follows them.
  */
 async function moveTrafficLights(scaleFactor: number) {
   try {
     const { invoke } = await import('@tauri-apps/api/core')
     const span = await invoke<number | null>('set_traffic_light_zoom', {
       zoom: scaleFactor,
+      centerY: MAC_TITLEBAR_ICON_CENTER * scaleFactor,
     })
     const root = document.documentElement
     // A newer zoom change already ran; do not write a stale inset.

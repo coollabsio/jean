@@ -163,6 +163,7 @@ describe('useZoom', () => {
     await waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith('set_traffic_light_zoom', {
         zoom: 1.25,
+        centerY: 22.5,
       })
     })
     // Buttons keep their 52pt width; the 68px gap scales with the zoom.
