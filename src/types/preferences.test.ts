@@ -141,7 +141,7 @@ describe('magic prompt preference resolvers', () => {
 
   it('defaults Claude to Opus 5.5 and Codex/OpenCode to GPT 6.1 Sol', () => {
     expect(defaultPreferences.selected_model).toBe('claude-opus-5-5')
-    expect(defaultPreferences.selected_codex_model).toBe('gpt-6.1-sol')
+    expect(defaultPreferences.selected_codex_model).toBe('gpt-6.2-sol')
     expect(defaultPreferences.selected_opencode_model).toBe(
       'opencode/gpt-6.1-sol'
     )

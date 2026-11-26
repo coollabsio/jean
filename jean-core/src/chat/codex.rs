@@ -683,6 +683,8 @@ fn emit_codex_plan_tool_call(
 /// to end in `-fast` are left unchanged.
 pub(crate) fn split_fast_model(model: &str) -> (&str, bool) {
     match model {
+        "gpt-6.2-sol-fast" => ("gpt-6.2-sol", true),
+        "gpt-6.2-astra-fast" => ("gpt-6.2-astra", true),
         "gpt-6.1-sol-fast" => ("gpt-6.1-sol", true),
         "gpt-6.1-terra-fast" => ("gpt-6.1-terra", true),
         "gpt-6-astra-fast" => ("gpt-6-astra", true),
@@ -6449,6 +6451,12 @@ mod tests {
             ("gpt-6.1-terra", true)
         );
         assert_eq!(split_fast_model("gpt-6.1-terra"), ("gpt-6.1-terra", false));
+        assert_eq!(split_fast_model("gpt-6.2-sol-fast"), ("gpt-6.2-sol", true));
+        assert_eq!(
+            split_fast_model("gpt-6.2-astra-fast"),
+            ("gpt-6.2-astra", true)
+        );
+        assert_eq!(split_fast_model("gpt-6.2-sol"), ("gpt-6.2-sol", false));
     }
 
     #[test]

@@ -172,7 +172,7 @@ const fallbackModelCatalog: ModelCatalog = {
   updated_at: 'bundled',
   defaults: {
     claude: 'claude-opus-5-5',
-    codex: 'gpt-6.1-sol',
+    codex: 'gpt-6.2-sol',
     opencode: 'opencode/gpt-6.1-sol',
     grok: 'grok/grok-4.6',
   },

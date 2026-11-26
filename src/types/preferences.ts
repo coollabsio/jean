@@ -1023,13 +1023,13 @@ function makeMagicPromptModelsPreset(
   }
 }
 
-/** Codex preset: use GPT-6.1 Sol for all magic prompts */
+/** Codex preset: use GPT-6.2 Sol for all magic prompts */
 export const CODEX_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
-  makeMagicPromptModelsPreset('gpt-6.1-sol')
+  makeMagicPromptModelsPreset('gpt-6.2-sol')
 
-/** Codex fast preset: use GPT-6.1 Sol Fast for all magic prompts */
+/** Codex fast preset: use GPT-6.2 Sol Fast for all magic prompts */
 export const CODEX_FAST_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
-  makeMagicPromptModelsPreset('gpt-6.1-sol-fast')
+  makeMagicPromptModelsPreset('gpt-6.2-sol-fast')
 
 /** GPT-5.6 Codex presets for all magic prompts */
 export const CODEX_56_SOL_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
@@ -2147,6 +2147,10 @@ export const effortLevelOptions: {
 // Codex Types
 // =============================================================================
 export type CodexModel =
+  | 'gpt-6.2-sol'
+  | 'gpt-6.2-sol-fast'
+  | 'gpt-6.2-astra'
+  | 'gpt-6.2-astra-fast'
   | 'gpt-6.1-sol'
   | 'gpt-6.1-sol-fast'
   | 'gpt-6.1-terra'
@@ -2179,6 +2183,8 @@ export type CodexModel =
 // Codex models that support fast service tier. Fast mode is exposed via a
 // separate UI toggle, not as standalone dropdown entries.
 export const CODEX_FAST_MODEL_MAP = {
+  'gpt-6.2-sol': 'gpt-6.2-sol-fast',
+  'gpt-6.2-astra': 'gpt-6.2-astra-fast',
   'gpt-6.1-sol': 'gpt-6.1-sol-fast',
   'gpt-6.1-terra': 'gpt-6.1-terra-fast',
   'gpt-6-astra': 'gpt-6-astra-fast',
@@ -2229,6 +2235,8 @@ export function getCodexFastInfo(model: string): CodexFastInfo {
 }
 
 export const codexModelOptions: { value: CodexModel; label: string }[] = [
+  { value: 'gpt-6.2-sol', label: 'GPT 6.2 Sol' },
+  { value: 'gpt-6.2-astra', label: 'GPT 6.2 Astra' },
   { value: 'gpt-6.1-sol', label: 'GPT 6.1 Sol' },
   { value: 'gpt-6.1-terra', label: 'GPT 6.1 Terra' },
   { value: 'gpt-6-astra', label: 'GPT 6 Astra' },
@@ -2252,6 +2260,10 @@ export const codexDefaultModelOptions: {
   value: CodexModel
   label: string
 }[] = [
+  { value: 'gpt-6.2-sol', label: 'GPT 6.2 Sol' },
+  { value: 'gpt-6.2-sol-fast', label: 'GPT 6.2 Sol Fast' },
+  { value: 'gpt-6.2-astra', label: 'GPT 6.2 Astra' },
+  { value: 'gpt-6.2-astra-fast', label: 'GPT 6.2 Astra Fast' },
   { value: 'gpt-6.1-sol', label: 'GPT 6.1 Sol' },
   { value: 'gpt-6.1-sol-fast', label: 'GPT 6.1 Sol Fast' },
   { value: 'gpt-6.1-terra', label: 'GPT 6.1 Terra' },
@@ -2278,6 +2290,8 @@ export const codexDefaultModelOptions: {
     option =>
       // react-doctor-disable-next-line react-doctor/js-set-map-lookups -- runs once at module load over a short model list
       ![
+        'gpt-6.2-sol',
+        'gpt-6.2-astra',
         'gpt-6.1-sol',
         'gpt-6.1-terra',
         'gpt-6-astra',
@@ -2318,7 +2332,7 @@ export function normalizeCodexModel(model: string): CodexModel {
     ]
   }
 
-  return isCodexModel(model) ? model : 'gpt-6.1-sol'
+  return isCodexModel(model) ? model : 'gpt-6.2-sol'
 }
 
 export type CodexReasoningEffort = string
@@ -2862,7 +2876,7 @@ export const defaultPreferences: AppPreferences = {
   default_execution_mode: 'yolo', // Default: Full access
   default_backend: 'claude', // Default: Claude
   default_new_session_kind: 'chat', // Default: Jean Chat for CMD+T
-  selected_codex_model: 'gpt-6.1-sol', // Default: latest Codex model
+  selected_codex_model: 'gpt-6.2-sol', // Default: latest Codex model
   selected_opencode_model: 'opencode/gpt-6.1-sol', // Default OpenCode model
   selected_cursor_model: 'cursor/auto', // Default Cursor model
   selected_pi_model: 'pi/sonnet', // Default PI model

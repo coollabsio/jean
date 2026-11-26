@@ -2017,7 +2017,7 @@ mod tests {
         );
         assert_eq!(
             default_model_for_backend("codex"),
-            "gpt-6.1-sol".to_string()
+            "gpt-6.2-sol".to_string()
         );
         assert_eq!(
             default_model_for_backend("opencode"),

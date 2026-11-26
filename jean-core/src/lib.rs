@@ -818,7 +818,7 @@ fn maybe_auto_select_system_cli_preferences(
 }
 
 fn default_codex_model() -> String {
-    "gpt-6.1-sol".to_string()
+    "gpt-6.2-sol".to_string()
 }
 
 fn default_opencode_model() -> String {

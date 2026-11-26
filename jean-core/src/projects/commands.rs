@@ -14528,7 +14528,7 @@ mod tests {
 
         assert_eq!(
             resolve_commit_message_model(Backend::Codex, Some("sonnet"), &preferences),
-            "gpt-6.1-sol"
+            "gpt-6.2-sol"
         );
     }
 

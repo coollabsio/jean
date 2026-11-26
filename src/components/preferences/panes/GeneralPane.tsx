@@ -378,9 +378,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   const codexReasoning = getCatalogModelReasoning(
     modelCatalog,
     'codex',
-    preferences?.selected_codex_model ?? 'gpt-6.1-sol'
+    preferences?.selected_codex_model ?? 'gpt-6.2-sol'
   )
-  const selectedCodexModel = preferences?.selected_codex_model ?? 'gpt-6.1-sol'
+  const selectedCodexModel = preferences?.selected_codex_model ?? 'gpt-6.2-sol'
   const selectedCodexReasoningOptions = withAdaptiveEffortOption(
     codexReasoning?.type === 'effort'
       ? codexReasoning.levels
@@ -2592,7 +2592,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
           <div className="space-y-4">
             <InlineField label="Model">
               <Select
-                value={preferences?.selected_codex_model ?? 'gpt-6.1-sol'}
+                value={preferences?.selected_codex_model ?? 'gpt-6.2-sol'}
                 onValueChange={handleCodexModelChange}
               >
                 <SelectTrigger className="w-full sm:w-80">

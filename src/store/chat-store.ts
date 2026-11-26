@@ -51,7 +51,7 @@ export type { ManualSessionStatus }
 export const DEFAULT_MODEL: ClaudeModel = 'claude-opus-5-5'
 
 /** Default Codex model */
-export const DEFAULT_CODEX_MODEL: CodexModel = 'gpt-6.1-sol'
+export const DEFAULT_CODEX_MODEL: CodexModel = 'gpt-6.2-sol'
 
 /** Default OpenCode model */
 export const DEFAULT_OPENCODE_MODEL = 'opencode/gpt-6.1-sol'
