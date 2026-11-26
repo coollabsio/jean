@@ -1,9 +1,9 @@
 import {
   Activity,
   AlertCircle,
+  Category,
   CircleDot,
   Code,
-  Folder,
   FolderOpen,
   GitBranch,
   GitPullRequestArrow,
@@ -285,7 +285,7 @@ export function WorktreeDropdownMenu({
               onClick={e => e.stopPropagation()}
               aria-label="Actions"
             >
-              <Folder className="size-3.5" />
+              <Category className="size-3.5" />
             </Button>
           ) : (
             <Button

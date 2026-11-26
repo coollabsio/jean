@@ -16,7 +16,6 @@ import { useIsTouchDevice } from '@/hooks/use-touch-device'
 import { useSwipeDown } from '@/hooks/useSwipeDown'
 import { DevModeBanner } from './DevModeBanner'
 import { SidebarWidthProvider } from './SidebarWidthContext'
-import { SidebarHoverPreview } from './SidebarHoverPreview'
 import { MainWindowContent } from './MainWindowContent'
 import { CommandPalette } from '@/components/command-palette/CommandPalette'
 import { BranchConflictDialog } from '@/components/worktree/BranchConflictDialog'
@@ -237,7 +236,6 @@ import {
 } from '@/services/projects'
 import { isNativeApp } from '@/lib/environment'
 import { isLinux, isWindows } from '@/lib/platform'
-import { usePreferences } from '@/services/preferences'
 
 // Left sidebar resize constraints (pixels)
 const MIN_SIDEBAR_WIDTH = 150
@@ -324,7 +322,6 @@ export function MainWindow() {
   const newSessionModeTarget = useUIStore(state => state.newSessionModeTarget)
   const sessionChatModalOpen = useUIStore(state => state.sessionChatModalOpen)
   const modalSidebarSwipe = useUIStore(state => state.leftSidebarSwipe)
-  const { data: preferences } = usePreferences()
   const selectedWorktreeId = useProjectsStore(state => state.selectedWorktreeId)
   const addProjectDialogOpen = useProjectsStore(
     state => state.addProjectDialogOpen
@@ -633,22 +630,6 @@ export function MainWindow() {
 
       {/* Main Content Area */}
       <div className="flex flex-1 overflow-hidden">
-        <SidebarHoverPreview
-          enabled={
-            !isMobile &&
-            isInitialized &&
-            !leftSidebarVisible &&
-            (preferences?.sidebar_hover_open_enabled ?? false)
-          }
-          width={leftSidebarSize}
-        >
-          <SidebarWidthProvider value={leftSidebarSize}>
-            <Suspense fallback={null}>
-              <LeftSideBar />
-            </Suspense>
-          </SidebarWidthProvider>
-        </SidebarHoverPreview>
-
         {/* Desktop: in-flow left sidebar (shifts layout). Only after UI state init. */}
         {!isMobile && leftSidebarVisible && isInitialized && (
           <SidebarWidthProvider value={leftSidebarSize}>

@@ -289,27 +289,27 @@ export function TitleBar({
           </Tooltip>
         )}
         {!zenMode && (
-          <>
+          <div className="flex items-center gap-1">
             <UpdatesIndicator />
             {/* The session view portals its actions and close button here */}
             {!isMobile && (
               <div
                 ref={titleBarSlotRef(TITLEBAR_ACTIONS_SLOT_ID)}
-                className="flex items-center gap-1"
+                className="flex items-center empty:hidden gap-1"
               />
             )}
             {/* The right panel portals its Open in / Add tab actions here */}
             {!isMobile && (
               <div
                 ref={titleBarSlotRef(TITLEBAR_RIGHT_PANEL_SLOT_ID)}
-                className="flex items-center gap-1"
+                className="flex items-center empty:hidden gap-1"
               />
             )}
             {/* The chat toolbar portals its thread details menu here, next to
                 the right panel toggle in the top right corner */}
             <div
               ref={titleBarSlotRef(TITLEBAR_THREAD_DETAILS_SLOT_ID)}
-              className="flex items-center"
+              className="flex items-center empty:hidden"
             />
             <Tooltip>
               <TooltipTrigger asChild>
@@ -337,7 +337,7 @@ export function TitleBar({
                 </kbd>
               </TooltipContent>
             </Tooltip>
-          </>
+          </div>
         )}
         {native && isClientLinux && <LinuxWindowControls />}
       </div>

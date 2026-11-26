@@ -45,6 +45,7 @@ export {
   ChevronLeft,
   ChevronRight,
   ChevronUp,
+  Category,
   ClipboardList,
   Clock,
   Clock3,

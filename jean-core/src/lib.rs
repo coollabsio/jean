@@ -228,8 +228,6 @@ pub struct AppPreferences {
     pub syntax_theme_dark: String, // Syntax highlighting theme for dark mode
     #[serde(default = "default_syntax_theme_light")]
     pub syntax_theme_light: String, // Syntax highlighting theme for light mode
-    #[serde(default = "default_sidebar_hover_open_enabled")]
-    pub sidebar_hover_open_enabled: bool, // Temporarily reveal collapsed sidebar from left edge
     #[serde(default = "default_keep_ai_servers_warm")]
     pub keep_ai_servers_warm: bool, // Keep Codex/OpenCode servers alive briefly after a request
     #[serde(default)]
@@ -687,10 +685,6 @@ fn default_syntax_theme_light() -> String {
 
 fn default_file_edit_mode() -> String {
     "inline".to_string() // Default to Jean's Pierre inline editor
-}
-
-fn default_sidebar_hover_open_enabled() -> bool {
-    false // Opt-in for new and existing installs
 }
 
 fn default_keep_ai_servers_warm() -> bool {
@@ -1358,26 +1352,6 @@ mod tests {
             custom_prompts.parallel_execution.as_deref(),
             Some("Custom parallel prompt.")
         );
-    }
-
-    #[test]
-    fn sidebar_hover_open_defaults_off() {
-        let prefs = AppPreferences::default();
-
-        assert!(!prefs.sidebar_hover_open_enabled);
-    }
-
-    #[test]
-    fn sidebar_hover_open_defaults_off_for_existing_preferences() {
-        let mut value = serde_json::to_value(AppPreferences::default()).unwrap();
-        value
-            .as_object_mut()
-            .unwrap()
-            .remove("sidebar_hover_open_enabled");
-
-        let prefs: AppPreferences = serde_json::from_value(value).unwrap();
-
-        assert!(!prefs.sidebar_hover_open_enabled);
     }
 
     #[test]
@@ -3588,7 +3562,6 @@ impl Default for AppPreferences {
             applied_keybinding_migrations: Vec::new(),
             syntax_theme_dark: default_syntax_theme_dark(),
             syntax_theme_light: default_syntax_theme_light(),
-            sidebar_hover_open_enabled: default_sidebar_hover_open_enabled(),
             keep_ai_servers_warm: default_keep_ai_servers_warm(),
             magic_prompts: MagicPrompts::default(),
             magic_prompt_models: MagicPromptModels::default(),

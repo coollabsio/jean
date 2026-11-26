@@ -1352,7 +1352,6 @@ export interface AppPreferences {
   applied_keybinding_migrations?: string[]
   syntax_theme_dark: SyntaxTheme // Syntax highlighting theme for dark mode
   syntax_theme_light: SyntaxTheme // Syntax highlighting theme for light mode
-  sidebar_hover_open_enabled?: boolean // Temporarily reveal the collapsed desktop sidebar from the left screen edge
   keep_ai_servers_warm?: boolean // Keep Codex/OpenCode servers alive briefly between requests
   magic_prompts: MagicPrompts // Customizable prompts for AI-powered features
   magic_prompt_models: MagicPromptModels // Per-prompt model overrides
@@ -2823,7 +2822,6 @@ export const defaultPreferences: AppPreferences = {
   applied_keybinding_migrations: [],
   syntax_theme_dark: 'vitesse-black',
   syntax_theme_light: 'github-light',
-  sidebar_hover_open_enabled: false, // Default: off (opt-in)
   keep_ai_servers_warm: true, // Default: enabled for faster follow-up requests
   magic_prompts: DEFAULT_MAGIC_PROMPTS,
   magic_prompt_models: DEFAULT_MAGIC_PROMPT_MODELS,
