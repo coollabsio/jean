@@ -263,7 +263,7 @@ export const JeanMcpRow: React.FC<JeanMcpRowProps> = ({ mcpServers }) => {
               className={cn(
                 'flex-1 sm:flex-none',
                 installState === 'success' &&
-                  'border-success bg-success text-success-foreground hover:bg-success/90'
+                  'border-success/30 bg-success/10 text-success disabled:opacity-100 dark:border-success/30 dark:bg-success/10'
               )}
               aria-live="polite"
               title={installMessage}
