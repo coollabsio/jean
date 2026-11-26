@@ -9,7 +9,7 @@ describe('MainWindow file-browser side', () => {
       '{/* Desktop: resize handle for the right panel */}'
     )
     const fileBrowser = source.indexOf(
-      '{/* Desktop: right panel (files, terminal, browser, scripts) */}'
+      '{/* Desktop: right panel (files, terminal, browser) */}'
     )
 
     expect(resizeHandle).toBeGreaterThan(mainContent)

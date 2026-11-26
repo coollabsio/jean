@@ -123,17 +123,19 @@ export interface MinimizedCliUpdate {
   progress: number | null
 }
 
-export type RightPanelTab = 'files' | 'terminal' | 'browser' | 'scripts'
+export type RightPanelTab = 'files' | 'terminal' | 'browser'
 
 interface UIState {
   leftSidebarVisible: boolean
   leftSidebarSize: number // Width in pixels, persisted across sessions
-  /** Right panel visibility (tabs: files, terminal, browser, scripts) */
+  /** Right panel visibility (tabs: files, terminal, browser) */
   fileBrowserVisible: boolean
   /** Tab shown in the right panel */
   rightPanelTab: RightPanelTab
   /** Tabs open in the right panel, in display order */
   rightPanelOpenTabs: RightPanelTab[]
+  /** Set by the scripts shortcut; the Scripts button opens its menu and clears it */
+  scriptsMenuRequested: boolean
   /** File browser width in pixels, persisted across sessions */
   fileBrowserSize: number
   /** Absolute path of file open in the global FileContentModal (null = closed) */
@@ -267,6 +269,9 @@ interface UIState {
   setLeftSidebarSwipe: (swipe: UIState['leftSidebarSwipe']) => void
   toggleFileBrowser: () => void
   setFileBrowserVisible: (visible: boolean) => void
+  /** Show the right panel and open its Scripts menu */
+  requestScriptsMenu: () => void
+  clearScriptsMenuRequest: () => void
   /** Show the right panel on this tab */
   openRightPanelTab: (tab: RightPanelTab) => void
   /** Remove a tab; hides the panel when it was the last one */
@@ -442,6 +447,7 @@ export const useUIStore = create<UIState>()(
       fileBrowserVisible: false,
       rightPanelTab: 'files',
       rightPanelOpenTabs: ['files'],
+      scriptsMenuRequested: false,
       fileBrowserSize: 400,
       viewingFilePath: null,
       rightSidebarVisible: false,
@@ -607,6 +613,23 @@ export const useUIStore = create<UIState>()(
               : { fileBrowserVisible: visible },
           undefined,
           'setFileBrowserVisible'
+        ),
+
+      requestScriptsMenu: () =>
+        set(
+          { fileBrowserVisible: true, scriptsMenuRequested: true },
+          undefined,
+          'requestScriptsMenu'
+        ),
+
+      clearScriptsMenuRequest: () =>
+        set(
+          state =>
+            state.scriptsMenuRequested
+              ? { scriptsMenuRequested: false }
+              : state,
+          undefined,
+          'clearScriptsMenuRequest'
         ),
 
       openRightPanelTab: tab =>

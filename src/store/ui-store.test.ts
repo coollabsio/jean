@@ -460,13 +460,13 @@ describe('right panel tabs', () => {
   it('keeps the active tab when another tab closes', () => {
     useUIStore.setState({
       fileBrowserVisible: true,
-      rightPanelOpenTabs: ['files', 'scripts'],
-      rightPanelTab: 'scripts',
+      rightPanelOpenTabs: ['files', 'terminal'],
+      rightPanelTab: 'terminal',
     })
 
     useUIStore.getState().closeRightPanelTab('files')
 
-    expect(useUIStore.getState().rightPanelTab).toBe('scripts')
+    expect(useUIStore.getState().rightPanelTab).toBe('terminal')
     expect(useUIStore.getState().fileBrowserVisible).toBe(true)
   })
 

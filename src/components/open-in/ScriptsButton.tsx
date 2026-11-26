@@ -1,4 +1,5 @@
-import { Play, Star } from '@/components/icons/reicon'
+import { useEffect, useState } from 'react'
+import { ChevronDown, Play, Star } from '@/components/icons/reicon'
 import { Button, raisedToolbar } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -18,6 +19,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import { useUIStore } from '@/store/ui-store'
 
 interface ScriptsButtonProps {
   projectId?: string
@@ -25,6 +27,11 @@ interface ScriptsButtonProps {
   owner: GitRepoOwner
   worktreePath: string
   onRun: (script: PackageScript) => void
+}
+
+interface ScriptsButtonOwnProps extends ScriptsButtonProps {
+  /** Plain text style for the window title bar */
+  inTitleBar?: boolean
 }
 
 function ScriptMenuItems({
@@ -98,15 +105,54 @@ function ScriptMenuItems({
   ))
 }
 
-export function ScriptsButton(props: ScriptsButtonProps) {
-  const { data: scripts = [] } = usePackageScripts(
+export function ScriptsButton({
+  inTitleBar = false,
+  ...props
+}: ScriptsButtonOwnProps) {
+  const { data: scripts = [], isLoading } = usePackageScripts(
     props.worktreePath,
     props.owner
   )
-  if (scripts.length === 0) return null
+  const [open, setOpen] = useState(false)
+  const menuRequested = useUIStore(state => state.scriptsMenuRequested)
+  const hasScripts = scripts.length > 0
+
+  // The open_scripts_menu shortcut opens the menu; arrow keys and Enter then
+  // pick a script through the dropdown's own keyboard navigation.
+  useEffect(() => {
+    if (!menuRequested || isLoading) return
+    useUIStore.getState().clearScriptsMenuRequest()
+    if (hasScripts) setOpen(true)
+  }, [menuRequested, isLoading, hasScripts])
+
+  if (!hasScripts) return null
+
+  const menuContent = (
+    <DropdownMenuContent align="end" className="min-w-48">
+      <ScriptMenuItems {...props} />
+    </DropdownMenuContent>
+  )
+
+  if (inTitleBar) {
+    return (
+      <DropdownMenu open={open} onOpenChange={setOpen}>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className="flex h-6 items-center gap-1 px-1.5 text-xs text-foreground/70 hover:text-foreground"
+            aria-label="Scripts"
+          >
+            Scripts
+            <ChevronDown className="size-3" />
+          </button>
+        </DropdownMenuTrigger>
+        {menuContent}
+      </DropdownMenu>
+    )
+  }
 
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <Tooltip>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
@@ -122,9 +168,7 @@ export function ScriptsButton(props: ScriptsButtonProps) {
         </TooltipTrigger>
         <TooltipContent>Scripts (package.json)</TooltipContent>
       </Tooltip>
-      <DropdownMenuContent align="end" className="min-w-48">
-        <ScriptMenuItems {...props} />
-      </DropdownMenuContent>
+      {menuContent}
     </DropdownMenu>
   )
 }

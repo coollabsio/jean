@@ -738,7 +738,7 @@ export function MainWindow() {
           </div>
         )}
 
-        {/* Desktop: right panel (files, terminal, browser, scripts) */}
+        {/* Desktop: right panel (files, terminal, browser) */}
         {!isMobile && fileBrowserVisible && isInitialized && (
           <div
             ref={fileBrowserRef}

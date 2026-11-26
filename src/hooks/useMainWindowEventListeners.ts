@@ -876,6 +876,12 @@ function executeKeybindingAction(
       toggleBrowserKeybinding()
       break
     }
+    case 'open_scripts_menu':
+      logger.debug('Keybinding: open_scripts_menu')
+      if (currentRightPanelWorktreeId()) {
+        useUIStore.getState().requestScriptsMenu()
+      }
+      break
     case 'open_provider_dropdown':
       logger.debug('Keybinding: open_provider_dropdown')
       window.dispatchEvent(new CustomEvent('open-provider-dropdown'))
@@ -1124,6 +1130,7 @@ export function useMainWindowEventListeners() {
           if (
             shortcut === kb.toggle_terminal ||
             shortcut === kb.toggle_browser ||
+            shortcut === kb.open_scripts_menu ||
             shortcut === kb.open_new_session_modal ||
             shortcut === kb.cancel_prompt
           ) {

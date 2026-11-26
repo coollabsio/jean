@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import userEvent from '@testing-library/user-event'
 import { render, screen, within } from '@/test/test-utils'
+import { act } from '@testing-library/react'
 import { ScriptsButton } from './ScriptsButton'
+import { useUIStore } from '@/store/ui-store'
 
 const mocks = vi.hoisted(() => ({
   scripts: [
@@ -118,5 +120,29 @@ describe('ScriptsButton', () => {
       ],
     })
     expect(onRun).not.toHaveBeenCalled()
+  })
+
+  it('opens from the scripts shortcut and runs a script with arrow keys and Enter', async () => {
+    const user = userEvent.setup()
+    const onRun = vi.fn()
+    render(
+      <ScriptsButton
+        inTitleBar
+        projectId="project-1"
+        owner={{ worktreeId: 'worktree-1' }}
+        worktreePath="/repo"
+        onRun={onRun}
+      />
+    )
+
+    act(() => useUIStore.getState().requestScriptsMenu())
+
+    expect(await screen.findByRole('menu')).toBeInTheDocument()
+    expect(useUIStore.getState().scriptsMenuRequested).toBe(false)
+
+    await user.keyboard('{ArrowDown}{ArrowDown}{Enter}')
+
+    // Favorites sort first: test:unit, then dev
+    expect(onRun).toHaveBeenCalledWith(mocks.scripts[0])
   })
 })

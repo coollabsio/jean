@@ -1,19 +1,11 @@
-import { useCallback } from 'react'
+import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import {
   TITLEBAR_RIGHT_PANEL_SLOT_ID,
   useTitleBarSlot,
 } from '@/components/titlebar/breadcrumb-slot'
-import {
-  Folder,
-  Globe,
-  Play,
-  Plus,
-  Terminal,
-  X,
-} from '@/components/icons/reicon'
+import { Folder, Globe, Plus, Terminal, X } from '@/components/icons/reicon'
 import { Button } from '@/components/ui/button'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,6 +19,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { OpenInButton } from '@/components/open-in/OpenInButton'
+import { ScriptsButton } from '@/components/open-in/ScriptsButton'
 import { TerminalView } from '@/components/chat/TerminalView'
 import { BrowserView } from '@/components/browser/BrowserView'
 import { FileBrowserSidebar } from '@/components/file-browser/FileBrowserSidebar'
@@ -40,7 +33,6 @@ import { useProjectsStore } from '@/store/projects-store'
 import { useTerminalStore } from '@/store/terminal-store'
 import { useBrowserStore } from '@/store/browser-store'
 import {
-  usePackageScripts,
   useProjects,
   useWorktree,
   type PackageScript,
@@ -56,7 +48,6 @@ const TABS: {
   { id: 'files', label: 'Files', icon: Folder, shortcut: 'F' },
   { id: 'terminal', label: 'Terminal', icon: Terminal, shortcut: 'T' },
   { id: 'browser', label: 'Browser', icon: Globe, shortcut: 'B' },
-  { id: 'scripts', label: 'Scripts', icon: Play, shortcut: 'S' },
 ]
 
 function useRightPanelWorktreeId(): string | null {
@@ -86,6 +77,15 @@ function selectTab(tab: RightPanelTab, worktreeId: string | null) {
   }
 }
 
+function runScript(worktreeId: string, script: PackageScript) {
+  useTerminalStore
+    .getState()
+    .addTerminal(worktreeId, script.command, script.name, {
+      commandArgs: script.args,
+    })
+  useTerminalStore.getState().setModalTerminalOpen(worktreeId, true)
+}
+
 function EmptyState({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-full items-center justify-center p-4 text-center text-xs text-muted-foreground">
@@ -94,70 +94,16 @@ function EmptyState({ children }: { children: React.ReactNode }) {
   )
 }
 
-function ScriptsTab({
-  worktreeId,
-  worktreePath,
-}: {
-  worktreeId: string
-  worktreePath: string
-}) {
-  const { data: scripts = [], isLoading } = usePackageScripts(worktreePath, {
-    worktreeId,
-  })
-
-  const handleRun = useCallback(
-    (script: PackageScript) => {
-      useTerminalStore
-        .getState()
-        .addTerminal(worktreeId, script.command, script.name, {
-          commandArgs: script.args,
-        })
-      useTerminalStore.getState().setModalTerminalOpen(worktreeId, true)
-    },
-    [worktreeId]
-  )
-
-  if (isLoading) return <EmptyState>Loading scripts…</EmptyState>
-  if (scripts.length === 0) {
-    return <EmptyState>No package.json scripts in this worktree.</EmptyState>
-  }
-
-  return (
-    <ScrollArea className="h-full">
-      <ul className="flex flex-col p-1" aria-label="Scripts">
-        {scripts.map(script => (
-          <li key={script.name}>
-            <button
-              type="button"
-              onClick={() => handleRun(script)}
-              aria-label={`Run ${script.name}`}
-              className="group flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-muted"
-            >
-              <Play className="size-3.5 shrink-0 text-muted-foreground group-hover:text-foreground" />
-              <span className="min-w-0 flex-1 truncate font-mono text-xs">
-                {script.name}
-              </span>
-              <span className="min-w-0 max-w-[50%] truncate font-mono text-2xs text-muted-foreground">
-                {[script.command, ...script.args].join(' ')}
-              </span>
-            </button>
-          </li>
-        ))}
-      </ul>
-    </ScrollArea>
-  )
-}
-
 /**
- * Right side panel with tabs for the worktree: files, terminal, browser and
- * package scripts. Visibility is `fileBrowserVisible` in the UI store.
+ * Right side panel with tabs for the worktree: files, terminal and browser.
+ * Package scripts run from the Scripts button next to Open in. Visibility is `fileBrowserVisible` in the UI store.
  */
 export function RightPanel() {
   const tab = useUIStore(state => state.rightPanelTab)
   const openTabs = useUIStore(state => state.rightPanelOpenTabs)
   const isMobile = useIsMobile()
   const zenMode = useUIStore(state => state.zenMode)
-  // Desktop: Open in and Add tab live in the window title bar
+  // Desktop: Scripts, Open in and Add tab live in the window title bar
   const titleBarSlot = useTitleBarSlot(
     TITLEBAR_RIGHT_PANEL_SLOT_ID,
     !isMobile && !zenMode
@@ -175,10 +121,15 @@ export function RightPanel() {
     : undefined
   const isServer = !!project?.server
 
+  // Server projects have no Scripts button to take a shortcut request.
+  useEffect(() => {
+    if (isServer) useUIStore.getState().clearScriptsMenuRequest()
+  }, [isServer])
+
   const canShowWorktreeTab = !!worktreeId && !!worktreePath
   const available = TABS.filter(t => {
     if (t.id === 'browser') return isNativeApp() && !isServer
-    if (t.id === 'terminal' || t.id === 'scripts') return !isServer
+    if (t.id === 'terminal') return !isServer
     return true
   })
   const tabs = openTabs.flatMap(id => available.filter(t => t.id === id))
@@ -225,14 +176,25 @@ export function RightPanel() {
   const renderOpenIn = (inTitleBar: boolean) =>
     worktreeId &&
     worktreePath && (
-      <OpenInButton
-        inTitleBar={inTitleBar}
-        worktreeId={worktreeId}
-        worktreePath={worktreePath}
-        serverId={worktree?.serverId}
-        branch={worktree?.branch}
-        server={project?.server}
-      />
+      <>
+        {!isServer && (
+          <ScriptsButton
+            inTitleBar={inTitleBar}
+            projectId={project?.id}
+            owner={{ worktreeId }}
+            worktreePath={worktreePath}
+            onRun={script => runScript(worktreeId, script)}
+          />
+        )}
+        <OpenInButton
+          inTitleBar={inTitleBar}
+          worktreeId={worktreeId}
+          worktreePath={worktreePath}
+          serverId={worktree?.serverId}
+          branch={worktree?.branch}
+          server={project?.server}
+        />
+      </>
     )
 
   return (
@@ -326,9 +288,6 @@ export function RightPanel() {
               relayoutNonce={panelWidth}
             />
           </div>
-        )}
-        {activeTab === 'scripts' && worktreeId && worktreePath && (
-          <ScriptsTab worktreeId={worktreeId} worktreePath={worktreePath} />
         )}
       </div>
     </div>
