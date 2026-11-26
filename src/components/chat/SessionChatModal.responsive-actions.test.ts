@@ -14,11 +14,11 @@ describe('SessionChatModal responsive header actions', () => {
     expect(source).not.toContain('@/components/shared/FailedRunsBadge')
   })
 
-  it('shows terminal and browser toggles in the desktop header', () => {
-    expect(source).toContain('label="Terminal"')
-    expect(source).toContain('label="Browser"')
-    expect(source).toContain('onClick={handleToggleModalTerminal}')
-    expect(source).toContain('onClick={handleToggleModalBrowser}')
+  it('leaves terminal, browser, Open In and Scripts to the right panel', () => {
+    expect(source).not.toContain('<OpenInButton')
+    expect(source).not.toContain('<ScriptsButton')
+    expect(source).not.toContain('label="Terminal"')
+    expect(source).not.toContain('label="Browser"')
   })
 
   it('does not duplicate run actions in the desktop header', () => {
@@ -34,7 +34,7 @@ describe('SessionChatModal responsive header actions', () => {
     )
   })
 
-  it('hides Open In and Scripts by header width, not window width', () => {
+  it('hides secondary tools by header width, not window width', () => {
     // The modal is narrower than the window when side panels are open
     expect(source).toContain('@container/header')
     expect(source).toContain(

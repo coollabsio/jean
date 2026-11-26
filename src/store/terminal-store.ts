@@ -7,6 +7,11 @@ import {
 import { generateId } from '@/lib/uuid'
 import type { ModalTerminalDockMode } from '@/types/ui-state'
 import { useBrowserStore } from './browser-store'
+import {
+  isRightPanelShowing,
+  syncRightPanelSurface,
+  usesRightPanelSurfaces,
+} from '@/lib/right-panel'
 
 /** A single terminal instance */
 export type TerminalKind = 'panel' | 'session'
@@ -228,6 +233,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     ),
 
   setModalTerminalOpen: (worktreeId, open) => {
+    syncRightPanelSurface(worktreeId, 'terminal', open)
     const current =
       useTerminalStore.getState().modalTerminalOpen[worktreeId] ?? false
     if (current === open) return
@@ -238,16 +244,10 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   },
 
   toggleModalTerminal: worktreeId => {
-    const current =
-      useTerminalStore.getState().modalTerminalOpen[worktreeId] ?? false
-    const next = !current
-    if (next) closeBrowserSurfacesFor(worktreeId)
-    set(state => ({
-      modalTerminalOpen: {
-        ...state.modalTerminalOpen,
-        [worktreeId]: next,
-      },
-    }))
+    const open = usesRightPanelSurfaces()
+      ? !isRightPanelShowing('terminal')
+      : !(useTerminalStore.getState().modalTerminalOpen[worktreeId] ?? false)
+    useTerminalStore.getState().setModalTerminalOpen(worktreeId, open)
   },
 
   setModalTerminalDockMode: dockMode =>

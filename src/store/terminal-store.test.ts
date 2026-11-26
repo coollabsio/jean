@@ -576,3 +576,40 @@ describe('TerminalStore', () => {
     })
   })
 })
+
+describe('right panel terminal tab (desktop)', () => {
+  beforeEach(async () => {
+    const { useUIStore } = await import('./ui-store')
+    const { useChatStore } = await import('./chat-store')
+    useTerminalStore.setState({ modalTerminalOpen: {} })
+    useChatStore.setState({ activeWorktreeId: 'wt-1' })
+    useUIStore.setState({
+      sessionChatModalOpen: false,
+      sessionChatModalWorktreeId: null,
+      fileBrowserVisible: false,
+      rightPanelTab: 'files',
+    })
+  })
+
+  it('toggles the right panel on the terminal tab', async () => {
+    const { useUIStore } = await import('./ui-store')
+
+    useTerminalStore.getState().toggleModalTerminal('wt-1')
+    expect(useUIStore.getState().fileBrowserVisible).toBe(true)
+    expect(useUIStore.getState().rightPanelTab).toBe('terminal')
+
+    useTerminalStore.getState().toggleModalTerminal('wt-1')
+    expect(useUIStore.getState().fileBrowserVisible).toBe(false)
+  })
+
+  it('hides the panel when the last terminal of its worktree closes', async () => {
+    const { useUIStore } = await import('./ui-store')
+    useTerminalStore.getState().setModalTerminalOpen('wt-1', true)
+
+    useTerminalStore.getState().setModalTerminalOpen('other', false)
+    expect(useUIStore.getState().fileBrowserVisible).toBe(true)
+
+    useTerminalStore.getState().setModalTerminalOpen('wt-1', false)
+    expect(useUIStore.getState().fileBrowserVisible).toBe(false)
+  })
+})

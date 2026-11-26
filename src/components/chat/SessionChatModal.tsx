@@ -10,12 +10,12 @@ import {
   type MouseEvent,
   type RefObject,
 } from 'react'
+import { createPortal } from 'react-dom'
+import { useTitleBarBreadcrumbSlot } from '@/components/titlebar/breadcrumb-slot'
 import {
   GitBranchPlus,
   GitPullRequestArrow,
-  Globe,
   Plus,
-  Terminal,
 } from '@/components/icons/reicon'
 import { ModalCloseButton } from '@/components/ui/modal-close-button'
 import { cn } from '@/lib/utils'
@@ -48,10 +48,8 @@ import {
   useCloseSession,
   useCloseSessions,
 } from '@/services/chat'
-import { usePreferences } from '@/services/preferences'
 import { useQueryClient } from '@tanstack/react-query'
 import { useHoverIntent } from '@/hooks/useHoverIntent'
-import { LOCAL_SERVER_ID } from '@/types/server-resource'
 import { usePackageScripts, type PackageScript } from '@/services/projects'
 import { useGitHubPRs } from '@/services/github'
 import { usePrStatus } from '@/services/pr-status'
@@ -70,14 +68,10 @@ import { isImeComposingEvent } from '@/lib/ime-composition'
 import { toast } from 'sonner'
 import { ChatWindow } from './ChatWindow'
 import { ModalTerminalDrawer } from './ModalTerminalDrawer'
-import { TerminalActivityIcon } from './TerminalActivityIcon'
-import { useWorktreeTerminalStatus } from '@/hooks/useWorktreeTerminalStatus'
 import { ModalBrowserDrawer } from '@/components/browser/ModalBrowserDrawer'
-import { OpenInButton } from '@/components/open-in/OpenInButton'
-import { ScriptsButton } from '@/components/open-in/ScriptsButton'
 import { DevToolsDropdown } from './DevToolsDropdown'
 import { TerminalMagicButton } from './TerminalMagicButton'
-import { DEFAULT_KEYBINDINGS, formatShortcutDisplay } from '@/types/keybindings'
+import { formatShortcutDisplay } from '@/types/keybindings'
 import {
   createSessionCardDataCache,
   getResumeCommand,
@@ -213,60 +207,6 @@ function HeaderPrLink({ worktree }: { worktree: Worktree }) {
   )
 }
 
-function HeaderSurfaceToggle({
-  label,
-  icon: Icon,
-  isOpen,
-  shortcut,
-  onClick,
-  active,
-}: {
-  label: string
-  icon: typeof Terminal
-  isOpen: boolean
-  shortcut: string | undefined
-  onClick: () => void
-  /** When set, the control shows a live-PTY badge and an active label. */
-  active?: boolean
-}) {
-  const activityLabel = active ? `${label} active` : label
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className={cn(
-            'text-muted-foreground hover:text-foreground',
-            isOpen && 'bg-muted text-foreground'
-          )}
-          aria-label={
-            active
-              ? `Toggle ${label.toLowerCase()} (active)`
-              : `Toggle ${label.toLowerCase()}`
-          }
-          aria-pressed={isOpen}
-          onClick={onClick}
-        >
-          {active === undefined ? (
-            <Icon className="h-4 w-4" />
-          ) : (
-            <TerminalActivityIcon active={active} className="h-4 w-4" />
-          )}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>
-        {activityLabel}
-        {isNativeApp() && (
-          <kbd className="ml-1 text-[0.625rem] opacity-60">
-            {formatShortcutDisplay(shortcut)}
-          </kbd>
-        )}
-      </TooltipContent>
-    </Tooltip>
-  )
-}
-
 interface SessionChatModalProps {
   worktreeId: string
   worktreePath: string
@@ -390,8 +330,12 @@ export const SessionChatModal = memo(function SessionChatModal({
   const browserModalDockMode = useBrowserStore(state => state.modalDockMode)
   const hasBottomBrowser =
     isBrowserModalOpen && browserModalDockMode === 'bottom'
-  const hasBottomDock = hasBottomTerminal || hasBottomBrowser
-  const { hasActiveTerminal } = useWorktreeTerminalStatus(worktreeId)
+  // Desktop shows the terminal and browser as right panel tabs; mobile
+  // keeps them as drawers in this view.
+  const showSurfaceDrawers = isMobile
+  const hasBottomDock =
+    showSurfaceDrawers && (hasBottomTerminal || hasBottomBrowser)
+  const titleBarSlot = useTitleBarBreadcrumbSlot(!isMobile)
   // Horizontal scroll on session tabs
   const modalTabScrollRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -1005,9 +949,6 @@ export const SessionChatModal = memo(function SessionChatModal({
 
   const pickRemoteOrRun = useRemotePicker(worktreePath, { worktreeId })
 
-  // Display preference of this client, not of the worktree's server
-  const { data: localPreferences } = usePreferences(LOCAL_SERVER_ID)
-
   const handleSync = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation()
@@ -1120,6 +1061,34 @@ export const SessionChatModal = memo(function SessionChatModal({
   }, [isOpen])
 
   if (!isOpen || !worktreeId) return null
+
+  // Desktop: the title sits in the window title bar, next to Settings.
+  const sessionTitle = (
+    <h2
+      className={cn(
+        'text-sm font-medium min-w-0 truncate',
+        !isMobile && !titleBarSlot && 'flex-1'
+      )}
+    >
+      {project && !isMobile && !isServer && (
+        <span className="text-muted-foreground font-normal">
+          <button
+            type="button"
+            className="hover:text-foreground transition-colors cursor-pointer"
+            onClick={handleClose}
+          >
+            {project.name}
+          </button>
+          <span className="mx-1.5 text-muted-foreground/40">/</span>
+        </span>
+      )}
+      {isServer
+        ? project?.name
+        : isBase
+          ? 'Base Session'
+          : (worktree?.name ?? 'Worktree')}
+    </h2>
+  )
 
   const worktreeMenu = !zenMode && worktree && project && (
     <WorktreeDropdownMenu
@@ -1249,14 +1218,18 @@ export const SessionChatModal = memo(function SessionChatModal({
             />
           </div>
         )}
-        {isModalTerminalOpen && modalTerminalDockMode === 'left' && (
-          <ModalTerminalDrawer
-            worktreeId={worktreeId}
-            worktreePath={worktreePath}
-            dockMode="left"
-          />
+        {showSurfaceDrawers && (
+          <>
+            {isModalTerminalOpen && modalTerminalDockMode === 'left' && (
+              <ModalTerminalDrawer
+                worktreeId={worktreeId}
+                worktreePath={worktreePath}
+                dockMode="left"
+              />
+            )}
+            <ModalBrowserDrawer worktreeId={worktreeId} dockMode="left" />
+          </>
         )}
-        <ModalBrowserDrawer worktreeId={worktreeId} dockMode="left" />
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           {!zenMode && (
             <div className="shrink-0 sm:text-left">
@@ -1281,32 +1254,9 @@ export const SessionChatModal = memo(function SessionChatModal({
                       isMobile ? 'flex min-w-0 items-center gap-2' : 'contents'
                     )}
                   >
-                    <h2
-                      className={cn(
-                        'text-sm font-medium min-w-0 truncate',
-                        !isMobile && 'flex-1'
-                      )}
-                    >
-                      {project && !isMobile && !isServer && (
-                        <span className="text-muted-foreground font-normal">
-                          <button
-                            type="button"
-                            className="hover:text-foreground transition-colors cursor-pointer"
-                            onClick={handleClose}
-                          >
-                            {project.name}
-                          </button>
-                          <span className="mx-1.5 text-muted-foreground/40">
-                            /
-                          </span>
-                        </span>
-                      )}
-                      {isServer
-                        ? project?.name
-                        : isBase
-                          ? 'Base Session'
-                          : (worktree?.name ?? 'Worktree')}
-                    </h2>
+                    {titleBarSlot
+                      ? createPortal(sessionTitle, titleBarSlot)
+                      : sessionTitle}
                     {worktreeMenu}
                   </div>
                   {isMobile ? (
@@ -1342,48 +1292,8 @@ export const SessionChatModal = memo(function SessionChatModal({
                       {currentSessionId && !project?.server && (
                         <TerminalMagicButton sessionId={currentSessionId} />
                       )}
-                      {!isMobile && !project?.server && (
-                        <>
-                          <HeaderSurfaceToggle
-                            label="Terminal"
-                            icon={Terminal}
-                            isOpen={isModalTerminalOpen}
-                            active={hasActiveTerminal}
-                            shortcut={
-                              localPreferences?.keybindings?.toggle_terminal ??
-                              DEFAULT_KEYBINDINGS.toggle_terminal
-                            }
-                            onClick={handleToggleModalTerminal}
-                          />
-                          {isNativeApp() && (
-                            <HeaderSurfaceToggle
-                              label="Browser"
-                              icon={Globe}
-                              isOpen={isBrowserModalOpen}
-                              shortcut={
-                                localPreferences?.keybindings?.toggle_browser ??
-                                DEFAULT_KEYBINDINGS.toggle_browser
-                              }
-                              onClick={handleToggleModalBrowser}
-                            />
-                          )}
-                        </>
-                      )}
                       {/* Desktop: secondary tools that are not in the menu */}
                       <div className="hidden items-center gap-1 @3xl/header:flex">
-                        <OpenInButton
-                          worktreeId={worktreeId}
-                          worktreePath={worktreePath}
-                          serverId={worktree?.serverId}
-                          branch={worktree?.branch}
-                          server={project?.server}
-                        />
-                        <ScriptsButton
-                          projectId={worktree?.project_id}
-                          owner={{ worktreeId }}
-                          worktreePath={worktreePath}
-                          onRun={handlePackageScript}
-                        />
                         {currentSessionId && (
                           <DevToolsDropdown
                             sessionId={currentSessionId}
@@ -1633,33 +1543,37 @@ export const SessionChatModal = memo(function SessionChatModal({
           </div>
         </div>
 
-        {isModalTerminalOpen && modalTerminalDockMode === 'right' && (
-          <ModalTerminalDrawer
-            worktreeId={worktreeId}
-            worktreePath={worktreePath}
-            dockMode="right"
-          />
+        {showSurfaceDrawers && (
+          <>
+            {isModalTerminalOpen && modalTerminalDockMode === 'right' && (
+              <ModalTerminalDrawer
+                worktreeId={worktreeId}
+                worktreePath={worktreePath}
+                dockMode="right"
+              />
+            )}
+            <ModalBrowserDrawer worktreeId={worktreeId} dockMode="right" />
+            {isModalTerminalOpen && modalTerminalDockMode === 'bottom' && (
+              <ModalTerminalDrawer
+                worktreeId={worktreeId}
+                worktreePath={worktreePath}
+                dockMode="bottom"
+              />
+            )}
+            {/* Browser bottom drawer sits at outer-flex bottom row alongside
+                terminal-bottom; outer flex flips to flex-col when either is
+                docked at bottom (see hasBottomDock). */}
+            <ModalBrowserDrawer worktreeId={worktreeId} dockMode="bottom" />
+            {modalTerminalDockMode === 'floating' && (
+              <ModalTerminalDrawer
+                worktreeId={worktreeId}
+                worktreePath={worktreePath}
+                dockMode="floating"
+              />
+            )}
+            <ModalBrowserDrawer worktreeId={worktreeId} dockMode="floating" />
+          </>
         )}
-        <ModalBrowserDrawer worktreeId={worktreeId} dockMode="right" />
-        {isModalTerminalOpen && modalTerminalDockMode === 'bottom' && (
-          <ModalTerminalDrawer
-            worktreeId={worktreeId}
-            worktreePath={worktreePath}
-            dockMode="bottom"
-          />
-        )}
-        {/* Browser bottom drawer sits at outer-flex bottom row alongside
-            terminal-bottom; outer flex flips to flex-col when either is
-            docked at bottom (see hasBottomDock). */}
-        <ModalBrowserDrawer worktreeId={worktreeId} dockMode="bottom" />
-        {modalTerminalDockMode === 'floating' && (
-          <ModalTerminalDrawer
-            worktreeId={worktreeId}
-            worktreePath={worktreePath}
-            dockMode="floating"
-          />
-        )}
-        <ModalBrowserDrawer worktreeId={worktreeId} dockMode="floating" />
       </div>
       <LabelModal
         isOpen={labelModalOpen}

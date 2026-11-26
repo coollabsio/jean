@@ -30,9 +30,9 @@ const LeftSideBar = lazyWithPreload(() =>
     default: mod.LeftSideBar,
   }))
 )
-const FileBrowserSidebar = lazyWithPreload(() =>
-  import('@/components/file-browser').then(mod => ({
-    default: mod.FileBrowserSidebar,
+const RightPanel = lazyWithPreload(() =>
+  import('./RightPanel').then(mod => ({
+    default: mod.RightPanel,
   }))
 )
 const MobileFileBrowser = lazyWithPreload(() =>
@@ -200,7 +200,7 @@ const IDLE_PRELOADS = [
   OnboardingDialog,
   FeatureTourDialog,
   JeanConfigWizard,
-  FileBrowserSidebar,
+  RightPanel,
   MobileFileBrowser,
 ]
 import { Toaster } from '@/components/ui/sonner'
@@ -245,8 +245,9 @@ import { usePreferences } from '@/services/preferences'
 const MIN_SIDEBAR_WIDTH = 150
 const MAX_SIDEBAR_WIDTH = 500
 // File browser sidebar resize constraints (pixels)
-const MIN_FILE_BROWSER_WIDTH = 180
-const MAX_FILE_BROWSER_WIDTH = 520
+const MIN_FILE_BROWSER_WIDTH = 240
+// Wide enough for the terminal and browser tabs
+const MAX_FILE_BROWSER_WIDTH = 1400
 
 function useRetainedMount(active: boolean) {
   const [shouldMount, setShouldMount] = useState(active)
@@ -727,13 +728,13 @@ export function MainWindow() {
           <BrowserPanel />
         </div>
 
-        {/* Desktop: resize handle for file browser */}
+        {/* Desktop: resize handle for the right panel */}
         {!isMobile && fileBrowserVisible && isInitialized && (
           <div
             role="separator"
             tabIndex={-1}
             aria-orientation="vertical"
-            aria-label="Resize file browser"
+            aria-label="Resize right panel"
             className="relative z-20 h-full w-px shrink-0 cursor-col-resize bg-border/20"
             onMouseDown={handleFileBrowserResizeStart}
           >
@@ -741,7 +742,7 @@ export function MainWindow() {
           </div>
         )}
 
-        {/* Desktop: file browser sidebar */}
+        {/* Desktop: right panel (files, terminal, browser, scripts) */}
         {!isMobile && fileBrowserVisible && isInitialized && (
           <div
             ref={fileBrowserRef}
@@ -749,7 +750,7 @@ export function MainWindow() {
             style={{ width: fileBrowserSize }}
           >
             <Suspense fallback={null}>
-              <FileBrowserSidebar />
+              <RightPanel />
             </Suspense>
           </div>
         )}

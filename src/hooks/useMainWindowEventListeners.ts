@@ -4,6 +4,10 @@ import { isNativeApp, hasBackend } from '@/lib/environment'
 import { notify } from '@/lib/notifications'
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useUIStore } from '@/store/ui-store'
+import {
+  currentRightPanelWorktreeId,
+  usesRightPanelSurfaces,
+} from '@/lib/right-panel'
 import { useProjectsStore } from '@/store/projects-store'
 import { useChatStore } from '@/store/chat-store'
 import { isPanelTerminal, useTerminalStore } from '@/store/terminal-store'
@@ -568,6 +572,11 @@ export function toggleBrowserKeybinding(): void {
   const worktreeId = uiState.sessionChatModalOpen
     ? (uiState.sessionChatModalWorktreeId ?? chatState.activeWorktreeId)
     : chatState.activeWorktreeId
+  if (usesRightPanelSurfaces()) {
+    const panelWorktreeId = currentRightPanelWorktreeId()
+    if (panelWorktreeId) useBrowserStore.getState().toggleModal(panelWorktreeId)
+    return
+  }
   if (!worktreeId) return
   useBrowserStore
     .getState()
@@ -876,7 +885,10 @@ function executeKeybindingAction(
       logger.debug('Keybinding: toggle_terminal')
       const uiState = useUIStore.getState()
       const chatState = useChatStore.getState()
-      if (uiState.sessionChatModalOpen) {
+      if (usesRightPanelSurfaces()) {
+        const wid = currentRightPanelWorktreeId()
+        if (wid) useTerminalStore.getState().toggleModalTerminal(wid)
+      } else if (uiState.sessionChatModalOpen) {
         const wid =
           uiState.sessionChatModalWorktreeId ?? chatState.activeWorktreeId
         if (wid) useTerminalStore.getState().toggleModalTerminal(wid)

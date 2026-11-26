@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderHook } from '@testing-library/react'
 import { useChatStore } from '@/store/chat-store'
 import { useTerminalStore } from '@/store/terminal-store'
@@ -1131,7 +1131,13 @@ describe('removed keybindings', () => {
 })
 
 describe('toggleBrowserKeybinding', () => {
+  const desktopWidth = window.innerWidth
+  afterEach(() => {
+    window.innerWidth = desktopWidth
+  })
   beforeEach(() => {
+    // The surface cycle only runs on mobile; desktop uses the right panel.
+    window.innerWidth = 500
     useChatStore.setState({ activeWorktreeId: null })
     useUIStore.setState({
       sessionChatModalOpen: false,
@@ -1309,5 +1315,37 @@ describe('Recent session navigation shortcuts', () => {
     expect(onAdjacent).not.toHaveBeenCalled()
     unmount()
     window.removeEventListener('open-adjacent-recent-session', onAdjacent)
+  })
+})
+
+describe('toggleBrowserKeybinding (desktop right panel)', () => {
+  beforeEach(() => {
+    useChatStore.setState({ activeWorktreeId: 'canvas-wt' })
+    useUIStore.setState({
+      sessionChatModalOpen: true,
+      sessionChatModalWorktreeId: 'modal-wt',
+      fileBrowserVisible: false,
+      rightPanelTab: 'files',
+    })
+    useBrowserStore.setState({
+      sidePaneOpen: {},
+      modalOpen: {},
+      bottomPanelOpen: {},
+    })
+    useTerminalStore.setState({ modalTerminalOpen: {} })
+  })
+
+  it('toggles the browser tab for the session view worktree', () => {
+    toggleBrowserKeybinding()
+
+    expect(useUIStore.getState().fileBrowserVisible).toBe(true)
+    expect(useUIStore.getState().rightPanelTab).toBe('browser')
+    expect(useBrowserStore.getState().modalOpen['modal-wt']).toBe(true)
+    expect(useBrowserStore.getState().sidePaneOpen['modal-wt']).toBeFalsy()
+    expect(useBrowserStore.getState().bottomPanelOpen['modal-wt']).toBeFalsy()
+
+    toggleBrowserKeybinding()
+
+    expect(useUIStore.getState().fileBrowserVisible).toBe(false)
   })
 })

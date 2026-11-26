@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { blankTabUrl, useBrowserStore } from './browser-store'
 import { useTerminalStore } from './terminal-store'
+import { useUIStore } from './ui-store'
+import { useChatStore } from './chat-store'
 
 describe('BrowserStore', () => {
   beforeEach(() => {
@@ -52,7 +54,13 @@ describe('BrowserStore', () => {
 })
 
 describe('toggleBrowserSurface', () => {
+  const desktopWidth = window.innerWidth
+  afterEach(() => {
+    window.innerWidth = desktopWidth
+  })
   beforeEach(() => {
+    // The surface cycle only runs on mobile; desktop uses the right panel.
+    window.innerWidth = 500
     useBrowserStore.setState({
       tabs: {},
       activeTabIds: {},
@@ -183,5 +191,51 @@ describe('blankTabUrl', () => {
     expect(decodeURIComponent(url.split(',')[1] ?? '')).toContain(
       'background:#101010'
     )
+  })
+})
+
+describe('right panel browser tab (desktop)', () => {
+  beforeEach(() => {
+    useBrowserStore.setState({ modalOpen: {}, sidePaneOpen: {} })
+    useTerminalStore.setState({ modalTerminalOpen: {} })
+    useChatStore.setState({ activeWorktreeId: 'worktree-1' })
+    useUIStore.setState({
+      sessionChatModalOpen: false,
+      sessionChatModalWorktreeId: null,
+      fileBrowserVisible: false,
+      rightPanelTab: 'files',
+    })
+  })
+
+  it('toggles the right panel on the browser tab', () => {
+    useBrowserStore.getState().toggleModal('worktree-1')
+
+    expect(useUIStore.getState().fileBrowserVisible).toBe(true)
+    expect(useUIStore.getState().rightPanelTab).toBe('browser')
+    expect(useBrowserStore.getState().modalOpen['worktree-1']).toBe(true)
+
+    useBrowserStore.getState().toggleModal('worktree-1')
+
+    expect(useUIStore.getState().fileBrowserVisible).toBe(false)
+    expect(useBrowserStore.getState().modalOpen['worktree-1']).toBe(false)
+  })
+
+  it('switches to the browser tab when the panel shows another tab', () => {
+    useUIStore.setState({ fileBrowserVisible: true, rightPanelTab: 'files' })
+    useBrowserStore.setState({ modalOpen: { 'worktree-1': true } })
+
+    useBrowserStore.getState().toggleModal('worktree-1')
+
+    expect(useUIStore.getState().fileBrowserVisible).toBe(true)
+    expect(useUIStore.getState().rightPanelTab).toBe('browser')
+  })
+
+  it('keeps the panel open when another worktree closes its browser', () => {
+    useUIStore.setState({ fileBrowserVisible: true, rightPanelTab: 'browser' })
+    useBrowserStore.setState({ modalOpen: { other: true } })
+
+    useBrowserStore.getState().setModalOpen('other', false)
+
+    expect(useUIStore.getState().fileBrowserVisible).toBe(true)
   })
 })

@@ -27,6 +27,7 @@ import { useProjectsStore } from '@/store/projects-store'
 import { resolveHeaderServerLabel } from './server-context'
 import { UpdatesIndicator } from './UpdatesIndicator'
 import { TitleBarGitDiff } from './TitleBarGitDiff'
+import { TITLEBAR_BREADCRUMB_SLOT_ID } from './breadcrumb-slot'
 
 // Dark pill that matches the toast surface (card bg + soft border).
 const SERVER_BADGE_CLASS = 'border border-border/60 bg-card text-2xs'
@@ -175,6 +176,13 @@ export function TitleBar({
                 </Kbd>
               </TooltipContent>
             </Tooltip>
+            {/* The session view portals its project / worktree title here */}
+            {!isMobile && (
+              <div
+                id={TITLEBAR_BREADCRUMB_SLOT_ID}
+                className="ml-2 flex min-w-0 max-w-[40vw] items-center"
+              />
+            )}
           </div>
         )}
       </div>
@@ -266,9 +274,7 @@ export function TitleBar({
                   )}
                   aria-pressed={fileBrowserVisible}
                   aria-label={
-                    fileBrowserVisible
-                      ? 'Hide file browser'
-                      : 'Show file browser'
+                    fileBrowserVisible ? 'Hide right panel' : 'Show right panel'
                   }
                   data-testid="toggle-file-browser"
                 >
@@ -276,7 +282,7 @@ export function TitleBar({
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                {fileBrowserVisible ? 'Hide' : 'Show'} File Browser{' '}
+                {fileBrowserVisible ? 'Hide' : 'Show'} Right Panel{' '}
                 <kbd className="ml-1 text-[0.625rem] opacity-60">
                   {fileBrowserShortcut}
                 </kbd>

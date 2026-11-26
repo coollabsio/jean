@@ -421,3 +421,61 @@ describe('mobile left sidebar closes when a surface opens over it', () => {
     expect(useUIStore.getState()).toBe(before)
   })
 })
+
+describe('right panel tabs', () => {
+  beforeEach(() => {
+    useUIStore.setState({
+      fileBrowserVisible: false,
+      rightPanelTab: 'files',
+      rightPanelOpenTabs: ['files'],
+    })
+  })
+
+  it('adds a tab once and selects it', () => {
+    useUIStore.getState().openRightPanelTab('terminal')
+    useUIStore.getState().openRightPanelTab('files')
+    useUIStore.getState().openRightPanelTab('terminal')
+
+    const state = useUIStore.getState()
+    expect(state.fileBrowserVisible).toBe(true)
+    expect(state.rightPanelTab).toBe('terminal')
+    expect(state.rightPanelOpenTabs).toEqual(['files', 'terminal'])
+  })
+
+  it('selects the neighbor when the active tab closes', () => {
+    useUIStore.setState({
+      fileBrowserVisible: true,
+      rightPanelOpenTabs: ['files', 'terminal', 'browser'],
+      rightPanelTab: 'terminal',
+    })
+
+    useUIStore.getState().closeRightPanelTab('terminal')
+    expect(useUIStore.getState().rightPanelTab).toBe('browser')
+
+    useUIStore.getState().closeRightPanelTab('browser')
+    expect(useUIStore.getState().rightPanelTab).toBe('files')
+    expect(useUIStore.getState().rightPanelOpenTabs).toEqual(['files'])
+  })
+
+  it('keeps the active tab when another tab closes', () => {
+    useUIStore.setState({
+      fileBrowserVisible: true,
+      rightPanelOpenTabs: ['files', 'scripts'],
+      rightPanelTab: 'scripts',
+    })
+
+    useUIStore.getState().closeRightPanelTab('files')
+
+    expect(useUIStore.getState().rightPanelTab).toBe('scripts')
+    expect(useUIStore.getState().fileBrowserVisible).toBe(true)
+  })
+
+  it('hides the panel when the last tab closes', () => {
+    useUIStore.setState({ fileBrowserVisible: true })
+
+    useUIStore.getState().closeRightPanelTab('files')
+
+    expect(useUIStore.getState().rightPanelOpenTabs).toEqual([])
+    expect(useUIStore.getState().fileBrowserVisible).toBe(false)
+  })
+})

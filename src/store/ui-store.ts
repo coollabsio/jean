@@ -123,11 +123,17 @@ export interface MinimizedCliUpdate {
   progress: number | null
 }
 
+export type RightPanelTab = 'files' | 'terminal' | 'browser' | 'scripts'
+
 interface UIState {
   leftSidebarVisible: boolean
   leftSidebarSize: number // Width in pixels, persisted across sessions
-  /** File browser (worktree explorer) visibility */
+  /** Right panel visibility (tabs: files, terminal, browser, scripts) */
   fileBrowserVisible: boolean
+  /** Tab shown in the right panel */
+  rightPanelTab: RightPanelTab
+  /** Tabs open in the right panel, in display order */
+  rightPanelOpenTabs: RightPanelTab[]
   /** File browser width in pixels, persisted across sessions */
   fileBrowserSize: number
   /** Absolute path of file open in the global FileContentModal (null = closed) */
@@ -261,6 +267,10 @@ interface UIState {
   setLeftSidebarSwipe: (swipe: UIState['leftSidebarSwipe']) => void
   toggleFileBrowser: () => void
   setFileBrowserVisible: (visible: boolean) => void
+  /** Show the right panel on this tab */
+  openRightPanelTab: (tab: RightPanelTab) => void
+  /** Remove a tab; hides the panel when it was the last one */
+  closeRightPanelTab: (tab: RightPanelTab) => void
   setFileBrowserSize: (size: number) => void
   setViewingFilePath: (path: string | null) => void
   toggleRightSidebar: () => void
@@ -430,7 +440,9 @@ export const useUIStore = create<UIState>()(
         dragTransition: '',
       },
       fileBrowserVisible: false,
-      fileBrowserSize: 280,
+      rightPanelTab: 'files',
+      rightPanelOpenTabs: ['files'],
+      fileBrowserSize: 400,
       viewingFilePath: null,
       rightSidebarVisible: false,
       commandPaletteOpen: false,
@@ -595,6 +607,50 @@ export const useUIStore = create<UIState>()(
               : { fileBrowserVisible: visible },
           undefined,
           'setFileBrowserVisible'
+        ),
+
+      openRightPanelTab: tab =>
+        set(
+          state => {
+            const isOpen = state.rightPanelOpenTabs.includes(tab)
+            if (
+              isOpen &&
+              state.fileBrowserVisible &&
+              state.rightPanelTab === tab
+            ) {
+              return state
+            }
+            return {
+              fileBrowserVisible: true,
+              rightPanelTab: tab,
+              rightPanelOpenTabs: isOpen
+                ? state.rightPanelOpenTabs
+                : [...state.rightPanelOpenTabs, tab],
+            }
+          },
+          undefined,
+          'openRightPanelTab'
+        ),
+
+      closeRightPanelTab: tab =>
+        set(
+          state => {
+            const index = state.rightPanelOpenTabs.indexOf(tab)
+            if (index === -1) return state
+            const rightPanelOpenTabs = state.rightPanelOpenTabs.filter(
+              t => t !== tab
+            )
+            if (rightPanelOpenTabs.length === 0) {
+              return { rightPanelOpenTabs, fileBrowserVisible: false }
+            }
+            if (state.rightPanelTab !== tab) return { rightPanelOpenTabs }
+            // Select the neighbor that took the closed tab's place
+            const next =
+              rightPanelOpenTabs[Math.min(index, rightPanelOpenTabs.length - 1)]
+            return { rightPanelOpenTabs, rightPanelTab: next ?? 'files' }
+          },
+          undefined,
+          'closeRightPanelTab'
         ),
 
       setFileBrowserSize: size =>
