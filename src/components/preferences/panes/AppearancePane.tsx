@@ -6,7 +6,10 @@ import { Checkbox } from '@/components/ui/checkbox'
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
@@ -39,6 +42,8 @@ import { Button } from '@/components/ui/button'
 import { serializeCustomTheme } from '@/lib/custom-themes'
 import { copyToClipboard } from '@/lib/clipboard'
 import { importThemeFiles } from '@/lib/vscode-themes'
+import { THEME_PRESETS } from '@/lib/theme-presets'
+import { generateId } from '@/lib/uuid'
 import { readClientPreferences } from '@/lib/client-preferences'
 import { useClientPreferences } from '@/hooks/useClientPreferences'
 import { useClientZoom } from '@/lib/client-zoom'
@@ -67,6 +72,7 @@ function getErrorMessage(error: unknown): string {
 
 const modKey = getModifierSymbol()
 const NO_CUSTOM_THEME = 'none'
+const PRESET_PREFIX = 'preset:'
 
 export const AppearancePane: React.FC = () => {
   const { theme, setTheme } = useTheme()
@@ -117,6 +123,15 @@ export const AppearancePane: React.FC = () => {
   const { preferences: clientPreferences, update: updateClientPreferences } =
     useClientPreferences()
   const themeFileInputRef = useRef<HTMLInputElement>(null)
+  // Presets already in use show once, as a stored theme.
+  const availablePresets = useMemo(
+    () =>
+      THEME_PRESETS.filter(
+        preset =>
+          !clientPreferences.custom_themes.some(t => t.name === preset.name)
+      ),
+    [clientPreferences.custom_themes]
+  )
 
   const handleCustomThemeImport = useCallback(
     async (files: File[]) => {
@@ -152,6 +167,37 @@ export const AppearancePane: React.FC = () => {
           description: errors.join('\n'),
         })
       }
+    },
+    [updateClientPreferences]
+  )
+
+  const handleCustomThemeSelect = useCallback(
+    (value: string) => {
+      if (value === NO_CUSTOM_THEME) {
+        updateClientPreferences({ custom_theme: null })
+        return
+      }
+      if (!value.startsWith(PRESET_PREFIX)) {
+        updateClientPreferences({ custom_theme: value })
+        return
+      }
+      // A preset is copied into the stored themes on first use, so it
+      // persists, exports and boots like an imported theme.
+      const preset = THEME_PRESETS.find(
+        p => p.name === value.slice(PRESET_PREFIX.length)
+      )
+      if (!preset) return
+      const { custom_themes } = readClientPreferences()
+      const existing = custom_themes.find(t => t.name === preset.name)
+      if (existing) {
+        updateClientPreferences({ custom_theme: existing.id })
+        return
+      }
+      const theme = { ...preset, id: generateId() }
+      updateClientPreferences({
+        custom_themes: [...custom_themes, theme],
+        custom_theme: theme.id,
+      })
     },
     [updateClientPreferences]
   )
@@ -378,16 +424,12 @@ export const AppearancePane: React.FC = () => {
 
           <InlineField
             label="Custom theme"
-            description="Imported Jean, VS Code or T3 Code theme that recolours light and dark mode"
+            description="Preset, or imported Jean, VS Code or T3 Code theme, that recolours light and dark mode"
           >
             <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
               <Select
                 value={clientPreferences.custom_theme ?? NO_CUSTOM_THEME}
-                onValueChange={value =>
-                  updateClientPreferences({
-                    custom_theme: value === NO_CUSTOM_THEME ? null : value,
-                  })
-                }
+                onValueChange={handleCustomThemeSelect}
               >
                 <SelectTrigger className="w-full sm:w-80">
                   <SelectValue placeholder="None" />
@@ -399,6 +441,22 @@ export const AppearancePane: React.FC = () => {
                       {custom.name}
                     </SelectItem>
                   ))}
+                  {availablePresets.length > 0 && (
+                    <>
+                      <SelectSeparator />
+                      <SelectGroup>
+                        <SelectLabel>Presets</SelectLabel>
+                        {availablePresets.map(preset => (
+                          <SelectItem
+                            key={preset.name}
+                            value={`${PRESET_PREFIX}${preset.name}`}
+                          >
+                            {preset.name}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </>
+                  )}
                 </SelectContent>
               </Select>
               <input
