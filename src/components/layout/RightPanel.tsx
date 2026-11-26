@@ -121,10 +121,11 @@ export function RightPanel() {
     : undefined
   const isServer = !!project?.server
 
-  // Server projects have no Scripts button to take a shortcut request.
+  // Server projects and mobile have no Scripts button to take a shortcut request.
+  const showScripts = !isServer && !isMobile
   useEffect(() => {
-    if (isServer) useUIStore.getState().clearScriptsMenuRequest()
-  }, [isServer])
+    if (!showScripts) useUIStore.getState().clearScriptsMenuRequest()
+  }, [showScripts])
 
   const canShowWorktreeTab = !!worktreeId && !!worktreePath
   const available = TABS.filter(t => {
@@ -177,7 +178,7 @@ export function RightPanel() {
     worktreeId &&
     worktreePath && (
       <>
-        {!isServer && (
+        {showScripts && (
           <ScriptsButton
             inTitleBar={inTitleBar}
             projectId={project?.id}
