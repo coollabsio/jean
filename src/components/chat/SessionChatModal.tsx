@@ -1283,8 +1283,7 @@ export const SessionChatModal = memo(function SessionChatModal({
                 className={cn(
                   // Container queries: the modal is narrower than the window
                   // when side panels are open, so buttons hide by header width.
-                  // Border sits inside the row so the height matches the project header
-                  '@container/header flex items-center justify-between gap-2 border-b border-border/20 px-4 py-2',
+                  '@container/header flex items-center justify-between gap-2 px-4 py-2',
                   MODAL_TERMINAL_PRIMARY_ROW_CLASS
                 )}
               >
