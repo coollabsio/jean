@@ -274,14 +274,18 @@ export function ThreadDetailsButton({
       >
         {worktree && (
           <>
-            <div className="flex items-center gap-2 px-2 py-1.5 text-sm">
+            <div
+              className={cn(
+                'flex items-center gap-2 px-2 py-1.5 text-sm',
+                isMobile && 'min-h-12 gap-3 px-3'
+              )}
+            >
               <GitBranch className="h-4 w-4 shrink-0 text-muted-foreground" />
               <span className="truncate">{branch ?? 'Detached HEAD'}</span>
               {(ahead > 0 || behind > 0) && (
-                <span className="ml-auto pl-3 text-xs tabular-nums text-muted-foreground">
-                  {ahead > 0 && `↑${ahead}`}
-                  {ahead > 0 && behind > 0 && ' '}
-                  {behind > 0 && `↓${behind}`}
+                <span className="ml-auto flex gap-2 pl-3 text-xs tabular-nums text-muted-foreground">
+                  {ahead > 0 && <span>↑&nbsp;{ahead}</span>}
+                  {behind > 0 && <span>↓&nbsp;{behind}</span>}
                 </span>
               )}
             </div>

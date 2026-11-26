@@ -104,7 +104,7 @@ describe('ThreadDetailsButton', () => {
     await user.click(screen.getByRole('button', { name: /thread details/i }))
 
     expect(screen.getByText('feature-x')).toBeInTheDocument()
-    expect(screen.getByText('↑2')).toBeInTheDocument()
+    expect(screen.getByText('↑ 2')).toBeInTheDocument()
     const uncommitted = screen.getByRole('menuitem', { name: /uncommitted/i })
     expect(uncommitted).toHaveTextContent('+5 −1')
     expect(
