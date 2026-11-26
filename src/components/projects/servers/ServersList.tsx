@@ -93,7 +93,7 @@ export function ServersList({ servers }: ServersListProps) {
             </button>
           </div>
           {showServers && (
-            <ul className="flex flex-col gap-px px-1.5 pb-1">
+            <ul className="flex flex-col gap-px px-2 pb-1">
               {servers.map(project => {
                 return (
                   <li key={project.id} className="group relative">
@@ -101,7 +101,7 @@ export function ServersList({ servers }: ServersListProps) {
                       type="button"
                       onClick={() => handleOpen(project)}
                       className={cn(
-                        'flex w-full items-center gap-2 rounded-md px-2 py-1.5 pr-20 text-left transition-colors hover:bg-muted/50',
+                        'flex w-full items-center gap-2 rounded-md px-3 py-1.5 pr-20 text-left transition-colors hover:bg-muted/50',
                         selectedProjectId === project.id && 'bg-muted'
                       )}
                     >

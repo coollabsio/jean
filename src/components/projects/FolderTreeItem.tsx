@@ -122,11 +122,11 @@ export function FolderTreeItem({
         {/* react-doctor-disable-next-line react-doctor/no-static-element-interactions -- row click duplicates the nested expand/collapse folder <button>, which is the keyboard path */}
         <div
           className={cn(
-            'group flex cursor-pointer items-center gap-1 px-3 py-1.5 transition-colors duration-150',
+            'group flex cursor-pointer items-center gap-1 px-5 py-1.5 transition-colors duration-150',
             'text-[13px] font-medium text-muted-foreground/70 hover:bg-accent/50 hover:text-muted-foreground',
             isDropTarget && 'bg-primary/10 text-primary'
           )}
-          style={{ paddingLeft: `${12 + depth * 12}px` }}
+          style={{ paddingLeft: `${20 + depth * 12}px` }}
           onClick={handleClick}
           onDoubleClick={handleDoubleClick}
         >
