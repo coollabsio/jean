@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ComponentType } from 'react'
 import {
   CircleDot,
-  FileText,
+  ListSquare,
   FolderOpen,
   GitBranch,
   GitPullRequest,
@@ -250,7 +250,7 @@ export function ThreadDetailsButton({
                 open && 'bg-muted/50 text-foreground'
               )}
             >
-              <FileText className="size-3.5" />
+              <ListSquare className="size-3.5" />
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>

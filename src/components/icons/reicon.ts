@@ -87,6 +87,7 @@ export {
   Link2,
   List,
   ListCheck,
+  ListSquare,
   Lock,
   Login,
   Logout,
