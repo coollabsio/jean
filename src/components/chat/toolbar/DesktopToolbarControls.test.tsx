@@ -67,11 +67,7 @@ function renderDesktopToolbarControls(
     loadedLinearContexts: [],
     loadedSentryContexts: [],
     attachedSavedContexts: [],
-    providerDropdownOpen: false,
-    thinkingDropdownOpen: false,
     mcpDropdownOpen: false,
-    setProviderDropdownOpen: vi.fn(),
-    setThinkingDropdownOpen: vi.fn(),
     onMcpDropdownOpenChange: vi.fn(),
     onOpenMagicModal: vi.fn(),
     onOpenProjectSettings: vi.fn(),
@@ -99,6 +95,13 @@ function renderDesktopToolbarControls(
   return render(<DesktopToolbarControls {...defaultProps} {...props} />)
 }
 
+async function openPicker(user = userEvent.setup()) {
+  await user.click(
+    screen.getByRole('button', { name: /choose backend and model/i })
+  )
+  return user
+}
+
 describe('DesktopToolbarControls', () => {
   it('shows loaded Sentry issues in the context dropdown', async () => {
     const user = userEvent.setup()
@@ -124,18 +127,26 @@ describe('DesktopToolbarControls', () => {
   it.each([
     ['build', 'Auto-accept edits'],
     ['yolo', 'Full access'],
-  ] as const)('shows %s label in the desktop mode trigger', (mode, label) => {
-    renderDesktopToolbarControls({ executionMode: mode })
+  ] as const)(
+    'shows %s label in the picker mode trigger',
+    async (mode, label) => {
+      renderDesktopToolbarControls({ executionMode: mode })
+      await openPicker()
 
-    expect(
-      screen.getByRole('button', {
-        name: new RegExp(`^Permissions: ${label}$`, 'i'),
-      })
-    ).toBeInTheDocument()
-  })
+      expect(
+        screen.getByRole('button', {
+          name: new RegExp(`^Permissions: ${label}$`, 'i'),
+        })
+      ).toBeInTheDocument()
+    }
+  )
 
-  it('shows Plan in the desktop mode trigger', () => {
+  it('shows Plan in the picker trigger and mode trigger', async () => {
     renderDesktopToolbarControls({ executionMode: 'plan' })
+    expect(
+      screen.getByRole('button', { name: /choose backend and model/i })
+    ).toHaveTextContent('Plan')
+    await openPicker()
 
     expect(
       screen.getByRole('button', { name: 'Workflow: Plan' })
@@ -150,6 +161,7 @@ describe('DesktopToolbarControls', () => {
       executionMode: 'plan',
       onSetExecutionMode,
     })
+    await openPicker(user)
 
     await user.click(screen.getByRole('button', { name: 'Workflow: Plan' }))
     await user.click(screen.getByRole('menuitemradio', { name: /Supervised/ }))
@@ -192,14 +204,14 @@ describe('DesktopToolbarControls', () => {
     renderDesktopToolbarControls({ hasPendingQuestions: true })
 
     expect(screen.getByRole('button', { name: /magic/i })).toBeEnabled()
-    expect(
-      screen.getByRole('button', { name: /choose backend and model/i })
-    ).toBeEnabled()
-    expect(screen.getByRole('button', { name: /medium/i })).toBeEnabled()
-    expect(screen.getByRole('button', { name: 'Workflow: Plan' })).toBeEnabled()
+    const picker = screen.getByRole('button', {
+      name: /choose backend and model/i,
+    })
+    expect(picker).toBeEnabled()
+    expect(picker).toHaveTextContent('Medium')
   })
 
-  it('keeps Claude provider switcher available after messages exist', () => {
+  it('keeps Claude provider switcher available after messages exist', async () => {
     renderDesktopToolbarControls({
       selectedBackend: 'claude',
       selectedModel: 'sonnet',
@@ -209,9 +221,10 @@ describe('DesktopToolbarControls', () => {
       sessionHasMessages: true,
       isCodex: false,
     })
+    await openPicker()
 
     expect(
-      screen.getByRole('button', { name: /anthropic/i })
+      screen.getByRole('button', { name: 'Provider: Anthropic' })
     ).toBeInTheDocument()
   })
 
@@ -230,26 +243,25 @@ describe('DesktopToolbarControls', () => {
     expect(screen.queryByText('Effort')).not.toBeInTheDocument()
   })
 
-  it('hides Claude-only Max and Ultracode effort for Codex', () => {
+  it('hides Claude-only Max and Ultracode effort for Codex', async () => {
     renderDesktopToolbarControls({
       isCodex: true,
       selectedBackend: 'codex',
       useAdaptiveThinking: false,
       selectedEffortLevel: 'max',
-      thinkingDropdownOpen: true,
     })
+    await openPicker()
 
     expect(screen.getByText('xHigh')).toBeInTheDocument()
     expect(screen.queryByText('Max')).not.toBeInTheDocument()
     expect(screen.queryByText('Ultracode')).not.toBeInTheDocument()
   })
 
-  it('renders effort levels supplied by the selected model catalog entry', () => {
+  it('renders effort levels supplied by the selected model catalog entry', async () => {
     renderDesktopToolbarControls({
       selectedBackend: 'codex',
       selectedModel: 'gpt-5.6-sol',
       selectedEffortLevel: 'ultra',
-      thinkingDropdownOpen: true,
       modelReasoning: {
         type: 'effort',
         default: 'medium',
@@ -263,19 +275,19 @@ describe('DesktopToolbarControls', () => {
         ],
       },
     })
+    await openPicker()
 
     expect(screen.getAllByText('Ultra').length).toBeGreaterThan(0)
     expect(screen.getByText('Automatic delegation')).toBeInTheDocument()
     expect(screen.queryByText('xHigh')).not.toBeInTheDocument()
   })
 
-  it('renders thinking levels supplied by the selected model catalog entry', () => {
+  it('renders thinking levels supplied by the selected model catalog entry', async () => {
     renderDesktopToolbarControls({
       selectedBackend: 'claude',
       selectedModel: 'claude-legacy',
       isCodex: false,
       selectedThinkingLevel: 'megathink',
-      thinkingDropdownOpen: true,
       modelReasoning: {
         type: 'thinking',
         default: 'think',
@@ -285,13 +297,14 @@ describe('DesktopToolbarControls', () => {
         ],
       },
     })
+    await openPicker()
 
     expect(screen.getAllByText('Mega').length).toBeGreaterThan(0)
     expect(screen.getByText('10K')).toBeInTheDocument()
     expect(screen.queryByText('Ultrathink')).not.toBeInTheDocument()
   })
 
-  it('shows PI effort options instead of Claude thinking on desktop', () => {
+  it('shows PI effort options instead of Claude thinking on desktop', async () => {
     renderDesktopToolbarControls({
       isCodex: false,
       selectedBackend: 'pi',
@@ -299,33 +312,29 @@ describe('DesktopToolbarControls', () => {
       selectedEffortLevel: 'xhigh',
       useAdaptiveThinking: false,
       selectedThinkingLevel: 'megathink',
-      thinkingDropdownOpen: true,
     })
+    await openPicker()
 
-    expect(
-      screen.getByRole('menuitemradio', { name: /xhigh/i })
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole('menuitemradio', { name: /minimal/i })
-    ).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: /xhigh/i })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: /minimal/i })).toBeInTheDocument()
     expect(screen.queryByText('Megathink')).not.toBeInTheDocument()
     expect(screen.queryByText('Max')).not.toBeInTheDocument()
     expect(screen.queryByText('Ultracode')).not.toBeInTheDocument()
   })
 
-  it('shows only native Antigravity effort options', () => {
+  it('shows only native Antigravity effort options', async () => {
     renderDesktopToolbarControls({
       isCodex: false,
       selectedBackend: 'antigravity',
       selectedModel: 'antigravity/auto',
       selectedEffortLevel: 'medium',
       selectedThinkingLevel: 'megathink',
-      thinkingDropdownOpen: true,
     })
+    await openPicker()
 
     for (const name of ['Adaptive/Default', 'Low', 'Medium', 'High']) {
       expect(
-        screen.getByRole('menuitemradio', { name: new RegExp(name, 'i') })
+        screen.getByRole('radio', { name: new RegExp(name, 'i') })
       ).toBeInTheDocument()
     }
     expect(screen.queryByText('Megathink')).not.toBeInTheDocument()
@@ -341,20 +350,20 @@ describe('DesktopToolbarControls', () => {
       selectedModel: 'muse/default',
       selectedEffortLevel: 'high',
       selectedThinkingLevel: 'megathink',
-      thinkingDropdownOpen: true,
       handleEffortLevelChange,
     })
+    await openPicker(user)
 
-    const items = screen.getAllByRole('menuitemradio')
+    const items = screen.getAllByRole('radio')
     expect(items.map(item => item.textContent)).toEqual([
-      'NoneNo reasoning1',
-      'MinimalMinimal2',
-      'LowLow3',
-      'MediumModerate4',
-      'HighDeep5',
-      'xHighExtra high6',
-      'MaxMaximum7',
-      'UltraBeyond max8',
+      'NoneNo reasoning',
+      'MinimalMinimal',
+      'LowLow',
+      'MediumModerate',
+      'HighDeep',
+      'xHighExtra high',
+      'MaxMaximum',
+      'UltraBeyond max',
     ])
     const ultraItem = items[7]
     if (!ultraItem) throw new Error('missing Ultra effort item')
@@ -362,19 +371,22 @@ describe('DesktopToolbarControls', () => {
     expect(handleEffortLevelChange).toHaveBeenCalledWith('ultra')
   })
 
-  it('shows High for a Claude-only effort that Muse cannot run', () => {
+  it('shows High for a Claude-only effort that Muse cannot run', async () => {
     renderDesktopToolbarControls({
       isCodex: false,
       selectedBackend: 'muse',
       selectedModel: 'muse/muse-spark-1.2',
       selectedEffortLevel: 'ultracode',
-      thinkingDropdownOpen: true,
     })
+    await openPicker()
 
-    expect(screen.getByRole('menu', { name: 'High' })).toBeInTheDocument()
     expect(
-      screen.getByRole('menuitemradio', { name: /^HighDeep/ })
-    ).toHaveAttribute('aria-checked', 'true')
+      screen.getByRole('button', { name: /choose backend and model/i })
+    ).toHaveTextContent('High')
+    expect(screen.getByRole('radio', { name: /^HighDeep/ })).toHaveAttribute(
+      'aria-checked',
+      'true'
+    )
   })
 
   it('calls effort change handler when selecting an effort on desktop', async () => {
@@ -386,12 +398,12 @@ describe('DesktopToolbarControls', () => {
       selectedBackend: 'claude',
       useAdaptiveThinking: true,
       selectedEffortLevel: 'medium',
-      thinkingDropdownOpen: true,
       handleEffortLevelChange,
     })
+    await openPicker(user)
 
     const xHighItem = screen
-      .getAllByRole('menuitemradio', { name: /xhigh/i })
+      .getAllByRole('radio', { name: /xhigh/i })
       .find(item => item.textContent?.startsWith('xHigh'))
     expect(xHighItem).toBeDefined()
     if (!xHighItem) return
@@ -400,26 +412,26 @@ describe('DesktopToolbarControls', () => {
     expect(handleEffortLevelChange).toHaveBeenCalledWith('xhigh')
   })
 
-  it('keeps Max effort available for Claude adaptive thinking', () => {
+  it('keeps Max effort available for Claude adaptive thinking', async () => {
     renderDesktopToolbarControls({
       isCodex: false,
       selectedBackend: 'claude',
       useAdaptiveThinking: true,
       selectedEffortLevel: 'max',
-      thinkingDropdownOpen: true,
     })
+    await openPicker()
 
     expect(screen.getAllByText('Max').length).toBeGreaterThan(0)
   })
 
-  it('keeps Ultracode effort available for Claude adaptive thinking', () => {
+  it('keeps Ultracode effort available for Claude adaptive thinking', async () => {
     renderDesktopToolbarControls({
       isCodex: false,
       selectedBackend: 'claude',
       useAdaptiveThinking: true,
       selectedEffortLevel: 'ultracode',
-      thinkingDropdownOpen: true,
     })
+    await openPicker()
 
     expect(screen.getAllByText('Ultracode').length).toBeGreaterThan(0)
   })

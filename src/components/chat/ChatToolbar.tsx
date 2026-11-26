@@ -46,7 +46,6 @@ import {
   PI_MODEL_OPTIONS,
   THINKING_LEVEL_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
-import { useToolbarDropdownShortcuts } from '@/components/chat/toolbar/useToolbarDropdownShortcuts'
 import { useToolbarDerivedState } from '@/components/chat/toolbar/useToolbarDerivedState'
 import { useContextViewer } from '@/components/chat/toolbar/useContextViewer'
 import {
@@ -156,8 +155,6 @@ export const ChatToolbar = memo(function ChatToolbar({
     refetchAll: checkHealth,
   } = useAllBackendsMcpHealth(installedBackends, activeWorktreePath)
 
-  const [providerDropdownOpen, setProviderDropdownOpen] = useState(false)
-  const [thinkingDropdownOpen, setThinkingDropdownOpen] = useState(false)
   const [mcpDropdownOpen, setMcpDropdownOpen] = useState(false)
   const [mobileBackendModelPickerOpen, setMobileBackendModelPickerOpen] =
     useState(false)
@@ -180,11 +177,6 @@ export const ChatToolbar = memo(function ChatToolbar({
     },
     [checkHealth]
   )
-
-  useToolbarDropdownShortcuts({
-    setProviderDropdownOpen,
-    setThinkingDropdownOpen,
-  })
 
   const { data: availableOpencodeModels } = useAvailableOpencodeModels({
     enabled: selectedBackend === 'opencode',
@@ -611,11 +603,7 @@ export const ChatToolbar = memo(function ChatToolbar({
               loadedLinearContexts={loadedLinearContexts}
               loadedSentryContexts={loadedSentryContexts}
               attachedSavedContexts={attachedSavedContexts}
-              providerDropdownOpen={providerDropdownOpen}
-              thinkingDropdownOpen={thinkingDropdownOpen}
               mcpDropdownOpen={mcpDropdownOpen}
-              setProviderDropdownOpen={setProviderDropdownOpen}
-              setThinkingDropdownOpen={setThinkingDropdownOpen}
               onMcpDropdownOpenChange={handleMcpDropdownOpenChange}
               onOpenMagicModal={onOpenMagicModal}
               onOpenProjectSettings={onOpenProjectSettings}
