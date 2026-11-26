@@ -4,6 +4,7 @@ import type { SessionCardData } from './session-card-utils'
 import {
   decideSessionClose,
   finishedSubSessionIds,
+  groupRunningTabs,
   isActiveSessionGone,
   isSessionEmpty,
   leadIdsOf,
@@ -94,6 +95,34 @@ describe('session tab ordering', () => {
       'old-running',
       'older-planning',
     ])
+  })
+})
+
+describe('groupRunningTabs', () => {
+  const tabs = (...cards: SessionCardData[]) => cards.map(item => ({ item }))
+  const ids = (list: { item: SessionCardData }[]) =>
+    list.map(tab => tab.item.session.id)
+
+  it('moves 2+ running sessions into the group, but not the active one', () => {
+    const result = groupRunningTabs(
+      tabs(
+        card('idle', 'idle', 0),
+        card('waiting', 'waiting', 1),
+        card('active-run', 'vibing', 2),
+        card('run-a', 'planning', 3),
+        card('run-b', 'yoloing', 4)
+      ),
+      'active-run'
+    )
+    expect(ids(result.tabs)).toEqual(['idle', 'waiting', 'active-run'])
+    expect(ids(result.running)).toEqual(['run-a', 'run-b'])
+  })
+
+  it('keeps a single running session as a plain tab', () => {
+    const input = tabs(card('idle', 'idle', 0), card('run', 'vibing', 1))
+    const result = groupRunningTabs(input, 'idle')
+    expect(ids(result.tabs)).toEqual(['idle', 'run'])
+    expect(result.running).toEqual([])
   })
 })
 

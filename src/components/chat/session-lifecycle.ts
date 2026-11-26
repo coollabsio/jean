@@ -26,6 +26,21 @@ export function isSessionBusy(status: SessionStatus): boolean {
   )
 }
 
+/**
+ * Splits tab-bar entries into plain tabs and running sessions that share one
+ * grouped tab. The active session keeps its own tab. Groups need 2+ sessions.
+ */
+export function groupRunningTabs<T extends { item: SessionCardData }>(
+  tabs: T[],
+  activeSessionId: string | null | undefined
+): { tabs: T[]; running: T[] } {
+  const isGrouped = (tab: T) =>
+    isRunning(tab.item) && tab.item.session.id !== activeSessionId
+  const running = tabs.filter(isGrouped)
+  if (running.length < 2) return { tabs, running: [] }
+  return { tabs: tabs.filter(tab => !isGrouped(tab)), running }
+}
+
 /** The fields that link a sub-session to the session that started it. */
 interface SessionLink {
   id: string

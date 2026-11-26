@@ -87,6 +87,7 @@ import {
   decideSessionClose,
   finishedSubSessionIds,
   isActiveSessionGone,
+  groupRunningTabs,
   isSessionBusy,
   leadIdsOf,
   nestUnderLeads,
@@ -99,6 +100,7 @@ import {
 } from './session-lifecycle'
 import { useSubSessionStore } from '@/store/sub-session-store'
 import { DisclosureChevron } from '@/components/projects/DisclosureChevron'
+import { RunningSessionsTab } from './RunningSessionsTab'
 import { useCanvasStoreState } from './hooks/useCanvasStoreState'
 import {
   ContextMenu,
@@ -842,6 +844,11 @@ export const SessionChatModal = memo(function SessionChatModal({
     () => visibleTabs.map(tab => tab.item),
     [visibleTabs]
   )
+  // Running sessions other than the active one share a single last tab.
+  const tabRow = useMemo(
+    () => groupRunningTabs(visibleTabs, currentSessionId),
+    [visibleTabs, currentSessionId]
+  )
 
   // Opening a hidden sub-session (sidebar, Recent, notification) shows it.
   useEffect(() => {
@@ -1390,7 +1397,9 @@ export const SessionChatModal = memo(function SessionChatModal({
                   aria-label="Sessions"
                   className="flex min-w-max items-center gap-0 py-0 px-0"
                 >
-                  {visibleTabs.map((tab, idx) => {
+                  {tabRow.tabs.map(tab => {
+                    // Shortcut hints follow mod+N, which counts every tab.
+                    const idx = visibleTabs.indexOf(tab)
                     const card = tab.item
                     const session = card.session
                     const isActive = session.id === currentSessionId
@@ -1521,6 +1530,12 @@ export const SessionChatModal = memo(function SessionChatModal({
                       </ContextMenu>
                     )
                   })}
+                  {tabRow.running.length > 0 && (
+                    <RunningSessionsTab
+                      cards={tabRow.running.map(tab => tab.item)}
+                      onSelect={handleTabClick}
+                    />
+                  )}
                 </div>
                 <ScrollBar orientation="horizontal" className="h-1" />
               </ScrollArea>
