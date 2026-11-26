@@ -22,16 +22,16 @@ describe('RecentWorktreesList structure', () => {
     expect(source).toContain('isSnoozedSession(row.lastActivityAt, now)')
   })
 
-  it('moves unpinned working sessions to a collapsible Working shelf', () => {
+  it('moves unpinned working sessions to a Working shelf below the pinned rows', () => {
     expect(source).toContain(
       'if (!isPinned && isRunning(row)) groups.workingRows.push(row)'
     )
     expect(source).toContain('aria-label="Working sessions"')
     expect(source).toContain('aria-expanded={workingExpanded}')
+    // Visual order: pinned, Working shelf, finished, Snoozed shelf.
     expect(source).toMatch(
-      /\[\.\.\.listRows, \.\.\.visibleWorkingRows, \.\.\.visibleSnoozedRows\]/
+      /\.\.\.pinnedRows,\s+\.\.\.visibleWorkingRows,\s+\.\.\.finishedRows,\s+\.\.\.visibleSnoozedRows,/
     )
-    // The shelf sits at the bottom on every view, mobile included.
     expect(source).not.toContain('isMobile && workingShelfSection')
   })
 

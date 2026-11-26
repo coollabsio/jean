@@ -157,8 +157,13 @@ export function groupRecentRows(
   const hasPinned = listRows.some(
     row => pinned.has(row.session.id) && !depthById.has(row.session.id)
   )
+  const firstUnpinnedIndex = firstUnpinned
+    ? listRows.indexOf(firstUnpinned)
+    : listRows.length
   return {
     listRows,
+    // Rows before this index are pinned (with their sub-sessions).
+    pinnedCount: hasPinned ? firstUnpinnedIndex : 0,
     workingRows: nest(groups.workingRows),
     snoozedRows: nest(groups.snoozedRows),
     depthById,
@@ -234,12 +239,14 @@ export function RecentWorktreesList({
   const rows = query.data?.items ?? EMPTY_RECENT_ROWS
   const pageSize = query.data?.pageSize ?? limit
   const pinned = useMemo(() => new Set(pinnedSessionIds), [pinnedSessionIds])
-  // Unpinned running sessions move to a collapsible Working shelf, and
-  // unpinned snoozed sessions to a collapsible Snoozed shelf below it.
-  // Pinned sessions stay in the pinned group. Inside each part, a
+  // Unpinned running sessions move to a collapsible Working shelf between
+  // the pinned and finished rows, and unpinned snoozed sessions to a
+  // collapsible Snoozed shelf at the bottom. Pinned sessions stay in the
+  // pinned group. Inside each part, a
   // sub-session follows its lead when both are there.
   const {
     listRows,
+    pinnedCount,
     workingRows,
     snoozedRows,
     depthById,
@@ -262,10 +269,23 @@ export function RecentWorktreesList({
   if (workingExpanded && workingRows.length === 0) setWorkingExpanded(false)
   const visibleWorkingRows = workingExpanded ? workingRows : EMPTY_RECENT_ROWS
   const visibleSnoozedRows = snoozedExpanded ? snoozedRows : EMPTY_RECENT_ROWS
+  const pinnedRows = useMemo(
+    () => listRows.slice(0, pinnedCount),
+    [listRows, pinnedCount]
+  )
+  const finishedRows = useMemo(
+    () => listRows.slice(pinnedCount),
+    [listRows, pinnedCount]
+  )
   // Visual order, used by Cmd+Arrow navigation and Cmd+1-9 shortcuts.
   const displayedRows = useMemo(
-    () => [...listRows, ...visibleWorkingRows, ...visibleSnoozedRows],
-    [listRows, visibleWorkingRows, visibleSnoozedRows]
+    () => [
+      ...pinnedRows,
+      ...visibleWorkingRows,
+      ...finishedRows,
+      ...visibleSnoozedRows,
+    ],
+    [pinnedRows, visibleWorkingRows, finishedRows, visibleSnoozedRows]
   )
   const projectsById = useMemo(
     () => new Map(projects.map(project => [project.id, project])),
@@ -682,7 +702,7 @@ export function RecentWorktreesList({
       </button>
       <ul className={listClassName}>
         {visibleWorkingRows.map((row, index) =>
-          renderRow(row, listRows.length + index)
+          renderRow(row, pinnedRows.length + index)
         )}
       </ul>
     </section>
@@ -700,16 +720,29 @@ export function RecentWorktreesList({
             No recent sessions
           </div>
         )}
+        {pinnedRows.length > 0 && (
+          <ul
+            aria-label="Pinned sessions"
+            className={`${listClassName} pt-2 pb-2`}
+          >
+            {pinnedRows.map((row, index) => renderRow(row, index))}
+          </ul>
+        )}
+        {workingShelfSection}
         <ul
           aria-label="Recent sessions"
           className={`${listClassName} pt-2 pb-2`}
         >
-          {listRows.map((row, index) => renderRow(row, index))}
+          {finishedRows.map((row, index) =>
+            renderRow(
+              row,
+              pinnedRows.length + visibleWorkingRows.length + index
+            )
+          )}
         </ul>
-        {/* Shelves and paging actions sit at the bottom of a short list and
-            scroll with a long one. */}
+        {/* The Snoozed shelf and paging actions sit at the bottom of a short
+            list and scroll with a long one. */}
         <div className="mt-auto pb-[env(safe-area-inset-bottom)]">
-          {workingShelfSection}
           {snoozedCount > 0 && (
             <section aria-label="Snoozed sessions" className="pb-2">
               <button

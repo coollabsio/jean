@@ -107,6 +107,7 @@ describe('groupRecentRows', () => {
     )
     expect(ids(grouped.listRows)).toEqual(['lead', 'child', 'other'])
     expect(grouped.firstUnpinnedSessionId).toBeNull()
+    expect(grouped.pinnedCount).toBe(0)
   })
 
   it('keeps an unpinned sub-session of a pinned lead above the pinned separator', () => {
@@ -118,6 +119,19 @@ describe('groupRecentRows', () => {
     )
     expect(ids(grouped.listRows)).toEqual(['lead', 'child', 'plain'])
     expect(grouped.firstUnpinnedSessionId).toBe('plain')
+    expect(grouped.pinnedCount).toBe(2)
+  })
+
+  it('counts every row as pinned when no unpinned row is in the list', () => {
+    const grouped = groupRecentRows(
+      [sessionRow('a'), sessionRow('b'), sessionRow('run')],
+      new Set(['a', 'b']),
+      row => row.session.id === 'run',
+      now
+    )
+    expect(ids(grouped.listRows)).toEqual(['a', 'b'])
+    expect(ids(grouped.workingRows)).toEqual(['run'])
+    expect(grouped.pinnedCount).toBe(2)
   })
 
   it('draws no pinned separator without pinned rows', () => {
