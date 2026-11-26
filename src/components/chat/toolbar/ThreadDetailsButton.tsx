@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type ComponentType } from 'react'
 import {
   CircleDot,
-  Command,
   FileText,
   FolderOpen,
   GitBranch,
@@ -30,7 +29,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { McpStatusDot } from '@/components/chat/toolbar/McpStatusDot'
 import {
   UsageMenuItem,
   useUsageEntries,
@@ -42,7 +40,7 @@ import { useGitStatus } from '@/services/git-status'
 import { usePreferences } from '@/services/preferences'
 import { useWorktree } from '@/services/projects'
 import { useUIStore } from '@/store/ui-store'
-import type { McpHealthStatus, McpServerInfo } from '@/types/chat'
+import type { McpServerInfo } from '@/types/chat'
 import type {
   AttachedSavedContext,
   LoadedAdvisoryContext,
@@ -53,7 +51,6 @@ import type {
 } from '@/types/github'
 import { DEFAULT_KEYBINDINGS, formatShortcutDisplay } from '@/types/keybindings'
 import type { LoadedLinearIssueContext } from '@/types/linear'
-import type { CliBackend } from '@/types/preferences'
 import { isBaseSession } from '@/types/projects'
 import type { SentryIssueContext } from '@/types/sentry'
 
@@ -154,7 +151,6 @@ interface ThreadDetailsButtonProps {
   contexts: ThreadContextItem[]
   availableMcpServers: McpServerInfo[]
   enabledMcpServers: string[]
-  mcpStatuses: Record<string, McpHealthStatus> | undefined
   onManageContexts: () => void
   /** Called each time the menu opens (e.g. to refresh MCP health). */
   onOpen?: () => void
@@ -181,7 +177,6 @@ export function ThreadDetailsButton({
   contexts,
   availableMcpServers,
   enabledMcpServers,
-  mcpStatuses,
   onManageContexts,
   onOpen,
 }: ThreadDetailsButtonProps) {
@@ -235,12 +230,10 @@ export function ThreadDetailsButton({
         enabledKeys.has(server.name))
   )
 
-  const shortcut = (action: 'open_command_palette' | 'open_quick_menu') =>
-    formatShortcutDisplay(
-      (preferences?.keybindings?.[action] ??
-        DEFAULT_KEYBINDINGS[action]) as string
-    )
-  const menuShortcut = shortcut('open_quick_menu')
+  const menuShortcut = formatShortcutDisplay(
+    (preferences?.keybindings?.open_quick_menu ??
+      DEFAULT_KEYBINDINGS.open_quick_menu) as string
+  )
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -290,37 +283,21 @@ export function ThreadDetailsButton({
                 </span>
               )}
             </div>
-            <DropdownMenuItem
-              disabled={!hasUncommitted}
-              onClick={() => openDiff('uncommitted')}
-            >
-              <span className="text-muted-foreground">Uncommitted</span>
-              {hasUncommitted ? (
+            {hasUncommitted && (
+              <DropdownMenuItem onClick={() => openDiff('uncommitted')}>
+                <span className="text-muted-foreground">Uncommitted</span>
                 <DiffCounts
                   added={uncommittedAdded}
                   removed={uncommittedRemoved}
                 />
-              ) : (
-                <span className="ml-auto text-xs text-muted-foreground">
-                  Clean
-                </span>
-              )}
-            </DropdownMenuItem>
-            {!isBase && (
-              <DropdownMenuItem
-                disabled={!hasBranchDiff}
-                onClick={() => openDiff('branch')}
-              >
+              </DropdownMenuItem>
+            )}
+            {!isBase && hasBranchDiff && (
+              <DropdownMenuItem onClick={() => openDiff('branch')}>
                 <span className="truncate text-muted-foreground">
                   vs {gitStatus?.base_branch || 'base'}
                 </span>
-                {hasBranchDiff ? (
-                  <DiffCounts added={branchAdded} removed={branchRemoved} />
-                ) : (
-                  <span className="ml-auto text-xs text-muted-foreground">
-                    No changes
-                  </span>
-                )}
+                <DiffCounts added={branchAdded} removed={branchRemoved} />
               </DropdownMenuItem>
             )}
             <DropdownMenuSeparator />
@@ -343,53 +320,23 @@ export function ThreadDetailsButton({
 
         <DropdownMenuSeparator />
         {!isMobile && (
-          <>
-            <DropdownMenuItem
-              onClick={() =>
-                useUIStore.getState().openPreferencesPane('mcp-servers')
-              }
-            >
-              <Plug
-                className={cn(
-                  'h-4 w-4',
-                  activeMcpServers.length > 0 && 'text-success'
-                )}
-              />
-              MCP Servers
-              <DropdownMenuShortcut>
-                {activeMcpServers.length}
-              </DropdownMenuShortcut>
-            </DropdownMenuItem>
-            {activeMcpServers.map(server => {
-              const key = `${server.backend || 'claude'}:${server.name}`
-              return (
-                <div
-                  key={key}
-                  className="flex items-center gap-2 py-1 pr-2 pl-8 text-xs text-muted-foreground"
-                >
-                  <span className="truncate">{server.name}</span>
-                  <span className="ml-auto flex items-center">
-                    <McpStatusDot
-                      status={mcpStatuses?.[key]}
-                      backend={server.backend as CliBackend}
-                    />
-                  </span>
-                </div>
-              )
-            })}
-          </>
-        )}
-        <DropdownMenuItem
-          onClick={() => useUIStore.getState().setCommandPaletteOpen(true)}
-        >
-          <Command className="h-4 w-4" />
-          Command Palette
-          {!isMobile && (
+          <DropdownMenuItem
+            onClick={() =>
+              useUIStore.getState().openPreferencesPane('mcp-servers')
+            }
+          >
+            <Plug
+              className={cn(
+                'h-4 w-4',
+                activeMcpServers.length > 0 && 'text-success'
+              )}
+            />
+            MCP Servers
             <DropdownMenuShortcut>
-              {shortcut('open_command_palette')}
+              {activeMcpServers.length}
             </DropdownMenuShortcut>
-          )}
-        </DropdownMenuItem>
+          </DropdownMenuItem>
+        )}
         {isMobile && (
           <>
             <DropdownMenuItem

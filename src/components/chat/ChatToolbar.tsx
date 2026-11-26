@@ -479,7 +479,6 @@ export const ChatToolbar = memo(function ChatToolbar({
             })}
             availableMcpServers={availableMcpServers}
             enabledMcpServers={enabledMcpServers}
-            mcpStatuses={mcpStatuses}
             onManageContexts={onLoadContext}
             onOpen={checkHealth}
           />,

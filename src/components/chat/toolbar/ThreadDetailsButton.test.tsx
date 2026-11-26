@@ -75,7 +75,6 @@ function renderDetails(
       contexts={[]}
       availableMcpServers={[]}
       enabledMcpServers={[]}
-      mcpStatuses={undefined}
       onManageContexts={() => undefined}
       {...props}
     />
@@ -163,7 +162,7 @@ describe('ThreadDetailsButton', () => {
     ).toBeInTheDocument()
   })
 
-  it('counts only enabled MCP servers and opens their settings pane', async () => {
+  it('counts enabled MCP servers without listing them, and opens their settings pane', async () => {
     const user = userEvent.setup()
     renderDetails({
       availableMcpServers: [
@@ -177,8 +176,7 @@ describe('ThreadDetailsButton', () => {
     await user.click(screen.getByRole('button', { name: /thread details/i }))
     const item = screen.getByRole('menuitem', { name: /mcp servers/i })
     expect(item).toHaveTextContent('1')
-    expect(screen.getByText('alpha')).toBeInTheDocument()
-    expect(screen.queryByText('beta')).toBeNull()
+    expect(screen.queryByText('alpha')).toBeNull()
 
     await user.click(item)
     expect(useUIStore.getState().preferencesPane).toBe('mcp-servers')
