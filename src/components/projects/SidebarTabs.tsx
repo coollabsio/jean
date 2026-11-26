@@ -40,7 +40,7 @@ export function SidebarTabs() {
             role="tab"
             aria-selected={active === view}
             className={cn(
-              'flex h-7 min-w-0 flex-1 items-center justify-center truncate rounded-md px-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+              'flex h-7.5 min-w-0 flex-1 items-center justify-center truncate rounded-md px-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
               active === view
                 ? 'bg-muted text-foreground'
                 : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
