@@ -131,6 +131,8 @@ const baseProps = {
   handleProviderChange: vi.fn(),
   handleEffortLevelChange: vi.fn(),
   handleThinkingLevelChange: vi.fn(),
+  executionMode: 'yolo' as const,
+  onSetExecutionMode: vi.fn(),
   loadedIssueContexts: [],
   loadedPRContexts: [],
   loadedDiscussionContexts: [],
@@ -187,6 +189,40 @@ describe('MobileSettingsMenu', () => {
       const effortItem = screen.getByText('Effort').closest('[role="menuitem"]')
       const effortIcon = effortItem?.querySelector('svg')
       expect(effortIcon).not.toHaveClass('mr-2')
+    } finally {
+      Object.defineProperty(window, 'innerWidth', {
+        configurable: true,
+        value: originalInnerWidth,
+      })
+    }
+  })
+
+  it('switches to plan mode from the mobile Mode row', async () => {
+    const user = userEvent.setup()
+    const onSetExecutionMode = vi.fn()
+    const originalInnerWidth = window.innerWidth
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      value: 390,
+    })
+
+    try {
+      render(
+        <MobileSettingsMenu
+          {...baseProps}
+          onSetExecutionMode={onSetExecutionMode}
+        />
+      )
+
+      await user.click(screen.getByRole('button', { name: /settings/i }))
+      const modeItem = screen.getByText('Mode').closest('[role="menuitem"]')
+      expect(modeItem).toHaveTextContent('Full access')
+
+      await user.click(modeItem as HTMLElement)
+      fireEvent.click(
+        await screen.findByRole('menuitemradio', { name: /^Plan/ })
+      )
+      expect(onSetExecutionMode).toHaveBeenCalledWith('plan')
     } finally {
       Object.defineProperty(window, 'innerWidth', {
         configurable: true,

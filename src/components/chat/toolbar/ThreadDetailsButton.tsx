@@ -245,11 +245,17 @@ export function ThreadDetailsButton({
               aria-label="Thread details"
               data-testid="thread-details-button"
               className={cn(
-                'rounded-none text-foreground/70 hover:text-foreground',
+                'relative rounded-none text-foreground/70 hover:text-foreground',
                 open && 'bg-muted/50 text-foreground'
               )}
             >
               <ListSquare className="size-3.5" />
+              {hasUncommitted && (
+                <span
+                  data-testid="thread-details-uncommitted-dot"
+                  className="pointer-events-none absolute top-0.5 right-0.5 size-1.5 rounded-full bg-destructive"
+                />
+              )}
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>

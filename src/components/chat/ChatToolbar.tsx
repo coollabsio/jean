@@ -546,6 +546,10 @@ export const ChatToolbar = memo(function ChatToolbar({
               handleProviderChange={handleProviderChange}
               handleEffortLevelChange={handleEffortLevelChange}
               handleThinkingLevelChange={handleThinkingLevelChange}
+              sessionId={activeSessionId}
+              executionMode={executionMode}
+              availableExecutionModes={availableExecutionModes}
+              onSetExecutionMode={onSetExecutionMode}
               ref={mobileSettingsMenuRef}
               loadedIssueContexts={loadedIssueContexts}
               loadedPRContexts={loadedPRContexts}
@@ -597,17 +601,19 @@ export const ChatToolbar = memo(function ChatToolbar({
               />
             )}
 
-            <ExecutionModeDropdown
-              backend={selectedBackend}
-              sessionId={activeSessionId}
-              executionMode={executionMode}
-              availableModes={availableExecutionModes}
-              onSetExecutionMode={onSetExecutionMode}
-              className="flex @xl:hidden shrink-0"
-              align="end"
-              iconOnly
-              onCloseAutoFocus={isMobile ? undefined : focusChatInputOnClose}
-            />
+            {!isMobile && (
+              <ExecutionModeDropdown
+                backend={selectedBackend}
+                sessionId={activeSessionId}
+                executionMode={executionMode}
+                availableModes={availableExecutionModes}
+                onSetExecutionMode={onSetExecutionMode}
+                className="flex @xl:hidden shrink-0"
+                align="end"
+                iconOnly
+                onCloseAutoFocus={focusChatInputOnClose}
+              />
+            )}
 
             <DesktopToolbarControls
               activeSessionId={activeSessionId}

@@ -53,6 +53,7 @@ import type {
 } from '@/types/preferences'
 import type {
   EffortLevel,
+  ExecutionMode,
   McpServerInfo,
   ThinkingLevel,
   WorktreeSessions,
@@ -140,6 +141,10 @@ import {
   type MobileContextGroup,
 } from './MobileContextsSheet'
 import { LOCAL_SERVER_ID } from '@/types/server-resource'
+import {
+  ExecutionModeRadioGroup,
+  useExecutionModeDisplay,
+} from './ExecutionModeDropdown'
 
 /** Stable defaults so omit/undefined doesn't allocate a new [] each render. */
 const EMPTY_CODEX_PROVIDERS: CodexProviderProfile[] = []
@@ -178,6 +183,11 @@ interface MobileSettingsMenuProps {
   handleProviderChange: (value: string) => void
   handleEffortLevelChange: (value: string) => void
   handleThinkingLevelChange: (value: string) => void
+  /** Mobile only: the plan/permission mode picker sits below Model. */
+  sessionId?: string | null
+  executionMode: ExecutionMode
+  availableExecutionModes?: ExecutionMode[]
+  onSetExecutionMode: (mode: ExecutionMode) => void
   /** Lets the toolbar open the reasoning sheet after a mobile model pick. */
   ref?: Ref<MobileSettingsMenuHandle>
 
@@ -239,6 +249,10 @@ export function MobileSettingsMenu({
   handleProviderChange,
   handleEffortLevelChange,
   handleThinkingLevelChange,
+  sessionId,
+  executionMode,
+  availableExecutionModes,
+  onSetExecutionMode,
   ref,
   loadedIssueContexts,
   loadedPRContexts,
@@ -373,6 +387,17 @@ export function MobileSettingsMenu({
     selectedBackend === 'commandcode'
 
   const isMobile = useIsMobile()
+  const executionModeSelection = {
+    executionMode,
+    availableModes: availableExecutionModes,
+    backend: selectedBackend,
+    sessionId,
+  }
+  const {
+    Icon: ModeIcon,
+    tone: modeTone,
+    label: modeLabel,
+  } = useExecutionModeDisplay(executionModeSelection)
   const queryClient = useQueryClient()
   const [menuOpen, setMenuOpen] = useState(false)
   const [reasoningSheetOpen, setReasoningSheetOpen] = useState(false)
@@ -814,6 +839,24 @@ export function MobileSettingsMenu({
                 <ChevronRight className="ml-2 h-4 w-4 shrink-0 text-foreground" />
               )}
             </DropdownMenuItem>
+          )}
+
+          {isMobile && (
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger className="[&>svg:last-child]:!ml-2">
+                <ModeIcon className={cn('h-4 w-4', modeTone)} />
+                <span>Mode</span>
+                <span className="ml-auto min-w-0 truncate text-right text-xs text-muted-foreground">
+                  {modeLabel}
+                </span>
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="w-80">
+                <ExecutionModeRadioGroup
+                  {...executionModeSelection}
+                  onSetExecutionMode={onSetExecutionMode}
+                />
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
           )}
 
           {hideReasoningControl ? null : usesEffortControl && isMobile ? (

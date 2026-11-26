@@ -118,6 +118,24 @@ describe('ThreadDetailsButton', () => {
     window.removeEventListener('open-git-diff', onDiff)
   })
 
+  it('marks the button with a dot only while there are uncommitted changes', () => {
+    const { unmount } = renderDetails()
+    expect(
+      screen.getByTestId('thread-details-uncommitted-dot')
+    ).toBeInTheDocument()
+    unmount()
+
+    git.status = {
+      ...(git.status as object),
+      uncommitted_added: 0,
+      uncommitted_removed: 0,
+    }
+    renderDetails()
+    expect(
+      screen.queryByTestId('thread-details-uncommitted-dot')
+    ).not.toBeInTheDocument()
+  })
+
   it('lists attached contexts and runs their action', async () => {
     const user = userEvent.setup()
     const onSelect = vi.fn()
