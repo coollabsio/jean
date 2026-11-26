@@ -980,55 +980,33 @@ pub async fn get_session_status(
 /// plus every session the registry manages; a client treats any other session
 /// as idle. Orphaned runs are repaired before reading so a crashed run never
 /// reports as running.
+///
+/// Answered from the run-state index, which waits for the startup pass. Only
+/// an orphan repair reads session files.
 pub async fn get_run_states(
     app: AppHandle,
     session_ids: Option<Vec<String>>,
 ) -> Result<Vec<RunState>, String> {
-    let explicit = session_ids.is_some();
-    let session_ids = match session_ids {
-        Some(ids) => ids,
-        None => super::storage::list_all_session_ids(&app)?,
-    };
+    let index = super::run_state_index::loaded_index(&app).await?;
     let managed = super::registry::get_actively_managed_sessions();
-    let mut loaded = Vec::with_capacity(session_ids.len());
-    let mut to_repair = Vec::new();
-    for session_id in session_ids {
-        match load_metadata(&app, &session_id) {
-            Ok(Some(metadata)) => {
-                // Only an unmanaged session with an unfinished run can be an
-                // orphan; everything else is already in its final state.
-                let unfinished = metadata
-                    .runs
-                    .iter()
-                    .any(|run| matches!(run.status, RunStatus::Running | RunStatus::Resumable));
-                if unfinished && !managed.contains(&session_id) {
-                    to_repair.push(session_id.clone());
-                }
-                loaded.push(metadata);
-            }
-            Ok(None) => {}
-            Err(e) => log::warn!("get_run_states: skipping {session_id}: {e}"),
-        }
-    }
+    // Only an unmanaged session with an unfinished run can be an orphan;
+    // everything else is already in its final state.
+    let to_repair: Vec<String> = index
+        .snapshot(session_ids.as_deref())
+        .into_iter()
+        .filter(|state| state.has_unfinished_run && !managed.contains(&state.session_id))
+        .map(|state| state.session_id)
+        .collect();
     if !to_repair.is_empty() {
-        if let Err(e) = super::run_log::recover_incomplete_runs_for(&app, to_repair.clone()) {
+        if let Err(e) = super::run_log::recover_incomplete_runs_for(&app, to_repair) {
             log::warn!("get_run_states: orphan repair failed: {e}");
         }
-        for metadata in &mut loaded {
-            if !to_repair.contains(&metadata.id) {
-                continue;
-            }
-            if let Ok(Some(repaired)) = load_metadata(&app, &metadata.id) {
-                *metadata = repaired;
-            }
-        }
     }
-    Ok(loaded
+    let explicit = session_ids.is_some();
+    Ok(index
+        .snapshot(session_ids.as_deref())
         .into_iter()
-        .map(|metadata| {
-            let actively_managed = managed.contains(&metadata.id);
-            metadata.run_state(actively_managed)
-        })
+        .map(|state| state.resolve(managed.contains(&state.session_id)))
         .filter(|state| explicit || state.status.is_live())
         .collect())
 }
@@ -9779,8 +9757,14 @@ pub async fn check_resumable_sessions(
     // This calls recover_incomplete_runs which updates statuses and returns info.
     // Note: recover_incomplete_runs skips sessions that are actively managed
     // (including sends still preparing a backend process) to avoid corrupting
-    // their metadata.
-    let recovered = super::run_log::recover_incomplete_runs(&app)?;
+    // their metadata. It waits for the startup pass and then reads only the
+    // sessions the run-state index marks unfinished.
+    let recover_app = app.clone();
+    let recovered = tauri::async_runtime::spawn_blocking(move || {
+        super::run_log::recover_incomplete_runs(&recover_app)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {e}"))??;
 
     let mut resumable: Vec<_> = recovered.into_iter().filter(|r| r.resumable).collect();
 

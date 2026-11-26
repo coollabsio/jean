@@ -2406,7 +2406,7 @@ impl RunStateStatus {
 }
 
 /// Versioned run-state snapshot for one session. Built only by
-/// [`SessionMetadata::run_state`], shared by `get_session_status`,
+/// [`PersistedRunState::resolve`], shared by `get_session_status`,
 /// `get_run_states`, and the web bootstrap payload.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -2425,6 +2425,61 @@ pub struct RunState {
     pub waiting_for_input: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub waiting_for_input_type: Option<String>,
+}
+
+/// Latest run fields a [`RunState`] is built from.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PersistedLatestRun {
+    pub run_id: String,
+    pub status: RunStatus,
+    pub started_at: u64,
+    pub execution_mode: Option<String>,
+}
+
+/// What a session's metadata contributes to its [`RunState`]. The registry
+/// supplies the rest in [`PersistedRunState::resolve`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct PersistedRunState {
+    pub session_id: String,
+    pub worktree_id: String,
+    pub status_version: u64,
+    pub latest_run: Option<PersistedLatestRun>,
+    /// Any run, not only the latest, is Running or Resumable. Only such a
+    /// session can need orphan repair.
+    pub has_unfinished_run: bool,
+    pub waiting_for_input: bool,
+    pub waiting_for_input_type: Option<String>,
+}
+
+impl PersistedRunState {
+    pub fn resolve(&self, actively_managed: bool) -> RunState {
+        let latest_run = self.latest_run.as_ref();
+        let status = if actively_managed {
+            RunStateStatus::Running
+        } else {
+            match latest_run.map(|run| &run.status) {
+                Some(RunStatus::Running) | Some(RunStatus::Resumable) => RunStateStatus::Resumable,
+                Some(RunStatus::Cancelled) => RunStateStatus::Cancelled,
+                Some(RunStatus::Crashed) => RunStateStatus::Error,
+                Some(RunStatus::Completed) | None => RunStateStatus::Idle,
+            }
+        };
+        let live_run = latest_run.filter(|run| {
+            status.is_live() && matches!(run.status, RunStatus::Running | RunStatus::Resumable)
+        });
+        RunState {
+            session_id: self.session_id.clone(),
+            worktree_id: self.worktree_id.clone(),
+            status,
+            status_version: self.status_version,
+            actively_managed,
+            run_id: latest_run.map(|run| run.run_id.clone()),
+            started_at: live_run.map(|run| run.started_at),
+            execution_mode: live_run.and_then(|run| run.execution_mode.clone()),
+            waiting_for_input: self.waiting_for_input,
+            waiting_for_input_type: self.waiting_for_input_type.clone(),
+        }
+    }
 }
 
 // ============================================================================
@@ -2624,37 +2679,34 @@ impl SessionMetadata {
         }
     }
 
-    /// The run-state snapshot clients reconcile against. `actively_managed`
-    /// is the registry's view and wins over persisted status.
-    pub fn run_state(&self, actively_managed: bool) -> RunState {
-        let latest_run = self.runs.last();
-        let status = if actively_managed {
-            RunStateStatus::Running
-        } else {
-            match latest_run.map(|run| &run.status) {
-                Some(RunStatus::Running) | Some(RunStatus::Resumable) => RunStateStatus::Resumable,
-                Some(RunStatus::Cancelled) => RunStateStatus::Cancelled,
-                Some(RunStatus::Crashed) => RunStateStatus::Error,
-                Some(RunStatus::Completed) | None => RunStateStatus::Idle,
-            }
-        };
-        let live_run = latest_run.filter(|run| {
-            status.is_live() && matches!(run.status, RunStatus::Running | RunStatus::Resumable)
-        });
-        RunState {
+    /// The part of [`RunState`] this metadata decides. The run-state index
+    /// keeps one per session so snapshots need no disk read.
+    pub fn persisted_run_state(&self) -> PersistedRunState {
+        PersistedRunState {
             session_id: self.id.clone(),
             worktree_id: self.worktree_id.clone(),
-            status,
             status_version: self.status_version,
-            actively_managed,
-            run_id: latest_run.map(|run| run.run_id.clone()),
-            started_at: live_run.map(|run| run.started_at),
-            execution_mode: live_run.and_then(|run| run.execution_mode.clone()),
+            latest_run: self.runs.last().map(|run| PersistedLatestRun {
+                run_id: run.run_id.clone(),
+                status: run.status.clone(),
+                started_at: run.started_at,
+                execution_mode: run.execution_mode.clone(),
+            }),
+            has_unfinished_run: self
+                .runs
+                .iter()
+                .any(|run| matches!(run.status, RunStatus::Running | RunStatus::Resumable)),
             waiting_for_input: self.waiting_for_input
                 || self.has_pending_plan_waiting()
                 || self.has_pending_approval(),
             waiting_for_input_type: self.waiting_for_input_type.clone(),
         }
+    }
+
+    /// The run-state snapshot clients reconcile against. `actively_managed`
+    /// is the registry's view and wins over persisted status.
+    pub fn run_state(&self, actively_managed: bool) -> RunState {
+        self.persisted_run_state().resolve(actively_managed)
     }
 
     /// Find a run by ID

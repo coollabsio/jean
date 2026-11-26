@@ -5585,22 +5585,10 @@ pub fn initialize_runtime(context: &RuntimeContext) -> Result<(), String> {
         None::<jean_mcp_socket::JeanMcpSocketHandle>,
     )));
 
-    if let Err(error) = chat::wakeup::load_all_from_disk(context) {
-        log::warn!("Failed to restore scheduled wakeups: {error}");
-    }
-    // Finish runs orphaned by a crash/reboot before any client connects.
-    // Headless servers otherwise only recover on a full page load, so an
-    // open web tab that just reconnects keeps showing the dead run as running.
-    // Runs whose detached host survived the restart are resumed here, by the
-    // server that owns them, so a headless server with no client (or only a
-    // native desktop connected remotely) keeps tailing them.
-    match chat::run_log::recover_incomplete_runs(context) {
-        Ok(recovered) => chat::resume_recovered_runs(context.clone(), recovered),
-        Err(error) => log::warn!("Failed to recover incomplete runs: {error}"),
-    }
-    // Delegated runs that ended while Jean was closed still owe their origin
-    // an update. Live runs were just resumed above and report when they end.
-    chat::delegation::report_armed_links_on_startup(context);
+    // One background pass over session metadata restores wakeups, recovers
+    // and resumes runs, and reports delegated runs. Run-state readers wait
+    // for it; the headless server awaits it before accepting clients.
+    chat::startup_scan::start(context);
     let task_manager = background_tasks::BackgroundTaskManager::new(context.clone());
     task_manager.start();
     context.manage(task_manager);
@@ -5630,6 +5618,13 @@ pub fn initialize_runtime(context: &RuntimeContext) -> Result<(), String> {
 
     let cleanup_context = context.clone();
     async_runtime::spawn_blocking(move || {
+        // The orphan cleanups keep a server that unfinished runs still need,
+        // so they must see the runs as startup recovery left them.
+        if let Err(error) = chat::run_state_index::RunStateIndex::for_app(&cleanup_context)
+            .ensure_loaded(&cleanup_context)
+        {
+            log::warn!("Startup session scan unavailable for server cleanup: {error}");
+        }
         opencode_server::cleanup_orphaned_server(&cleanup_context);
         chat::codex_server::cleanup_orphaned_server(&cleanup_context);
         if let Err(error) = opinionated::cleanup_disallowed_opinionated_skills_on_startup() {
@@ -6022,6 +6017,11 @@ pub async fn run_server() -> Result<(), String> {
     platform::set_allow_native_open(cli.allow_native_open);
     let context = RuntimeContext::from_environment()?;
     initialize_runtime(&context)?;
+    // No client may connect before crashed runs are repaired: an open web tab
+    // that only reconnects would keep showing a dead run as running.
+    if let Err(error) = chat::startup_scan::finished(&context).await {
+        log::warn!("Startup session pass did not finish: {error}");
+    }
 
     let mut preferences = load_preferences(context.clone()).await.unwrap_or_default();
     if let Err(error) = sync_jean_mcp_socket_from_preferences(context.clone(), &preferences).await {

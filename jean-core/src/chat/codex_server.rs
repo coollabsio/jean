@@ -191,7 +191,7 @@ fn remove_socket_file(path: Option<&PathBuf>) {
 }
 
 fn has_incomplete_codex_runs(app: &AppHandle) -> bool {
-    let Ok(session_ids) = super::storage::list_all_session_ids(app) else {
+    let Ok(session_ids) = super::run_state_index::unfinished_session_ids(app) else {
         return false;
     };
 

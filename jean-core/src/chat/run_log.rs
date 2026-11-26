@@ -11,8 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 use super::storage::{
-    get_session_dir, list_all_session_ids, load_metadata, save_metadata,
-    with_existing_metadata_mut, with_metadata_mut,
+    get_session_dir, load_metadata, save_metadata, with_existing_metadata_mut, with_metadata_mut,
 };
 use super::types::{
     is_claude_compaction_summary_text, Backend, ChatMessage, ContentBlock, LoadedMessages,
@@ -3527,11 +3526,12 @@ pub struct RecoveredRun {
     pub started_at: u64,
 }
 
-/// Check for and recover incomplete runs across all sessions
-/// Called on app startup to handle crashed runs from previous session
+/// Check for and recover incomplete runs across all sessions: runs a crash
+/// left unfinished, and runs whose detached process is still alive. Only
+/// sessions the run-state index marks unfinished are read. Blocking.
 pub fn recover_incomplete_runs(app: &tauri::AppHandle) -> Result<Vec<RecoveredRun>, String> {
-    let session_ids = list_all_session_ids(app)?;
-    recover_incomplete_runs_for(app, session_ids)
+    let unfinished = super::run_state_index::unfinished_session_ids(app)?;
+    recover_incomplete_runs_for(app, unfinished)
 }
 
 /// Same repair as [`recover_incomplete_runs`], limited to the given sessions.
@@ -3744,7 +3744,7 @@ fn repair_session_runs(
 /// Whether any session has an unfinished OpenCode 2.x turn. While one
 /// exists, Jean keeps the OpenCode server running across a restart.
 pub fn has_incomplete_opencode_turns(app: &tauri::AppHandle) -> bool {
-    let Ok(session_ids) = super::storage::list_all_session_ids(app) else {
+    let Ok(session_ids) = super::run_state_index::unfinished_session_ids(app) else {
         return false;
     };
     session_ids.into_iter().any(|session_id| {

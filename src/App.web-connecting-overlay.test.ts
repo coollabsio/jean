@@ -37,7 +37,7 @@ describe('web connecting overlay', () => {
     expect(source).toContain('wsCheckingConnection && (')
     expect(source).toContain('Checking connection to Jean...')
     expect(source).not.toContain('Jean is loading...')
-    // A dropped WebSocket waits for the server before it reloads.
+    // A dropped WebSocket covers the view until it reconnected and resynced.
     expect(source).toContain(
       'webReconnecting ? (\n          <JeanLoadingScreen message="Reconnecting to Jean..." onTop />'
     )

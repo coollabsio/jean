@@ -94,65 +94,6 @@ function fetchBackend(url: string): Promise<Response> {
   )
 }
 
-const REACHABLE_PROBE_TIMEOUT = 5_000
-const REACHABLE_RETRY_MAX = 5_000
-let reachablePromise: Promise<void> | null = null
-
-/** Resolve once the backend answers HTTP. A page reload while the network
- *  is switching (Wi-Fi to cellular) shows the browser's offline error page,
- *  and no Jean code runs there to recover. Wait for the server first. */
-export function waitUntilBackendReachable(): Promise<void> {
-  reachablePromise ??= probeUntilReachable().finally(() => {
-    reachablePromise = null
-  })
-  return reachablePromise
-}
-
-async function probeUntilReachable(): Promise<void> {
-  for (let attempt = 0; ; attempt++) {
-    if (navigator.onLine !== false) {
-      const controller = new AbortController()
-      const timeout = setTimeout(
-        () => controller.abort(),
-        REACHABLE_PROBE_TIMEOUT
-      )
-      try {
-        const res = await fetch(backendUrl('healthz'), {
-          cache: 'no-store',
-          signal: controller.signal,
-        })
-        if (res.ok) return
-      } catch {
-        // Network still switching; retry below.
-      } finally {
-        clearTimeout(timeout)
-      }
-    }
-    await waitForRetryOrWake(Math.min(500 * 2 ** attempt, REACHABLE_RETRY_MAX))
-  }
-}
-
-/** Sleep, but retry at once when the network or page comes back. */
-function waitForRetryOrWake(ms: number): Promise<void> {
-  return new Promise(resolve => {
-    const connection = getNetworkInformation()
-    const done = () => {
-      clearTimeout(timer)
-      window.removeEventListener('online', done)
-      document.removeEventListener('visibilitychange', onVisible)
-      connection?.removeEventListener('change', done)
-      resolve()
-    }
-    const onVisible = () => {
-      if (!document.hidden) done()
-    }
-    const timer = setTimeout(done, ms)
-    window.addEventListener('online', done)
-    document.addEventListener('visibilitychange', onVisible)
-    connection?.addEventListener('change', done)
-  })
-}
-
 // ---------------------------------------------------------------------------
 // File source URL conversion (drop-in for Tauri's convertFileSrc)
 // ---------------------------------------------------------------------------
@@ -840,6 +781,19 @@ interface WsMessage {
   seq?: number
   /** Heartbeat interval announced by the server. Older servers omit it. */
   interval_ms?: number
+  /** Identifies the server process. Older servers omit it. */
+  boot_id?: string
+}
+
+/** How the app follows an established Web Access socket that dropped. */
+export interface WsRecoveryHandlers {
+  /** The established socket closed. */
+  disconnected: () => void
+  /** The socket is open again. Stream events are held until this settles, so
+   *  the app can load fresh state before events newer than it arrive. */
+  reconnected?: () => Promise<void> | void
+  /** The server was restarted or serves a new build: reload the page. */
+  reloadRequired?: () => void
 }
 
 interface NetworkInformationLike extends EventTarget {
@@ -849,6 +803,9 @@ interface NetworkInformationLike extends EventTarget {
 /** Inbound timeout for older servers that send a heartbeat every 20s without
  *  announcing the interval. */
 const LEGACY_INBOUND_TIMEOUT = 50_000
+/** Inbound timeout until the first heartbeat. Current servers send one at
+ *  once; this covers the oldest servers, whose first beat comes after 20s. */
+const FIRST_HEARTBEAT_TIMEOUT = 25_000
 
 function getNetworkInformation(): NetworkInformationLike | undefined {
   if (typeof navigator === 'undefined') return undefined
@@ -890,9 +847,14 @@ export class WsTransport {
   private inboundFrames = 0
   /** Derived from the server's announced heartbeat interval; older servers
    *  send no interval and keep the legacy timeout. */
-  private inboundTimeout = LEGACY_INBOUND_TIMEOUT
+  private inboundTimeout = FIRST_HEARTBEAT_TIMEOUT
   private networkType = getNetworkInformation()?.type
-  private queue: { data: string; resolve: () => void }[] = []
+  private queue: { id: string; data: string }[] = []
+  /** Events received while the app resyncs after a reconnect. */
+  private heldEvents: WsMessage[] | null = null
+  private authAbort: AbortController | null = null
+  private serverBuildId: string | null = null
+  private serverBootId: string | null = null
   // Buffer for events that arrive before listeners are registered.
   // Covers the ~16ms gap between WS onopen and React effect listener setup.
   private eventBuffer = new Map<
@@ -908,7 +870,7 @@ export class WsTransport {
   private _authError: string | null = null
   private _authReason: WsAuthReason | null = null
   private _subscribers = new Set<() => void>()
-  private _establishedDisconnectListeners = new Set<() => void>()
+  private _recoveryHandlers = new Set<WsRecoveryHandlers>()
   private _connectEnabled = false
   /** Track last seen sequence numbers to deduplicate bootstrap replay. */
   private _lastSeqBySession = new Map<string, number>()
@@ -917,8 +879,8 @@ export class WsTransport {
 
   constructor(private readonly config?: WsTransportConfig) {
     // Mobile browsers suspend background tabs and freeze JS timers. Check the
-    // socket immediately on wake so a stale established connection triggers
-    // the app reload without waiting for the periodic liveness timer.
+    // socket immediately on wake so a stale established connection is
+    // replaced without waiting for the periodic liveness timer.
     if (typeof window !== 'undefined') {
       document.addEventListener('visibilitychange', this.handleWake)
       window.addEventListener('online', this.handleWake)
@@ -975,37 +937,55 @@ export class WsTransport {
     return () => this._subscribers.delete(callback)
   }
 
-  onEstablishedDisconnect(callback: () => void): () => void {
-    this._establishedDisconnectListeners.add(callback)
-    // The socket may have dropped before this listener registered (it opens in
-    // parallel with preload). Recover now instead of staying disconnected.
-    if (this.isStuckAfterDisconnect()) callback()
-    return () => this._establishedDisconnectListeners.delete(callback)
+  onRecovery(handlers: WsRecoveryHandlers): () => void {
+    this._recoveryHandlers.add(handlers)
+    // The socket may have dropped before these handlers registered (it opens
+    // in parallel with preload). Report the drop that is still in progress.
+    if (this.isWebAccess && this._hasConnectedOnce && !this._connected) {
+      handlers.disconnected()
+    }
+    return () => this._recoveryHandlers.delete(handlers)
   }
 
-  /** An established web-access socket closed and nothing reconnected. Only a
-   *  page reload (the established-disconnect listener) recovers this state. */
-  private isStuckAfterDisconnect(): boolean {
-    return (
-      !this.config &&
-      !isNativeApp() &&
-      this._hasConnectedOnce &&
-      !this._connected &&
-      !this.ws
+  /** The browser client of this server. Native selected-server mode uses the
+   *  same singleton but recovers through RemoteConnectionRecovery. */
+  private get isWebAccess(): boolean {
+    return !this.config && !isNativeApp()
+  }
+
+  /** Web Access and parallel remote adapters reopen a dropped socket
+   *  themselves. */
+  private get reconnectsInMemory(): boolean {
+    return !!this.config || !isNativeApp()
+  }
+
+  private notifyDisconnected(): void {
+    for (const handlers of this._recoveryHandlers) {
+      try {
+        handlers.disconnected()
+      } catch (error) {
+        console.error('[WsTransport] Disconnect handler failed:', error)
+      }
+    }
+  }
+
+  private async notifyReconnected(): Promise<void> {
+    await Promise.all(
+      [...this._recoveryHandlers].map(async handlers => {
+        try {
+          await handlers.reconnected?.()
+        } catch (error) {
+          console.error('[WsTransport] Reconnect handler failed:', error)
+        }
+      })
     )
   }
 
-  private notifyEstablishedDisconnect(): void {
-    for (const callback of this._establishedDisconnectListeners) {
-      try {
-        callback()
-      } catch (error) {
-        console.error(
-          '[WsTransport] Established disconnect listener failed:',
-          error
-        )
-      }
-    }
+  /** Sequence numbers and terminals belong to one server process, and a new
+   *  build needs new client code. Neither can be resynced in this page. */
+  private requireReload(reason: string): void {
+    console.warn(`[WsTransport] ${reason}, reloading app`)
+    for (const handlers of this._recoveryHandlers) handlers.reloadRequired?.()
   }
 
   /** Get current connection snapshot for useSyncExternalStore. */
@@ -1026,9 +1006,12 @@ export class WsTransport {
   /** Connect to the WebSocket server (validates token first). */
   connect(): void {
     if (!this._connectEnabled) return
-    // Established connections recover through a full page reload, never a
-    // second in-memory WebSocket connection.
-    if (!this.config && this._hasConnectedOnce && !this._connected) return
+    if (this._hasConnectedOnce && !this._connected) {
+      // Native selected-server mode reconnects from its recovery UI only.
+      if (!this.reconnectsInMemory) return
+      // Commands sent while disconnected must not bypass the backoff.
+      if (this.isWebAccess && this.connectRetryTimer) return
+    }
     if (
       this._connecting ||
       this.ws?.readyState === WebSocket.OPEN ||
@@ -1089,7 +1072,7 @@ export class WsTransport {
     const remote = this.config ? true : getActiveRemoteConnection()
 
     try {
-      const res = await this.fetchBackend(authUrl)
+      const res = await this.fetchAuth(authUrl)
       // The server answered: the token is now either in the session cookie or
       // refused. Drop it from browser storage and the URL either way.
       if (!remote) forgetBrowserWebToken()
@@ -1113,6 +1096,21 @@ export class WsTransport {
           // Older servers or non-JSON auth bodies: allow connect.
         }
       }
+
+      if (this.isWebAccess) {
+        let buildId: string | null = null
+        try {
+          const body = (await res.json()) as { webBuildId?: string | null }
+          buildId = body.webBuildId || null
+        } catch {
+          // Non-JSON auth body: no build to compare.
+        }
+        if (buildId && this.serverBuildId && buildId !== this.serverBuildId) {
+          this.requireReload('Server serves a new web build')
+          return
+        }
+        this.serverBuildId ??= buildId
+      }
     } catch {
       if (remote && !this.config) {
         this.setAuthError(
@@ -1121,8 +1119,8 @@ export class WsTransport {
         )
         return
       }
-      // The initial page load may race server startup. Retry connecting until
-      // the first successful socket; established sockets use a page reload.
+      // The initial page load may race server startup, and a dropped socket
+      // often means the network is still switching. Retry with backoff.
       this.setAuthError(null)
       this.scheduleConnectRetry()
       return
@@ -1155,11 +1153,19 @@ export class WsTransport {
     }, WsTransport.CONNECT_TIMEOUT)
 
     this.ws.onopen = () => {
+      const reconnected = this._hasConnectedOnce
       this.clearConnectWatchdog()
       this._lastInbound = Date.now()
-      this.inboundTimeout = LEGACY_INBOUND_TIMEOUT
+      this.inboundTimeout = FIRST_HEARTBEAT_TIMEOUT
       this.startLivenessTimer()
       this._hasConnectedOnce = true
+      // Hold events before any subscriber learns the socket is open, so none
+      // reaches the app ahead of its resync.
+      const held: WsMessage[] | null =
+        reconnected && this.isWebAccess && this._recoveryHandlers.size > 0
+          ? []
+          : null
+      this.heldEvents = held
       this.setConnected(true)
       this.setCheckingConnection(false)
       this.connectRetryAttempt = 0
@@ -1167,9 +1173,32 @@ export class WsTransport {
       // Flush queued messages
       for (const item of this.queue) {
         this.ws?.send(item.data)
-        item.resolve()
       }
       this.queue = []
+
+      if (!held) return
+      // Ask for the terminal output this client missed while disconnected.
+      for (const [terminalId, lastSeq] of this._lastSeqByTerminal) {
+        this.ws?.send(
+          JSON.stringify({
+            type: 'terminal_replay',
+            terminal_id: terminalId,
+            last_seq: lastSeq,
+          })
+        )
+      }
+      let timeout: ReturnType<typeof setTimeout> | undefined
+      void Promise.race([
+        this.notifyReconnected(),
+        new Promise<void>(resolve => {
+          timeout = setTimeout(resolve, WsTransport.RESYNC_HOLD_MAX)
+        }),
+      ]).then(() => {
+        clearTimeout(timeout)
+        if (this.heldEvents !== held) return // socket dropped during resync
+        this.heldEvents = null
+        this.dispatchInSeqOrder(held)
+      })
     }
 
     this.ws.onmessage = event => {
@@ -1186,11 +1215,13 @@ export class WsTransport {
     this.ws.onclose = () => {
       const wasConnected = this._connected
 
-      if (wasConnected) this.notifyEstablishedDisconnect()
+      if (wasConnected) this.notifyDisconnected()
 
       this.clearConnectWatchdog()
       this.stopLivenessTimer()
       this.ws = null
+      // Held events were never dispatched, so the next resync covers them.
+      this.heldEvents = null
 
       this.setConnected(false)
       if (wasConnected && !this.config && getActiveRemoteConnection()) {
@@ -1213,14 +1244,14 @@ export class WsTransport {
       }
       this.pending.clear()
 
-      // Clear queued-but-unsent messages so a later page bootstrap cannot
-      // spawn duplicate CLI processes.
+      // Their callers were just rejected above. Drop the unsent messages so
+      // the next connection cannot run commands nobody waits for.
       this.queue = []
 
       if (this.manualReconnectPending) {
         this.manualReconnectPending = false
         this.connect()
-      } else if (this.config || (!wasConnected && !this._hasConnectedOnce)) {
+      } else {
         this.scheduleConnectRetry()
       }
     }
@@ -1262,8 +1293,12 @@ export class WsTransport {
   private static readonly MAX_QUEUE_SIZE = 500
   /** No inbound traffic for this many heartbeat intervals means the
    *  connection is dead; protocol ping/pong is not visible to browser JS. */
-  private static readonly MISSED_HEARTBEATS_BEFORE_DEAD = 3
-  private static readonly LIVENESS_CHECK_INTERVAL = 5_000
+  private static readonly MISSED_HEARTBEATS_BEFORE_DEAD = 2
+  private static readonly LIVENESS_CHECK_INTERVAL = 1_000
+  /** Abort a Web Access sign-in probe that hangs on a dead network path. */
+  private static readonly AUTH_TIMEOUT = 5_000
+  /** Longest the app's resync may hold events after a reconnect. */
+  private static readonly RESYNC_HOLD_MAX = 10_000
   private static readonly WAKE_CHECK_TIMEOUT = 3_000
   /** After wake, ask the server over HTTP once the socket has been silent
    *  this long. */
@@ -1294,6 +1329,8 @@ export class WsTransport {
 
       const timeout = setTimeout(() => {
         this.pending.delete(id)
+        // Still unsent: the caller gave up, so it must not run later.
+        this.queue = this.queue.filter(item => item.id !== id)
         reject(
           new Error(`Command '${command}' timed out after ${timeoutMs / 1000}s`)
         )
@@ -1321,12 +1358,7 @@ export class WsTransport {
         }
 
         // Queue for when connection is established
-        this.queue.push({
-          data,
-          resolve() {
-            /* noop */
-          },
-        })
+        this.queue.push({ id, data })
         this.connect()
       }
     })
@@ -1399,10 +1431,21 @@ export class WsTransport {
   private handleMessage(msg: WsMessage): void {
     if (msg.type === 'heartbeat') {
       // onmessage already refreshed _lastInbound. No listener dispatch.
-      if (typeof msg.interval_ms === 'number' && msg.interval_ms > 0) {
-        this.inboundTimeout =
-          msg.interval_ms * WsTransport.MISSED_HEARTBEATS_BEFORE_DEAD
+      this.inboundTimeout =
+        typeof msg.interval_ms === 'number' && msg.interval_ms > 0
+          ? msg.interval_ms * WsTransport.MISSED_HEARTBEATS_BEFORE_DEAD
+          : LEGACY_INBOUND_TIMEOUT
+      if (this.isWebAccess && msg.boot_id) {
+        if (this.serverBootId && this.serverBootId !== msg.boot_id) {
+          this.requireReload('Server restarted')
+        }
+        this.serverBootId = msg.boot_id
       }
+      return
+    }
+
+    if (msg.type === 'event' && this.heldEvents) {
+      this.heldEvents.push(msg)
       return
     }
 
@@ -1472,23 +1515,27 @@ export class WsTransport {
   }
 
   private scheduleConnectRetry(): void {
-    if (this.connectRetryTimer || (!this.config && this._hasConnectedOnce))
-      return
+    if (this.connectRetryTimer) return
+    if (this._hasConnectedOnce && !this.reconnectsInMemory) return
     // Don't retry if there's an auth error — user needs to fix the token.
     if (this._authError) return
 
-    // Exponential backoff while establishing the initial connection.
-    const delay = this.config
-      ? 5_000
-      : this.connectRetryAttempt === 0
-        ? 100
-        : Math.min(500 * 2 ** (this.connectRetryAttempt - 1), 30_000)
+    const delay = this.connectRetryDelay()
     this.connectRetryAttempt++
 
     this.connectRetryTimer = setTimeout(() => {
       this.connectRetryTimer = null
       this.connect()
     }, delay)
+  }
+
+  private connectRetryDelay(): number {
+    const attempt = this.connectRetryAttempt
+    if (this.config) return 5_000
+    // A dropped socket usually comes back at once: retry fast, cap low.
+    if (this._hasConnectedOnce) return Math.min(250 * 2 ** attempt, 5_000)
+    // The first connection may wait for the server to start.
+    return attempt === 0 ? 100 : Math.min(500 * 2 ** (attempt - 1), 30_000)
   }
 
   private clearConnectWatchdog(): void {
@@ -1503,12 +1550,12 @@ export class WsTransport {
       if (this.ws?.readyState !== WebSocket.OPEN) return
       if (Date.now() - this._lastInbound > this.inboundTimeout) {
         console.warn(
-          '[WsTransport] No inbound traffic, closing stale connection for reload'
+          '[WsTransport] No inbound traffic, closing stale connection'
         )
         try {
           this.ws.close()
         } catch {
-          // Ignore close errors; a successful close triggers the app reload.
+          // Ignore close errors; a successful close starts the reconnect.
         }
       }
     }, WsTransport.LIVENESS_CHECK_INTERVAL)
@@ -1535,11 +1582,11 @@ export class WsTransport {
       // recent socket may simply have queued frames. Replace one already past
       // the liveness timeout immediately so iOS resume adds no extra delay.
       if (Date.now() - this._lastInbound > this.inboundTimeout) {
-        console.warn('[WsTransport] Stale socket after resume, reloading app')
+        console.warn('[WsTransport] Stale socket after resume, reconnecting')
         try {
           this.ws?.close()
         } catch {
-          // Ignore close errors; a successful close triggers the app reload.
+          // Ignore close errors; a successful close starts the reconnect.
         }
         return
       }
@@ -1547,21 +1594,18 @@ export class WsTransport {
       return
     }
 
-    // The reload after an established disconnect can be lost while the page
-    // is frozen in the background. Run the recovery again on wake.
-    if (this.isStuckAfterDisconnect()) {
-      console.warn('[WsTransport] Disconnected after wake, recovering')
-      this.notifyEstablishedDisconnect()
-      return
-    }
-    // Before the first successful connection, retry immediately on wake.
-    if (this._hasConnectedOnce) return
+    // Disconnected: retry now instead of waiting out the backoff.
+    if (this._hasConnectedOnce && !this.reconnectsInMemory) return
     if (this.connectRetryTimer) {
       clearTimeout(this.connectRetryTimer)
       this.connectRetryTimer = null
     }
     this.connectRetryAttempt = 0
-    this.connect()
+    // A reconnect's sign-in probe may hang on the old network path. Its abort
+    // schedules the next attempt with the first, short delay. The first
+    // connection keeps its probe: `pageshow` fires during every page load.
+    if (this._hasConnectedOnce && this.authAbort) this.authAbort.abort()
+    else this.connect()
   }
 
   /** A Wi-Fi to cellular switch kills the socket without a close event and
@@ -1628,7 +1672,7 @@ export class WsTransport {
     const remaining = startedAt + WsTransport.SILENT_SOCKET_AFTER - Date.now()
     if (remaining > 0) await sleep(remaining)
     if (!isSilent()) return
-    console.warn('[WsTransport] Socket silent while server answers, reloading')
+    console.warn('[WsTransport] Socket silent while server answers, closing')
     socket.close()
   }
 
@@ -1646,6 +1690,11 @@ export class WsTransport {
   }
 
   ingestBootstrapEvents(events: BootstrapEvent[]): void {
+    this.dispatchInSeqOrder(events)
+  }
+
+  /** Replayed events can arrive after live events that are newer. */
+  private dispatchInSeqOrder(events: WsMessage[]): void {
     const sorted = [...events].sort(
       (a, b) =>
         (a.seq ?? Number.MAX_SAFE_INTEGER) - (b.seq ?? Number.MAX_SAFE_INTEGER)
@@ -1670,6 +1719,9 @@ export class WsTransport {
         this.handleNetworkChange
       )
     }
+    this.authAbort?.abort()
+    this.heldEvents = null
+    this._recoveryHandlers.clear()
     const socket = this.ws
     this.ws = null
     if (socket) {
@@ -1693,6 +1745,21 @@ export class WsTransport {
     if (!this.config) return backendUrl(path)
     const base = `${this.config.baseUrl.replace(/\/+$/, '')}/`
     return new URL(path.replace(/^\/+/, ''), base).toString()
+  }
+
+  /** Web Access sign-in probe that a wake or a timeout can abort. */
+  private fetchAuth(url: string): Promise<Response> {
+    if (!this.isWebAccess) return this.fetchBackend(url)
+    const controller = new AbortController()
+    this.authAbort = controller
+    const timeout = setTimeout(
+      () => controller.abort(),
+      WsTransport.AUTH_TIMEOUT
+    )
+    return fetch(url, { signal: controller.signal }).finally(() => {
+      clearTimeout(timeout)
+      if (this.authAbort === controller) this.authAbort = null
+    })
   }
 
   private fetchBackend(url: string): Promise<Response> {
@@ -1756,9 +1823,9 @@ export function connectTransport(): void {
   wsTransport.enableConnect()
 }
 
-/** Run immediately when an established browser WebSocket disconnects. */
-export function onEstablishedWsDisconnect(callback: () => void): () => void {
-  return wsTransport.onEstablishedDisconnect(callback)
+/** Follow an established browser WebSocket through a drop and its recovery. */
+export function onWsRecovery(handlers: WsRecoveryHandlers): () => void {
+  return wsTransport.onRecovery(handlers)
 }
 
 /**

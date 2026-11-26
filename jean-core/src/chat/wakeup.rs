@@ -290,52 +290,52 @@ fn resolve_worktree_path(app: &AppHandle, worktree_id: &str) -> Option<String> {
     data.find_worktree(worktree_id).map(|w| w.path.clone())
 }
 
-/// Load every persisted `ScheduledWakeup` from disk and repopulate the
-/// in-memory map. Called once at app startup.
+/// A wakeup read from session metadata by the startup scan.
+pub struct PersistedWakeup {
+    pub session_id: String,
+    pub worktree_id: String,
+    pub wakeup: ScheduledWakeup,
+}
+
+/// Put the wakeups found on disk at startup back into the in-memory map.
+/// A session that scheduled a wakeup since the scan read it keeps the newer
+/// one.
 ///
 /// Entries whose `fire_at_unix <= now` remain in the map and will fire on
 /// the next `fire_due()` poll tick — giving the frontend a moment to
 /// subscribe before events land.
-pub fn load_all_from_disk(app: &AppHandle) -> Result<usize, String> {
-    let data_dir = storage::get_data_dir(app)?;
-    let read_dir = match std::fs::read_dir(&data_dir) {
-        Ok(d) => d,
-        Err(_) => return Ok(0),
-    };
-
-    let mut loaded = 0usize;
+pub fn restore(persisted: Vec<PersistedWakeup>) -> usize {
     let mut map = SCHEDULER.lock().unwrap();
-    map.clear();
-
-    for entry in read_dir.flatten() {
-        if !entry.path().is_dir() {
+    let mut restored = 0usize;
+    for PersistedWakeup {
+        session_id,
+        worktree_id,
+        wakeup,
+    } in persisted
+    {
+        let already_scheduled = map
+            .values()
+            .flatten()
+            .any(|entry| entry.session_id == session_id);
+        if already_scheduled {
             continue;
         }
-        let session_id = match entry.file_name().to_str() {
-            Some(s) => s.to_string(),
-            None => continue,
-        };
-        let metadata = match storage::load_metadata(app, &session_id) {
-            Ok(Some(m)) => m,
-            _ => continue,
-        };
-        let Some(w) = metadata.scheduled_wakeup.clone() else {
-            continue;
-        };
-        map.entry(w.fire_at_unix).or_default().push(WakeupEntry {
-            session_id: metadata.id.clone(),
-            worktree_id: metadata.worktree_id.clone(),
-            tool_call_id: w.tool_call_id.clone(),
-            prompt: w.prompt.clone(),
-            reason: w.reason.clone(),
-            delay_seconds: w.delay_seconds,
-            scheduled_at_unix: w.scheduled_at_unix,
-        });
-        loaded += 1;
+        map.entry(wakeup.fire_at_unix)
+            .or_default()
+            .push(WakeupEntry {
+                session_id,
+                worktree_id,
+                tool_call_id: wakeup.tool_call_id,
+                prompt: wakeup.prompt,
+                reason: wakeup.reason,
+                delay_seconds: wakeup.delay_seconds,
+                scheduled_at_unix: wakeup.scheduled_at_unix,
+            });
+        restored += 1;
     }
 
-    log::info!("wakeup::load_all_from_disk: loaded {loaded} pending wakeup(s)");
-    Ok(loaded)
+    log::info!("wakeup::restore: restored {restored} pending wakeup(s)");
+    restored
 }
 
 /// Get the pending wakeup for a session (UI hydration).

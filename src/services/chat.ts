@@ -95,7 +95,7 @@ export function touchRecentSessionCaches(
   )
 }
 
-/** Check if an error is from a WebSocket disconnect (suppress toasts before reload). */
+/** Check if an error is from a WebSocket disconnect (no toast: the app resyncs on reconnect). */
 function isWsDisconnectError(error: unknown): boolean {
   const msg = error instanceof Error ? error.message : String(error)
   return msg.includes('WebSocket disconnected')

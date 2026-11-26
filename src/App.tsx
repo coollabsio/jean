@@ -12,8 +12,8 @@ import {
   setAppDataDir,
   hasPreloadedData,
   listen,
-  onEstablishedWsDisconnect,
-  waitUntilBackendReachable,
+  isTransportConnected,
+  onWsRecovery,
   usesWebSocketBackend,
   signInToWebAccess,
   type InitialData,
@@ -33,6 +33,7 @@ import {
   refreshRunStates,
   refreshRunStatesOnFocus,
 } from '@/services/run-states'
+import { resyncAfterReconnect } from '@/services/reconnect-resync'
 import { serverConnectionManager } from '@/lib/server-connections'
 import { invalidateMcpServers } from '@/services/mcp'
 import { mergeWorktreesPreservingOptimistic } from '@/lib/worktree-list-cache'
@@ -866,27 +867,37 @@ function App() {
   // listeners attach; WS buffers events until React listeners register.
   // Native remote clients keep the shell and show RemoteConnectionRecovery —
   // dismiss open overlays so they cannot trap pointer events (issue #623).
-  // Pure web-access reloads so in-memory UI state is rebuilt cleanly.
+  // Pure web-access keeps the page: the transport reopens the socket and the
+  // overlay stays up until the page has caught up with the server.
   useEffect(() => {
     if (!webBackend) return
 
-    return onEstablishedWsDisconnect(() => {
-      if (isNativeApp()) {
-        dismissTransientUi()
-        return
-      }
-      // Reloading while the network switches (Wi-Fi to cellular) lands on
-      // the browser's offline page with no way back. Reload only once the
-      // server answers again.
-      logger.info('WebSocket disconnected, waiting for server before reload')
-      setWebReconnecting(true)
-      void waitUntilBackendReachable().then(() => {
-        logger.info('WebSocket disconnected, reloading web app')
+    return onWsRecovery({
+      disconnected: () => {
+        if (isNativeApp()) {
+          dismissTransientUi()
+          return
+        }
+        logger.info('WebSocket disconnected, reconnecting')
+        setWebReconnecting(true)
+      },
+      reconnected: async () => {
+        logger.info('WebSocket reconnected, resyncing')
+        try {
+          await resyncAfterReconnect(queryClient)
+        } finally {
+          // A drop during the resync keeps the overlay for the next attempt.
+          if (isTransportConnected()) setWebReconnecting(false)
+        }
+      },
+      // A restarted or updated server cannot be resynced in this page.
+      reloadRequired: () => {
+        logger.info('Server changed while disconnected, reloading web app')
         captureWebReloadState()
         window.location.reload()
-      })
+      },
     })
-  }, [captureWebReloadState, webBackend])
+  }, [captureWebReloadState, queryClient, webBackend])
 
   // Headless background investigation - starts investigations on background
   // worktrees (CMD+Click) without opening the session modal
@@ -895,14 +906,16 @@ function App() {
   // One-time: detect installed backends and set magic prompt defaults accordingly
   useMagicPromptAutoDefaults()
 
-  // A fresh page bootstrap is faster and more reliable than repairing stale
-  // in-memory state. The backend keeps long-running jobs and
-  // terminals alive, so reloading behaves like reopening Jean without losing
-  // backend work.
   const wsConnected = useWsConnectionStatus()
   const wsCheckingConnection = useWsConnectionChecking()
+  const webConnectedOnceRef = useRef(false)
   useEffect(() => {
     if (!webBackend || !wsConnected) return
+    // Web access resyncs a reconnect in the recovery handler above.
+    if (!isNativeApp()) {
+      if (webConnectedOnceRef.current) return
+      webConnectedOnceRef.current = true
+    }
 
     // First connect: invalidate non-preloaded queries. If the HTTP preload
     // failed, invalidate everything so it fetches over the open WebSocket.

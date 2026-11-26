@@ -199,13 +199,36 @@ its metadata lock with the registry re-checked inside it, and resume tails
 finalize the run before they unregister, so a snapshot in that gap never
 marks a finished run crashed.
 
+**Run-state index and the startup pass.** `get_run_states` does not read
+session files. `chat/run_state_index.rs` keeps one `PersistedRunState` per
+session in memory (per `RuntimeContext`). `storage.rs` updates it in the two
+places every metadata change passes through: `save_metadata_file` records the
+written copy and `delete_session_data` forgets the session, both under the
+session's metadata lock. Never write or delete a session's `metadata.json`
+outside those two functions, or the index goes stale. `RunState` is built by
+`PersistedRunState::resolve(actively_managed)`; `SessionMetadata::run_state()`
+calls the same function. Orphan repair, `check_resumable_sessions`,
+`has_incomplete_opencode_turns` and `has_incomplete_codex_runs` read only the
+sessions the index marks unfinished.
+
+The index is filled by one scan at startup. `initialize_runtime` calls
+`chat::startup_scan::start`, which claims the index and runs the pass on a
+blocking thread: `storage::scan_all_metadata` parses each `metadata.json` once
+and feeds the index, `wakeup::restore`, run recovery and resume, and the
+delegation sweep. The index reports "loading" until the whole pass ends, so
+`get_run_states`, `check_resumable_sessions`, `/api/init` and the orphaned
+server cleanups wait for the result. `run_headless` awaits
+`startup_scan::finished` before it binds the port. A context with no startup
+pass (tests) scans on first read. A new consumer of all session metadata at
+startup belongs in `StartupScan::visit`, not in another directory scan.
+
 ### Backend-Owned Long-Running Jobs
 
 Long-running operations that must survive web/mobile WebSocket disconnects
 should be owned by Rust, not by a pending frontend `invoke()` response. The
 frontend should start the job and receive an immediate job id; Rust
 should run the process, persist the final state, and emit best-effort progress
-events. After a disconnect-triggered reload, the frontend recovers from
+events. After a reconnect or a page reload, the frontend recovers from
 persisted session/project data or job query commands instead of relying on the
 original WebSocket response.
 
@@ -535,13 +558,36 @@ Additional systems (no dedicated docs yet):
   through jean-core or MCP. See `docs/developer/ssh-tunnel.md`. Notifications
   such as ntfy are not part of this transport.
 
-  When an established WebSocket disconnects, the frontend reloads the page
-  instead of repairing stale in-memory state. The normal
-  HTTP bootstrap then restores current persisted state, while backend-owned
-  jobs and terminals keep running. Before reload, the current canvas session
-  modal and active session are copied to short-lived `sessionStorage` so the
-  same session header is restored even if the debounced UI-state save has not
-  completed yet.
+  **Web Access reconnect.** When an established WebSocket drops, the page
+  stays and `WsTransport` (`src/lib/transport.ts`) opens a new socket: backoff
+  from 250ms to 5s, and at once on `online`, `visibilitychange`, `pageshow`
+  or a network type change. The "Reconnecting to Jean..." overlay covers the
+  view until the page has caught up. `onWsRecovery` in `App.tsx` drives this:
+  - Commands pending at the drop reject with `WebSocket disconnected`. Unsent
+    commands are dropped with them. A command sent during the gap is queued
+    and runs on the new socket, unless its caller timed out first.
+  - On open, the transport asks for the missed output of every terminal it
+    tracks (`terminal_replay` with the last seen `seq`) and holds all events
+    until the app resync settles (10s cap). Held events are dispatched in
+    `seq` order, because live output can overtake a replay.
+  - `resyncAfterReconnect` (`src/services/reconnect-resync.ts`) invalidates
+    every query except `ui-state`, runs `refreshRunStates`, and replaces each
+    running turn with a fresh `get_session` snapshot through
+    `hydrateRunningSnapshot` (`dedupeReplayedOutput`). The held events then
+    pass the replay filter, so text that is already in the snapshot is not
+    shown twice.
+  - The page reloads only when the server changed: `/api/auth` reports another
+    `webBuildId`, or the heartbeat carries another `boot_id` (a restarted
+    server has new sequence numbers and no terminals). Before that reload, the
+    current canvas session modal and active session are copied to short-lived
+    `sessionStorage` so the same session header is restored.
+
+  **Dead-socket detection.** The server sends an app-level heartbeat when a
+  socket opens and every 5s after that
+  (`jean-core/src/http_server/websocket.rs`). The client checks every second
+  and closes a socket with no inbound frame for two intervals, about 10-11s.
+  Until the first heartbeat the limit is 25s, for servers that send no
+  heartbeat on connect; a heartbeat without `interval_ms` keeps 50s.
   1. **Backend PTY registry** (`src-tauri/src/terminal/registry.rs`) keeps the
      real `portable_pty` process alive in `TERMINAL_SESSIONS` keyed by
      `terminal_id`. The frontend is a viewer; refresh never kills the PTY.
@@ -550,9 +596,9 @@ Additional systems (no dedicated docs yet):
      `TERMINAL_BUFFER_MAX_EVENTS = 12000` events/terminal and
      `TERMINAL_BUFFER_MAX_BYTES = 3MB` per terminal) holds the most
      recent `terminal:output` and `terminal:started` envelopes with monotonic
-     sequence numbers. After a full-page refresh, `requestTerminalReplay` asks
-     for events after a given `last_seq` and the backend streams the buffered
-     slice.
+     sequence numbers. After a full-page refresh (`requestTerminalReplay`)
+     or a reconnect, the frontend asks for events after a given `last_seq` and
+     the backend streams the buffered slice.
 
   3. **UI state hydration** (`src/hooks/useUIStatePersistence.ts`,
      `restoreTerminalRuntimeState`) is web-only. On load it reads

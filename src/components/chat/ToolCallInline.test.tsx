@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@/test/test-utils'
 import { describe, expect, it, vi } from 'vitest'
+import { extractJeanMcpBareToolName } from './tool-call-utils'
 import {
-  extractJeanMcpBareToolName,
   formatJeanMcpToolLabel,
   isJeanMcpToolName,
   normalizeToolCallForDisplay,

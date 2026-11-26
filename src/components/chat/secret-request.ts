@@ -1,5 +1,5 @@
 import type { ToolCall } from '@/types/chat'
-import { extractJeanMcpBareToolName } from './ToolCallInline'
+import { extractJeanMcpBareToolName } from './tool-call-utils'
 
 /** A secret the agent asked for with the Jean MCP `request_secret` tool. */
 export interface SecretRequest {

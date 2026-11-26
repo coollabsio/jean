@@ -981,3 +981,60 @@ export function findPlanFilePath(toolCalls: ToolCall[]): string | null {
   }
   return editedPlanPath
 }
+
+/**
+ * Strip MCP / client prefixes from a Jean tool name and return the bare registry name.
+ * Handles: jean_get_current_context, jean-dev_list_projects, mcp:jean:list_worktrees,
+ * mcp__jean__create_session, mcp__jean-dev__get_current_context.
+ */
+export function extractJeanMcpBareToolName(name: string): string | null {
+  const trimmed = name.trim()
+  if (!trimmed) return null
+
+  if (trimmed.startsWith('mcp__')) {
+    // mcp__jean__tool or mcp__jean-dev__tool (tool may contain underscores)
+    const rest = trimmed.slice('mcp__'.length)
+    const serverSep = rest.indexOf('__')
+    if (serverSep > 0) {
+      const server = rest.slice(0, serverSep)
+      const tool = rest.slice(serverSep + 2)
+      if (
+        (server === 'jean' ||
+          server === 'jean-dev' ||
+          server.startsWith('jean')) &&
+        tool
+      ) {
+        return tool
+      }
+    }
+    return null
+  }
+
+  if (trimmed.startsWith('mcp:')) {
+    // mcp:jean:tool or mcp:jean-dev:tool
+    const parts = trimmed.split(':')
+    if (parts.length >= 3) {
+      const server = parts[1] ?? ''
+      const tool = parts.slice(2).join(':')
+      if (
+        (server === 'jean' ||
+          server === 'jean-dev' ||
+          server.startsWith('jean')) &&
+        tool
+      ) {
+        return tool
+      }
+    }
+    return null
+  }
+
+  // Client-side prefix: jean_get_current_context / jean-dev_list_projects
+  for (const prefix of ['jean-dev_', 'jean_']) {
+    if (trimmed.startsWith(prefix)) {
+      const bare = trimmed.slice(prefix.length)
+      if (bare) return bare
+    }
+  }
+
+  return null
+}
