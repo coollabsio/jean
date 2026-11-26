@@ -3587,7 +3587,7 @@ export function ProjectCanvasView({
                         onChange={e => setSearchQuery(e.target.value)}
                         aria-label="Search worktrees and sessions"
                         name="worktree-search"
-                        className="h-6 border-border/30 bg-transparent pl-6 text-xs shadow-none dark:bg-transparent"
+                        className="h-6 border-0 bg-transparent pl-6 text-xs shadow-none dark:bg-transparent"
                       />
                     </div>
                   )}
@@ -3716,7 +3716,7 @@ export function ProjectCanvasView({
                           onChange={e => setSearchQuery(e.target.value)}
                           aria-label="Search worktrees and sessions"
                           name="worktree-search"
-                          className="h-8 border-border/30 bg-transparent pl-7 text-xs shadow-none dark:bg-transparent"
+                          className="h-8 border-0 bg-transparent pl-7 text-xs shadow-none dark:bg-transparent"
                         />
                       </div>
                     </div>
