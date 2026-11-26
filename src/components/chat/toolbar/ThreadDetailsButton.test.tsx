@@ -101,7 +101,7 @@ describe('ThreadDetailsButton', () => {
     window.addEventListener('open-git-diff', onDiff)
     renderDetails()
 
-    await user.click(screen.getByRole('button', { name: /thread details/i }))
+    await user.click(screen.getByRole('button', { name: /^details/i }))
 
     expect(screen.getByText('feature-x')).toBeInTheDocument()
     expect(screen.getByText('↑ 2')).toBeInTheDocument()
@@ -151,7 +151,7 @@ describe('ThreadDetailsButton', () => {
       ],
     })
 
-    await user.click(screen.getByRole('button', { name: /thread details/i }))
+    await user.click(screen.getByRole('button', { name: /^details/i }))
     await user.click(screen.getByRole('menuitem', { name: '#7 Broken login' }))
 
     expect(onSelect).toHaveBeenCalledOnce()
@@ -172,7 +172,7 @@ describe('ThreadDetailsButton', () => {
     const user = userEvent.setup()
     renderDetails()
 
-    await user.click(screen.getByRole('button', { name: /thread details/i }))
+    await user.click(screen.getByRole('button', { name: /^details/i }))
 
     expect(screen.queryByRole('menuitem', { name: /mcp servers/i })).toBeNull()
     expect(
@@ -191,7 +191,7 @@ describe('ThreadDetailsButton', () => {
       enabledMcpServers: ['claude:alpha', 'claude:off'],
     })
 
-    await user.click(screen.getByRole('button', { name: /thread details/i }))
+    await user.click(screen.getByRole('button', { name: /^details/i }))
     const item = screen.getByRole('menuitem', { name: /mcp servers/i })
     expect(item).toHaveTextContent('1')
     expect(screen.queryByText('alpha')).toBeNull()
@@ -219,7 +219,7 @@ describe('ThreadDetailsButton', () => {
     const user = userEvent.setup()
     renderDetails()
 
-    await user.click(screen.getByRole('button', { name: /thread details/i }))
+    await user.click(screen.getByRole('button', { name: /^details/i }))
 
     expect(screen.getByText('· Max 5x')).toBeInTheDocument()
     expect(screen.getByText('9%')).toBeInTheDocument()

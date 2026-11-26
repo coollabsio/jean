@@ -431,8 +431,8 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
   },
   {
     action: 'open_quick_menu',
-    label: 'Thread details',
-    description: 'Toggle the thread details menu',
+    label: 'Details',
+    description: 'Toggle the details menu',
     default_shortcut: 'mod+period',
     category: 'navigation',
   },

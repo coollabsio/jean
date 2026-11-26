@@ -242,7 +242,7 @@ export function ThreadDetailsButton({
             <Button
               variant="ghost"
               size="icon-xs"
-              aria-label="Thread details"
+              aria-label="Details"
               data-testid="thread-details-button"
               className={cn(
                 'relative rounded-none text-foreground/70 hover:text-foreground',
@@ -260,7 +260,7 @@ export function ThreadDetailsButton({
           </DropdownMenuTrigger>
         </TooltipTrigger>
         <TooltipContent>
-          Thread details
+          Details
           {!isMobile && (
             <kbd className="ml-1 text-[0.625rem] opacity-60">
               {menuShortcut}
