@@ -1451,6 +1451,9 @@ export interface AppPreferences {
   yolo_effort_level: string | null // Effort level override for yolo mode (Claude adaptive / Codex), null = use session effort
   linear_api_key: string | null // Global Linear personal API key (inherited by all projects)
   sentry_auth_token?: string | null // Global Sentry auth token (inherited by all projects)
+  plane_api_key?: string | null // Global Plane API key (inherited by all projects)
+  plane_workspace_slug?: string | null // Global Plane workspace slug
+  plane_base_url?: string | null // Plane API base URL, null = Plane Cloud
   magic_models_auto_initialized: boolean // Whether magic prompt models were auto-set based on installed backends
   commit_close_issue?: boolean // Commit magic: add "Closes #N" for the worktree's linked GitHub issue
   claude_cli_source: 'jean' | 'path' // Claude CLI source: 'jean' (managed) or 'path' (system PATH)

@@ -8,6 +8,7 @@ import type {
   RepositoryAdvisory,
 } from '@/types/github'
 import type { LinearIssue } from '@/types/linear'
+import type { PlaneWorkItem } from '@/types/plane'
 import type { SentryIssue } from '@/types/sentry'
 import {
   worktreeBranchCheckoutRef,
@@ -67,6 +68,8 @@ interface Params {
     issue: LinearIssue,
     background?: boolean
   ) => void
+  filteredPlaneWorkItems: PlaneWorkItem[]
+  handleSelectPlaneWorkItem: (item: PlaneWorkItem, background?: boolean) => void
   filteredSentryIssues: SentryIssue[]
   handleSelectSentryIssue: (issue: SentryIssue, background?: boolean) => void
   handleSelectSentryIssueAndInvestigate: (
@@ -111,6 +114,8 @@ export function useNewWorktreeKeyboard({
   filteredLinearIssues,
   handleSelectLinearIssue,
   handleSelectLinearIssueAndInvestigate,
+  filteredPlaneWorkItems,
+  handleSelectPlaneWorkItem,
   filteredSentryIssues,
   handleSelectSentryIssue,
   handleSelectSentryIssueAndInvestigate,
@@ -365,6 +370,30 @@ export function useNewWorktreeKeyboard({
         }
       }
 
+      // Plane tab navigation
+      if (activeTab === 'plane' && filteredPlaneWorkItems.length > 0) {
+        if (key === 'arrowdown') {
+          e.preventDefault()
+          setSelectedItemIndex((prev: number) =>
+            Math.min(prev + 1, filteredPlaneWorkItems.length - 1)
+          )
+          return
+        }
+        if (key === 'arrowup') {
+          e.preventDefault()
+          setSelectedItemIndex((prev: number) => Math.max(prev - 1, 0))
+          return
+        }
+        if (key === 'enter' && filteredPlaneWorkItems[selectedItemIndex]) {
+          e.preventDefault()
+          handleSelectPlaneWorkItem(
+            filteredPlaneWorkItems[selectedItemIndex],
+            e.metaKey
+          )
+          return
+        }
+      }
+
       // Discussions tab navigation
       if (activeTab === 'discussions' && filteredDiscussions.length > 0) {
         if (key === 'arrowdown') {
@@ -481,6 +510,8 @@ export function useNewWorktreeKeyboard({
       filteredSentryIssues,
       handleSelectLinearIssue,
       handleSelectLinearIssueAndInvestigate,
+      filteredPlaneWorkItems,
+      handleSelectPlaneWorkItem,
       handleSelectSentryIssue,
       handleSelectSentryIssueAndInvestigate,
       filteredDiscussions,

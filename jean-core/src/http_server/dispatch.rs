@@ -404,6 +404,7 @@ pub async fn dispatch_command(
             let linear_context = field_opt(&args, "linearContext", "linear_context")?;
             let sentry_context = field_opt(&args, "sentryContext", "sentry_context")?;
             let discussion_context = field_opt(&args, "discussionContext", "discussion_context")?;
+            let plane_context = field_opt(&args, "planeContext", "plane_context")?;
             let custom_name = field_opt(&args, "customName", "custom_name")?;
             let auto_open_in_jean = field_opt(&args, "autoOpenInJean", "auto_open_in_jean")?;
             let origin = field_opt(&args, "origin", "origin")?;
@@ -418,6 +419,7 @@ pub async fn dispatch_command(
                 linear_context,
                 sentry_context,
                 discussion_context,
+                plane_context,
                 custom_name,
                 auto_open_in_jean,
                 origin,
@@ -4130,6 +4132,93 @@ pub async fn dispatch_command(
             )
             .await?;
             Ok(Value::Null)
+        }
+        // Plane Work Items
+        "list_plane_projects" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            to_value(crate::projects::list_plane_projects(app.clone(), project_id).await?)
+        }
+        "list_plane_work_items" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            to_value(crate::projects::list_plane_work_items(app.clone(), project_id).await?)
+        }
+        "search_plane_work_items" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let query: String = from_field(&args, "query")?;
+            to_value(
+                crate::projects::search_plane_work_items(app.clone(), project_id, query).await?,
+            )
+        }
+        "get_plane_work_item" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let identifier: String = from_field(&args, "identifier")?;
+            to_value(
+                crate::projects::get_plane_work_item(app.clone(), project_id, identifier).await?,
+            )
+        }
+        "load_plane_work_item_context" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let identifier: String = from_field(&args, "identifier")?;
+            let result = crate::projects::load_plane_work_item_context(
+                app.clone(),
+                session_id,
+                project_id,
+                identifier,
+            )
+            .await?;
+            to_value(result)
+        }
+        "list_loaded_plane_work_item_contexts" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let worktree_id: Option<String> = field_opt(&args, "worktreeId", "worktree_id")?;
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            to_value(
+                crate::projects::list_loaded_plane_work_item_contexts(
+                    app.clone(),
+                    session_id,
+                    worktree_id,
+                    project_id,
+                )
+                .await?,
+            )
+        }
+        "get_plane_work_item_context_contents" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let worktree_id: Option<String> = field_opt(&args, "worktreeId", "worktree_id")?;
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            to_value(
+                crate::projects::get_plane_work_item_context_contents(
+                    app.clone(),
+                    session_id,
+                    worktree_id,
+                    project_id,
+                )
+                .await?,
+            )
+        }
+        "remove_plane_work_item_context" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let identifier: String = from_field(&args, "identifier")?;
+            crate::projects::remove_plane_work_item_context(
+                app.clone(),
+                session_id,
+                project_id,
+                identifier,
+            )
+            .await?;
+            Ok(Value::Null)
+        }
+        "update_project_plane_settings" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let settings: crate::projects::types::PlaneProjectSettings =
+                from_field(&args, "settings")?;
+            let result =
+                crate::projects::update_project_plane_settings(app.clone(), project_id, settings)
+                    .await?;
+            emit_cache_invalidation(app, &["projects"]);
+            to_value(result)
         }
         "remove_linear_issue_context" => {
             let session_id: String = field(&args, "sessionId", "session_id")?;

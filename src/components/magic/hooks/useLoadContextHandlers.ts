@@ -47,7 +47,15 @@ interface LinearIssueContextContent {
 }
 
 export interface ViewingContext {
-  type: 'issue' | 'pr' | 'security' | 'advisory' | 'saved' | 'linear' | 'sentry'
+  type:
+    | 'issue'
+    | 'pr'
+    | 'security'
+    | 'advisory'
+    | 'saved'
+    | 'linear'
+    | 'plane'
+    | 'sentry'
   number?: number
   ghsaId?: string
   slug?: string

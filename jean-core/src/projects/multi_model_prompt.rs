@@ -94,6 +94,7 @@ pub async fn start_prompt_on_models(
             None,
             None,
             None,
+            None,
             Some(false),
             None,
         )

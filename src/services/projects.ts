@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from 'react'
+import type { PlaneWorkItemDetail } from '@/types/plane'
 import {
   useQuery,
   useMutation,
@@ -890,6 +891,7 @@ export function useCreateWorktree() {
       linearContext,
       sentryContext,
       discussionContext,
+      planeContext,
       customName,
       origin,
       background: _background,
@@ -964,6 +966,8 @@ export function useCreateWorktree() {
       }
       /** GitHub discussion context to attach to the new worktree */
       discussionContext?: DiscussionContext
+      /** Plane work item (with comments) to attach to the new worktree */
+      planeContext?: PlaneWorkItemDetail
       /** Custom worktree name (used when retrying after path conflict) */
       customName?: string
       /** Origin/category for the worktree */
@@ -996,6 +1000,7 @@ export function useCreateWorktree() {
         linearContext,
         sentryContext,
         discussionContext,
+        planeContext,
         customName,
         origin,
         autoOpenInJean: !_background,

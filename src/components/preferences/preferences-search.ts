@@ -219,7 +219,7 @@ const paneEntries: PreferenceSearchEntry[] = [
     paneTitle: 'Integrations',
     type: 'pane',
     title: 'Integrations',
-    keywords: ['linear', 'api key'],
+    keywords: ['linear', 'plane', 'api key'],
     anchorId: 'pref-pane-integrations',
   },
   {
@@ -994,6 +994,17 @@ const sectionEntries: PreferenceSearchEntry[] = [
     sectionTitle: 'Integrations',
     keywords: ['linear api key', 'personal api key'],
     anchorId: 'pref-integrations-section-linear',
+    fallbackAnchorId: 'pref-pane-integrations',
+  },
+  {
+    id: 'integrations-plane',
+    pane: 'integrations',
+    paneTitle: 'Integrations',
+    type: 'section',
+    title: 'Plane',
+    sectionTitle: 'Integrations',
+    keywords: ['plane api key', 'plane workspace', 'work items', 'self-hosted'],
+    anchorId: 'pref-integrations-section-plane',
     fallbackAnchorId: 'pref-pane-integrations',
   },
   {

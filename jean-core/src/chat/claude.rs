@@ -1105,6 +1105,11 @@ fn build_claude_args(
     }
 
     all_context_paths.extend(get_discussion_context_paths(app, session_id, worktree_id));
+    all_context_paths.extend(crate::projects::plane_issues::get_plane_context_paths(
+        app,
+        session_id,
+        worktree_id,
+    ));
 
     // Check for attached saved context files
     if let Ok(app_data_dir) = app.path().app_data_dir() {
@@ -1186,6 +1191,13 @@ fn build_claude_args(
                     s.contains("git-context") && s.contains("-linear-")
                 })
                 .count();
+            let plane_count = all_context_paths
+                .iter()
+                .filter(|p| {
+                    let s = p.to_string_lossy();
+                    s.contains("git-context") && s.contains("-plane-")
+                })
+                .count();
             let saved_context_count = all_context_paths
                 .iter()
                 .filter(|p| {
@@ -1220,6 +1232,7 @@ fn build_claude_args(
                     || advisory_count > 0
                     || discussion_count > 0
                     || linear_count > 0
+                    || plane_count > 0
                     || saved_context_count > 0
                 {
                     combined_content.push_str("**Summary:**\n");
@@ -1244,6 +1257,9 @@ fn build_claude_args(
                     }
                     if linear_count > 0 {
                         combined_content.push_str(&format!("- {} Linear Issue(s)\n", linear_count));
+                    }
+                    if plane_count > 0 {
+                        combined_content.push_str(&format!("- {plane_count} Plane Work Item(s)\n"));
                     }
                     if saved_context_count > 0 {
                         combined_content

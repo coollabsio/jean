@@ -63,11 +63,15 @@ import {
 import { useAvailableOpencodeModels } from '@/services/opencode-cli'
 import { useAvailablePiModels } from '@/services/pi-cli'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { useLoadedPlaneWorkItemContexts } from '@/services/plane'
+import type { LoadedPlaneWorkItemContext } from '@/types/plane'
 import {
   BackendLabel,
   getBackendPlainLabel,
 } from '@/components/ui/backend-label'
 import type { RevertCommitResponse } from '@/types/projects'
+
+const EMPTY_PLANE_CONTEXTS: LoadedPlaneWorkItemContext[] = []
 
 // eslint-disable-next-line react-refresh/only-export-components
 export {
@@ -272,6 +276,7 @@ export const ChatToolbar = memo(function ChatToolbar({
     handleViewSecurityAlert,
     handleViewAdvisory,
     handleViewLinear,
+    handleViewPlane,
     handleViewSentry,
   } = useContextViewer({
     activeSessionId,
@@ -279,6 +284,13 @@ export const ChatToolbar = memo(function ChatToolbar({
     worktreeId,
     projectId,
   })
+
+  const { data: loadedPlaneContexts = EMPTY_PLANE_CONTEXTS } =
+    useLoadedPlaneWorkItemContexts(
+      activeSessionId ?? null,
+      worktreeId ?? null,
+      projectId ?? null
+    )
 
   const handleModelChange = useCallback(
     (value: string) => {
@@ -474,6 +486,7 @@ export const ChatToolbar = memo(function ChatToolbar({
               security: loadedSecurityContexts,
               advisories: loadedAdvisoryContexts,
               linear: loadedLinearContexts,
+              plane: loadedPlaneContexts,
               sentry: loadedSentryContexts,
               saved: attachedSavedContexts,
               onViewIssue: handleViewIssue,
@@ -482,6 +495,7 @@ export const ChatToolbar = memo(function ChatToolbar({
               onViewSecurityAlert: handleViewSecurityAlert,
               onViewAdvisory: handleViewAdvisory,
               onViewLinear: handleViewLinear,
+              onViewPlane: handleViewPlane,
               onViewSentry: handleViewSentry,
               onViewSavedContext: handleViewSavedContext,
             })}
@@ -561,6 +575,7 @@ export const ChatToolbar = memo(function ChatToolbar({
               loadedSecurityContexts={loadedSecurityContexts}
               loadedAdvisoryContexts={loadedAdvisoryContexts}
               loadedLinearContexts={loadedLinearContexts}
+              loadedPlaneContexts={loadedPlaneContexts}
               loadedSentryContexts={loadedSentryContexts}
               attachedSavedContexts={attachedSavedContexts}
               handleViewIssue={handleViewIssue}
@@ -569,6 +584,7 @@ export const ChatToolbar = memo(function ChatToolbar({
               handleViewSecurityAlert={handleViewSecurityAlert}
               handleViewAdvisory={handleViewAdvisory}
               handleViewLinear={handleViewLinear}
+              handleViewPlane={handleViewPlane}
               handleViewSentry={handleViewSentry}
               handleViewSavedContext={handleViewSavedContext}
               availableMcpServers={availableMcpServers}
@@ -652,6 +668,7 @@ export const ChatToolbar = memo(function ChatToolbar({
               loadedSecurityContexts={loadedSecurityContexts}
               loadedAdvisoryContexts={loadedAdvisoryContexts}
               loadedLinearContexts={loadedLinearContexts}
+              loadedPlaneContexts={loadedPlaneContexts}
               loadedSentryContexts={loadedSentryContexts}
               attachedSavedContexts={attachedSavedContexts}
               mcpDropdownOpen={mcpDropdownOpen}
@@ -675,6 +692,7 @@ export const ChatToolbar = memo(function ChatToolbar({
               handleViewSecurityAlert={handleViewSecurityAlert}
               handleViewAdvisory={handleViewAdvisory}
               handleViewLinear={handleViewLinear}
+              handleViewPlane={handleViewPlane}
               handleViewSentry={handleViewSentry}
               handleViewSavedContext={handleViewSavedContext}
             />

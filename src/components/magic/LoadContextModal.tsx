@@ -11,6 +11,9 @@ import {
   Sentry,
 } from '@/components/icons/reicon'
 import { LinearIcon } from '@/components/icons/LinearIcon'
+import { PlaneIcon } from '@/components/icons/PlaneIcon'
+import { planeQueryKeys } from '@/services/plane'
+import { usePlaneLoadContext } from './hooks/usePlaneLoadContext'
 import type { LucideIcon } from '@/components/icons/reicon'
 import {
   Dialog,
@@ -41,7 +44,14 @@ import { useContextLinkUsage } from '@/hooks/useContextLinkUsage'
 import { useLoadContextHandlers } from './hooks/useLoadContextHandlers'
 import { useLoadContextKeyboard } from './hooks/useLoadContextKeyboard'
 
-type TabId = 'issues' | 'prs' | 'security' | 'contexts' | 'linear' | 'sentry'
+type TabId =
+  | 'issues'
+  | 'prs'
+  | 'security'
+  | 'contexts'
+  | 'linear'
+  | 'sentry'
+  | 'plane'
 
 interface Tab {
   id: TabId
@@ -57,6 +67,7 @@ const TABS: Tab[] = [
   { id: 'security', label: 'Security', key: '4', icon: Shield },
   { id: 'linear', label: 'Linear', key: '5', icon: LinearIcon },
   { id: 'sentry', label: 'Sentry', key: '6', icon: Sentry },
+  { id: 'plane', label: 'Plane', key: '7', icon: PlaneIcon },
 ]
 
 interface LoadContextModalProps {
@@ -155,6 +166,16 @@ export function LoadContextModal({
     onClearSearch,
   })
 
+  const plane = usePlaneLoadContext({
+    open,
+    activeSessionId,
+    worktreeId,
+    projectId,
+    searchQuery,
+    onClearSearch,
+    setViewingContext: handlers.setViewingContext,
+  })
+
   // Keyboard navigation
   const { handleKeyDown } = useLoadContextKeyboard({
     activeTab,
@@ -165,6 +186,7 @@ export function LoadContextModal({
     filteredAdvisories: data.filteredAdvisories,
     filteredLinearIssues: data.filteredLinearIssues,
     filteredSentryIssues: data.filteredSentryIssues,
+    filteredPlaneWorkItems: plane.filteredWorkItems,
     filteredContexts: data.filteredContexts,
     filteredEntries: data.filteredEntries,
     selectedIndex,
@@ -179,6 +201,7 @@ export function LoadContextModal({
     onPreviewAdvisory: handlers.handlePreviewAdvisory,
     onSelectLinearIssue: handlers.handleSelectLinearIssue,
     onSelectSentryIssue: handlers.handleSelectSentryIssue,
+    onSelectPlaneWorkItem: plane.selectWorkItem,
     onAttachContext: handlers.handleAttachContext,
     onSessionClick: handlers.handleSessionClick,
     onTabChange: setActiveTab,
@@ -204,6 +227,8 @@ export function LoadContextModal({
         setActiveTab('linear')
       } else if (data.hasLoadedSentryContexts) {
         setActiveTab('sentry')
+      } else if (plane.hasLoadedContexts) {
+        setActiveTab('plane')
       } else {
         setActiveTab('contexts')
       }
@@ -212,6 +237,7 @@ export function LoadContextModal({
       setIncludeClosed(false)
       setSelectedIndex(0)
       handlers.resetState()
+      plane.resetState()
     }
   }
 
@@ -269,6 +295,9 @@ export function LoadContextModal({
         queryClient.invalidateQueries({
           queryKey: linearQueryKeys.issues(projectId),
         })
+        queryClient.invalidateQueries({
+          queryKey: planeQueryKeys.workItems(projectId),
+        })
       }
       queryClient.invalidateQueries({ queryKey: ['session-context'] })
     }
@@ -292,6 +321,9 @@ export function LoadContextModal({
       })
       queryClient.invalidateQueries({
         queryKey: linearQueryKeys.loadedContexts(activeSessionId),
+      })
+      queryClient.invalidateQueries({
+        queryKey: planeQueryKeys.loadedContexts(activeSessionId),
       })
     }
 
@@ -529,6 +561,34 @@ export function LoadContextModal({
             />
           )}
 
+          {activeTab === 'plane' && (
+            <LinearItemsTab
+              provider="plane"
+              searchQuery={searchQuery}
+              setSearchQuery={setSearchQuery}
+              searchInputRef={searchInputRef}
+              loadedContexts={plane.loadedContexts}
+              isLoadingContexts={plane.isLoadingContexts}
+              hasLoadedContexts={plane.hasLoadedContexts}
+              loadingLinearIds={plane.loadingIds}
+              removingLinearIds={plane.removingIds}
+              onViewLoaded={plane.viewWorkItem}
+              onRemoveLoaded={plane.removeWorkItem}
+              onRefreshLoaded={(_, identifier) =>
+                plane.loadWorkItem(identifier, true)
+              }
+              filteredIssues={plane.filteredWorkItems}
+              isLoading={plane.isLoading}
+              isRefetching={plane.isRefetching}
+              isSearching={plane.isSearching}
+              error={plane.error}
+              onRefresh={() => plane.refetch()}
+              selectedIndex={selectedIndex}
+              setSelectedIndex={setSelectedIndex}
+              onSelectIssue={plane.selectWorkItem}
+            />
+          )}
+
           {activeTab === 'sentry' && (
             <SentryItemsTab
               projectId={projectId ?? ''}
@@ -617,6 +677,7 @@ export function LoadContextModal({
             handlers.viewingContext.type === 'security' ||
             handlers.viewingContext.type === 'advisory' ||
             handlers.viewingContext.type === 'linear' ||
+            handlers.viewingContext.type === 'plane' ||
             handlers.viewingContext.type === 'sentry') && (
             <Dialog
               open={true}
@@ -631,6 +692,8 @@ export function LoadContextModal({
                       <ShieldAlert className="h-4 w-4 text-warning" />
                     ) : handlers.viewingContext.type === 'linear' ? (
                       <LinearIcon className="h-4 w-4 text-violet-600 dark:text-violet-400" />
+                    ) : handlers.viewingContext.type === 'plane' ? (
+                      <PlaneIcon className="h-4 w-4 text-sky-600 dark:text-sky-400" />
                     ) : handlers.viewingContext.type === 'sentry' ? (
                       <Sentry className="h-4 w-4 text-warning" />
                     ) : (

@@ -802,6 +802,7 @@ pub async fn add_project(
         worktrees_dir: None,
         linear_api_key: None,
         linear_team_id: None,
+        plane: None,
         sentry_auth_token: None,
         sentry_organization_slug: None,
         sentry_project_slug: None,
@@ -965,6 +966,7 @@ pub async fn init_project(
         worktrees_dir: None,
         linear_api_key: None,
         linear_team_id: None,
+        plane: None,
         sentry_auth_token: None,
         sentry_organization_slug: None,
         sentry_project_slug: None,
@@ -1026,6 +1028,7 @@ pub async fn clone_project(
         worktrees_dir: None,
         linear_api_key: None,
         linear_team_id: None,
+        plane: None,
         sentry_auth_token: None,
         sentry_organization_slug: None,
         sentry_project_slug: None,
@@ -1806,6 +1809,7 @@ pub async fn create_worktree(
     linear_context: Option<LinearIssueContext>,
     sentry_context: Option<SentryIssueContext>,
     discussion_context: Option<DiscussionContext>,
+    plane_context: Option<super::plane_issues::PlaneWorkItemDetail>,
     custom_name: Option<String>,
     auto_open_in_jean: Option<bool>,
     origin: Option<String>,
@@ -1931,6 +1935,23 @@ pub async fn create_worktree(
             }
         } else {
             linear_branch
+        }
+    } else if let Some(ref ctx) = plane_context {
+        let plane_branch = super::plane_issues::generate_branch_name_from_plane_work_item(
+            &ctx.item.identifier,
+            &ctx.item.title,
+        );
+        if data.worktree_name_exists(&project_id, &plane_branch) {
+            let mut counter = 2;
+            loop {
+                let candidate = format!("{plane_branch}-{counter}");
+                if !data.worktree_name_exists(&project_id, &candidate) {
+                    break candidate;
+                }
+                counter += 1;
+            }
+        } else {
+            plane_branch
         }
     } else if let Some(ref ctx) = sentry_context {
         let sentry_branch = generate_branch_name_from_sentry_issue(&ctx.short_id, &ctx.title);
@@ -2085,6 +2106,7 @@ pub async fn create_worktree(
     let linear_context_clone = linear_context.clone();
     let sentry_context_clone = sentry_context.clone();
     let discussion_context_clone = discussion_context.clone();
+    let plane_context_clone = plane_context.clone();
     let worktree_origin_clone = worktree_origin.clone();
 
     // Spawn background thread for git operations
@@ -2625,6 +2647,19 @@ pub async fn create_worktree(
                             );
                         }
                     }
+                }
+            }
+
+            // Write Plane work item context file if provided
+            if let Some(ctx) = &plane_context_clone {
+                match super::plane_issues::write_plane_work_item_context(
+                    &app_clone,
+                    &project_name,
+                    ctx,
+                    &worktree_id_clone,
+                ) {
+                    Ok(path) => log::trace!("Background: Plane context file written to {path:?}"),
+                    Err(e) => log::warn!("Background: Failed to write Plane context file: {e}"),
                 }
             }
 
@@ -13066,6 +13101,7 @@ pub async fn create_folder(
         worktrees_dir: None,
         linear_api_key: None,
         linear_team_id: None,
+        plane: None,
         sentry_auth_token: None,
         sentry_organization_slug: None,
         sentry_project_slug: None,
@@ -15818,6 +15854,7 @@ mod tests {
             worktrees_dir: None,
             linear_api_key: None,
             linear_team_id: None,
+            plane: None,
             sentry_auth_token: None,
             sentry_organization_slug: None,
             sentry_project_slug: None,
@@ -16002,6 +16039,7 @@ mod tests {
             worktrees_dir: None,
             linear_api_key: None,
             linear_team_id: None,
+            plane: None,
             sentry_auth_token: None,
             sentry_base_url: None,
             sentry_organization_slug: None,

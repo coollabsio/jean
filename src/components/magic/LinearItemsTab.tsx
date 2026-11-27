@@ -15,13 +15,17 @@ import {
   TooltipContent,
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import { isLinearAuthError } from '@/services/linear'
-import { LinearAuthError } from '@/components/shared/LinearAuthError'
+import {
+  WORK_ITEM_PROVIDERS,
+  type WorkItemProvider,
+} from '@/components/worktree/work-item-providers'
 import { LinearIssueItem } from '@/components/worktree/LinearIssueItem'
 import type { LinearIssue, LoadedLinearIssueContext } from '@/types/linear'
 import type { ContextLinkLookup } from '@/hooks/useContextLinkUsage'
 
 interface LinearItemsTabProps {
+  /** Issue tracker of the items (default: Linear) */
+  provider?: WorkItemProvider
   searchQuery: string
   setSearchQuery: (q: string) => void
   searchInputRef: React.RefObject<HTMLInputElement | null>
@@ -49,6 +53,7 @@ interface LinearItemsTabProps {
 }
 
 export function LinearItemsTab({
+  provider = 'linear',
   searchQuery,
   setSearchQuery,
   searchInputRef,
@@ -71,6 +76,8 @@ export function LinearItemsTab({
   onSelectIssue,
   contextLinks,
 }: LinearItemsTabProps) {
+  const { label, noun, title, isAuthError, AuthError } =
+    WORK_ITEM_PROVIDERS[provider]
   const errorMessage =
     error instanceof Error ? error.message : String(error ?? '')
 
@@ -87,7 +94,7 @@ export function LinearItemsTab({
       ) : hasLoadedContexts ? (
         <div className="border-b border-border">
           <div className="px-4 py-2 text-xs font-medium text-muted-foreground bg-muted/30">
-            Loaded Linear Issues
+            Loaded {title}
           </div>
           <div className="max-h-[150px] overflow-y-auto">
             {loadedContexts.map(ctx => (
@@ -175,8 +182,8 @@ export function LinearItemsTab({
             <Input
               ref={searchInputRef}
               type="text"
-              placeholder="Search issues by identifier, title, or description..."
-              aria-label="Search Linear issues"
+              placeholder={`Search ${noun} by identifier, title, or description...`}
+              aria-label={`Search ${label} ${noun}`}
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               className="pl-9 h-8 text-base md:text-sm"
@@ -188,7 +195,7 @@ export function LinearItemsTab({
                 type="button"
                 onClick={onRefresh}
                 disabled={isRefetching}
-                aria-label="Refresh issues"
+                aria-label={`Refresh ${noun}`}
                 className={cn(
                   'flex items-center justify-center h-8 w-8 rounded-md border border-border',
                   'hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring',
@@ -204,7 +211,7 @@ export function LinearItemsTab({
                 />
               </button>
             </TooltipTrigger>
-            <TooltipContent>Refresh issues</TooltipContent>
+            <TooltipContent>Refresh {noun}</TooltipContent>
           </Tooltip>
         </div>
       </div>
@@ -215,19 +222,19 @@ export function LinearItemsTab({
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             <span className="ml-2 text-sm text-muted-foreground">
-              Loading issues...
+              Loading {noun}...
             </span>
           </div>
         )}
 
         {error != null &&
-          (isLinearAuthError(error) ? (
-            <LinearAuthError />
+          (isAuthError(error) ? (
+            <AuthError />
           ) : (
             <div className="flex flex-col items-center justify-center py-8 px-4 text-center">
               <AlertCircle className="h-5 w-5 text-destructive mb-2" />
               <span className="text-sm text-muted-foreground">
-                {errorMessage || 'Failed to load issues'}
+                {errorMessage || `Failed to load ${noun}`}
               </span>
             </div>
           ))}
@@ -239,10 +246,10 @@ export function LinearItemsTab({
             <div className="flex items-center justify-center py-8">
               <span className="text-sm text-muted-foreground">
                 {searchQuery
-                  ? 'No issues match your search'
+                  ? `No ${noun} match your search`
                   : hasLoadedContexts
-                    ? 'All active issues already loaded'
-                    : 'No active issues found'}
+                    ? `All active ${noun} already loaded`
+                    : `No active ${noun} found`}
               </span>
             </div>
           )}
@@ -254,7 +261,7 @@ export function LinearItemsTab({
             <div className="flex items-center justify-center py-8">
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
               <span className="ml-2 text-sm text-muted-foreground">
-                Searching Linear...
+                Searching {label}...
               </span>
             </div>
           )}
@@ -268,10 +275,15 @@ export function LinearItemsTab({
                 index={index}
                 isSelected={index === selectedIndex}
                 isCreating={loadingLinearIds.has(issue.identifier)}
-                contextMatches={contextLinks?.getMatches({
-                  type: 'linear',
-                  id: issue.identifier,
-                })}
+                providerLabel={label}
+                contextMatches={
+                  provider === 'linear'
+                    ? contextLinks?.getMatches({
+                        type: 'linear',
+                        id: issue.identifier,
+                      })
+                    : undefined
+                }
                 currentWorktreeId={contextLinks?.currentWorktreeId}
                 onMouseEnter={() => setSelectedIndex(index)}
                 onClick={() => onSelectIssue(issue)}
@@ -281,7 +293,7 @@ export function LinearItemsTab({
               <div className="flex items-center justify-center py-2">
                 <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
                 <span className="ml-1.5 text-xs text-muted-foreground">
-                  Searching Linear for more results...
+                  Searching {label} for more results...
                 </span>
               </div>
             )}

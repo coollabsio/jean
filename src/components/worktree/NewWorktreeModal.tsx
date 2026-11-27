@@ -223,6 +223,8 @@ function NewWorktreeModalContent() {
     handleSelectLinearIssue: handlers.handleSelectLinearIssue,
     handleSelectLinearIssueAndInvestigate:
       handlers.handleSelectLinearIssueAndInvestigate,
+    filteredPlaneWorkItems: data.filteredPlaneWorkItems,
+    handleSelectPlaneWorkItem: handlers.handleSelectPlaneWorkItem,
     filteredSentryIssues: data.filteredSentryIssues,
     handleSelectSentryIssue: handlers.handleSelectSentryIssue,
     handleSelectSentryIssueAndInvestigate:
@@ -305,6 +307,7 @@ function NewWorktreeModalContent() {
         activeTab === 'security' ||
         activeTab === 'branches' ||
         activeTab === 'linear' ||
+        activeTab === 'plane' ||
         activeTab === 'sentry' ||
         activeTab === 'discussions') &&
       newWorktreeModalOpen
@@ -552,6 +555,25 @@ function NewWorktreeModalContent() {
                 isBulkInvestigating={handlers.isBulkInvestigating}
                 searchInputRef={searchInputRef}
                 getContextMatches={getContextMatches}
+              />
+            )}
+
+            {activeTab === 'plane' && (
+              <LinearIssuesTab
+                provider="plane"
+                searchQuery={searchQuery}
+                setSearchQuery={setSearchQuery}
+                issues={data.filteredPlaneWorkItems}
+                isLoading={data.isLoadingPlaneWorkItems}
+                isRefetching={data.isRefetchingPlaneWorkItems}
+                isSearching={data.isSearchingPlaneWorkItems}
+                error={data.planeWorkItemsError}
+                onRefresh={() => data.refetchPlaneWorkItems()}
+                selectedIndex={selectedItemIndex}
+                setSelectedIndex={setSelectedItemIndex}
+                onSelectIssue={handlers.handleSelectPlaneWorkItem}
+                creatingFromId={handlers.creatingFromPlaneId}
+                searchInputRef={searchInputRef}
               />
             )}
 

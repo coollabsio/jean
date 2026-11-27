@@ -21,6 +21,8 @@ import type {
   AdvisoryContext,
 } from '@/types/github'
 import type { LinearIssue, LinearIssueDetail } from '@/types/linear'
+import type { PlaneWorkItem } from '@/types/plane'
+import { getPlaneWorkItem } from '@/services/plane'
 import type { SentryIssue, SentryIssueContext } from '@/types/sentry'
 import type { useNewWorktreeData } from './useNewWorktreeData'
 import type { TabId } from '../new-worktree-tabs'
@@ -79,6 +81,9 @@ export function useNewWorktreeHandlers(
   const [creatingFromLinearId, setCreatingFromLinearId] = useState<
     string | null
   >(null)
+  const [creatingFromPlaneId, setCreatingFromPlaneId] = useState<string | null>(
+    null
+  )
   const [creatingFromSentryId, setCreatingFromSentryId] = useState<
     string | null
   >(null)
@@ -100,6 +105,7 @@ export function useNewWorktreeHandlers(
       setCreatingFromNumber(null)
       setCreatingFromRepo(null)
       setCreatingFromLinearId(null)
+      setCreatingFromPlaneId(null)
       setCreatingFromSentryId(null)
       setCreatingFromBranch(null)
       setCreatingFromGhsaId(null)
@@ -171,6 +177,9 @@ export function useNewWorktreeHandlers(
           })
           queryClient.invalidateQueries({
             queryKey: ['sentry', 'issues', selectedProjectId],
+          })
+          queryClient.invalidateQueries({
+            queryKey: ['plane', 'work-items', selectedProjectId],
           })
         }
       }
@@ -1095,6 +1104,46 @@ export function useNewWorktreeHandlers(
   )
 
   // =========================================================================
+  // Plane work item handlers
+  // =========================================================================
+
+  const handleSelectPlaneWorkItem = useCallback(
+    async (item: PlaneWorkItem, background = false) => {
+      if (!selectedProjectId) {
+        toast.error('No project selected')
+        return
+      }
+
+      setCreatingFromPlaneId(item.id)
+
+      try {
+        const planeContext = await getPlaneWorkItem(
+          selectedProjectId,
+          item.identifier
+        )
+
+        if (background)
+          useUIStore.getState().incrementPendingBackgroundCreations()
+        createWorktree.mutate({
+          projectId: selectedProjectId,
+          planeContext,
+          background,
+        })
+
+        if (background) {
+          setCreatingFromPlaneId(null)
+        } else {
+          handleOpenChange(false)
+        }
+      } catch (error) {
+        toast.error(`Failed to fetch Plane work item: ${error}`)
+        setCreatingFromPlaneId(null)
+      }
+    },
+    [selectedProjectId, createWorktree, handleOpenChange]
+  )
+
+  // =========================================================================
   // Linear issue handlers
   // =========================================================================
 
@@ -1359,6 +1408,7 @@ export function useNewWorktreeHandlers(
     creatingFromNumber,
     creatingFromRepo,
     creatingFromLinearId,
+    creatingFromPlaneId,
     creatingFromSentryId,
     creatingFromBranch,
     creatingFromGhsaId,
@@ -1384,6 +1434,7 @@ export function useNewWorktreeHandlers(
     handleSelectLinearIssue,
     handleSelectLinearIssueAndInvestigate,
     handleBulkInvestigateLinearIssues,
+    handleSelectPlaneWorkItem,
     handleSelectSentryIssue,
     handleSelectSentryIssueAndInvestigate,
     handleBulkInvestigateSentryIssues,

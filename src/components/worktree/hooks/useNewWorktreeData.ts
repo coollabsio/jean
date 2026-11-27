@@ -28,6 +28,11 @@ import {
   useSearchLinearIssues,
   filterLinearIssues,
 } from '@/services/linear'
+import {
+  usePlaneWorkItems,
+  useSearchPlaneWorkItems,
+  filterPlaneWorkItems,
+} from '@/services/plane'
 import { filterSentryIssues, useSentryIssues } from '@/services/sentry'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import {
@@ -349,6 +354,27 @@ export function useNewWorktreeData(
     return [...local, ...extra]
   }, [linearIssues, searchQuery, searchedLinearIssues])
 
+  // Plane work items
+  const {
+    data: planeWorkItems,
+    isLoading: isLoadingPlaneWorkItems,
+    isFetching: isRefetchingPlaneWorkItems,
+    error: planeWorkItemsError,
+    refetch: refetchPlaneWorkItems,
+  } = usePlaneWorkItems(selectedProjectId)
+
+  const {
+    data: searchedPlaneWorkItems,
+    isFetching: isSearchingPlaneWorkItems,
+  } = useSearchPlaneWorkItems(selectedProjectId, debouncedSearchQuery)
+
+  const filteredPlaneWorkItems = useMemo(() => {
+    const local = filterPlaneWorkItems(planeWorkItems ?? [], searchQuery)
+    if (!searchedPlaneWorkItems?.length) return local
+    const ids = new Set(local.map(i => i.id))
+    return [...local, ...searchedPlaneWorkItems.filter(i => !ids.has(i.id))]
+  }, [planeWorkItems, searchQuery, searchedPlaneWorkItems])
+
   // Sentry issues. The debounced query is also sent to Sentry so structured
   // searches can find issues outside the initial unresolved result page.
   const {
@@ -444,6 +470,14 @@ export function useNewWorktreeData(
     isSearchingLinearIssues,
     linearIssuesError,
     refetchLinearIssues,
+
+    // Plane work items
+    filteredPlaneWorkItems,
+    isLoadingPlaneWorkItems,
+    isRefetchingPlaneWorkItems,
+    isSearchingPlaneWorkItems,
+    planeWorkItemsError,
+    refetchPlaneWorkItems,
 
     // Sentry issues
     filteredSentryIssues,

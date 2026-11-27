@@ -50,6 +50,8 @@ import type {
   LoadedDiscussionContext,
 } from '@/types/github'
 import type { LoadedLinearIssueContext } from '@/types/linear'
+import type { LoadedPlaneWorkItemContext } from '@/types/plane'
+import { PlaneIcon } from '@/components/icons/PlaneIcon'
 import type { SentryIssueContext } from '@/types/sentry'
 import { LinearIcon } from '@/components/icons/LinearIcon'
 import type { PrDisplayStatus } from '@/types/pr-status'
@@ -124,6 +126,7 @@ interface DesktopToolbarControlsProps {
   loadedSecurityContexts: LoadedSecurityAlertContext[]
   loadedAdvisoryContexts: LoadedAdvisoryContext[]
   loadedLinearContexts: LoadedLinearIssueContext[]
+  loadedPlaneContexts?: LoadedPlaneWorkItemContext[]
   loadedSentryContexts: SentryIssueContext[]
   attachedSavedContexts: AttachedSavedContext[]
 
@@ -150,6 +153,7 @@ interface DesktopToolbarControlsProps {
   handleViewSecurityAlert: (ctx: LoadedSecurityAlertContext) => void
   handleViewAdvisory: (ctx: LoadedAdvisoryContext) => void
   handleViewLinear: (ctx: LoadedLinearIssueContext) => void
+  handleViewPlane?: (ctx: LoadedPlaneWorkItemContext) => void
   handleViewSentry: (ctx: SentryIssueContext) => void
   handleViewSavedContext: (ctx: AttachedSavedContext) => void
 }
@@ -187,6 +191,7 @@ export function DesktopToolbarControls({
   loadedSecurityContexts,
   loadedAdvisoryContexts,
   loadedLinearContexts,
+  loadedPlaneContexts = [],
   loadedSentryContexts,
   attachedSavedContexts,
   mcpDropdownOpen: _mcpDropdownOpen,
@@ -210,6 +215,7 @@ export function DesktopToolbarControls({
   handleViewSecurityAlert,
   handleViewAdvisory,
   handleViewLinear,
+  handleViewPlane,
   handleViewSentry,
   handleViewSavedContext,
 }: DesktopToolbarControlsProps) {
@@ -317,6 +323,7 @@ export function DesktopToolbarControls({
   const loadedSecurityCount =
     loadedSecurityContexts.length + loadedAdvisoryContexts.length
   const loadedLinearCount = loadedLinearContexts.length
+  const loadedPlaneCount = loadedPlaneContexts.length
   const loadedSentryCount = loadedSentryContexts.length
   const loadedContextCount = attachedSavedContexts.length
   const providerDisplayName = getProviderDisplayName(
@@ -450,6 +457,7 @@ export function DesktopToolbarControls({
         loadedDiscussionCount > 0 ||
         loadedSecurityCount > 0 ||
         loadedLinearCount > 0 ||
+        loadedPlaneCount > 0 ||
         loadedSentryCount > 0 ||
         loadedContextCount > 0) && (
         <>
@@ -468,6 +476,7 @@ export function DesktopToolbarControls({
                     loadedDiscussionCount > 0 && `${loadedDiscussionCount}`,
                     loadedSecurityCount > 0 && `${loadedSecurityCount}`,
                     loadedLinearCount > 0 && `${loadedLinearCount}`,
+                    loadedPlaneCount > 0 && `${loadedPlaneCount}`,
                     loadedSentryCount > 0 && `${loadedSentryCount}`,
                     loadedContextCount > 0 && `${loadedContextCount}`,
                   ]
@@ -697,7 +706,7 @@ export function DesktopToolbarControls({
                 </>
               )}
 
-              {loadedSentryContexts.length > 0 && (
+              {loadedPlaneContexts.length > 0 && (
                 <>
                   {(loadedIssueContexts.length > 0 ||
                     loadedPRContexts.length > 0 ||
@@ -705,6 +714,47 @@ export function DesktopToolbarControls({
                     loadedSecurityContexts.length > 0 ||
                     loadedAdvisoryContexts.length > 0 ||
                     loadedLinearContexts.length > 0) && (
+                    <DropdownMenuSeparator />
+                  )}
+                  <DropdownMenuLabel className="text-xs text-muted-foreground">
+                    Plane Work Items
+                  </DropdownMenuLabel>
+                  {loadedPlaneContexts.map(ctx => (
+                    <DropdownMenuItem
+                      key={ctx.identifier}
+                      onClick={() => handleViewPlane?.(ctx)}
+                    >
+                      <PlaneIcon className="h-4 w-4 text-sky-600 dark:text-sky-400" />
+                      <span className="truncate">
+                        {ctx.identifier} {ctx.title}
+                      </span>
+                      {ctx.url && (
+                        <button
+                          type="button"
+                          aria-label="Open external link"
+                          className="ml-auto shrink-0 rounded p-0.5 hover:bg-accent"
+                          onClick={e => {
+                            e.stopPropagation()
+                            if (ctx.url) openExternal(ctx.url)
+                          }}
+                        >
+                          <ExternalLink className="h-3.5 w-3.5 opacity-60" />
+                        </button>
+                      )}
+                    </DropdownMenuItem>
+                  ))}
+                </>
+              )}
+
+              {loadedSentryContexts.length > 0 && (
+                <>
+                  {(loadedIssueContexts.length > 0 ||
+                    loadedPRContexts.length > 0 ||
+                    loadedDiscussionContexts.length > 0 ||
+                    loadedSecurityContexts.length > 0 ||
+                    loadedAdvisoryContexts.length > 0 ||
+                    loadedLinearContexts.length > 0 ||
+                    loadedPlaneContexts.length > 0) && (
                     <DropdownMenuSeparator />
                   )}
                   <DropdownMenuLabel className="text-xs text-muted-foreground">
@@ -745,6 +795,7 @@ export function DesktopToolbarControls({
                     loadedSecurityContexts.length > 0 ||
                     loadedAdvisoryContexts.length > 0 ||
                     loadedLinearContexts.length > 0 ||
+                    loadedPlaneContexts.length > 0 ||
                     loadedSentryContexts.length > 0) && (
                     <DropdownMenuSeparator />
                   )}
