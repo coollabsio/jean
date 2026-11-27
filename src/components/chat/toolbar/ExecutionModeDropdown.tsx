@@ -1,4 +1,5 @@
 import {
+  Check,
   ChevronsUpDown,
   ClipboardList,
   Hammer,
@@ -20,6 +21,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { BOTTOM_SHEET_ROW_CLASS } from '@/components/ui/bottom-sheet'
 import { useChatStore } from '@/store/chat-store'
 import {
   getSupportedPermissionModes,
@@ -131,6 +133,29 @@ interface ExecutionModeRadioGroupProps extends ExecutionModeSelection {
   onSetExecutionMode: (mode: ExecutionMode) => void
 }
 
+function selectExecutionMode(
+  value: string,
+  sessionId: string | null | undefined,
+  onSetExecutionMode: (mode: ExecutionMode) => void
+) {
+  if (value === 'plan') {
+    onSetExecutionMode('plan')
+    return
+  }
+  const next = value as PermissionMode
+  if (sessionId) useChatStore.getState().setPermissionMode(sessionId, next)
+  onSetExecutionMode(next)
+}
+
+function permissionDescription(mode: PermissionMode, backend?: Backend) {
+  return mode === 'build' && backend === 'codex'
+    ? 'Allow workspace edits and sandboxed commands. Ask for escalation.'
+    : PERMISSIONS[mode].description
+}
+
+const PLAN_DESCRIPTION =
+  'Explore and propose a plan. No code changes until you approve.'
+
 /** Plan + permission radio items; render inside a dropdown (sub)menu. */
 export function ExecutionModeRadioGroup({
   onSetExecutionMode,
@@ -143,16 +168,9 @@ export function ExecutionModeRadioGroup({
   return (
     <DropdownMenuRadioGroup
       value={isPlan ? 'plan' : permission}
-      onValueChange={value => {
-        if (value === 'plan') {
-          onSetExecutionMode('plan')
-          return
-        }
-        const next = value as PermissionMode
-        if (sessionId)
-          useChatStore.getState().setPermissionMode(sessionId, next)
-        onSetExecutionMode(next)
-      }}
+      onValueChange={value =>
+        selectExecutionMode(value, sessionId, onSetExecutionMode)
+      }
     >
       {planAvailable && (
         <DropdownMenuRadioItem value="plan" className={MODE_ITEM_CLASS}>
@@ -162,7 +180,7 @@ export function ExecutionModeRadioGroup({
           <div>
             <div>Plan</div>
             <div className="mt-1 text-xs text-muted-foreground">
-              Explore and propose a plan. No code changes until you approve.
+              {PLAN_DESCRIPTION}
             </div>
           </div>
         </DropdownMenuRadioItem>
@@ -188,9 +206,7 @@ export function ExecutionModeRadioGroup({
             <div>
               <div>{meta.label}</div>
               <div className="mt-1 text-xs text-muted-foreground">
-                {mode === 'build' && backend === 'codex'
-                  ? 'Allow workspace edits and sandboxed commands. Ask for escalation.'
-                  : meta.description}
+                {permissionDescription(mode, backend)}
               </div>
             </div>
           </DropdownMenuRadioItem>
@@ -198,6 +214,68 @@ export function ExecutionModeRadioGroup({
       })}
     </DropdownMenuRadioGroup>
   )
+}
+
+interface ExecutionModeSheetOptionsProps extends ExecutionModeRadioGroupProps {
+  /** Runs after a mode is picked, e.g. to close the sheet. */
+  onSelected?: () => void
+}
+
+/** Plan + permission rows for a mobile bottom sheet. */
+export function ExecutionModeSheetOptions({
+  onSetExecutionMode,
+  onSelected,
+  ...selection
+}: ExecutionModeSheetOptionsProps) {
+  const { backend, sessionId } = selection
+  const { isPlan, permission, supported, planAvailable } =
+    useExecutionModeDisplay(selection)
+  const current = isPlan ? 'plan' : permission
+  const options = [
+    ...(planAvailable
+      ? [
+          {
+            value: 'plan',
+            label: 'Plan',
+            description: PLAN_DESCRIPTION,
+            Icon: ClipboardList,
+            tone: MODE_TONE.plan,
+          },
+        ]
+      : []),
+    ...supported.map(mode => ({
+      value: mode,
+      label: PERMISSIONS[mode].label,
+      description: permissionDescription(mode, backend),
+      Icon: PERMISSIONS[mode].icon,
+      tone: MODE_TONE[mode],
+    })),
+  ]
+
+  return options.map(({ value, label, description, Icon, tone }) => {
+    const selected = value === current
+    return (
+      <button
+        key={value}
+        type="button"
+        className={cn(BOTTOM_SHEET_ROW_CLASS, 'py-2', selected && 'bg-accent')}
+        aria-pressed={selected}
+        onClick={() => {
+          selectExecutionMode(value, sessionId, onSetExecutionMode)
+          onSelected?.()
+        }}
+      >
+        <Icon className={cn('h-4 w-4 shrink-0', tone)} />
+        <span className="flex-1">
+          <span className="block font-medium">{label}</span>
+          <span className="block text-xs text-muted-foreground">
+            {description}
+          </span>
+        </span>
+        {selected && <Check className="h-4 w-4 shrink-0" />}
+      </button>
+    )
+  })
 }
 
 /** Permission selector; existing wire modes remain compatible. */

@@ -138,7 +138,7 @@ import {
 } from './MobileContextsSheet'
 import { LOCAL_SERVER_ID } from '@/types/server-resource'
 import {
-  ExecutionModeRadioGroup,
+  ExecutionModeSheetOptions,
   useExecutionModeDisplay,
 } from './ExecutionModeDropdown'
 
@@ -409,6 +409,7 @@ export function MobileSettingsMenu({
   const thinkingSheetOpen =
     reasoningSheetOpen && !hideReasoningControl && !usesEffortControl
   const [providerSheetOpen, setProviderSheetOpen] = useState(false)
+  const [modeSheetOpen, setModeSheetOpen] = useState(false)
   const [mcpSheetOpen, setMcpSheetOpen] = useState(false)
   const [scriptsSheetOpen, setScriptsSheetOpen] = useState(false)
   const [contextsSheetOpen, setContextsSheetOpen] = useState(false)
@@ -480,6 +481,11 @@ export function MobileSettingsMenu({
   const openReasoningPicker = () => {
     setMenuOpen(false)
     requestAnimationFrame(() => setReasoningSheetOpen(true))
+  }
+
+  const openModePicker = () => {
+    setMenuOpen(false)
+    requestAnimationFrame(() => setModeSheetOpen(true))
   }
 
   const openProviderPicker = () => {
@@ -856,21 +862,14 @@ export function MobileSettingsMenu({
           )}
 
           {isMobile && (
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger className="[&>svg:last-child]:!ml-2">
-                <ModeIcon className={cn('h-4 w-4', modeTone)} />
-                <span>Mode</span>
-                <span className="ml-auto min-w-0 truncate text-right text-xs text-muted-foreground">
-                  {modeLabel}
-                </span>
-              </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="w-80">
-                <ExecutionModeRadioGroup
-                  {...executionModeSelection}
-                  onSetExecutionMode={onSetExecutionMode}
-                />
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
+            <DropdownMenuItem onSelect={openModePicker}>
+              <ModeIcon className={cn('h-4 w-4', modeTone)} />
+              <span>Mode</span>
+              <span className="ml-auto min-w-0 truncate text-right text-xs text-muted-foreground">
+                {modeLabel}
+              </span>
+              <ChevronRight className="ml-2 h-4 w-4 shrink-0 text-foreground" />
+            </DropdownMenuItem>
           )}
 
           {hideReasoningControl ? null : usesEffortControl && isMobile ? (
@@ -1260,6 +1259,20 @@ export function MobileSettingsMenu({
             )
           }
         )}
+      </BottomSheet>
+
+      <BottomSheet
+        open={modeSheetOpen && isMobile}
+        onOpenChange={setModeSheetOpen}
+        title="Select mode"
+        description="Choose how much the agent can do without approval."
+        showDescription
+      >
+        <ExecutionModeSheetOptions
+          {...executionModeSelection}
+          onSetExecutionMode={onSetExecutionMode}
+          onSelected={() => setModeSheetOpen(false)}
+        />
       </BottomSheet>
 
       <BottomSheet

@@ -219,10 +219,10 @@ describe('MobileSettingsMenu', () => {
       expect(modeItem).toHaveTextContent('Full access')
 
       await user.click(modeItem as HTMLElement)
-      fireEvent.click(
-        await screen.findByRole('menuitemradio', { name: /^Plan/ })
-      )
+      await user.click(await screen.findByRole('button', { name: /^Plan/ }))
       expect(onSetExecutionMode).toHaveBeenCalledWith('plan')
+      // The settings menu closes, so only one sheet is open at a time.
+      expect(screen.queryByText('Mode')).not.toBeInTheDocument()
     } finally {
       Object.defineProperty(window, 'innerWidth', {
         configurable: true,
