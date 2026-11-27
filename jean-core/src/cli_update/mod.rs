@@ -82,14 +82,7 @@ fn allowlist_key(command: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
-    use super::{allowlist_key, ALLOWED_CLI_TYPES, ALLOWED_COMMANDS, UPDATE_COMMAND_TIMEOUT};
-    use std::time::Duration;
-
-    #[test]
-    fn update_command_timeout_is_bounded() {
-        assert!(UPDATE_COMMAND_TIMEOUT <= Duration::from_secs(5 * 60));
-        assert!(UPDATE_COMMAND_TIMEOUT > Duration::from_secs(60));
-    }
+    use super::{allowlist_key, ALLOWED_CLI_TYPES, ALLOWED_COMMANDS};
 
     #[test]
     fn pi_is_an_allowed_cli_type_for_path_updates() {

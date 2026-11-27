@@ -45,7 +45,6 @@ import { useShallow } from 'zustand/react/shallow'
 import { disposeTerminal, setOnStopped } from '@/lib/terminal-instances'
 import { BackendLabel } from '@/components/ui/backend-label'
 import { generateId } from '@/lib/uuid'
-import { isCliUpdateCompleteOutput } from '@/lib/cli-update-output'
 import { StandaloneTerminalSurface } from '@/components/chat/StandaloneTerminalSurface'
 import { Minus } from '@/components/icons/reicon'
 
@@ -187,10 +186,6 @@ function CliLoginModalContent({
   // Buffer last N lines of terminal output for debug logging on error
   const outputBufferRef = useRef<string[]>([])
   const MAX_OUTPUT_LINES = 50
-  const updateCompleteCloseRef = useRef(false)
-  const updateCompleteTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(
-    undefined
-  )
 
   // Cleanup terminal on unmount (needed for retry remount)
   useEffect(() => {
@@ -286,26 +281,12 @@ function CliLoginModalContent({
           outputBufferRef.current =
             outputBufferRef.current.slice(-MAX_OUTPUT_LINES)
         }
-
-        // Windows self-updaters can exit without a terminal:stopped event.
-        // Treat a clear "up to date" line as a secondary completion signal.
-        if (action !== 'login' && !updateCompleteCloseRef.current) {
-          const combined = outputBufferRef.current.join('\n')
-          if (isCliUpdateCompleteOutput(combined)) {
-            updateCompleteCloseRef.current = true
-            updateCompleteTimeoutRef.current = setTimeout(
-              () => onLoginSuccessClose(),
-              1200
-            )
-          }
-        }
       }
     )
     return () => {
-      clearTimeout(updateCompleteTimeoutRef.current)
       unlisten.then(fn => fn())
     }
-  }, [terminalId, mcpContext, action])
+  }, [terminalId, mcpContext])
 
   useEffect(() => {
     let closeTimeout: ReturnType<typeof setTimeout> | undefined
@@ -320,8 +301,6 @@ function CliLoginModalContent({
 
       if (exitCode === 0) {
         logger.debug(logBase + logOutput)
-        clearTimeout(updateCompleteTimeoutRef.current)
-        updateCompleteTimeoutRef.current = undefined
         if (minimizedRef.current) {
           toast.success(
             `${cliName} (${target}) ${action === 'install' ? 'installed' : 'updated'} successfully`
