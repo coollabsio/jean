@@ -58,8 +58,10 @@ const git = vi.hoisted(() => ({
 }))
 
 vi.mock('@/services/projects', () => ({
-  useWorktree: () => ({
-    data: { id: 'wt-1', session_type: 'worktree', branch: 'feature-x' },
+  useWorktree: (id: string | null) => ({
+    data: id
+      ? { id, session_type: 'worktree', branch: 'feature-x' }
+      : undefined,
   }),
 }))
 vi.mock('@/services/git-status', () => ({
@@ -124,6 +126,19 @@ describe('ThreadDetailsButton', () => {
       type: 'uncommitted',
     })
     window.removeEventListener('open-git-diff', onDiff)
+  })
+
+  it('shows only MCP servers and usage on the worktree list', async () => {
+    const user = userEvent.setup()
+    render(<ThreadDetailsButton worktreeId={null} />)
+
+    await user.click(screen.getByRole('button', { name: /^details/i }))
+
+    expect(screen.queryByText('feature-x')).not.toBeInTheDocument()
+    expect(screen.queryByText(/attach context/i)).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('menuitem', { name: 'MCP Servers' })
+    ).toBeInTheDocument()
   })
 
   it('shows the linked PR with its status and opens it on click', async () => {

@@ -5,6 +5,7 @@ import {
   TITLEBAR_BREADCRUMB_SLOT_ID,
   TITLEBAR_CENTER_SLOT_ID,
   TITLEBAR_PROJECT_MENU_SLOT_ID,
+  TITLEBAR_THREAD_DETAILS_SLOT_ID,
   useTitleBarSlot,
 } from '@/components/titlebar/breadcrumb-slot'
 import {
@@ -206,6 +207,7 @@ import { DEFAULT_KEYBINDINGS, formatShortcutDisplay } from '@/types/keybindings'
 import type { CheckStatus, PrDisplayStatus } from '@/types/pr-status'
 import { usePrStatus } from '@/services/pr-status'
 import { getPrStatusDisplay } from '@/components/chat/toolbar/toolbar-utils'
+import { ThreadDetailsButton } from '@/components/chat/toolbar/ThreadDetailsButton'
 import { openExternal } from '@/lib/platform'
 import {
   getCheckStatusDisplay,
@@ -1974,6 +1976,11 @@ export function ProjectCanvasView({
     TITLEBAR_CENTER_SLOT_ID,
     titleBarEnabled
   )
+  // The open session view portals its own (full) details button here
+  const threadDetailsSlot = useTitleBarSlot(
+    TITLEBAR_THREAD_DETAILS_SLOT_ID,
+    !zenMode && !selectedWorktreeModal
+  )
   const selectedModalWorktreeSnapshotRef = useRef<Worktree | null>(null)
   const selectedModalWorktree = resolveModalWorktreeSnapshot(
     selectedWorktreeModal?.worktreeId ?? null,
@@ -3596,6 +3603,11 @@ export function ProjectCanvasView({
 
   return (
     <div className="relative flex h-full flex-col">
+      {threadDetailsSlot &&
+        createPortal(
+          <ThreadDetailsButton worktreeId={null} />,
+          threadDetailsSlot
+        )}
       <div className="flex-1 flex flex-col overflow-auto">
         {/* Header and filters - sticky together over content */}
         <div className="sticky top-0 z-10 bg-background/60 backdrop-blur-md">

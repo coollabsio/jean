@@ -161,10 +161,11 @@ export function buildThreadContextItems(
 
 interface ThreadDetailsButtonProps {
   worktreeId: string | null
-  contexts: ThreadContextItem[]
-  availableMcpServers: McpServerInfo[]
-  enabledMcpServers: string[]
-  onManageContexts: () => void
+  /** Session-only sections below are omitted on the worktree list. */
+  contexts?: ThreadContextItem[]
+  availableMcpServers?: McpServerInfo[]
+  enabledMcpServers?: string[]
+  onManageContexts?: () => void
   /** PR opened from or linked to this worktree. */
   prUrl?: string
   prNumber?: number
@@ -192,12 +193,13 @@ function DiffCounts({ added, removed }: { added: number; removed: number }) {
 /**
  * Title bar button + menu with the thread details: git state, linked PR, session
  * tokens, attached context, MCP servers, and backend usage. Replaces the chat burger menu.
+ * Without a session (worktree list) it shows only MCP servers and backend usage.
  */
 export function ThreadDetailsButton({
   worktreeId,
-  contexts,
+  contexts = [],
   availableMcpServers,
-  enabledMcpServers,
+  enabledMcpServers = [],
   onManageContexts,
   prUrl,
   prNumber,
@@ -249,7 +251,7 @@ export function ThreadDetailsButton({
   const behind = gitStatus?.behind_count ?? 0
 
   const enabledKeys = new Set(enabledMcpServers)
-  const activeMcpServers = availableMcpServers.filter(
+  const activeMcpServers = (availableMcpServers ?? []).filter(
     server =>
       !server.disabled &&
       (enabledKeys.has(`${server.backend || 'claude'}:${server.name}`) ||
@@ -375,12 +377,15 @@ export function ThreadDetailsButton({
             <span className="truncate">{label}</span>
           </DropdownMenuItem>
         ))}
-        <DropdownMenuItem onClick={onManageContexts}>
-          <FolderOpen className="h-4 w-4" />
-          {contexts.length > 0 ? 'Manage Contexts...' : 'Attach Context...'}
-        </DropdownMenuItem>
-
-        <DropdownMenuSeparator />
+        {onManageContexts && (
+          <>
+            <DropdownMenuItem onClick={onManageContexts}>
+              <FolderOpen className="h-4 w-4" />
+              {contexts.length > 0 ? 'Manage Contexts...' : 'Attach Context...'}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+          </>
+        )}
         {!isMobile && (
           <DropdownMenuItem
             onClick={() =>
@@ -394,9 +399,11 @@ export function ThreadDetailsButton({
               )}
             />
             MCP Servers
-            <DropdownMenuShortcut>
-              {activeMcpServers.length}
-            </DropdownMenuShortcut>
+            {availableMcpServers && (
+              <DropdownMenuShortcut>
+                {activeMcpServers.length}
+              </DropdownMenuShortcut>
+            )}
           </DropdownMenuItem>
         )}
 
