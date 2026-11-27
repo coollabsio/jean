@@ -68,7 +68,7 @@ export const SteeredPromptGroup = memo(function SteeredPromptGroup({
             'max-w-full divide-y',
             bubble
               ? cn(USER_PILL_BUBBLE_CLASS, 'divide-(--bubble-fg)/20 p-0')
-              : cn(USER_CARD_BUBBLE_CLASS, 'divide-border/20 p-0')
+              : cn(USER_CARD_BUBBLE_CLASS, 'divide-border/50 p-0')
           )}
         >
           {texts.map((text, textIndex) => {
