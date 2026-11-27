@@ -17,6 +17,7 @@ import { toast } from 'sonner'
 import { invoke } from '@/lib/transport'
 import { isLocalBackend, updateTargetLabel } from '@/lib/environment'
 import { logger } from '@/lib/logger'
+import { normalizeReleaseNotes } from '@/lib/app-update'
 import { useUIStore } from '@/store/ui-store'
 
 export type HostUpdateChannel = 'server' | 'desktop'
@@ -50,7 +51,7 @@ function normalizeStatus(raw: Record<string, unknown>): ServerUpdateStatus {
     latestVersion: (raw.latestVersion ?? raw.latest_version ?? null) as
       | string
       | null,
-    notes: (raw.notes ?? null) as string | null,
+    notes: normalizeReleaseNotes(raw.notes),
     canUpdate: Boolean(raw.canUpdate ?? raw.can_update),
     reason: (raw.reason ?? null) as string | null,
     channel: normalizeChannel(raw.channel),
@@ -106,7 +107,7 @@ export function useServerUpdateCheck() {
         !useUIStore.getState().pendingUpdateVersion &&
         useUIStore.getState().updateModalVersion !== version
       ) {
-        useUIStore.getState().setUpdateModalVersion(version)
+        useUIStore.getState().setUpdateModalVersion(version, status.notes)
       }
       return
     }

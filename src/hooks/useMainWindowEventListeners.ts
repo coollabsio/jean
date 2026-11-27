@@ -42,6 +42,7 @@ import {
 } from '@/types/keybindings'
 import { installWindowKeyboardFocusRestore } from '@/lib/restore-keyboard-focus'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { normalizeReleaseNotes } from '@/lib/app-update'
 
 const PLAN_DIALOG_APPROVAL_ACTIONS = new Set<KeybindingAction>([
   'approve_plan',
@@ -1319,7 +1320,12 @@ export function useMainWindowEventListeners() {
                 new CustomEvent('update-available', { detail: update })
               )
               // Show the update modal (same as auto-check on startup)
-              useUIStore.getState().setUpdateModalVersion(update.version)
+              useUIStore
+                .getState()
+                .setUpdateModalVersion(
+                  update.version,
+                  normalizeReleaseNotes(update.body)
+                )
             } else {
               commandContextRef.current.showToast(
                 'You are running the latest version',

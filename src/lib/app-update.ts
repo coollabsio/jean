@@ -41,3 +41,29 @@ export function resolveInstallPendingAction(state: {
   if (state.hasPendingUpdateObject) return 'install'
   return 'noop'
 }
+
+/** Update notes as shown to the user: trimmed markdown, or null when empty. */
+export function normalizeReleaseNotes(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const notes = raw.trim()
+  return notes ? notes : null
+}
+
+/**
+ * The release CI builds `latest.json` before the GitHub release notes are
+ * published into it, so its `notes` field is often empty. Fall back to the
+ * body of the GitHub release for that version.
+ */
+export async function fetchGitHubReleaseNotes(
+  version: string,
+  fetchImpl: typeof fetch = fetch
+): Promise<string | null> {
+  const tag = `v${version.replace(/^v/, '')}`
+  const response = await fetchImpl(
+    `https://api.github.com/repos/coollabsio/jean/releases/tags/${encodeURIComponent(tag)}`,
+    { headers: { Accept: 'application/vnd.github+json' } }
+  )
+  if (!response.ok) return null
+  const release = (await response.json()) as { body?: unknown }
+  return normalizeReleaseNotes(release.body)
+}

@@ -6,9 +6,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
+import { Markdown } from '@/components/ui/markdown'
 import { useUIStore } from '@/store/ui-store'
 import { isNativeApp } from '@/lib/environment'
+import { fetchGitHubReleaseNotes } from '@/lib/app-update'
 
 function handleUpdateLater() {
   const modalVersion = useUIStore.getState().updateModalVersion
@@ -25,6 +28,15 @@ export function UpdateAvailableModal() {
   const version = useUIStore(state => state.updateModalVersion)
   const readyVersion = useUIStore(state => state.updateReadyVersion)
   const isInstalling = useUIStore(state => state.isUpdateInstalling)
+  const manifestNotes = useUIStore(state => state.updateModalNotes)
+  const { data: releaseNotes } = useQuery({
+    queryKey: ['app-update-release-notes', version],
+    queryFn: () => fetchGitHubReleaseNotes(version ?? ''),
+    enabled: version !== null && !manifestNotes,
+    staleTime: Infinity,
+    retry: false,
+  })
+  const notes = manifestNotes ?? releaseNotes ?? null
   const isOpen = version !== null
   const native = isNativeApp()
 
@@ -60,13 +72,20 @@ export function UpdateAvailableModal() {
         if (!open) handleUpdateLater()
       }}
     >
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className={notes ? 'sm:max-w-lg' : 'sm:max-w-md'}>
         <DialogHeader>
           <DialogTitle>
             {isReady ? 'Update Ready' : 'Update Available'}
           </DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
+        {notes && (
+          <div className="max-h-[min(50vh,24rem)] min-w-0 overflow-y-auto rounded-md border bg-muted/30 px-4 py-3">
+            <Markdown compact className="text-sm">
+              {notes}
+            </Markdown>
+          </div>
+        )}
         <DialogFooter>
           <Button variant="outline" onClick={handleUpdateLater}>
             Later

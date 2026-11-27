@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
+  fetchGitHubReleaseNotes,
+  normalizeReleaseNotes,
   resolveInstallPendingAction,
   shouldOfferUpdateCheck,
 } from './app-update'
@@ -95,5 +97,55 @@ describe('resolveInstallPendingAction', () => {
         hasPendingUpdateObject: false,
       })
     ).toBe('noop')
+  })
+})
+
+describe('normalizeReleaseNotes', () => {
+  it('trims markdown notes from the update object', () => {
+    expect(normalizeReleaseNotes('\n## Features\n- New thing\n ')).toBe(
+      '## Features\n- New thing'
+    )
+  })
+
+  it('returns null for missing, empty, or non-string notes', () => {
+    expect(normalizeReleaseNotes(undefined)).toBeNull()
+    expect(normalizeReleaseNotes(null)).toBeNull()
+    expect(normalizeReleaseNotes('   ')).toBeNull()
+    expect(normalizeReleaseNotes(42)).toBeNull()
+  })
+})
+
+describe('fetchGitHubReleaseNotes', () => {
+  it('reads the body of the GitHub release for the version tag', async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ body: '## Fixes\n- Bug fixed\n' }))
+    )
+
+    await expect(
+      fetchGitHubReleaseNotes('1.0.16', fetchMock as typeof fetch)
+    ).resolves.toBe('## Fixes\n- Bug fixed')
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.github.com/repos/coollabsio/jean/releases/tags/v1.0.16',
+      expect.anything()
+    )
+  })
+
+  it('does not double the v prefix', async () => {
+    const fetchMock = vi.fn(async () => new Response('{}'))
+    await fetchGitHubReleaseNotes('v1.0.16', fetchMock as typeof fetch)
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.github.com/repos/coollabsio/jean/releases/tags/v1.0.16',
+      expect.anything()
+    )
+  })
+
+  it('returns null when the release is missing', async () => {
+    const fetchMock = vi.fn(
+      async () => new Response('not found', { status: 404 })
+    )
+    await expect(
+      fetchGitHubReleaseNotes('9.9.9', fetchMock as typeof fetch)
+    ).resolves.toBeNull()
   })
 })

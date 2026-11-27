@@ -87,6 +87,28 @@ describe('useServerUpdateCheck', () => {
     expect(useUIStore.getState().pendingUpdateVersion).toBeNull()
   })
 
+  it('passes host release notes to the desktop update modal', async () => {
+    invokeMock.mockResolvedValue({
+      update_available: true,
+      current_version: '1.0.0',
+      latest_version: '1.2.0',
+      notes: '  ## Fixes\n- Faster startup\n',
+      can_update: true,
+      channel: 'desktop',
+    })
+
+    renderHook(() => useServerUpdateCheck())
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8_000)
+    })
+
+    expect(useUIStore.getState().updateModalVersion).toBe('1.2.0')
+    expect(useUIStore.getState().updateModalNotes).toBe(
+      '## Fixes\n- Faster startup'
+    )
+  })
+
   it('clears sticky state after a successful apply', async () => {
     useUIStore.getState().setPendingServerUpdate({
       latestVersion: '1.2.0',
