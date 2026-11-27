@@ -18,8 +18,10 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { Kbd } from '@/components/ui/kbd'
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/store/ui-store'
+import { DEFAULT_KEYBINDINGS, formatShortcutDisplay } from '@/types/keybindings'
 
 interface ScriptsButtonProps {
   projectId?: string
@@ -113,6 +115,12 @@ export function ScriptsButton({
     props.worktreePath,
     props.owner
   )
+  const { data: preferences } = usePreferences()
+  // `??` keeps an unbound ('') shortcut unbound instead of the default.
+  const shortcut = formatShortcutDisplay(
+    preferences?.keybindings?.open_scripts_menu ??
+      DEFAULT_KEYBINDINGS.open_scripts_menu
+  )
   const [open, setOpen] = useState(false)
   const menuRequested = useUIStore(state => state.scriptsMenuRequested)
   const hasScripts = scripts.length > 0
@@ -133,40 +141,40 @@ export function ScriptsButton({
     </DropdownMenuContent>
   )
 
-  if (inTitleBar) {
-    return (
-      <DropdownMenu open={open} onOpenChange={setOpen}>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            className="flex h-6 items-center gap-1 px-1.5 text-xs text-foreground/70 hover:text-foreground"
-            aria-label="Scripts"
-          >
-            Scripts
-            <ChevronDown className="size-3" />
-          </button>
-        </DropdownMenuTrigger>
-        {menuContent}
-      </DropdownMenu>
-    )
-  }
+  const trigger = inTitleBar ? (
+    <button
+      type="button"
+      className="flex h-6 items-center gap-1 px-1.5 text-xs text-foreground/70 hover:text-foreground"
+      aria-label="Scripts"
+    >
+      Scripts
+      <ChevronDown className="size-3" />
+    </button>
+  ) : (
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      className={raisedToolbar}
+      aria-label="Scripts"
+    >
+      <Play className="size-3.5" />
+    </Button>
+  )
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className={raisedToolbar}
-              aria-label="Scripts"
-            >
-              <Play className="size-3.5" />
-            </Button>
-          </DropdownMenuTrigger>
+          <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
         </TooltipTrigger>
-        <TooltipContent>Scripts (package.json)</TooltipContent>
+        <TooltipContent>
+          Scripts (package.json)
+          {shortcut && (
+            <Kbd modHint className="ml-1">
+              {shortcut}
+            </Kbd>
+          )}
+        </TooltipContent>
       </Tooltip>
       {menuContent}
     </DropdownMenu>
