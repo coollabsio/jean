@@ -2253,7 +2253,8 @@ ${resolveInstructions}`
             ))}
             {canCloseAfter && (
               <p className="px-3 pt-3 text-xs text-muted-foreground">
-                Long-press a commit action to also close the session.
+                Long-press a commit or close-issue action to also close the
+                session.
               </p>
             )}
           </div>
@@ -2298,7 +2299,8 @@ ${resolveInstructions}`
             </div>
             {canCloseAfter && (
               <p className="shrink-0 border-t border-border/60 px-4 py-2 text-xs text-muted-foreground">
-                Hold Shift with a commit action to also close the session.
+                Hold Shift with a commit or close-issue action to also close the
+                session.
               </p>
             )}
           </DialogContent>

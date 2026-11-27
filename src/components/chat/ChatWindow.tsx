@@ -55,10 +55,7 @@ import {
   chatQueryKeys,
   reconnectNativeCliSession,
   canReconnectSession,
-  useCloseSession,
-  useRestoreSession,
 } from '@/services/chat'
-import { closeSessionAfterRun } from '@/lib/close-session-after-run'
 import {
   useWorktree,
   useProjects,
@@ -199,6 +196,7 @@ import { CHECK_GITHUB_ISSUES_PROMPT } from '@/lib/github-discovery-prompt'
 import { routeCurrentSessionMagicPrompt } from '@/lib/magic-prompt-pty'
 import { buildCommentAndCloseIssuePrompt } from '@/lib/github-issue-close-prompt'
 import { buildCommitInSessionPrompt } from '@/lib/commit-in-session-prompt'
+import { withCloseSessionStep } from '@/lib/close-session-prompt'
 import type { McpServerInfo } from '@/types/chat'
 import { useGitStatus } from '@/services/git-status'
 import { useRemotePicker } from '@/hooks/useRemotePicker'
@@ -1980,9 +1978,13 @@ const ChatWindowContent = memo(function ChatWindowContent({
 
   // Sends a magic prompt to this session with the selected backend/model/mode
   const sendMagicPrompt = useCallback(
-    (message: string): boolean => {
+    (prompt: string, closeSession = false) => {
+      const message = withCloseSessionStep(
+        prompt,
+        closeSession ? activeSessionId : null
+      )
       if (routeCurrentSessionMagicPrompt(activeSessionId, message) !== 'chat') {
-        return false
+        return
       }
       sendMessageNow({
         id: generateId(),
@@ -2005,13 +2007,10 @@ const ChatWindowContent = memo(function ChatWindowContent({
         backend: selectedBackendRef.current,
         queuedAt: Date.now(),
       })
-      return true
     },
     [activeSessionId, getMcpConfig, sendMessageNow]
   )
 
-  const { mutate: closeSessionMutate } = useCloseSession()
-  const { mutate: restoreSessionMutate } = useRestoreSession()
   const handleCommitInSession = useCallback(
     (closeSession = false) => {
       const closeIssueNumbers = preferences?.commit_close_issue
@@ -2020,26 +2019,12 @@ const ChatWindowContent = memo(function ChatWindowContent({
             ...(loadedIssueContexts ?? []).map(ctx => ctx.number),
           ]
         : []
-      const sent = sendMagicPrompt(
-        buildCommitInSessionPrompt(closeIssueNumbers)
-      )
-      if (!sent || !closeSession) return
-      if (!activeSessionId || !activeWorktreeId || !activeWorktreePath) return
-      closeSessionAfterRun(
-        {
-          worktreeId: activeWorktreeId,
-          worktreePath: activeWorktreePath,
-          sessionId: activeSessionId,
-        },
-        { close: closeSessionMutate, restore: restoreSessionMutate }
+      sendMagicPrompt(
+        buildCommitInSessionPrompt(closeIssueNumbers),
+        closeSession
       )
     },
     [
-      activeSessionId,
-      activeWorktreeId,
-      activeWorktreePath,
-      closeSessionMutate,
-      restoreSessionMutate,
       loadedIssueContexts,
       preferences?.commit_close_issue,
       sendMagicPrompt,
@@ -2047,13 +2032,19 @@ const ChatWindowContent = memo(function ChatWindowContent({
     ]
   )
 
-  const handleCommentAndCloseIssue = useCallback(() => {
-    if (!loadedIssueContexts?.length) {
-      toast.error('No GitHub issue attached to this session or worktree')
-      return
-    }
-    sendMagicPrompt(buildCommentAndCloseIssuePrompt(loadedIssueContexts))
-  }, [loadedIssueContexts, sendMagicPrompt])
+  const handleCommentAndCloseIssue = useCallback(
+    (closeSession = false) => {
+      if (!loadedIssueContexts?.length) {
+        toast.error('No GitHub issue attached to this session or worktree')
+        return
+      }
+      sendMagicPrompt(
+        buildCommentAndCloseIssuePrompt(loadedIssueContexts),
+        closeSession
+      )
+    },
+    [loadedIssueContexts, sendMagicPrompt]
+  )
 
   // Git operations hook - handles commit, PR, review, merge operations
   const {

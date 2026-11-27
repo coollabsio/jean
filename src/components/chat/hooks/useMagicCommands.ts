@@ -26,7 +26,7 @@ interface MagicCommandHandlers {
   handleCommit: () => void
   handleCommitAndPush: () => void
   handleCommitInSession: (closeSession?: boolean) => void
-  handleCommentAndCloseIssue: () => void
+  handleCommentAndCloseIssue: (closeSession?: boolean) => void
   handlePull: () => void
   handlePush: () => void
   handleRevertLastCommit: () => void
@@ -188,7 +188,9 @@ export function useMagicCommands({
           )
           break
         case 'comment-and-close-issue':
-          handlers.handleCommentAndCloseIssue()
+          handlers.handleCommentAndCloseIssue(
+            (rest as { closeSession?: boolean }).closeSession
+          )
           break
         case 'pull':
           handlers.handlePull()
