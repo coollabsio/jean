@@ -7,6 +7,7 @@ import {
   XIcon,
 } from '@/components/icons/reicon'
 import { toast } from 'sonner'
+import { openMagicPromptInTerminal } from '@/lib/magic-prompt-session'
 import { invoke } from '@/lib/transport'
 import { isGhAuthError } from '@/services/github'
 import { useGhLogin } from '@/hooks/useGhLogin'
@@ -114,12 +115,6 @@ export function ReleaseNotesDialog() {
           release.name || release.tagName,
           preferences?.magic_prompts?.release_notes
         )
-        const session = await createSession.mutateAsync({
-          worktreeId: baseWorktree.id,
-          worktreePath: baseWorktree.path,
-          name: `Release notes since ${release.tagName}`,
-        })
-        const store = useChatStore.getState()
         const defaultBackend =
           project.default_backend ?? preferences?.default_backend ?? 'claude'
         const backend = (resolveMagicPromptBackend(
@@ -127,6 +122,36 @@ export function ReleaseNotesDialog() {
           'release_notes_backend',
           defaultBackend
         ) ?? defaultBackend) as CliBackend
+        const sessionName = `Release notes since ${release.tagName}`
+        const terminalSession = await openMagicPromptInTerminal({
+          newSessionKind: preferences?.default_new_session_kind,
+          worktreeId: baseWorktree.id,
+          worktreePath: baseWorktree.path,
+          name: sessionName,
+          prompt,
+          promptBackend: backend,
+          executionMode: 'yolo',
+        })
+        if (terminalSession) {
+          window.dispatchEvent(
+            new CustomEvent('open-session-modal', {
+              detail: {
+                sessionId: terminalSession.id,
+                worktreeId: baseWorktree.id,
+                worktreePath: baseWorktree.path,
+              },
+            })
+          )
+          setReleaseNotesModalOpen(false)
+          return
+        }
+
+        const session = await createSession.mutateAsync({
+          worktreeId: baseWorktree.id,
+          worktreePath: baseWorktree.path,
+          name: sessionName,
+        })
+        const store = useChatStore.getState()
         const model =
           preferences?.magic_prompt_models?.release_notes_model ?? undefined
         const provider = resolveMagicPromptProvider(

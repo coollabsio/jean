@@ -25,6 +25,9 @@ import { useUIStore } from '@/store/ui-store'
  * - Generate Release Notes
  * - Merge to Base, Resolve Conflicts
  * - Investigate a workflow run (opens a new session)
+ *
+ * Magic prompts that open a NEW session follow `default_new_session_kind`
+ * through `openMagicPromptInTerminal` in `magic-prompt-session.ts`.
  */
 
 const BRACKETED_PASTE_START = '\u001b[200~'

@@ -1,4 +1,5 @@
 import type { Session } from '@/types/chat'
+import type { CliBackend } from '@/types/preferences'
 
 export type NativeTerminalBackend = 'claude' | 'codex' | 'opencode' | 'pi'
 
@@ -176,4 +177,31 @@ export function getNativeTerminalResumeLaunch(
   }
 
   return null
+}
+
+/** Command name for each backend CLI when Jean has no resolved binary path. */
+export const NATIVE_CLI_COMMANDS: Record<CliBackend, string> = {
+  codex: 'codex',
+  claude: 'claude',
+  opencode: 'opencode',
+  cursor: 'cursor-agent',
+  pi: 'pi',
+  commandcode: 'commandcode',
+  grok: 'grok',
+  kimi: 'kimi',
+  devin: 'devin',
+  antigravity: 'antigravity',
+  muse: 'muse',
+}
+
+/** Flags that start a native CLI without approval prompts (Full access). */
+export const NATIVE_CLI_YOLO_ARGS: Partial<Record<CliBackend, string[]>> = {
+  claude: ['--permission-mode', 'bypassPermissions'],
+  codex: ['--dangerously-bypass-approvals-and-sandbox'],
+  cursor: ['--yolo', '--sandbox', 'disabled'],
+  grok: ['--always-approve', '--sandbox', 'off'],
+  kimi: ['--yolo'],
+  devin: ['--permission-mode', 'dangerous'],
+  antigravity: ['--approval-mode', 'yolo'],
+  muse: ['--yolo'],
 }

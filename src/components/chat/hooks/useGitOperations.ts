@@ -1,5 +1,6 @@
 import { useCallback, useState, type RefObject } from 'react'
 import { startJeanReviewSession } from '@/lib/jean-review'
+import { openMagicPromptInTerminal } from '@/lib/magic-prompt-session'
 import { invoke, listen } from '@/lib/transport'
 import { openExternal } from '@/lib/platform'
 import { dismissibleToast } from '@/lib/dismissible-toast'
@@ -396,6 +397,31 @@ export function useGitOperations({
       return { backend, model, provider, executionMode }
     },
     [project?.default_backend, preferences]
+  )
+
+  // Follows `default_new_session_kind`: returns null when the conflict
+  // session stays in Jean Chat.
+  const openConflictTerminalSession = useCallback(
+    ({
+      override,
+      ...session
+    }: {
+      worktreeId: string
+      worktreePath: string
+      name: string
+      prompt: string
+      override?: InvestigateOverride
+    }) => {
+      const { backend, executionMode } =
+        resolveConflictSessionSelection(override)
+      return openMagicPromptInTerminal({
+        newSessionKind: preferences?.default_new_session_kind,
+        ...session,
+        promptBackend: backend,
+        executionMode,
+      })
+    },
+    [preferences?.default_new_session_kind, resolveConflictSessionSelection]
   )
 
   const handleCommit = useCallback(async () => {
@@ -1171,6 +1197,33 @@ export function useGitOperations({
             }
           )
 
+          const conflictFiles = prResult.conflicts.join('\n- ')
+          const diffSection = prResult.conflict_diff
+            ? `\n\nHere is the diff showing the conflict details:\n\n\`\`\`diff\n${prResult.conflict_diff}\n\`\`\``
+            : ''
+          const baseBranch =
+            worktree.base_branch || project?.default_branch || 'main'
+          const baseRemote = worktree.base_remote || 'origin'
+          const resolveInstructions =
+            preferences?.magic_prompts?.resolve_conflicts ??
+            DEFAULT_RESOLVE_CONFLICTS_PROMPT
+
+          const conflictPrompt = `I merged \`${baseRemote}/${baseBranch}\` into this branch to resolve PR conflicts, but there are merge conflicts.
+
+Conflicts in these files:
+- ${conflictFiles}${diffSection}
+
+${resolveInstructions}`
+
+          const terminalSession = await openConflictTerminalSession({
+            worktreeId: activeWorktreeId,
+            worktreePath: worktree.path,
+            name: 'PR: resolve conflicts',
+            prompt: conflictPrompt,
+            override,
+          })
+          if (terminalSession) return
+
           const { setActiveSession, copySessionSettings, activeSessionIds } =
             useChatStore.getState()
           const currentSessionId = activeSessionIds[activeWorktreeId]
@@ -1193,24 +1246,6 @@ export function useGitOperations({
           )
 
           setActiveSession(activeWorktreeId, newSession.id)
-
-          const conflictFiles = prResult.conflicts.join('\n- ')
-          const diffSection = prResult.conflict_diff
-            ? `\n\nHere is the diff showing the conflict details:\n\n\`\`\`diff\n${prResult.conflict_diff}\n\`\`\``
-            : ''
-          const baseBranch =
-            worktree.base_branch || project?.default_branch || 'main'
-          const baseRemote = worktree.base_remote || 'origin'
-          const resolveInstructions =
-            preferences?.magic_prompts?.resolve_conflicts ??
-            DEFAULT_RESOLVE_CONFLICTS_PROMPT
-
-          const conflictPrompt = `I merged \`${baseRemote}/${baseBranch}\` into this branch to resolve PR conflicts, but there are merge conflicts.
-
-Conflicts in these files:
-- ${conflictFiles}${diffSection}
-
-${resolveInstructions}`
 
           sendConflictResolutionPrompt({
             session: newSession,
@@ -1240,6 +1275,32 @@ ${resolveInstructions}`
           description: 'Opening conflict resolution session...',
         })
 
+        // Build conflict resolution prompt with diff details
+        const conflictFiles = result.conflicts.join('\n- ')
+        const diffSection = result.conflict_diff
+          ? `\n\nHere is the diff showing the conflict details:\n\n\`\`\`diff\n${result.conflict_diff}\n\`\`\``
+          : ''
+
+        const resolveInstructions =
+          preferences?.magic_prompts?.resolve_conflicts ??
+          DEFAULT_RESOLVE_CONFLICTS_PROMPT
+
+        const conflictPrompt = `I have merge conflicts that need to be resolved.
+
+Conflicts in these files:
+- ${conflictFiles}${diffSection}
+
+${resolveInstructions}`
+
+        const terminalSession = await openConflictTerminalSession({
+          worktreeId: activeWorktreeId,
+          worktreePath: worktree.path,
+          name: 'Resolve conflicts',
+          prompt: conflictPrompt,
+          override,
+        })
+        if (terminalSession) return
+
         const { setActiveSession, copySessionSettings, activeSessionIds } =
           useChatStore.getState()
         const currentSessionId = activeSessionIds[activeWorktreeId]
@@ -1265,23 +1326,6 @@ ${resolveInstructions}`
 
         // Set the new session as active
         setActiveSession(activeWorktreeId, newSession.id)
-
-        // Build conflict resolution prompt with diff details
-        const conflictFiles = result.conflicts.join('\n- ')
-        const diffSection = result.conflict_diff
-          ? `\n\nHere is the diff showing the conflict details:\n\n\`\`\`diff\n${result.conflict_diff}\n\`\`\``
-          : ''
-
-        const resolveInstructions =
-          preferences?.magic_prompts?.resolve_conflicts ??
-          DEFAULT_RESOLVE_CONFLICTS_PROMPT
-
-        const conflictPrompt = `I have merge conflicts that need to be resolved.
-
-Conflicts in these files:
-- ${conflictFiles}${diffSection}
-
-${resolveInstructions}`
 
         sendConflictResolutionPrompt({
           session: newSession,
@@ -1314,6 +1358,7 @@ ${resolveInstructions}`
       applyResolveConflictSessionSelection,
       cacheCreatedSession,
       resolveConflictSessionSelection,
+      openConflictTerminalSession,
       sendConflictResolutionPrompt,
       notifyCleanBaseMerge,
     ]
@@ -1344,6 +1389,35 @@ ${resolveInstructions}`
           description: 'Opening conflict resolution session...',
         })
 
+        // Build conflict resolution prompt with diff details
+        const conflictFiles = result.conflicts.join('\n- ')
+        const diffSection = result.conflict_diff
+          ? `\n\nHere is the diff showing the conflict details:\n\n\`\`\`diff\n${result.conflict_diff}\n\`\`\``
+          : ''
+
+        const baseBranch =
+          worktree.base_branch || project?.default_branch || 'main'
+        const baseRemote = worktree.base_remote || 'origin'
+        const resolveInstructions =
+          preferences?.magic_prompts?.resolve_conflicts ??
+          DEFAULT_RESOLVE_CONFLICTS_PROMPT
+
+        const conflictPrompt = `I merged \`${baseRemote}/${baseBranch}\` into this branch to resolve PR conflicts, but there are merge conflicts.
+
+Conflicts in these files:
+- ${conflictFiles}${diffSection}
+
+${resolveInstructions}`
+
+        const terminalSession = await openConflictTerminalSession({
+          worktreeId: activeWorktreeId,
+          worktreePath: worktree.path,
+          name: 'PR: resolve conflicts',
+          prompt: conflictPrompt,
+          override,
+        })
+        if (terminalSession) return
+
         const { setActiveSession, copySessionSettings, activeSessionIds } =
           useChatStore.getState()
         const currentSessionId = activeSessionIds[activeWorktreeId]
@@ -1369,26 +1443,6 @@ ${resolveInstructions}`
 
         // Set the new session as active
         setActiveSession(activeWorktreeId, newSession.id)
-
-        // Build conflict resolution prompt with diff details
-        const conflictFiles = result.conflicts.join('\n- ')
-        const diffSection = result.conflict_diff
-          ? `\n\nHere is the diff showing the conflict details:\n\n\`\`\`diff\n${result.conflict_diff}\n\`\`\``
-          : ''
-
-        const baseBranch =
-          worktree.base_branch || project?.default_branch || 'main'
-        const baseRemote = worktree.base_remote || 'origin'
-        const resolveInstructions =
-          preferences?.magic_prompts?.resolve_conflicts ??
-          DEFAULT_RESOLVE_CONFLICTS_PROMPT
-
-        const conflictPrompt = `I merged \`${baseRemote}/${baseBranch}\` into this branch to resolve PR conflicts, but there are merge conflicts.
-
-Conflicts in these files:
-- ${conflictFiles}${diffSection}
-
-${resolveInstructions}`
 
         sendConflictResolutionPrompt({
           session: newSession,
@@ -1421,6 +1475,7 @@ ${resolveInstructions}`
       applyResolveConflictSessionSelection,
       cacheCreatedSession,
       resolveConflictSessionSelection,
+      openConflictTerminalSession,
       sendConflictResolutionPrompt,
       notifyCleanBaseMerge,
     ]
@@ -1509,31 +1564,6 @@ ${resolveInstructions}`
             }
           )
 
-          const { setActiveSession, copySessionSettings, activeSessionIds } =
-            useChatStore.getState()
-          const currentSessionId = activeSessionIds[activeWorktreeId]
-
-          // Create a NEW session tab on the CURRENT worktree for conflict resolution
-          const newSession = await invoke<Session>('create_session', {
-            worktreeId: activeWorktreeId,
-            worktreePath: worktreeData.path,
-            name: 'Merge: resolve conflicts',
-          })
-          cacheCreatedSession(activeWorktreeId, newSession)
-
-          // Inherit model/mode/thinking settings from current session
-          if (currentSessionId)
-            copySessionSettings(currentSessionId, newSession.id)
-          const conflictSelection = resolveConflictSessionSelection()
-          applyResolveConflictSessionSelection(
-            newSession.id,
-            activeWorktreeId,
-            worktreeData.path
-          )
-
-          // Set the new session as active
-          setActiveSession(activeWorktreeId, newSession.id)
-
           // Build conflict resolution prompt with diff details
           const conflictFiles = result.conflicts.join('\n- ')
           const diffSection = result.conflict_diff
@@ -1558,6 +1588,39 @@ Then resolve the conflicts in these files:
 - ${conflictFiles}${diffSection}
 
 ${resolveInstructions}`
+
+          const terminalSession = await openConflictTerminalSession({
+            worktreeId: activeWorktreeId,
+            worktreePath: worktreeData.path,
+            name: 'Merge: resolve conflicts',
+            prompt: conflictPrompt,
+          })
+          if (terminalSession) return
+
+          const { setActiveSession, copySessionSettings, activeSessionIds } =
+            useChatStore.getState()
+          const currentSessionId = activeSessionIds[activeWorktreeId]
+
+          // Create a NEW session tab on the CURRENT worktree for conflict resolution
+          const newSession = await invoke<Session>('create_session', {
+            worktreeId: activeWorktreeId,
+            worktreePath: worktreeData.path,
+            name: 'Merge: resolve conflicts',
+          })
+          cacheCreatedSession(activeWorktreeId, newSession)
+
+          // Inherit model/mode/thinking settings from current session
+          if (currentSessionId)
+            copySessionSettings(currentSessionId, newSession.id)
+          const conflictSelection = resolveConflictSessionSelection()
+          applyResolveConflictSessionSelection(
+            newSession.id,
+            activeWorktreeId,
+            worktreeData.path
+          )
+
+          // Set the new session as active
+          setActiveSession(activeWorktreeId, newSession.id)
 
           sendConflictResolutionPrompt({
             session: newSession,
@@ -1593,6 +1656,7 @@ ${resolveInstructions}`
       applyResolveConflictSessionSelection,
       cacheCreatedSession,
       resolveConflictSessionSelection,
+      openConflictTerminalSession,
       sendConflictResolutionPrompt,
     ]
   )

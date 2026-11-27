@@ -701,6 +701,17 @@ Shared infrastructure in `src/components/chat/`:
 - `hooks/useCanvasShortcutEvents.ts` - Event handlers for plan/recap/approve shortcuts
 - `hooks/useCanvasStoreState.ts` - Store state subscriptions for card data
 
+### Magic prompts in new sessions
+
+A magic prompt or investigation that opens a NEW session follows the `default_new_session_kind` preference (the CMD+T default). Call `openMagicPromptInTerminal()` from `src/lib/magic-prompt-session.ts` before you create the chat session:
+
+- It returns `null` when the prompt stays in Jean Chat: the preference is `chat`, the execution mode has no native CLI equivalent (plan mode on a CLI other than Claude), or the CLI is not installed. Then continue with the chat path.
+- Otherwise it creates a native CLI terminal session, starts the PTY, and types the prompt into the CLI when the CLI turns on bracketed paste. The caller opens the returned session the same way it opens a chat session.
+- A plain `terminal` preference runs the magic prompt's own backend. A CLI backend preference runs that CLI.
+- The prompt is never a command-line argument, so it is not shell-parsed and is not saved in the resume arguments.
+
+Keep Jean Chat for runs that must work with no open client (backend-owned background investigations), and for flows that need Jean structured output or Jean plan approval.
+
 ### UI Primitives
 
 Use these shared primitives instead of one-off styling:
