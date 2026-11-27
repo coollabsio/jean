@@ -292,6 +292,10 @@ export interface Worktree {
   issue_number?: number
   /** Linear issue identifier (e.g. "ENG-123", if created from a Linear issue) */
   linear_issue_identifier?: string
+  /** Sentry issue short ID (e.g. "JEAN-42", if created from a Sentry issue) */
+  sentry_issue_short_id?: string
+  /** Plane work item identifier (e.g. "PROJ-123", if created from a Plane work item) */
+  plane_work_item_identifier?: string
   /** Dependabot security alert number (if created from a security alert) */
   security_alert_number?: number
   /** Dependabot security alert URL on GitHub */

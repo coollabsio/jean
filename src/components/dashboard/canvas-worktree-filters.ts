@@ -5,8 +5,11 @@ import {
   GitBranch,
   GitPullRequestArrow,
   Home,
+  Sentry,
   ShieldAlert,
 } from '@/components/icons/reicon'
+import { LinearIcon } from '@/components/icons/LinearIcon'
+import { PlaneIcon } from '@/components/icons/PlaneIcon'
 import { getWorktreeLabels } from '@/lib/worktree-labels'
 import { isBaseSession, type Worktree } from '@/types/projects'
 
@@ -16,6 +19,9 @@ export type CanvasPredefinedFilterTab =
   | 'issues'
   | 'prs'
   | 'security'
+  | 'linear'
+  | 'sentry'
+  | 'plane'
   | 'auto_fix'
 export type CanvasLabelFilterTab = `label:${string}`
 export type CanvasFilterTab = CanvasPredefinedFilterTab | CanvasLabelFilterTab
@@ -35,6 +41,9 @@ export const CANVAS_FILTER_TABS: CanvasPredefinedFilterTabItem[] = [
   { value: 'issues', label: 'Issues', icon: CircleDot },
   { value: 'prs', label: 'PRs', icon: GitPullRequestArrow },
   { value: 'security', label: 'Security', icon: ShieldAlert },
+  { value: 'linear', label: 'Linear', icon: LinearIcon },
+  { value: 'sentry', label: 'Sentry', icon: Sentry },
+  { value: 'plane', label: 'Plane', icon: PlaneIcon },
   {
     value: 'auto_fix',
     label: 'Mr. Robot',
@@ -55,10 +64,21 @@ export function isAutoFixWorktree(worktree: Worktree): boolean {
   return worktree.origin === 'auto_fix'
 }
 
+/** Worktree created from a GitHub/GitLab issue. Linear issues have their own tab. */
 export function isIssueWorktree(worktree: Worktree): boolean {
-  return (
-    worktree.issue_number != null || !!worktree.linear_issue_identifier?.trim()
-  )
+  return worktree.issue_number != null
+}
+
+export function isLinearWorktree(worktree: Worktree): boolean {
+  return !!worktree.linear_issue_identifier?.trim()
+}
+
+export function isSentryWorktree(worktree: Worktree): boolean {
+  return !!worktree.sentry_issue_short_id?.trim()
+}
+
+export function isPlaneWorktree(worktree: Worktree): boolean {
+  return !!worktree.plane_work_item_identifier?.trim()
 }
 
 export function isPrWorktree(worktree: Worktree): boolean {
@@ -77,6 +97,9 @@ export function isManualWorktree(worktree: Worktree): boolean {
     !isBaseSession(worktree) &&
     !isAutoFixWorktree(worktree) &&
     !isIssueWorktree(worktree) &&
+    !isLinearWorktree(worktree) &&
+    !isSentryWorktree(worktree) &&
+    !isPlaneWorktree(worktree) &&
     !isPrWorktree(worktree) &&
     !isSecurityWorktree(worktree)
   )
@@ -106,6 +129,12 @@ export function matchesCanvasFilterTab(
       return isPrWorktree(worktree) && !isAutoFixWorktree(worktree)
     case 'security':
       return isSecurityWorktree(worktree) && !isAutoFixWorktree(worktree)
+    case 'linear':
+      return isLinearWorktree(worktree)
+    case 'sentry':
+      return isSentryWorktree(worktree)
+    case 'plane':
+      return isPlaneWorktree(worktree)
     case 'auto_fix':
       return isAutoFixWorktree(worktree)
   }
@@ -126,6 +155,8 @@ export function getCanvasWorktreeSearchTerms(worktree: Worktree): string[] {
     worktree.pr_number != null ? worktree.pr_number.toString() : null,
     worktree.issue_number != null ? worktree.issue_number.toString() : null,
     worktree.linear_issue_identifier ?? null,
+    worktree.sentry_issue_short_id ?? null,
+    worktree.plane_work_item_identifier ?? null,
     worktree.security_alert_number != null
       ? worktree.security_alert_number.toString()
       : null,

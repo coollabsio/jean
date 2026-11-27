@@ -99,6 +99,60 @@ describe('canvas worktree filters', () => {
     ).toBe(false)
   })
 
+  it('shows Linear worktrees in the Linear tab, not in Issues or Manual', () => {
+    const linear = worktree({ id: 'linear', linear_issue_identifier: 'ENG-1' })
+    const github = worktree({ id: 'github', issue_number: 7 })
+    const blankLinear = worktree({ id: 'blank', linear_issue_identifier: ' ' })
+    const autoFixLinear = worktree({
+      id: 'auto-fix-linear',
+      linear_issue_identifier: 'ENG-2',
+      origin: 'auto_fix',
+    })
+    const all = [linear, github, blankLinear, autoFixLinear]
+
+    expect(all.filter(wt => matchesCanvasFilterTab(wt, 'linear'))).toEqual([
+      linear,
+    ])
+    expect(all.filter(wt => matchesCanvasFilterTab(wt, 'issues'))).toEqual([
+      github,
+    ])
+    expect(all.filter(wt => matchesCanvasFilterTab(wt, 'manual'))).toEqual([
+      blankLinear,
+    ])
+    expect(getCanvasFilterTabCount(all, 'linear')).toBe(1)
+  })
+
+  it('shows Sentry worktrees only in the Sentry tab', () => {
+    const sentry = worktree({ id: 'sentry', sentry_issue_short_id: 'JEAN-42' })
+    const plain = worktree({ id: 'plain' })
+    const all = [sentry, plain]
+
+    expect(all.filter(wt => matchesCanvasFilterTab(wt, 'sentry'))).toEqual([
+      sentry,
+    ])
+    expect(all.filter(wt => matchesCanvasFilterTab(wt, 'manual'))).toEqual([
+      plain,
+    ])
+    expect(matchesCanvasWorktreeSearch(sentry, 'jean-42')).toBe(true)
+  })
+
+  it('shows Plane worktrees only in the Plane tab', () => {
+    const plane = worktree({
+      id: 'plane',
+      plane_work_item_identifier: 'PROJ-7',
+    })
+    const plain = worktree({ id: 'plain' })
+    const all = [plane, plain]
+
+    expect(all.filter(wt => matchesCanvasFilterTab(wt, 'plane'))).toEqual([
+      plane,
+    ])
+    expect(all.filter(wt => matchesCanvasFilterTab(wt, 'manual'))).toEqual([
+      plain,
+    ])
+    expect(matchesCanvasWorktreeSearch(plane, 'proj-7')).toBe(true)
+  })
+
   it('matches worktree search only against relevant worktree metadata', () => {
     const matching = worktree({
       name: 'pr-10960-memory-crash',

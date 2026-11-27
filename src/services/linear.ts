@@ -9,9 +9,31 @@ import type {
 } from '@/types/linear'
 import { isTauri, useProjects } from './projects'
 import { usePreferences } from './preferences'
+import type { AppPreferences } from '@/types/preferences'
+import type { Project } from '@/types/projects'
 
 function hasValue(value: string | null | undefined): boolean {
   return !!value?.trim()
+}
+
+/**
+ * True when a project-level or global Linear API key is set. Remote server
+ * preferences redact the key and send `linear_api_key_configured` instead.
+ */
+export function hasLinearAccess(
+  project: Pick<Project, 'linear_api_key'> | null | undefined,
+  preferences:
+    | (Pick<AppPreferences, 'linear_api_key'> & {
+        linear_api_key_configured?: boolean
+      })
+    | null
+    | undefined
+): boolean {
+  return (
+    hasValue(project?.linear_api_key) ||
+    hasValue(preferences?.linear_api_key) ||
+    preferences?.linear_api_key_configured === true
+  )
 }
 
 function useHasLinearAccess(projectId: string | null): boolean {
@@ -19,10 +41,7 @@ function useHasLinearAccess(projectId: string | null): boolean {
   const { data: preferences } = usePreferences()
   const project = projects?.find(p => p.id === projectId)
 
-  return (
-    hasValue(project?.linear_api_key ?? null) ||
-    hasValue(preferences?.linear_api_key ?? null)
-  )
+  return hasLinearAccess(project, preferences)
 }
 
 /**

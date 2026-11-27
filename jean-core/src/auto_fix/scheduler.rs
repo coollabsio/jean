@@ -1755,6 +1755,8 @@ mod tests {
             pr_url: None,
             issue_number,
             linear_issue_identifier: None,
+            sentry_issue_short_id: None,
+            plane_work_item_identifier: None,
             security_alert_number: None,
             security_alert_url: None,
             advisory_ghsa_id: None,

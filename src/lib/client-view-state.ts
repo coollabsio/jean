@@ -87,6 +87,9 @@ const isCanvasFilter = (value: unknown): value is string =>
   value === 'issues' ||
   value === 'prs' ||
   value === 'security' ||
+  value === 'linear' ||
+  value === 'sentry' ||
+  value === 'plane' ||
   value === 'auto_fix' ||
   (typeof value === 'string' && value.startsWith('label:') && value.length > 6)
 const isNumber = (value: unknown): value is number =>
