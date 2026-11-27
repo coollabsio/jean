@@ -263,7 +263,9 @@ export function MobileToolbarMenu({
             </section>
           ))}
           <p className="px-3 pt-3 text-xs text-muted-foreground">
-            Long-press a commit or close-issue action to also close the session.
+            Tip: long-press Commit, Commit &amp; Push, Commit This Session, or
+            Comment &amp; Close Issue. Jean then closes this session when the
+            action succeeds.
           </p>
         </BottomSheet>
       </>
