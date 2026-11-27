@@ -244,6 +244,8 @@ interface UIState {
   pendingUpdateVersion: string | null
   /** When non-null, shows the update available modal */
   updateModalVersion: string | null
+  /** Release notes (markdown) from the update manifest, shown in the update modal */
+  updateModalNotes: string | null
   /**
    * App update package installed but not applied yet — title bar shows Restart.
    * Prevents re-download loops while the old binary is still running (#507).
@@ -388,7 +390,7 @@ interface UIState {
   setMcpServersModalOpen: (open: boolean) => void
   setUIStateInitialized: (initialized: boolean) => void
   setPendingUpdateVersion: (version: string | null) => void
-  setUpdateModalVersion: (version: string | null) => void
+  setUpdateModalVersion: (version: string | null, notes?: string | null) => void
   setUpdateReadyVersion: (version: string | null) => void
   setIsUpdateInstalling: (installing: boolean) => void
   setPendingServerUpdate: (update: PendingServerUpdate | null) => void
@@ -514,6 +516,7 @@ export const useUIStore = create<UIState>()(
       uiStateInitialized: false,
       pendingUpdateVersion: null,
       updateModalVersion: null,
+      updateModalNotes: null,
       updateReadyVersion: null,
       isUpdateInstalling: false,
       pendingServerUpdate: null,
@@ -1671,12 +1674,13 @@ export const useUIStore = create<UIState>()(
           'setPendingUpdateVersion'
         ),
 
-      setUpdateModalVersion: (version: string | null) =>
+      setUpdateModalVersion: (version: string | null, notes = null) =>
         set(
           state =>
-            state.updateModalVersion === version
+            state.updateModalVersion === version &&
+            state.updateModalNotes === notes
               ? state
-              : { updateModalVersion: version },
+              : { updateModalVersion: version, updateModalNotes: notes },
           undefined,
           'setUpdateModalVersion'
         ),

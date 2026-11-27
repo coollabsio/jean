@@ -71,6 +71,7 @@ import { useKimiCliStatus, useKimiCliAuth } from './services/kimi-cli'
 import { useUIStore } from './store/ui-store'
 import {
   resolveInstallPendingAction,
+  normalizeReleaseNotes,
   shouldOfferUpdateCheck,
 } from './lib/app-update'
 import type { AppPreferences } from './types/preferences'
@@ -1326,7 +1327,12 @@ function App() {
 
           logger.info(`Update available: ${update.version}`)
           pendingUpdateRef.current = update
-          useUIStore.getState().setUpdateModalVersion(update.version)
+          useUIStore
+            .getState()
+            .setUpdateModalVersion(
+              update.version,
+              normalizeReleaseNotes(update.body)
+            )
         }
       } catch (checkError) {
         logger.error(`Update check failed: ${String(checkError)}`)
