@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { filterSentryIssues, isSentryAuthError } from './sentry'
+import {
+  filterSentryIssues,
+  hasSentryAccess,
+  isSentryAuthError,
+} from './sentry'
 import type { SentryIssue } from '@/types/sentry'
 
 const issues: SentryIssue[] = [
@@ -44,5 +48,45 @@ describe('isSentryAuthError', () => {
       )
     ).toBe(false)
     expect(isSentryAuthError(new Error('Network unavailable'))).toBe(false)
+  })
+})
+
+describe('hasSentryAccess', () => {
+  const linked = {
+    sentry_projects: [{ organization_slug: 'acme', project_slug: 'jean' }],
+  }
+
+  it('needs both a token and a linked Sentry project', () => {
+    expect(hasSentryAccess(undefined, { sentry_auth_token: 'tok' })).toBe(false)
+    expect(hasSentryAccess(linked, { sentry_auth_token: null })).toBe(false)
+    expect(hasSentryAccess({}, { sentry_auth_token: 'tok' })).toBe(false)
+    expect(
+      hasSentryAccess(
+        { sentry_projects: [{ organization_slug: ' ', project_slug: 'jean' }] },
+        { sentry_auth_token: 'tok' }
+      )
+    ).toBe(false)
+  })
+
+  it('accepts a project token, a global token, or a redacted remote token', () => {
+    expect(
+      hasSentryAccess({ ...linked, sentry_auth_token: 'tok' }, undefined)
+    ).toBe(true)
+    expect(hasSentryAccess(linked, { sentry_auth_token: 'tok' })).toBe(true)
+    expect(
+      hasSentryAccess(linked, {
+        sentry_auth_token: null,
+        sentry_auth_token_configured: true,
+      })
+    ).toBe(true)
+  })
+
+  it('accepts the legacy organization and project slugs', () => {
+    expect(
+      hasSentryAccess(
+        { sentry_organization_slug: 'acme', sentry_project_slug: 'jean' },
+        { sentry_auth_token: 'tok' }
+      )
+    ).toBe(true)
   })
 })

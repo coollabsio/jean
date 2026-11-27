@@ -2057,6 +2057,10 @@ pub async fn create_worktree(
         pr_url: None,
         issue_number: issue_context.as_ref().map(|ctx| ctx.number),
         linear_issue_identifier: linear_context.as_ref().map(|ctx| ctx.identifier.clone()),
+        sentry_issue_short_id: sentry_context.as_ref().map(|ctx| ctx.short_id.clone()),
+        plane_work_item_identifier: plane_context
+            .as_ref()
+            .map(|ctx| ctx.item.identifier.clone()),
         security_alert_number: security_context.as_ref().map(|ctx| ctx.number),
         security_alert_url: security_context
             .as_ref()
@@ -2762,6 +2766,12 @@ pub async fn create_worktree(
                     linear_issue_identifier: linear_context_clone
                         .as_ref()
                         .map(|ctx| ctx.identifier.clone()),
+                    sentry_issue_short_id: sentry_context_clone
+                        .as_ref()
+                        .map(|ctx| ctx.short_id.clone()),
+                    plane_work_item_identifier: plane_context_clone
+                        .as_ref()
+                        .map(|ctx| ctx.item.identifier.clone()),
                     security_alert_number: security_context_clone.as_ref().map(|ctx| ctx.number),
                     security_alert_url: security_context_clone
                         .as_ref()
@@ -3002,6 +3012,8 @@ pub async fn fork_session_to_worktree(
         pr_url: source_worktree.pr_url.clone(),
         issue_number: source_worktree.issue_number,
         linear_issue_identifier: source_worktree.linear_issue_identifier.clone(),
+        sentry_issue_short_id: source_worktree.sentry_issue_short_id.clone(),
+        plane_work_item_identifier: source_worktree.plane_work_item_identifier.clone(),
         security_alert_number: source_worktree.security_alert_number,
         security_alert_url: source_worktree.security_alert_url.clone(),
         advisory_ghsa_id: source_worktree.advisory_ghsa_id.clone(),
@@ -3184,6 +3196,8 @@ pub async fn create_worktree_from_existing_branch(
         pr_url: None,
         issue_number: issue_context.as_ref().map(|ctx| ctx.number),
         linear_issue_identifier: linear_context.as_ref().map(|ctx| ctx.identifier.clone()),
+        sentry_issue_short_id: None,
+        plane_work_item_identifier: None,
         security_alert_number: security_context.as_ref().map(|ctx| ctx.number),
         security_alert_url: security_context
             .as_ref()
@@ -3587,6 +3601,8 @@ pub async fn create_worktree_from_existing_branch(
                     linear_issue_identifier: linear_context_clone
                         .as_ref()
                         .map(|ctx| ctx.identifier.clone()),
+                    sentry_issue_short_id: None,
+                    plane_work_item_identifier: None,
                     security_alert_number: security_context_clone.as_ref().map(|ctx| ctx.number),
                     security_alert_url: security_context_clone
                         .as_ref()
@@ -3835,6 +3851,8 @@ pub async fn checkout_pr(
         pr_url: pr_url.clone(),
         issue_number: None,
         linear_issue_identifier: None,
+        sentry_issue_short_id: None,
+        plane_work_item_identifier: None,
         security_alert_number: None,
         security_alert_url: None,
         advisory_ghsa_id: None,
@@ -4160,6 +4178,8 @@ pub async fn checkout_pr(
                     pr_url: pr_url_clone,
                     issue_number: None,
                     linear_issue_identifier: None,
+                    sentry_issue_short_id: None,
+                    plane_work_item_identifier: None,
                     security_alert_number: None,
                     security_alert_url: None,
                     advisory_ghsa_id: None,
@@ -4590,6 +4610,8 @@ pub async fn import_worktree(
         pr_url: None,
         issue_number: None,
         linear_issue_identifier: None,
+        sentry_issue_short_id: None,
+        plane_work_item_identifier: None,
         security_alert_number: None,
         security_alert_url: None,
         advisory_ghsa_id: None,

@@ -199,6 +199,9 @@ import { useCanvasKeyboardNav } from '@/components/chat/hooks/useCanvasKeyboardN
 import { useCanvasShortcutEvents } from '@/components/chat/hooks/useCanvasShortcutEvents'
 import { useDeleteWorktree } from '@/services/projects'
 import { usePreferences } from '@/services/preferences'
+import { hasLinearAccess } from '@/services/linear'
+import { hasSentryAccess } from '@/services/sentry'
+import { hasPlaneAccess } from '@/services/plane'
 import { DEFAULT_KEYBINDINGS, formatShortcutDisplay } from '@/types/keybindings'
 import type { CheckStatus, PrDisplayStatus } from '@/types/pr-status'
 import { usePrStatus } from '@/services/pr-status'
@@ -1140,6 +1143,9 @@ export function ProjectCanvasView({
     []
   )
   const { data: preferences } = usePreferences(project.serverId)
+  const linearConfigured = hasLinearAccess(project, preferences)
+  const sentryConfigured = hasSentryAccess(project, preferences)
+  const planeConfigured = hasPlaneAccess(project, preferences)
   const worktreeSortMode = useProjectsStore(
     state =>
       state.projectCanvasSettings[projectId]?.worktreeSortMode ?? 'created'
@@ -1281,6 +1287,9 @@ export function ProjectCanvasView({
       issues: getCanvasFilterTabCount(visibleWorktrees, 'issues'),
       prs: getCanvasFilterTabCount(visibleWorktrees, 'prs'),
       security: getCanvasFilterTabCount(visibleWorktrees, 'security'),
+      linear: getCanvasFilterTabCount(visibleWorktrees, 'linear'),
+      sentry: getCanvasFilterTabCount(visibleWorktrees, 'sentry'),
+      plane: getCanvasFilterTabCount(visibleWorktrees, 'plane'),
       auto_fix: getCanvasFilterTabCount(visibleWorktrees, 'auto_fix'),
     }
   }, [visibleWorktrees])
@@ -1294,22 +1303,43 @@ export function ProjectCanvasView({
     [visibleWorktrees, projectPinnedLabels]
   )
 
+  // Integration tabs show when the integration is set up for the project, or
+  // when a worktree still links to it.
+  const hiddenFilterTabs = useMemo(() => {
+    const hidden = new Set<CanvasFilterTab>()
+    if (!linearConfigured && filterTabCounts.linear === 0) hidden.add('linear')
+    if (!sentryConfigured && filterTabCounts.sentry === 0) hidden.add('sentry')
+    if (!planeConfigured && filterTabCounts.plane === 0) hidden.add('plane')
+    return hidden
+  }, [linearConfigured, sentryConfigured, planeConfigured, filterTabCounts])
+
   const canvasFilterTabs = useMemo<CanvasFilterTabItem[]>(
     () => [
-      ...CANVAS_FILTER_TABS,
+      ...CANVAS_FILTER_TABS.filter(tab => !hiddenFilterTabs.has(tab.value)),
       ...pinnedLabelTabs.map(tab => ({
         ...tab,
         icon: Tag,
       })),
     ],
-    [pinnedLabelTabs]
+    [pinnedLabelTabs, hiddenFilterTabs]
   )
 
   useEffect(() => {
+    // Wait for preferences: a global key is only known after they load.
+    if (preferences && hiddenFilterTabs.has(activeFilterTab)) {
+      useProjectsStore.getState().setProjectCanvasActiveFilter(projectId, 'all')
+      return
+    }
     if (!isLabelFilterTab(activeFilterTab)) return
     if (pinnedLabelTabs.some(tab => tab.value === activeFilterTab)) return
     useProjectsStore.getState().setProjectCanvasActiveFilter(projectId, 'all')
-  }, [activeFilterTab, pinnedLabelTabs, projectId])
+  }, [
+    activeFilterTab,
+    hiddenFilterTabs,
+    pinnedLabelTabs,
+    preferences,
+    projectId,
+  ])
 
   const assignedWorktreeLabels = useMemo(() => {
     const labels: LabelData[] = []

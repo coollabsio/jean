@@ -8,6 +8,7 @@ import type {
   PlaneWorkItem,
   PlaneWorkItemDetail,
 } from '@/types/plane'
+import type { AppPreferences } from '@/types/preferences'
 import type { PlaneProjectSettings, Project } from '@/types/projects'
 import { invalidateProjectLists, isTauri } from './projects'
 
@@ -29,6 +30,36 @@ export function filterPlaneWorkItems(
 /**
  * Check if an error is a Plane configuration error (missing or invalid key/workspace).
  */
+function hasValue(value: string | null | undefined): boolean {
+  return !!value?.trim()
+}
+
+/**
+ * True when Plane is set up for a project: an API key and a workspace slug,
+ * each from the project or the global settings (matches the backend config).
+ * Remote server preferences redact the key and send
+ * `plane_api_key_configured` instead.
+ */
+export function hasPlaneAccess(
+  project: Pick<Project, 'plane'> | null | undefined,
+  preferences:
+    | (Pick<AppPreferences, 'plane_api_key' | 'plane_workspace_slug'> & {
+        plane_api_key_configured?: boolean
+      })
+    | null
+    | undefined
+): boolean {
+  if (!project) return false
+  const hasKey =
+    hasValue(project.plane?.api_key) ||
+    hasValue(preferences?.plane_api_key) ||
+    preferences?.plane_api_key_configured === true
+  const hasWorkspace =
+    hasValue(project.plane?.workspace_slug) ||
+    hasValue(preferences?.plane_workspace_slug)
+  return hasKey && hasWorkspace
+}
+
 export function isPlaneAuthError(error: unknown): boolean {
   if (!error) return false
   const message = (

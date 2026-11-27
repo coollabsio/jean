@@ -6,6 +6,8 @@ import type {
   SentryIssueContext,
   SentryProjectMapping,
 } from '@/types/sentry'
+import type { AppPreferences } from '@/types/preferences'
+import type { Project } from '@/types/projects'
 
 export const sentryQueryKeys = {
   all: ['sentry'] as const,
@@ -36,6 +38,48 @@ export function useSentryProjects(
     gcTime: 1000 * 60 * 10,
     retry: false,
   })
+}
+
+function hasValue(value: string | null | undefined): boolean {
+  return !!value?.trim()
+}
+
+/**
+ * True when Sentry is set up for a project: a project or global auth token,
+ * and at least one linked Sentry project (matches `get_sentry_config`).
+ * Remote server preferences redact the token and send
+ * `sentry_auth_token_configured` instead.
+ */
+export function hasSentryAccess(
+  project:
+    | Pick<
+        Project,
+        | 'sentry_auth_token'
+        | 'sentry_projects'
+        | 'sentry_organization_slug'
+        | 'sentry_project_slug'
+      >
+    | null
+    | undefined,
+  preferences:
+    | (Pick<AppPreferences, 'sentry_auth_token'> & {
+        sentry_auth_token_configured?: boolean
+      })
+    | null
+    | undefined
+): boolean {
+  if (!project) return false
+  const hasToken =
+    hasValue(project.sentry_auth_token) ||
+    hasValue(preferences?.sentry_auth_token) ||
+    preferences?.sentry_auth_token_configured === true
+  const hasLinkedProject =
+    (project.sentry_projects ?? []).some(
+      link => hasValue(link.organization_slug) && hasValue(link.project_slug)
+    ) ||
+    (hasValue(project.sentry_organization_slug) &&
+      hasValue(project.sentry_project_slug))
+  return hasToken && hasLinkedProject
 }
 
 export function isSentryAuthError(error: unknown): boolean {

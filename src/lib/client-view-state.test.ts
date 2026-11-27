@@ -20,6 +20,17 @@ describe('client view state', () => {
     })
   })
 
+  it('keeps a saved Linear canvas filter', () => {
+    saveClientViewState({
+      ...defaultClientViewState,
+      project_canvas_active_filters: { 'server-a:project-1': 'linear' },
+    })
+
+    expect(loadClientViewState().project_canvas_active_filters).toEqual({
+      'server-a:project-1': 'linear',
+    })
+  })
+
   it('round-trips client-owned view settings', () => {
     const state = {
       ...defaultClientViewState,

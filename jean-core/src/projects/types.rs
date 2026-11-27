@@ -412,6 +412,12 @@ pub struct Worktree {
     /// Linear issue identifier (e.g. "ENG-123", if created from a Linear issue)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub linear_issue_identifier: Option<String>,
+    /// Sentry issue short ID (e.g. "JEAN-42", if created from a Sentry issue)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sentry_issue_short_id: Option<String>,
+    /// Plane work item identifier (e.g. "PROJ-123", if created from a Plane work item)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plane_work_item_identifier: Option<String>,
     /// Dependabot security alert number (if created from a security alert)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub security_alert_number: Option<u32>,
@@ -902,6 +908,8 @@ impl Worktree {
             pr_url: None,
             issue_number: None,
             linear_issue_identifier: None,
+            sentry_issue_short_id: None,
+            plane_work_item_identifier: None,
             security_alert_number: None,
             security_alert_url: None,
             advisory_ghsa_id: None,
@@ -982,6 +990,29 @@ mod tests {
 
         assert_eq!(value["pr_context"]["number"], 396);
         assert_eq!(value["pr_context"]["headRefName"], "main");
+    }
+
+    #[test]
+    fn worktree_sentry_issue_short_id_round_trips_and_defaults() {
+        let saved = serde_json::json!({
+            "id": "wt-1",
+            "project_id": "project-1",
+            "name": "jean-42-crash",
+            "path": "/tmp/jean/jean-42-crash",
+            "branch": "jean-42-crash",
+            "created_at": 1,
+            "order": 0,
+        });
+
+        let old: Worktree = serde_json::from_value(saved.clone()).expect("load old worktree");
+        assert_eq!(old.sentry_issue_short_id, None);
+
+        let mut with_sentry = saved;
+        with_sentry["sentry_issue_short_id"] = serde_json::json!("JEAN-42");
+        let worktree: Worktree = serde_json::from_value(with_sentry).expect("load worktree");
+        let value = serde_json::to_value(&worktree).expect("serialize worktree");
+        assert_eq!(value["sentry_issue_short_id"], "JEAN-42");
+        assert_eq!(old.plane_work_item_identifier, None);
     }
 }
 
