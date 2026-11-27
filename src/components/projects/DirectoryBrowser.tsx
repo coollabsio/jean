@@ -154,7 +154,7 @@ export function DirectoryBrowser({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex-1 min-h-0 overflow-y-auto space-y-4 py-4 pr-1">
+        <div className="flex-auto min-h-0 overflow-y-auto space-y-4 py-4 pr-1">
           <div className="space-y-1.5">
             <Label htmlFor="directory-browser-path" className="text-xs">
               Current path

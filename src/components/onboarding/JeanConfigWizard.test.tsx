@@ -60,7 +60,7 @@ describe('JeanConfigWizard mobile layout', () => {
     )
     expect(screen.getByTestId('jean-config-wizard-scroll')).toHaveClass(
       'min-h-0',
-      'flex-1',
+      'flex-auto',
       'overflow-y-auto',
       'overscroll-contain'
     )

@@ -130,7 +130,7 @@ function JeanConfigWizardContent() {
 
         <div
           data-testid="jean-config-wizard-scroll"
-          className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6"
+          className="min-h-0 flex-auto space-y-4 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6"
         >
           {/* Education callout */}
           <div className="flex gap-3 rounded-lg border border-border/50 bg-muted/30 p-3">
