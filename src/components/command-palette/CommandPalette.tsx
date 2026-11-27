@@ -19,7 +19,11 @@ import type { Backend } from '@/types/chat'
 import { Badge } from '@/components/ui/badge'
 import { useProjectsStore } from '@/store/projects-store'
 import { projectAvatarUrl } from '@/lib/project-avatar'
-import { getAllCommands, executeCommand } from '@/lib/commands'
+import {
+  getAllCommands,
+  executeCommand,
+  matchesSearchTerms,
+} from '@/lib/commands'
 import { formatShortcutDisplay } from '@/types/keybindings'
 import { isNativeApp } from '@/lib/environment'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -196,10 +200,8 @@ export function CommandPalette() {
 
     // Filter project commands by search
     const filteredProjectCommands = searchLower
-      ? projectCommands.filter(
-          cmd =>
-            cmd.label.toLowerCase().includes(searchLower) ||
-            cmd.keywords.some(kw => kw.includes(searchLower))
+      ? projectCommands.filter(cmd =>
+          matchesSearchTerms([cmd.label, ...cmd.keywords], searchLower)
         )
       : projectCommands
 

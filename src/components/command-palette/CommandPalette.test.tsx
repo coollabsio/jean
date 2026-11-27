@@ -163,7 +163,9 @@ vi.mock('@/store/projects-store', () => ({
   ),
 }))
 
-vi.mock('@/lib/commands', () => ({
+vi.mock('@/lib/commands', async () => ({
+  matchesSearchTerms: (await import('@/lib/commands/registry'))
+    .matchesSearchTerms,
   getAllCommands: () => [],
   executeCommand: vi.fn(),
 }))
