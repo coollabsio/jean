@@ -591,6 +591,16 @@ fn spawn_kimi_acp_host(
             args.push(value.to_string());
         }
     }
+    // User flags for `kimi acp`, one host arg per argv item.
+    let extra = super::extra_args::extra_args_for(
+        options.app,
+        &super::types::Backend::Kimi,
+        &["acp".to_string()],
+    )?;
+    for value in extra {
+        args.push("--kimi-arg".to_string());
+        args.push(value);
+    }
 
     let pid = super::detached::spawn_detached_process(&executable, &args, &log_file, &app_data)?;
     wait_for_kimi_acp_socket(&socket_path, pid)?;
@@ -626,6 +636,7 @@ pub fn run_kimi_acp_host_from_args() -> Result<(), String> {
     let mut model = None;
     let mut execution_mode = None;
     let mut effort = None;
+    let mut kimi_args = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -639,6 +650,7 @@ pub fn run_kimi_acp_host_from_args() -> Result<(), String> {
             "--model" => model = args.next(),
             "--execution-mode" => execution_mode = args.next(),
             "--effort" => effort = args.next(),
+            "--kimi-arg" => kimi_args.extend(args.next()),
             _ => {}
         }
     }
@@ -662,6 +674,7 @@ pub fn run_kimi_acp_host_from_args() -> Result<(), String> {
     let mut command = silent_command(&kimi_cli);
     command
         .arg("acp")
+        .args(&kimi_args)
         .current_dir(&cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -1237,8 +1250,9 @@ fn execute_kimi_attached(
 ) -> Result<KimiResponse, String> {
     let mut command =
         crate::platform::cli_command(&cli_path.to_string_lossy(), Some(options.working_dir));
+    command.arg("acp");
+    super::extra_args::apply_extra_args(options.app, &super::types::Backend::Kimi, &mut command)?;
     command
-        .arg("acp")
         .current_dir(options.working_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -1605,6 +1619,7 @@ pub fn execute_one_shot_kimi(
     if let Some(model) = kimi_model(Some(model)) {
         command.args(["--model", model]);
     }
+    super::extra_args::apply_extra_args(app, &super::types::Backend::Kimi, &mut command)?;
     let output = command
         .current_dir(dir)
         .output()

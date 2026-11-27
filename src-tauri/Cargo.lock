@@ -2494,6 +2494,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha2",
+ "shell-words",
  "tar",
  "tempfile",
  "tokio",

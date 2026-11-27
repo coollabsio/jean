@@ -8277,6 +8277,7 @@ fn execute_summarization_claude(
         "--permission-mode",
         "plan", // Prevent tool use that could waste turns
     ]);
+    crate::chat::extra_args::apply_extra_args(app, &crate::chat::types::Backend::Claude, &mut cmd)?;
 
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())

@@ -1419,7 +1419,7 @@ pub fn execute_pi(
     {
         let run_id = run_id_from_output_file(output_file);
         let resume_pi_session_id = usable_pi_session_id(existing_pi_session_id, session_id);
-        let pi_args = build_pi_rpc_args(
+        let mut pi_args = build_pi_rpc_args(
             session_id,
             model,
             execution_mode,
@@ -1428,6 +1428,8 @@ pub fn execute_pi(
             existing_pi_session_id,
             pi_agent_owns_policy,
         );
+        let extra = super::extra_args::extra_args_for(app, &super::types::Backend::Pi, &pi_args)?;
+        pi_args.extend(extra);
         log::info!(
             "[PI] spawning RPC host session={session_id} worktree={worktree_id} model={:?} mode={:?} policy={}",
             raw_pi_model(model),
@@ -1516,6 +1518,9 @@ pub fn execute_pi(
             system_prompt,
             pi_agent_owns_policy,
         );
+        let extra = super::extra_args::extra_args_for(app, &super::types::Backend::Pi, &args)?;
+        args.extend(extra);
+        // The prompt stays the last positional argument.
         args.push(message.to_string());
 
         log::info!(
@@ -1641,6 +1646,7 @@ pub fn execute_one_shot_pi(
     if let Some(effort) = effort_level {
         cmd.args(["--thinking", effort]);
     }
+    super::extra_args::apply_extra_args(app, &super::types::Backend::Pi, &mut cmd)?;
     cmd.arg(prompt)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -2103,6 +2109,34 @@ mod tests {
         );
         assert_eq!(value.get("type").and_then(Value::as_str), Some("get_state"));
         assert!(value.get("message").is_none());
+    }
+
+    #[test]
+    fn pi_rpc_args_append_user_flags_but_keep_jean_mode_and_model() {
+        let mut args = build_pi_rpc_args(
+            "jean-session-123",
+            Some("pi/openai-codex/gpt-5.4"),
+            Some("build"),
+            None,
+            None,
+            None,
+            false,
+        );
+        let jean_len = args.len();
+        let extra = super::super::extra_args::build_extra_args(
+            Some("--no-extensions --mode json --model other --skill ./my-skill"),
+            &args,
+            &super::super::types::Backend::Pi,
+        )
+        .unwrap();
+        args.extend(extra);
+
+        assert_eq!(
+            &args[jean_len..],
+            ["--no-extensions", "--skill", "./my-skill"]
+        );
+        assert!(args.windows(2).any(|w| w == ["--mode", "rpc"]));
+        assert_eq!(args.iter().filter(|arg| *arg == "--model").count(), 1);
     }
 
     #[test]

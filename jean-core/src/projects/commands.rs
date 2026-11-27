@@ -7947,6 +7947,20 @@ fn extract_json_object_from_text(text: &str) -> Result<String, String> {
     Err("No valid JSON object found in response".to_string())
 }
 
+/// Jean's structured-output args plus the user's extra Claude CLI args.
+fn claude_one_shot_args(
+    app: &AppHandle,
+    model: &str,
+    tools: &str,
+    schema: &str,
+) -> Result<Vec<String>, String> {
+    let mut args = build_claude_structured_output_args(model, tools, schema);
+    let extra =
+        crate::chat::extra_args::extra_args_for(app, &crate::chat::types::Backend::Claude, &args)?;
+    args.extend(extra);
+    Ok(args)
+}
+
 fn build_claude_structured_output_args(model: &str, tools: &str, schema: &str) -> Vec<String> {
     let tools = if tools == "none" { "" } else { tools };
     // A turn is one model round trip (parallel tool calls share it). Reviews
@@ -8926,11 +8940,7 @@ fn generate_pr_content_from_inputs(
     let mut cmd = crate::platform::cli_command(&cli_path.to_string_lossy(), None);
     crate::chat::claude::apply_custom_profile_settings(&mut cmd, custom_profile_name);
     crate::chat::claude::apply_custom_profile_env(&mut cmd, custom_profile_name);
-    cmd.args(build_claude_structured_output_args(
-        model_str,
-        "",
-        PR_CONTENT_SCHEMA,
-    ));
+    cmd.args(claude_one_shot_args(app, model_str, "", PR_CONTENT_SCHEMA)?);
 
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -9763,11 +9773,12 @@ fn generate_commit_message_once(
     let mut cmd = crate::platform::cli_command(&cli_path.to_string_lossy(), None);
     crate::chat::claude::apply_custom_profile_settings(&mut cmd, custom_profile_name);
     crate::chat::claude::apply_custom_profile_env(&mut cmd, custom_profile_name);
-    cmd.args(build_claude_structured_output_args(
+    cmd.args(claude_one_shot_args(
+        app,
         model_str,
         "",
         COMMIT_MESSAGE_SCHEMA,
-    ));
+    )?);
 
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -10386,13 +10397,16 @@ fn execute_codex_review(
         working_dir
     );
 
+    let mut args = build_codex_review_args(actual_model, is_fast, &schema_file, working_dir);
+    // After `exec`, before Jean's flags.
+    crate::chat::extra_args::insert_extra_os_args(
+        app,
+        &crate::chat::types::Backend::Codex,
+        &mut args,
+        1,
+    )?;
     let mut cmd = crate::platform::cli_command(&cli_path.to_string_lossy(), working_dir);
-    cmd.args(build_codex_review_args(
-        actual_model,
-        is_fast,
-        &schema_file,
-        working_dir,
-    ));
+    cmd.args(args);
     cmd.stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
@@ -10596,11 +10610,12 @@ fn generate_review(
     let mut cmd = crate::platform::cli_command(&cli_path.to_string_lossy(), None);
     crate::chat::claude::apply_custom_profile_settings(&mut cmd, custom_profile_name);
     crate::chat::claude::apply_custom_profile_env(&mut cmd, custom_profile_name);
-    cmd.args(build_claude_structured_output_args(
+    cmd.args(claude_one_shot_args(
+        app,
         model_str,
         REVIEW_CLAUDE_TOOLS,
         REVIEW_SCHEMA,
-    ));
+    )?);
 
     if let Some(dir) = review_working_dir {
         cmd.current_dir(dir);
@@ -12257,11 +12272,12 @@ fn generate_release_notes_content(
     let mut cmd = crate::platform::cli_command(&cli_path.to_string_lossy(), None);
     crate::chat::claude::apply_custom_profile_settings(&mut cmd, custom_profile_name);
     crate::chat::claude::apply_custom_profile_env(&mut cmd, custom_profile_name);
-    cmd.args(build_claude_structured_output_args(
+    cmd.args(claude_one_shot_args(
+        app,
         model_str,
         "",
         RELEASE_NOTES_SCHEMA,
-    ));
+    )?);
 
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())

@@ -4631,7 +4631,11 @@ pub fn execute_grok(options: GrokExecutionOptions<'_>) -> Result<GrokResponse, S
 
     let existing_grok_session_id = existing_grok_session_id.filter(|id| !id.is_empty());
     let prepared_message = build_grok_message(message, system_prompt, execution_mode);
-    let args = build_grok_agent_args(model, execution_mode, effort_level);
+    let mut args = build_grok_agent_args(model, execution_mode, effort_level);
+    // Before the trailing `stdio` transport positional.
+    let extra = super::extra_args::extra_args_for(app, &super::types::Backend::Grok, &args)?;
+    let stdio_index = args.len() - 1;
+    args.splice(stdio_index..stdio_index, extra);
     let acp_mcp_servers = crate::grok_cli::mcp::mcp_config_to_acp_servers(mcp_config);
     let desired_enabled = crate::grok_cli::mcp::enabled_names_from_mcp_config(mcp_config);
     let worktree_str = working_dir.to_str();
@@ -5143,13 +5147,18 @@ pub fn execute_one_shot_grok(
     let prompt_file = write_one_shot_prompt_file(&json_prompt)?;
     let prompt_file_arg = resolve_cli_path_arg(&prompt_file);
 
-    let args = build_one_shot_grok_cli_args(
+    let mut args = build_one_shot_grok_cli_args(
         &prompt_file_arg,
         &dir.to_string_lossy(),
         model,
         json_schema,
         effort_level,
     );
+    let extra = super::extra_args::extra_args_for(app, &super::types::Backend::Grok, &args)
+        .inspect_err(|_| {
+            let _ = std::fs::remove_file(&prompt_file);
+        })?;
+    args.extend(extra);
 
     let mut cmd = crate::platform::cli_command(&cli_path.to_string_lossy(), None);
     cmd.args(&args);

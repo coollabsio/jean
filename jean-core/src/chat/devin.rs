@@ -963,6 +963,11 @@ pub fn execute_devin(mut options: DevinExecutionOptions<'_>) -> Result<DevinResp
             let (key, value) = super::jean_mcp::child_depth_env();
             command.env(key, value);
         }
+        super::extra_args::apply_extra_args(
+            options.app,
+            &super::types::Backend::Devin,
+            &mut command,
+        )?;
         let mut child = command
             .spawn()
             .map_err(|e| format!("Cannot start Devin ACP: {e}"))?;

@@ -514,6 +514,7 @@ When adding a backend like Claude, Codex, OpenCode, Cursor, Pi, Command Code, or
 - [ ] Register every new `#[tauri::command]` in both native `generate_handler![]` and WebSocket dispatch
 - [ ] Use dispatch helpers (`field`, `field_opt`, `from_field`, `from_field_opt`, `to_value`) and emit cache invalidation for mutations
 - [ ] Use `silent_command()` for background processes to avoid Windows console flashes
+- [ ] Add the user's extra CLI args (`cli_extra_args`) at every chat and one-shot spawn site, and list the backend's reserved flags (`docs/developer/cli-extra-args.md`)
 - [ ] Add Rust tests for parsing, default backend resolution, cancellation, one-shot JSON extraction, and auth/login
 - [ ] Add TS/component/E2E tests for preferences, auth/login UI, execution mode normalization, backend selection, plan approval, cancellation, and magic prompt overrides
 - [ ] Update developer docs, user docs, troubleshooting, and all comments that list supported backends

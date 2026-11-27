@@ -8,6 +8,7 @@ import type { CliBackend } from '@/types/preferences'
 import { GeneralPane } from './GeneralPane'
 import { AntigravityPane } from './AntigravityPane'
 import { MusePane } from './MusePane'
+import { CliExtraArgsSection } from './CliExtraArgsSection'
 import {
   ClaudeProvidersSection,
   CodexProvidersSection,
@@ -50,7 +51,22 @@ export function isBackendPane(pane: PreferencePane): pane is BackendPane {
   return BACKEND_PANES.includes(pane)
 }
 
+function isCliBackendPane(
+  pane: BackendPane
+): pane is (typeof CLI_BACKEND_PANES)[number] {
+  return (CLI_BACKEND_PANES as readonly string[]).includes(pane)
+}
+
 function BackendContent({ backend }: { backend: BackendPane }) {
+  return (
+    <>
+      <BackendSettings backend={backend} />
+      {isCliBackendPane(backend) && <CliExtraArgsSection backend={backend} />}
+    </>
+  )
+}
+
+function BackendSettings({ backend }: { backend: BackendPane }) {
   switch (backend) {
     case 'antigravity':
       return <AntigravityPane />
