@@ -13,6 +13,7 @@ use crate::http_server::EmitExt;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use once_cell::sync::Lazy;
 use serde_json::Value;
+use std::borrow::Cow;
 use std::collections::HashMap;
 #[cfg(unix)]
 use std::fs::OpenOptions;
@@ -992,6 +993,25 @@ fn extract_acp_update(value: &Value) -> Option<&Value> {
     value_at_path(value, &["params", "update"])
 }
 
+fn acp_update_kind(value: &Value) -> Option<&str> {
+    extract_acp_update(value)?
+        .get("sessionUpdate")
+        .and_then(Value::as_str)
+}
+
+/// Grok ACP has no message-boundary event: after a thought or tool update, the
+/// next assistant message arrives as more `agent_message_chunk` deltas, often
+/// without a leading space ("constraints." + "I have"). Add the space only when
+/// the text `resumed` after a non-text update: within one message, "." +
+/// uppercase is usually code (`{{team.` + `KEY`), so it must stay glued.
+fn join_resumed_text<'a>(existing: &str, delta: &'a str, resumed: bool) -> Cow<'a, str> {
+    if resumed && existing.ends_with(['.', '!', '?']) && delta.starts_with(char::is_uppercase) {
+        Cow::Owned(format!(" {delta}"))
+    } else {
+        Cow::Borrowed(delta)
+    }
+}
+
 fn extract_acp_session_id(value: &Value) -> Option<String> {
     first_string(
         value,
@@ -1269,6 +1289,7 @@ where
     let mut session_id = initial_session_id.unwrap_or_default().to_string();
     let mut usage = None;
     let mut error: Option<String> = None;
+    let mut text_resumes = false;
 
     for line in reader.lines() {
         let raw_line = line.map_err(|e| format!("Failed to read Grok CLI output: {e}"))?;
@@ -1332,13 +1353,17 @@ where
         }
 
         if let Some(update) = extract_acp_update(&parsed) {
-            match update.get("sessionUpdate").and_then(Value::as_str) {
+            let kind = update.get("sessionUpdate").and_then(Value::as_str);
+            let resumed = text_resumes;
+            text_resumes = kind != Some("agent_message_chunk");
+            match kind {
                 Some("agent_message_chunk") => {
                     if let Some(text) = update
                         .get("content")
                         .and_then(extract_text_from_acp_content)
                         .filter(|text| !text.is_empty())
                     {
+                        let text = join_resumed_text(&content, &text, resumed);
                         content.push_str(&text);
                         push_text_block(&mut content_blocks, &text);
                         on_chunk(&text);
@@ -3180,21 +3205,28 @@ pub fn tail_grok_output(
     // Batch tiny token deltas (~30ms) so streaming markdown re-parses less often
     // and leading spaces between word fragments stay mid-string in each batch.
     let mut chunk_coalescer = ChunkCoalescer::new();
+    // Each line is parsed on its own, so keep the message-boundary state here.
+    let mut text_resumes = false;
 
     loop {
         let lines = tailer.poll()?;
         let got_lines = !lines.is_empty();
         for line in lines {
-            if let Ok(value) = serde_json::from_str::<Value>(&line) {
+            let value = serde_json::from_str::<Value>(&line).ok();
+            if let Some(value) = &value {
                 if super::acp_permissions::handle_log_event(
                     app,
                     session_id,
                     worktree_id,
                     &super::pi::run_id_from_output_file(output_file),
-                    &value,
+                    value,
                 )? {
                     continue;
                 }
+            }
+            let resumed = text_resumes;
+            if let Some(kind) = value.as_ref().and_then(acp_update_kind) {
+                text_resumes = kind != "agent_message_chunk";
             }
             if line.trim().is_empty() {
                 continue;
@@ -3261,14 +3293,15 @@ pub fn tail_grok_output(
                         }
                     }
                     if !partial.content.is_empty() {
-                        response.content.push_str(&partial.content);
-                        push_text_block(&mut response.content_blocks, &partial.content);
+                        let text = join_resumed_text(&response.content, &partial.content, resumed);
+                        response.content.push_str(&text);
+                        push_text_block(&mut response.content_blocks, &text);
                         push_coalesced_chunk(
                             app,
                             session_id,
                             worktree_id,
                             &mut chunk_coalescer,
-                            &partial.content,
+                            &text,
                         );
                     }
                     for tool in partial.tool_calls {
@@ -4369,6 +4402,7 @@ fn send_grok_acp_prompt(
     // keep full content labels across the turn (live ACP path).
     let mut todo_snapshot: Vec<Value> = Vec::new();
     let mut chunk_coalescer = ChunkCoalescer::new();
+    let mut text_resumes = false;
     let mut line = String::new();
     loop {
         line.clear();
@@ -4422,13 +4456,17 @@ fn send_grok_acp_prompt(
             response.session_id = session_id;
         }
         if let Some(update) = extract_acp_update(&value) {
-            match update.get("sessionUpdate").and_then(Value::as_str) {
+            let kind = update.get("sessionUpdate").and_then(Value::as_str);
+            let resumed = text_resumes;
+            text_resumes = kind != Some("agent_message_chunk");
+            match kind {
                 Some("agent_message_chunk") => {
                     if let Some(text) = update
                         .get("content")
                         .and_then(extract_text_from_acp_content)
                         .filter(|text| !text.is_empty())
                     {
+                        let text = join_resumed_text(&response.content, &text, resumed);
                         response.content.push_str(&text);
                         push_text_block(&mut response.content_blocks, &text);
                         push_coalesced_chunk(
@@ -6797,7 +6835,8 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
 "#;
         let response = parse_grok_stream_inner(BufReader::new(input.as_bytes()), None).unwrap();
 
-        assert_eq!(response.content, "Waiting 10 seconds.I'm Grok 4.5");
+        // The reply after the tool call is a new message (#948): keep the space.
+        assert_eq!(response.content, "Waiting 10 seconds. I'm Grok 4.5");
         assert!(
             !response.content.contains("who are you"),
             "steered prompt must not leak into assistant content blob: {}",
@@ -6818,7 +6857,7 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
         ));
         assert!(matches!(
             &response.content_blocks[3],
-            ContentBlock::Text { text } if text == "I'm Grok 4.5"
+            ContentBlock::Text { text } if text == " I'm Grok 4.5"
         ));
     }
 
@@ -7013,6 +7052,63 @@ mod space_regression_tests {
             "Testfirst glued: {:?}",
             response.content
         );
+    }
+
+    fn parse_with_emitted(input: &str) -> (GrokResponse, String) {
+        let mut emitted = String::new();
+        let response = parse_grok_stream_inner_with_callbacks(
+            Cursor::new(input.as_bytes()),
+            None,
+            |chunk| emitted.push_str(chunk),
+            |_| {},
+            |_, _| {},
+        )
+        .unwrap();
+        (response, emitted)
+    }
+
+    #[test]
+    fn new_message_after_thought_keeps_sentence_space() {
+        // Real Grok shape (#948): the next message starts after a thought,
+        // with a single-word delta and no leading space.
+        let input = r#"
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"SQL constraints"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"."}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"Reading files"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"I"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":" have"}}}}
+"#;
+        let (response, emitted) = parse_with_emitted(input);
+        assert_eq!(response.content, "SQL constraints. I have");
+        assert_eq!(emitted, response.content);
+        assert!(matches!(
+            response.content_blocks.as_slice(),
+            [ContentBlock::Text { text }] if text == "SQL constraints. I have"
+        ));
+    }
+
+    #[test]
+    fn new_message_after_tool_call_keeps_sentence_space() {
+        let input = r#"
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Done!"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"t1","title":"Read","kind":"read","rawInput":{}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Next"}}}}
+"#;
+        let (response, emitted) = parse_with_emitted(input);
+        assert_eq!(response.content, "Done! Next");
+        assert_eq!(emitted, "Done! Next");
+    }
+
+    #[test]
+    fn dot_uppercase_inside_one_message_stays_glued() {
+        // Real Grok shape: code split mid-token must not get a space.
+        let input = r#"
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"`{{team."}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"KEY}}`"}}}}
+"#;
+        let (response, emitted) = parse_with_emitted(input);
+        assert_eq!(response.content, "`{{team.KEY}}`");
+        assert_eq!(emitted, "`{{team.KEY}}`");
     }
 
     #[test]
