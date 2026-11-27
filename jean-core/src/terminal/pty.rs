@@ -2,11 +2,12 @@ use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use std::io::Read;
 use std::sync::Mutex;
 use std::thread;
+use std::time::Duration;
 use tauri::AppHandle;
 
 use crate::http_server::EmitExt;
 
-use super::registry::{register_terminal, unregister_terminal};
+use super::registry::{register_terminal, unregister_terminal, with_terminal};
 use super::types::{
     TerminalOutputEvent, TerminalSession, TerminalStartedEvent, TerminalStoppedEvent,
 };
@@ -477,37 +478,66 @@ pub fn spawn_terminal(
             }
         }
 
-        // Terminal has exited, get exit code and cleanup
-        if let Some(mut session) = unregister_terminal(&terminal_id_clone) {
-            let (exit_code, signal) = session
-                .child
-                .wait()
-                .map(|s| {
-                    if s.success() {
-                        (Some(0), None)
-                    } else {
-                        // Display format: "Terminated by {signal}" or "Exited with code {code}"
-                        let display = format!("{s}");
-                        let signal = display
-                            .strip_prefix("Terminated by ")
-                            .map(|sig| sig.to_string());
-                        (Some(s.exit_code() as i32), signal)
-                    }
-                })
-                .unwrap_or((None, None));
+        finish_terminal(&app_clone, &terminal_id_clone);
+    });
 
-            let stopped_event = TerminalStoppedEvent {
-                terminal_id: terminal_id_clone,
-                exit_code,
-                signal,
-            };
-            if let Err(e) = app_clone.emit_all("terminal:stopped", &stopped_event) {
-                log::error!("Failed to emit terminal:stopped event: {e}");
+    // Reader EOF is not a reliable exit signal: a detached helper that inherits
+    // the PTY (common for Windows self-updaters) keeps it open after the command
+    // exits, and ConPTY only reports EOF once the pseudoconsole is closed. Watch
+    // the child itself so `terminal:stopped` always follows process exit.
+    let app_watch = app.clone();
+    thread::spawn(move || loop {
+        thread::sleep(EXIT_POLL_INTERVAL);
+        match with_terminal(&terminal_id, |s| s.child.try_wait()) {
+            None => return, // Already finished by the reader or killed.
+            Some(Ok(None)) => continue,
+            Some(_) => {
+                // Let the reader drain trailing output and finish normally.
+                thread::sleep(EXIT_DRAIN_GRACE);
+                finish_terminal(&app_watch, &terminal_id);
+                return;
             }
         }
     });
 
     Ok(())
+}
+
+const EXIT_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const EXIT_DRAIN_GRACE: Duration = Duration::from_millis(500);
+
+/// Unregister an exited terminal and emit `terminal:stopped`. Idempotent: the
+/// reader (on EOF) and the exit watcher both call it; only the first one acts.
+/// Dropping the session closes the PTY master, which unblocks a ConPTY reader.
+fn finish_terminal(app: &AppHandle, terminal_id: &str) {
+    let Some(mut session) = unregister_terminal(terminal_id) else {
+        return;
+    };
+    let (exit_code, signal) = session
+        .child
+        .wait()
+        .map(|s| {
+            if s.success() {
+                (Some(0), None)
+            } else {
+                // Display format: "Terminated by {signal}" or "Exited with code {code}"
+                let display = format!("{s}");
+                let signal = display
+                    .strip_prefix("Terminated by ")
+                    .map(|sig| sig.to_string());
+                (Some(s.exit_code() as i32), signal)
+            }
+        })
+        .unwrap_or((None, None));
+
+    let stopped_event = TerminalStoppedEvent {
+        terminal_id: terminal_id.to_string(),
+        exit_code,
+        signal,
+    };
+    if let Err(e) = app.emit_all("terminal:stopped", &stopped_event) {
+        log::error!("Failed to emit terminal:stopped event: {e}");
+    }
 }
 
 /// Control bytes that should also deliver a POSIX signal to the foreground

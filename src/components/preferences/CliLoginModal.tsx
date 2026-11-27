@@ -187,25 +187,6 @@ function CliLoginModalContent({
   const outputBufferRef = useRef<string[]>([])
   const MAX_OUTPUT_LINES = 50
 
-  useEffect(() => {
-    const unlisten = listen<{ terminal_id: string; data: string }>(
-      'terminal:output',
-      event => {
-        if (event.payload.terminal_id !== terminalId) return
-        if (mcpContext) return // OAuth URLs/callbacks must not enter debug logs.
-        const lines = event.payload.data.split('\n')
-        outputBufferRef.current.push(...lines)
-        if (outputBufferRef.current.length > MAX_OUTPUT_LINES) {
-          outputBufferRef.current =
-            outputBufferRef.current.slice(-MAX_OUTPUT_LINES)
-        }
-      }
-    )
-    return () => {
-      unlisten.then(fn => fn())
-    }
-  }, [terminalId, mcpContext])
-
   // Cleanup terminal on unmount (needed for retry remount)
   useEffect(() => {
     return () => {
@@ -289,6 +270,25 @@ function CliLoginModalContent({
   })
 
   useEffect(() => {
+    const unlisten = listen<{ terminal_id: string; data: string }>(
+      'terminal:output',
+      event => {
+        if (event.payload.terminal_id !== terminalId) return
+        if (mcpContext) return // OAuth URLs/callbacks must not enter debug logs.
+        const lines = event.payload.data.split('\n')
+        outputBufferRef.current.push(...lines)
+        if (outputBufferRef.current.length > MAX_OUTPUT_LINES) {
+          outputBufferRef.current =
+            outputBufferRef.current.slice(-MAX_OUTPUT_LINES)
+        }
+      }
+    )
+    return () => {
+      unlisten.then(fn => fn())
+    }
+  }, [terminalId, mcpContext])
+
+  useEffect(() => {
     let closeTimeout: ReturnType<typeof setTimeout> | undefined
     setOnStopped(terminalId, (exitCode, signal) => {
       const output = outputBufferRef.current.join('\n').trim()
@@ -347,7 +347,7 @@ function CliLoginModalContent({
     <Dialog open={!minimized} onOpenChange={handleOpenChange}>
       <DialogContent
         className="!w-screen !h-dvh !max-w-screen !rounded-none sm:!w-[calc(100vw-64px)] sm:!max-w-[calc(100vw-64px)] sm:!h-[calc(100vh-64px)] sm:!rounded-lg flex flex-col"
-        showCloseButton={action === 'login'}
+        showCloseButton
       >
         {action !== 'login' && (
           <Button
@@ -356,7 +356,7 @@ function CliLoginModalContent({
             size="icon-sm"
             onClick={handleMinimize}
             aria-label={`Minimize ${cliName} update`}
-            className="absolute right-5 top-4"
+            className="absolute right-14 top-4"
           >
             <Minus className="size-4" />
           </Button>

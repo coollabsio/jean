@@ -36,6 +36,7 @@ zune-core = "=0.5.1"
 if-addrs = "0.13"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 rust-embed = { version = "8", features = ["debug-embed"] }
+tempfile = "3.23.0"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -45,4 +46,3 @@ tokio-tungstenite = "0.28"
 windows-sys = { version = "0.59", features = ["Win32_System_Threading", "Win32_Foundation", "Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
-tempfile = "3.23.0"
