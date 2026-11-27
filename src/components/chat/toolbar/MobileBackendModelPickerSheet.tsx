@@ -1,10 +1,4 @@
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet'
+import { BottomSheet } from '@/components/ui/bottom-sheet'
 import type { CliBackend, CustomCliProfile } from '@/types/preferences'
 import { BackendModelPickerContent } from '@/components/chat/toolbar/BackendModelPickerContent'
 import { useToolbarDropdownShortcuts } from '@/components/chat/toolbar/useToolbarDropdownShortcuts'
@@ -48,37 +42,30 @@ export function MobileBackendModelPickerSheet({
   })
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent
-        side="bottom"
-        className="flex h-[75svh] max-h-[75svh] min-h-0 overflow-hidden rounded-t-xl p-0"
-        showCloseButton={false}
-      >
-        <SheetHeader className="shrink-0 border-b px-4 py-3">
-          <SheetTitle className="text-base">
-            Select Backend &amp; Model
-          </SheetTitle>
-          <SheetDescription className="sr-only">
-            Search and select the backend and model for this chat session.
-          </SheetDescription>
-        </SheetHeader>
-        <BackendModelPickerContent
-          open={open}
-          selectedBackend={selectedBackend}
-          selectedProvider={selectedProvider}
-          selectedModel={selectedModel}
-          installedBackends={installedBackends}
-          customCliProfiles={customCliProfiles}
-          sessionHasMessages={sessionHasMessages}
-          providerLocked={providerLocked}
-          onModelChange={onModelChange}
-          onBackendModelChange={onBackendModelChange}
-          onRequestClose={() => onOpenChange(false)}
-          onAfterSelect={onAfterModelSelect}
-          className="min-h-0"
-          commandListClassName="!max-h-none min-h-0 flex-1 overflow-y-auto pb-[calc(env(safe-area-inset-bottom)+0.5rem)]"
-        />
-      </SheetContent>
-    </Sheet>
+    <BottomSheet
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Select Backend &amp; Model"
+      description="Search and select the backend and model for this chat session."
+      fullHeight
+      scrollBody={false}
+    >
+      <BackendModelPickerContent
+        open={open}
+        selectedBackend={selectedBackend}
+        selectedProvider={selectedProvider}
+        selectedModel={selectedModel}
+        installedBackends={installedBackends}
+        customCliProfiles={customCliProfiles}
+        sessionHasMessages={sessionHasMessages}
+        providerLocked={providerLocked}
+        onModelChange={onModelChange}
+        onBackendModelChange={onBackendModelChange}
+        onRequestClose={() => onOpenChange(false)}
+        onAfterSelect={onAfterModelSelect}
+        className="min-h-0"
+        commandListClassName="!max-h-none min-h-0 flex-1 overflow-y-auto pb-[calc(env(safe-area-inset-bottom)+0.5rem)]"
+      />
+    </BottomSheet>
   )
 }

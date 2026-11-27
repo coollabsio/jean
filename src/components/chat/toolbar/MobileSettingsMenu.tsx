@@ -99,13 +99,7 @@ import {
 import type { PrDisplayStatus } from '@/types/pr-status'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { cn } from '@/lib/utils'
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet'
+import { BottomSheet } from '@/components/ui/bottom-sheet'
 import { BackendLabel, getBackendLabel } from '@/components/ui/backend-label'
 import { useChatStore } from '@/store/chat-store'
 import { useProjectsStore } from '@/store/projects-store'
@@ -1234,260 +1228,212 @@ export function MobileSettingsMenu({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <Sheet
+      <BottomSheet
         open={providerSheetOpen && showProviderMenu}
         onOpenChange={setProviderSheetOpen}
+        title="Select provider"
+        description="Choose which provider runs this session."
+        showDescription
       >
-        <SheetContent
-          side="bottom"
-          className="max-h-[75svh] overflow-hidden rounded-t-xl p-0"
-          showCloseButton={false}
-        >
-          <SheetHeader className="shrink-0 border-b px-4 py-3 text-left">
-            <SheetTitle>Select provider</SheetTitle>
-            <SheetDescription>
-              Choose which provider runs this session.
-            </SheetDescription>
-          </SheetHeader>
-          <div className="overflow-y-auto px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)]">
-            {[defaultProviderOption.value, ...customProviderNames].map(
-              (value, index) => {
-                const selected = value === selectedProviderValue
+        {[defaultProviderOption.value, ...customProviderNames].map(
+          (value, index) => {
+            const selected = value === selectedProviderValue
+            return (
+              <button
+                key={value}
+                type="button"
+                className={cn(
+                  'flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-left active:bg-accent',
+                  selected && 'bg-accent'
+                )}
+                aria-pressed={selected}
+                onClick={() => {
+                  handleProviderChange(value)
+                  setProviderSheetOpen(false)
+                }}
+              >
+                <span className="flex-1 font-medium">
+                  {index === 0 ? defaultProviderOption.label : value}
+                </span>
+                {selected && <Check className="h-4 w-4 shrink-0" />}
+              </button>
+            )
+          }
+        )}
+      </BottomSheet>
+
+      <BottomSheet
+        open={effortSheetOpen}
+        onOpenChange={setReasoningSheetOpen}
+        title="Select effort"
+        description="Choose how much reasoning effort the model should use."
+        showDescription
+      >
+        {effortLevelOptions.map(option => {
+          const selected = option.value === displayedEffortLevel
+          return (
+            <button
+              key={option.value}
+              type="button"
+              className={cn(
+                'flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-left active:bg-accent',
+                selected && 'bg-accent'
+              )}
+              aria-pressed={selected}
+              onClick={() => {
+                handleEffortLevelChange(option.value)
+                setReasoningSheetOpen(false)
+              }}
+            >
+              <span className="flex-1">
+                <span className="block font-medium">{option.label}</span>
+                <span className="block text-xs text-muted-foreground">
+                  {option.description}
+                </span>
+              </span>
+              {selected && <Check className="h-4 w-4 shrink-0" />}
+            </button>
+          )
+        })}
+      </BottomSheet>
+
+      <BottomSheet
+        open={thinkingSheetOpen}
+        onOpenChange={setReasoningSheetOpen}
+        title="Select thinking"
+        description="Choose how much thinking the model should use."
+        showDescription
+      >
+        {thinkingLevelOptions.map(option => {
+          const selected = option.value === displayedThinkingLevel
+          const detail = 'tokens' in option ? option.tokens : option.description
+          return (
+            <button
+              key={option.value}
+              type="button"
+              className={cn(
+                'flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-left active:bg-accent',
+                selected && 'bg-accent'
+              )}
+              aria-pressed={selected}
+              onClick={() => {
+                handleThinkingLevelChange(option.value)
+                setReasoningSheetOpen(false)
+              }}
+            >
+              <span className="flex-1">
+                <span className="block font-medium">{option.label}</span>
+                {detail ? (
+                  <span className="block text-xs text-muted-foreground">
+                    {detail}
+                  </span>
+                ) : null}
+              </span>
+              {selected && <Check className="h-4 w-4 shrink-0" />}
+            </button>
+          )
+        })}
+      </BottomSheet>
+
+      <BottomSheet
+        open={scriptsSheetOpen}
+        onOpenChange={setScriptsSheetOpen}
+        title="Scripts"
+        description="Run a package.json script in a new terminal."
+        showDescription
+      >
+        {sortedPackageScripts.map(script => (
+          <div
+            key={script.name}
+            className="flex min-h-12 items-center rounded-lg active:bg-accent"
+          >
+            <button
+              type="button"
+              className="flex min-h-12 min-w-0 flex-1 items-center gap-3 px-3 text-left"
+              onClick={() => {
+                onRunPackageScript?.(script)
+                setScriptsSheetOpen(false)
+              }}
+            >
+              <Play className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="truncate font-mono text-sm">{script.name}</span>
+            </button>
+            <button
+              type="button"
+              className="mr-2 flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:bg-muted"
+              aria-label={`${favoritePackageScriptSet.has(script.name) ? 'Unfavorite' : 'Favorite'} ${script.name}`}
+              aria-pressed={favoritePackageScriptSet.has(script.name)}
+              onClick={() => onToggleFavoritePackageScript?.(script.name)}
+            >
+              <Star
+                className={cn(
+                  'h-3.5 w-3.5',
+                  favoritePackageScriptSet.has(script.name) &&
+                    'fill-warning text-warning'
+                )}
+              />
+            </button>
+          </div>
+        ))}
+      </BottomSheet>
+
+      <BottomSheet
+        open={mcpSheetOpen}
+        onOpenChange={setMcpSheetOpen}
+        title="Manage MCP servers"
+        description="Choose which MCP servers are enabled for this session."
+        showDescription
+      >
+        {(() => {
+          const grouped = groupServersByBackend(availableMcpServers)
+          const backends = Object.keys(grouped) as CliBackend[]
+          const showHeaders = backends.length > 1
+          return backends.map(backend => (
+            <div key={backend}>
+              {showHeaders && (
+                <div className="px-3 pt-3 pb-1 text-xs text-muted-foreground">
+                  <BackendLabel backend={backend} />
+                </div>
+              )}
+              {(grouped[backend] ?? []).map(server => {
+                const key = mcpKey(backend, server.name)
+                const enabled =
+                  !server.disabled && enabledMcpServersSet.has(key)
                 return (
                   <button
-                    key={value}
+                    key={key}
                     type="button"
+                    disabled={
+                      server.disabled || isAutoLoadedMcpBackend(backend)
+                    }
+                    aria-pressed={enabled}
                     className={cn(
-                      'flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-left active:bg-accent',
-                      selected && 'bg-accent'
+                      'flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-left active:bg-accent disabled:opacity-50',
+                      enabled && 'bg-accent'
                     )}
-                    aria-pressed={selected}
-                    onClick={() => {
-                      handleProviderChange(value)
-                      setProviderSheetOpen(false)
-                    }}
+                    onClick={() => onToggleMcpServer(key)}
                   >
-                    <span className="flex-1 font-medium">
-                      {index === 0 ? defaultProviderOption.label : value}
+                    <span className="flex-1 min-w-0">
+                      <span className="block truncate font-medium">
+                        {server.name}
+                      </span>
+                      {isAutoLoadedMcpBackend(backend) && !server.disabled && (
+                        <span className="block text-xs text-muted-foreground">
+                          Loaded automatically by {getBackendLabel(backend)}
+                        </span>
+                      )}
+                      <span className="block text-xs text-muted-foreground">
+                        {server.disabled ? 'Disabled' : server.scope}
+                      </span>
                     </span>
-                    {selected && <Check className="h-4 w-4 shrink-0" />}
+                    {enabled && <Check className="h-4 w-4 shrink-0" />}
                   </button>
                 )
-              }
-            )}
-          </div>
-        </SheetContent>
-      </Sheet>
-
-      <Sheet open={effortSheetOpen} onOpenChange={setReasoningSheetOpen}>
-        <SheetContent
-          side="bottom"
-          className="max-h-[75svh] overflow-hidden rounded-t-xl p-0"
-          showCloseButton={false}
-        >
-          <SheetHeader className="shrink-0 border-b px-4 py-3 text-left">
-            <SheetTitle>Select effort</SheetTitle>
-            <SheetDescription>
-              Choose how much reasoning effort the model should use.
-            </SheetDescription>
-          </SheetHeader>
-          <div className="overflow-y-auto px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)]">
-            {effortLevelOptions.map(option => {
-              const selected = option.value === displayedEffortLevel
-              return (
-                <button
-                  key={option.value}
-                  type="button"
-                  className={cn(
-                    'flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-left active:bg-accent',
-                    selected && 'bg-accent'
-                  )}
-                  aria-pressed={selected}
-                  onClick={() => {
-                    handleEffortLevelChange(option.value)
-                    setReasoningSheetOpen(false)
-                  }}
-                >
-                  <span className="flex-1">
-                    <span className="block font-medium">{option.label}</span>
-                    <span className="block text-xs text-muted-foreground">
-                      {option.description}
-                    </span>
-                  </span>
-                  {selected && <Check className="h-4 w-4 shrink-0" />}
-                </button>
-              )
-            })}
-          </div>
-        </SheetContent>
-      </Sheet>
-
-      <Sheet open={thinkingSheetOpen} onOpenChange={setReasoningSheetOpen}>
-        <SheetContent
-          side="bottom"
-          className="max-h-[75svh] overflow-hidden rounded-t-xl p-0"
-          showCloseButton={false}
-        >
-          <SheetHeader className="shrink-0 border-b px-4 py-3 text-left">
-            <SheetTitle>Select thinking</SheetTitle>
-            <SheetDescription>
-              Choose how much thinking the model should use.
-            </SheetDescription>
-          </SheetHeader>
-          <div className="overflow-y-auto px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)]">
-            {thinkingLevelOptions.map(option => {
-              const selected = option.value === displayedThinkingLevel
-              const detail =
-                'tokens' in option ? option.tokens : option.description
-              return (
-                <button
-                  key={option.value}
-                  type="button"
-                  className={cn(
-                    'flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-left active:bg-accent',
-                    selected && 'bg-accent'
-                  )}
-                  aria-pressed={selected}
-                  onClick={() => {
-                    handleThinkingLevelChange(option.value)
-                    setReasoningSheetOpen(false)
-                  }}
-                >
-                  <span className="flex-1">
-                    <span className="block font-medium">{option.label}</span>
-                    {detail ? (
-                      <span className="block text-xs text-muted-foreground">
-                        {detail}
-                      </span>
-                    ) : null}
-                  </span>
-                  {selected && <Check className="h-4 w-4 shrink-0" />}
-                </button>
-              )
-            })}
-          </div>
-        </SheetContent>
-      </Sheet>
-
-      <Sheet open={scriptsSheetOpen} onOpenChange={setScriptsSheetOpen}>
-        <SheetContent
-          side="bottom"
-          className="max-h-[75svh] overflow-hidden rounded-t-xl p-0"
-          showCloseButton={false}
-        >
-          <SheetHeader className="shrink-0 border-b px-4 py-3 text-left">
-            <SheetTitle>Scripts</SheetTitle>
-            <SheetDescription>
-              Run a package.json script in a new terminal.
-            </SheetDescription>
-          </SheetHeader>
-          <div className="overflow-y-auto px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)]">
-            {sortedPackageScripts.map(script => (
-              <div
-                key={script.name}
-                className="flex min-h-12 items-center rounded-lg active:bg-accent"
-              >
-                <button
-                  type="button"
-                  className="flex min-h-12 min-w-0 flex-1 items-center gap-3 px-3 text-left"
-                  onClick={() => {
-                    onRunPackageScript?.(script)
-                    setScriptsSheetOpen(false)
-                  }}
-                >
-                  <Play className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  <span className="truncate font-mono text-sm">
-                    {script.name}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  className="mr-2 flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:bg-muted"
-                  aria-label={`${favoritePackageScriptSet.has(script.name) ? 'Unfavorite' : 'Favorite'} ${script.name}`}
-                  aria-pressed={favoritePackageScriptSet.has(script.name)}
-                  onClick={() => onToggleFavoritePackageScript?.(script.name)}
-                >
-                  <Star
-                    className={cn(
-                      'h-3.5 w-3.5',
-                      favoritePackageScriptSet.has(script.name) &&
-                        'fill-warning text-warning'
-                    )}
-                  />
-                </button>
-              </div>
-            ))}
-          </div>
-        </SheetContent>
-      </Sheet>
-
-      <Sheet open={mcpSheetOpen} onOpenChange={setMcpSheetOpen}>
-        <SheetContent
-          side="bottom"
-          className="max-h-[75svh] overflow-hidden rounded-t-xl p-0"
-          showCloseButton={false}
-        >
-          <SheetHeader className="shrink-0 border-b px-4 py-3 text-left">
-            <SheetTitle>Manage MCP servers</SheetTitle>
-            <SheetDescription>
-              Choose which MCP servers are enabled for this session.
-            </SheetDescription>
-          </SheetHeader>
-          <div className="overflow-y-auto px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)]">
-            {(() => {
-              const grouped = groupServersByBackend(availableMcpServers)
-              const backends = Object.keys(grouped) as CliBackend[]
-              const showHeaders = backends.length > 1
-              return backends.map(backend => (
-                <div key={backend}>
-                  {showHeaders && (
-                    <div className="px-3 pt-3 pb-1 text-xs text-muted-foreground">
-                      <BackendLabel backend={backend} />
-                    </div>
-                  )}
-                  {(grouped[backend] ?? []).map(server => {
-                    const key = mcpKey(backend, server.name)
-                    const enabled =
-                      !server.disabled && enabledMcpServersSet.has(key)
-                    return (
-                      <button
-                        key={key}
-                        type="button"
-                        disabled={
-                          server.disabled || isAutoLoadedMcpBackend(backend)
-                        }
-                        aria-pressed={enabled}
-                        className={cn(
-                          'flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-left active:bg-accent disabled:opacity-50',
-                          enabled && 'bg-accent'
-                        )}
-                        onClick={() => onToggleMcpServer(key)}
-                      >
-                        <span className="flex-1 min-w-0">
-                          <span className="block truncate font-medium">
-                            {server.name}
-                          </span>
-                          {isAutoLoadedMcpBackend(backend) &&
-                            !server.disabled && (
-                              <span className="block text-xs text-muted-foreground">
-                                Loaded automatically by{' '}
-                                {getBackendLabel(backend)}
-                              </span>
-                            )}
-                          <span className="block text-xs text-muted-foreground">
-                            {server.disabled ? 'Disabled' : server.scope}
-                          </span>
-                        </span>
-                        {enabled && <Check className="h-4 w-4 shrink-0" />}
-                      </button>
-                    )
-                  })}
-                </div>
-              ))
-            })()}
-          </div>
-        </SheetContent>
-      </Sheet>
+              })}
+            </div>
+          ))
+        })()}
+      </BottomSheet>
 
       <MobileContextsSheet
         open={contextsSheetOpen}

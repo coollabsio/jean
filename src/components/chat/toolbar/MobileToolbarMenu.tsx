@@ -11,13 +11,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { useUIStore } from '@/store/ui-store'
 import { useIsMobile } from '@/hooks/use-mobile'
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet'
+import { BottomSheet } from '@/components/ui/bottom-sheet'
 import {
   buildMagicColumns,
   isMagicOptionUnavailable,
@@ -196,93 +190,82 @@ export function MobileToolbarMenu({
     return (
       <>
         {trigger}
-        <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
-          <SheetContent
-            side="bottom"
-            className="max-h-[75svh] overflow-hidden rounded-t-xl p-0"
-            showCloseButton={false}
-          >
-            <SheetHeader className="shrink-0 border-b px-4 py-3 text-left">
-              <SheetTitle>Magic</SheetTitle>
-              <SheetDescription className="sr-only">
-                Git, pull request, release, and investigation actions.
-              </SheetDescription>
-            </SheetHeader>
-            <div className="overflow-y-auto px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)]">
-              {mobileSections.map(section => (
-                <section key={section.header} aria-label={section.header}>
-                  <h3 className="px-3 pt-3 pb-1 text-xs text-muted-foreground">
-                    {section.header}
-                  </h3>
-                  {section.options.map(option => {
-                    const Icon = option.icon
-                    const isFavorite = favorites.includes(option.id)
-                    return (
-                      <CloseAfterLongPress
-                        key={option.id}
-                        enabled={CLOSE_AFTER_OPTIONS.has(option.id)}
-                        label={option.label}
-                        className="px-3"
-                        onRun={closeSession =>
-                          runOption(option.id, closeSession)
-                        }
-                      >
-                        {({
-                          handlers: pressHandlers,
-                          consumeLongPress,
-                          choices,
-                        }) => (
-                          <div>
-                            <div className="flex items-center">
-                              <button
-                                type="button"
-                                {...pressHandlers}
-                                disabled={isMagicOptionUnavailable(
-                                  option.id,
-                                  availability
-                                )}
-                                className="flex min-h-12 min-w-0 flex-1 select-none items-center gap-3 rounded-lg px-3 text-left [-webkit-touch-callout:none] active:bg-accent disabled:opacity-40"
-                                onClick={() => {
-                                  if (consumeLongPress()) return
-                                  runOption(option.id, false)
-                                }}
-                              >
-                                <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-                                <span className="truncate text-sm">
-                                  {option.label}
-                                </span>
-                              </button>
-                              <button
-                                type="button"
-                                aria-label={`${isFavorite ? 'Unfavorite' : 'Favorite'} ${option.label}`}
-                                aria-pressed={isFavorite}
-                                className="flex size-12 shrink-0 items-center justify-center rounded-lg active:bg-accent"
-                                onClick={() => toggleFavorite(option.id)}
-                              >
-                                <Star
-                                  className={cn(
-                                    'h-4 w-4',
-                                    isFavorite
-                                      ? 'fill-warning text-warning'
-                                      : 'text-muted-foreground/40'
-                                  )}
-                                />
-                              </button>
-                            </div>
-                            {choices}
-                          </div>
-                        )}
-                      </CloseAfterLongPress>
-                    )
-                  })}
-                </section>
-              ))}
-              <p className="px-3 pt-3 text-xs text-muted-foreground">
-                Long-press a commit action to also close the session.
-              </p>
-            </div>
-          </SheetContent>
-        </Sheet>
+        <BottomSheet
+          open={menuOpen}
+          onOpenChange={setMenuOpen}
+          title="Magic"
+          description="Git, pull request, release, and investigation actions."
+        >
+          {mobileSections.map(section => (
+            <section key={section.header} aria-label={section.header}>
+              <h3 className="px-3 pt-3 pb-1 text-xs text-muted-foreground">
+                {section.header}
+              </h3>
+              {section.options.map(option => {
+                const Icon = option.icon
+                const isFavorite = favorites.includes(option.id)
+                return (
+                  <CloseAfterLongPress
+                    key={option.id}
+                    enabled={CLOSE_AFTER_OPTIONS.has(option.id)}
+                    label={option.label}
+                    className="px-3"
+                    onRun={closeSession => runOption(option.id, closeSession)}
+                  >
+                    {({
+                      handlers: pressHandlers,
+                      consumeLongPress,
+                      choices,
+                    }) => (
+                      <div>
+                        <div className="flex items-center">
+                          <button
+                            type="button"
+                            {...pressHandlers}
+                            disabled={isMagicOptionUnavailable(
+                              option.id,
+                              availability
+                            )}
+                            className="flex min-h-12 min-w-0 flex-1 select-none items-center gap-3 rounded-lg px-3 text-left [-webkit-touch-callout:none] active:bg-accent disabled:opacity-40"
+                            onClick={() => {
+                              if (consumeLongPress()) return
+                              runOption(option.id, false)
+                            }}
+                          >
+                            <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                            <span className="truncate text-sm">
+                              {option.label}
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`${isFavorite ? 'Unfavorite' : 'Favorite'} ${option.label}`}
+                            aria-pressed={isFavorite}
+                            className="flex size-12 shrink-0 items-center justify-center rounded-lg active:bg-accent"
+                            onClick={() => toggleFavorite(option.id)}
+                          >
+                            <Star
+                              className={cn(
+                                'h-4 w-4',
+                                isFavorite
+                                  ? 'fill-warning text-warning'
+                                  : 'text-muted-foreground/40'
+                              )}
+                            />
+                          </button>
+                        </div>
+                        {choices}
+                      </div>
+                    )}
+                  </CloseAfterLongPress>
+                )
+              })}
+            </section>
+          ))}
+          <p className="px-3 pt-3 text-xs text-muted-foreground">
+            Long-press a commit action to also close the session.
+          </p>
+        </BottomSheet>
       </>
     )
   }

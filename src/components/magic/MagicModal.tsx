@@ -16,6 +16,10 @@ import {
 } from '@/components/ui/dialog'
 import { RevertLastCommitDialog } from '@/components/shared/RevertLastCommitDialog'
 import { CloseAfterLongPress } from '@/components/magic/CloseAfterLongPress'
+import {
+  BOTTOM_SHEET_ROW_CLASS,
+  BottomSheet,
+} from '@/components/ui/bottom-sheet'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 import { Input } from '@/components/ui/input'
@@ -2168,7 +2172,7 @@ ${resolveInstructions}`
         enabled={mobile && canCloseAfter && CLOSE_AFTER_OPTIONS.has(option.id)}
         label={option.label}
         onRun={closeSession => executeAction(option.id, { closeSession })}
-        className="col-span-2"
+        className="px-3"
       >
         {({ handlers, consumeLongPress, choices }) => (
           <Fragment>
@@ -2187,7 +2191,10 @@ ${resolveInstructions}`
               className={cn(
                 'group flex w-full items-center text-left text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                 mobile
-                  ? 'min-h-12 select-none [-webkit-touch-callout:none] gap-2.5 rounded-lg border border-border/70 bg-muted/30 px-3 py-2.5 active:bg-accent'
+                  ? cn(
+                      BOTTOM_SHEET_ROW_CLASS,
+                      'select-none [-webkit-touch-callout:none]'
+                    )
                   : 'justify-between px-4 py-2',
                 isDisabled
                   ? 'cursor-not-allowed opacity-40'
@@ -2228,43 +2235,44 @@ ${resolveInstructions}`
         onConfirm={confirmRevertLastCommit}
         branchName={worktree?.branch ?? worktree?.name}
       />
-      <Dialog open={magicModalOpen} onOpenChange={handleOpenChange}>
-        <DialogContent
-          ref={contentRef}
-          tabIndex={-1}
-          className="max-h-[calc(100dvh-5.5rem-env(safe-area-inset-bottom))] overflow-hidden p-0 outline-none max-md:top-auto max-md:bottom-[calc(4.5rem+env(safe-area-inset-bottom))] max-md:w-[calc(100%-1rem)] max-md:max-w-none max-md:rounded-xl sm:max-h-[min(90vh,760px)] sm:max-w-lg"
-          onOpenAutoFocus={e => {
-            e.preventDefault()
-            contentRef.current?.focus()
-          }}
-          onKeyDown={handleKeyDown}
+      {isMobile ? (
+        <BottomSheet
+          open={magicModalOpen}
+          onOpenChange={handleOpenChange}
+          title="Magic"
+          description="Git, pull request, release, and investigation actions."
         >
-          <DialogHeader className="shrink-0 border-b border-border/60 px-4 py-4 text-left sm:border-b-0 sm:pt-5 sm:pb-2">
-            <DialogTitle>Magic</DialogTitle>
-          </DialogHeader>
-
-          {isMobile ? (
-            <div
-              data-testid="magic-mobile-menu"
-              className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain px-3 pt-3 pb-4"
-            >
-              {magicColumns.all.map(section => (
-                <section key={section.header}>
-                  <h3 className="mb-2 px-1 text-xs text-muted-foreground">
-                    {section.header}
-                  </h3>
-                  <div className="grid grid-cols-2 gap-2">
-                    {section.options.map(option => renderOption(option, true))}
-                  </div>
-                </section>
-              ))}
-              {canCloseAfter && (
-                <p className="px-1 text-xs text-muted-foreground">
-                  Long-press a commit action to also close the session.
-                </p>
-              )}
-            </div>
-          ) : (
+          <div data-testid="magic-mobile-menu">
+            {magicColumns.all.map(section => (
+              <section key={section.header} aria-label={section.header}>
+                <h3 className="px-3 pt-3 pb-1 text-xs text-muted-foreground">
+                  {section.header}
+                </h3>
+                {section.options.map(option => renderOption(option, true))}
+              </section>
+            ))}
+            {canCloseAfter && (
+              <p className="px-3 pt-3 text-xs text-muted-foreground">
+                Long-press a commit action to also close the session.
+              </p>
+            )}
+          </div>
+        </BottomSheet>
+      ) : (
+        <Dialog open={magicModalOpen} onOpenChange={handleOpenChange}>
+          <DialogContent
+            ref={contentRef}
+            tabIndex={-1}
+            className="max-h-[min(90vh,760px)] overflow-hidden p-0 outline-none sm:max-w-lg"
+            onOpenAutoFocus={e => {
+              e.preventDefault()
+              contentRef.current?.focus()
+            }}
+            onKeyDown={handleKeyDown}
+          >
+            <DialogHeader className="shrink-0 px-4 pt-5 pb-2 text-left">
+              <DialogTitle>Magic</DialogTitle>
+            </DialogHeader>
             <div className="grid min-h-0 flex-1 grid-cols-2 overflow-y-auto pb-2">
               {[magicColumns.left, magicColumns.right].map(
                 (columnSections, colIndex) => (
@@ -2288,14 +2296,14 @@ ${resolveInstructions}`
                 )
               )}
             </div>
-          )}
-          {!isMobile && canCloseAfter && (
-            <p className="shrink-0 border-t border-border/60 px-4 py-2 text-xs text-muted-foreground">
-              Hold Shift with a commit action to also close the session.
-            </p>
-          )}
-        </DialogContent>
-      </Dialog>
+            {canCloseAfter && (
+              <p className="shrink-0 border-t border-border/60 px-4 py-2 text-xs text-muted-foreground">
+                Hold Shift with a commit action to also close the session.
+              </p>
+            )}
+          </DialogContent>
+        </Dialog>
+      )}
 
       <Dialog open={linkPrDialogOpen} onOpenChange={setLinkPrDialogOpen}>
         <DialogContent className="sm:max-w-md">

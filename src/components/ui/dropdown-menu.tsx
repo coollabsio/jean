@@ -8,18 +8,26 @@ import {
   CircleIcon,
 } from '@/components/icons/reicon'
 
+import {
+  BOTTOM_SHEET_SAFE_PADDING_CLASS,
+  BOTTOM_SHEET_SURFACE_CLASS,
+} from '@/components/ui/bottom-sheet'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { cn } from '@/lib/utils'
 
 const POPOVER_CLASS =
   'bg-popover text-popover-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-[80] max-h-(--radix-dropdown-menu-content-available-height) min-w-[8rem] origin-(--radix-dropdown-menu-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-md border p-1'
 
-// On mobile every menu opens as a bottom sheet, like MobileContextsSheet.
+// On mobile every menu opens as a bottom sheet, with the same look and
+// motion as `BottomSheet`.
 // App.css pins the Radix popper wrapper of `[data-mobile-sheet]` content to
 // the bottom edge. These classes come after the caller's className so they
 // win over desktop sizing such as `w-56` or `max-h-[300px]`.
-const MOBILE_SHEET_CLASS =
-  'bg-background text-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:slide-in-from-bottom data-[state=closed]:slide-out-to-bottom z-[80] w-full min-w-0 max-w-none max-h-[75svh] overflow-x-hidden overflow-y-auto overscroll-contain rounded-t-xl rounded-b-none border-x-0 border-t border-b-0 px-2 pt-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] shadow-lg'
+const MOBILE_SHEET_CLASS = cn(
+  BOTTOM_SHEET_SURFACE_CLASS,
+  'text-foreground z-[80] w-full min-w-0 max-w-none overflow-x-hidden overflow-y-auto overscroll-contain rounded-b-none border-x-0 border-b-0 px-2 pt-2',
+  BOTTOM_SHEET_SAFE_PADDING_CLASS
+)
 
 // Radix menus close on `pointerdown` outside. On a touch screen the browser
 // then sends the compat mouse events and the `click` of the same tap to the

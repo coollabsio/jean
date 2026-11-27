@@ -104,13 +104,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet'
+import { BottomSheet } from '@/components/ui/bottom-sheet'
 import { Spinner } from '@/components/ui/spinner'
 import { GitStatusBadges } from '@/components/ui/git-status-badges'
 import {
@@ -3681,55 +3675,41 @@ export function ProjectCanvasView({
                   </h2>
                   {projectMenu}
                   {isMobile && (
-                    <Sheet
+                    <BottomSheet
                       open={isSortSheetOpen}
                       onOpenChange={setIsSortSheetOpen}
+                      title="Sort worktrees"
+                      description="Choose how worktrees are ordered in this project."
                     >
-                      <SheetContent
-                        side="bottom"
-                        className="max-h-[75svh] overflow-hidden rounded-t-xl p-0"
-                        showCloseButton={false}
-                      >
-                        <SheetHeader className="shrink-0 border-b px-4 py-3 text-left">
-                          <SheetTitle>Sort worktrees</SheetTitle>
-                          <SheetDescription className="sr-only">
-                            Choose how worktrees are ordered in this project.
-                          </SheetDescription>
-                        </SheetHeader>
-                        <div className="overflow-y-auto px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)]">
-                          {WORKTREE_SORT_OPTIONS.map(option => {
-                            const selected = option.value === worktreeSortMode
-                            return (
-                              <button
-                                key={option.value}
-                                type="button"
-                                className={cn(
-                                  'flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-left active:bg-accent',
-                                  selected && 'bg-accent'
-                                )}
-                                aria-pressed={selected}
-                                onClick={() => {
-                                  useProjectsStore
-                                    .getState()
-                                    .setProjectCanvasWorktreeSortMode(
-                                      projectId,
-                                      option.value
-                                    )
-                                  setIsSortSheetOpen(false)
-                                }}
-                              >
-                                <span className="flex-1 font-medium">
-                                  {option.label}
-                                </span>
-                                {selected && (
-                                  <Check className="h-4 w-4 shrink-0" />
-                                )}
-                              </button>
-                            )
-                          })}
-                        </div>
-                      </SheetContent>
-                    </Sheet>
+                      {WORKTREE_SORT_OPTIONS.map(option => {
+                        const selected = option.value === worktreeSortMode
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            className={cn(
+                              'flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-left active:bg-accent',
+                              selected && 'bg-accent'
+                            )}
+                            aria-pressed={selected}
+                            onClick={() => {
+                              useProjectsStore
+                                .getState()
+                                .setProjectCanvasWorktreeSortMode(
+                                  projectId,
+                                  option.value
+                                )
+                              setIsSortSheetOpen(false)
+                            }}
+                          >
+                            <span className="flex-1 font-medium">
+                              {option.label}
+                            </span>
+                            {selected && <Check className="h-4 w-4 shrink-0" />}
+                          </button>
+                        )
+                      })}
+                    </BottomSheet>
                   )}
                   {/* Mobile: magnifier icon inline with badges */}
                   {isMobile &&
