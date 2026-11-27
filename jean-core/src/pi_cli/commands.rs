@@ -51,7 +51,7 @@ pub struct PiModelInfo {
     pub is_default: bool,
 }
 
-fn parse_version(stdout: &[u8], stderr: &[u8]) -> Option<String> {
+pub(crate) fn parse_version(stdout: &[u8], stderr: &[u8]) -> Option<String> {
     let stdout = String::from_utf8_lossy(stdout);
     let stderr = String::from_utf8_lossy(stderr);
     stdout
@@ -143,11 +143,24 @@ fn parse_pi_models(stdout: &[u8], stderr: &[u8]) -> Vec<PiModelInfo> {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_pi_auth_script, default_pi_models, parse_pi_models, parse_version};
+    use super::{
+        build_pi_auth_script, default_pi_models, parse_pi_models, parse_version,
+        pi_version_emits_agent_settled,
+    };
 
     #[test]
     fn parse_version_reads_pi_version_from_stderr() {
         assert_eq!(parse_version(b"", b"0.78.1\n"), Some("0.78.1".into()));
+    }
+
+    #[test]
+    fn agent_settled_support_starts_at_pi_0_80_4() {
+        assert!(!pi_version_emits_agent_settled(None));
+        assert!(!pi_version_emits_agent_settled(Some("0.80.3")));
+        assert!(!pi_version_emits_agent_settled(Some("0.9.0")));
+        assert!(pi_version_emits_agent_settled(Some("0.80.4")));
+        assert!(pi_version_emits_agent_settled(Some("0.87.1")));
+        assert!(pi_version_emits_agent_settled(Some("1.6.0")));
     }
 
     #[test]
@@ -626,6 +639,17 @@ fn semver_parts(version: &str) -> Vec<u32> {
         .split(['.', '-'])
         .map(|p| p.parse::<u32>().unwrap_or(0))
         .collect()
+}
+
+/// First PI release that emits the RPC `agent_settled` event.
+const PI_AGENT_SETTLED_MIN_VERSION: [u32; 3] = [0, 80, 4];
+
+/// Whether this PI version emits `agent_settled`, the event that tells
+/// clients PI will not continue automatically (retry, compaction, follow-up).
+/// Unknown versions count as older, so Jean never waits for an event that
+/// does not come.
+pub(crate) fn pi_version_emits_agent_settled(version: Option<&str>) -> bool {
+    version.is_some_and(|version| semver_parts(version) >= PI_AGENT_SETTLED_MIN_VERSION.to_vec())
 }
 
 pub async fn get_available_pi_versions(_app: AppHandle) -> Result<Vec<PiReleaseInfo>, String> {

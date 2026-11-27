@@ -654,16 +654,37 @@ fn auto_compaction_rpc_line(enabled: Option<bool>) -> String {
         .unwrap_or_default()
 }
 
-fn pi_line_is_completion_result(line: &str) -> bool {
+/// Whether a PI RPC stdout line ends the Jean run, so the host can stop PI.
+///
+/// `agent_end` only ends one low-level agent run: PI can still retry,
+/// recover from overflow, compact, or run queued follow-ups after it.
+/// `agent_settled` (PI 0.80.4+) is the documented end of all automatic work.
+/// Older PI has no `agent_settled`, so there `agent_end` ends the run unless
+/// it reports `willRetry: true`.
+/// See https://pi.dev/docs/latest/rpc and PI `docs/json.md`.
+fn pi_line_ends_run(line: &str, pi_emits_agent_settled: bool) -> bool {
+    let Ok(value) = serde_json::from_str::<Value>(line) else {
+        return false;
+    };
+    match value.get("type").and_then(Value::as_str) {
+        Some("agent_settled") => true,
+        Some("agent_end") => {
+            !pi_emits_agent_settled
+                && !value
+                    .get("willRetry")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+        }
+        _ => false,
+    }
+}
+
+/// Whether a run log line is the host's synthetic `result` marker. The host
+/// writes it after PI settles; the tailer stops on it only.
+fn pi_line_is_host_result(line: &str) -> bool {
     serde_json::from_str::<Value>(line)
         .ok()
-        .and_then(|value| {
-            value
-                .get("type")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        })
-        .is_some_and(|event_type| event_type == "agent_end" || event_type == "result")
+        .is_some_and(|value| value.get("type").and_then(Value::as_str) == Some("result"))
 }
 
 fn pi_line_session_id(line: &str) -> Option<String> {
@@ -943,6 +964,19 @@ pub fn run_pi_rpc_host_from_args() -> Result<(), String> {
             .map_err(|e| format!("Failed to flush PI RPC get_state command: {e}"))?;
     }
 
+    // `pi --version` runs next to the RPC child, so it adds no prompt latency.
+    let version_cli = pi_cli.clone();
+    let settled_support = std::thread::spawn(move || {
+        let version = silent_command(&version_cli)
+            .arg("--version")
+            .output()
+            .ok()
+            .and_then(|o| crate::pi_cli::parse_version(&o.stdout, &o.stderr));
+        crate::pi_cli::pi_version_emits_agent_settled(version.as_deref())
+    });
+    let mut settled_support = Some(settled_support);
+    let mut pi_emits_agent_settled = false;
+
     let mut pi_session_id: Option<String> = None;
     let reader = BufReader::new(stdout);
     for line in reader.lines() {
@@ -958,7 +992,11 @@ pub fn run_pi_rpc_host_from_args() -> Result<(), String> {
             out.flush()
                 .map_err(|e| format!("Failed to flush PI output: {e}"))?;
         }
-        if pi_line_is_completion_result(&line) {
+        // Only `agent_end` needs the version; join the check on the first one.
+        if let Some(handle) = settled_support.take_if(|_| line.contains("\"agent_end\"")) {
+            pi_emits_agent_settled = handle.join().unwrap_or(false);
+        }
+        if pi_line_ends_run(&line, pi_emits_agent_settled) {
             let result = serde_json::json!({
                 "type": "result",
                 "session_id": pi_session_id,
@@ -1287,7 +1325,7 @@ pub fn tail_pi_output(
             if line.trim().is_empty() {
                 continue;
             }
-            if pi_line_is_completion_result(&line) {
+            if pi_line_is_host_result(&line) {
                 completed = true;
             }
             let Ok(value) = serde_json::from_str::<Value>(&line) else {
@@ -1996,10 +2034,46 @@ mod tests {
     }
 
     #[test]
-    fn pi_rpc_agent_end_counts_as_completion_result() {
-        let line = r#"{"type":"agent_end","messages":[]}"#;
+    fn pi_rpc_run_ends_at_agent_settled_not_agent_end() {
+        // Issue #966: PI 1.6 sequence for a retried 503.
+        let error = r#"{"type":"message_end","message":{"role":"assistant","stopReason":"error","errorMessage":"503 upstream connect error"}}"#;
+        let retry_end = r#"{"type":"agent_end","messages":[],"willRetry":true}"#;
+        let final_end = r#"{"type":"agent_end","messages":[],"willRetry":false}"#;
+        let settled = r#"{"type":"agent_settled","aborted":false}"#;
 
-        assert!(pi_line_is_completion_result(line));
+        assert!(!pi_line_ends_run(error, true));
+        assert!(!pi_line_ends_run(retry_end, true));
+        assert!(!pi_line_ends_run(final_end, true));
+        assert!(pi_line_ends_run(settled, true));
+    }
+
+    #[test]
+    fn pi_rpc_run_ends_at_agent_end_for_pi_without_agent_settled() {
+        assert!(pi_line_ends_run(
+            r#"{"type":"agent_end","messages":[]}"#,
+            false
+        ));
+        assert!(pi_line_ends_run(
+            r#"{"type":"agent_end","messages":[],"willRetry":false}"#,
+            false
+        ));
+        assert!(!pi_line_ends_run(
+            r#"{"type":"agent_end","messages":[],"willRetry":true}"#,
+            false
+        ));
+    }
+
+    #[test]
+    fn pi_tailer_stops_only_at_host_result_marker() {
+        assert!(pi_line_is_host_result(
+            r#"{"type":"result","session_id":"s"}"#
+        ));
+        assert!(!pi_line_is_host_result(
+            r#"{"type":"agent_end","messages":[]}"#
+        ));
+        assert!(!pi_line_is_host_result(
+            r#"{"type":"agent_settled","aborted":false}"#
+        ));
     }
 
     #[test]

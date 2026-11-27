@@ -223,7 +223,12 @@ https://pi.dev/docs/latest/rpc and https://pi.dev/docs/latest/session-format
   host-backed PI runs store the host PID on the run, are treated as detached
   survivable sessions, and `resume_session` tails the run JSONL with the PI
   parser after Jean restarts. The host appends a synthetic `type: "result"`
-  marker after `agent_end` so completed-while-closed runs recover as completed.
+  marker when the run ends, so completed-while-closed runs recover as
+  completed. The tailer stops only at that marker.
+- **Run end** is `agent_settled`, not `agent_end`. `agent_end` ends one
+  low-level run; PI can still retry, compact, or run follow-ups after it.
+  PI before 0.80.4 has no `agent_settled`: there the host ends at `agent_end`
+  unless it has `willRetry: true` (`pi_line_ends_run`, issue #966).
 
 **Parsing is incremental:** `merge_pi_line()` merges one parsed line into the
 accumulating `PiResponse`. Both the batch parser (`parse_pi_json_stream_inner`)
