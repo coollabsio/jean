@@ -1159,6 +1159,27 @@ describe('transport bootstrap', () => {
     expect(await attemptsAt(5_000)).toBe(7)
   })
 
+  it('retries at once when a socket that was up for a while drops', async () => {
+    vi.useFakeTimers()
+    const transport = await loadTransportModule()
+    transport.connectTransport()
+    await flushAsync()
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockClear()
+    fetchMock.mockRejectedValue(new TypeError('offline'))
+
+    await vi.advanceTimersByTimeAsync(5_000)
+    getWs(0).close()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    // The retry failed: back to the normal backoff.
+    await vi.advanceTimersByTimeAsync(499)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
   it('rejects commands pending at the drop and runs commands sent during the gap', async () => {
     vi.useFakeTimers()
     const transport = await loadTransportModule()

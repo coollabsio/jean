@@ -310,6 +310,42 @@ describe('useMessageSending Codex /goal', () => {
     )
   })
 
+  it('runs a Claude custom command before the slash popover loaded the lists', async () => {
+    const win = window as unknown as { __JEAN_E2E_MOCK__?: boolean }
+    win.__JEAN_E2E_MOCK__ = true
+    mockInvoke.mockImplementation(async (command: string) =>
+      command === 'list_claude_commands'
+        ? [{ name: 'deploy', path: '/repo/.claude/commands/deploy.md' }]
+        : command.startsWith('list_')
+          ? []
+          : undefined
+    )
+    try {
+      const { result, sendMessage } = renderUseMessageSending({
+        inputValue: '/deploy staging',
+        selectedBackend: 'claude',
+      })
+
+      await act(async () => {
+        await result.current.handleSubmit({
+          preventDefault: vi.fn(),
+        } as unknown as React.FormEvent)
+      })
+
+      expect(sendMessage.mutate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message:
+            'Run the /deploy command from /repo/.claude/commands/deploy.md with arguments: staging',
+        }),
+        expect.any(Object)
+      )
+    } finally {
+      delete win.__JEAN_E2E_MOCK__
+      mockInvoke.mockReset()
+      mockInvoke.mockResolvedValue(undefined)
+    }
+  })
+
   it('enters Plan mode and starts a planning turn from /plan', async () => {
     useChatStore.setState({
       executionModes: { 'session-1': 'yolo' },

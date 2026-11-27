@@ -107,9 +107,14 @@ export function hasUntouchedClaudeMagicDefaults(
 /** Set magic prompts from the first installed AI CLI after detection completes. */
 export function useMagicPromptAutoDefaults() {
   const { data: preferences } = usePreferences()
+  // Probe the CLIs only until the defaults are set. The repair below then
+  // uses statuses that onboarding, settings or the toolbar already loaded.
+  const detect = !!preferences && !preferences.magic_models_auto_initialized
   const { installedBackends, isLoading: isStatusLoading } =
-    useInstalledBackends()
-  const { authByBackend, isLoading: isAuthLoading } = useBackendAuthStatuses()
+    useInstalledBackends({ enabled: detect })
+  const { authByBackend, isLoading: isAuthLoading } = useBackendAuthStatuses({
+    enabled: detect,
+  })
   const patchPreferences = usePatchPreferences()
   const didRun = useRef(false)
 

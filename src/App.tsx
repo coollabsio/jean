@@ -920,24 +920,29 @@ function App() {
 
     // First connect: invalidate non-preloaded queries. If the HTTP preload
     // failed, invalidate everything so it fetches over the open WebSocket.
+    // `cancelRefetch: false`: a query whose request waited for this socket is
+    // already loading and is not sent twice.
     if (hasPreloadedData()) {
       logger.info('WebSocket connected, invalidating dynamic queries')
-      queryClient.invalidateQueries({
-        predicate: query => {
-          const key = query.queryKey[0]
-          return (
-            key !== 'projects' &&
-            key !== 'preferences' &&
-            key !== 'ui-state' &&
-            key !== 'chat'
-          )
+      queryClient.invalidateQueries(
+        {
+          predicate: query => {
+            const key = query.queryKey[0]
+            return (
+              key !== 'projects' &&
+              key !== 'preferences' &&
+              key !== 'ui-state' &&
+              key !== 'chat'
+            )
+          },
         },
-      })
+        { cancelRefetch: false }
+      )
     } else {
       logger.warn(
         'WebSocket connected without preloaded data, invalidating all queries'
       )
-      queryClient.invalidateQueries()
+      queryClient.invalidateQueries(undefined, { cancelRefetch: false })
     }
 
     // Native desktop keeps its shell across remote socket drops, so a run

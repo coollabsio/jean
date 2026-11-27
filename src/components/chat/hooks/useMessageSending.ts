@@ -13,7 +13,7 @@ import {
   steerPiTurn,
   steerClaudeTurn,
 } from '@/services/chat'
-import { skillQueryKeys } from '@/services/skills'
+import { skillQueries } from '@/services/skills'
 import { buildMcpConfigJson } from '@/services/mcp'
 import { buildMessageWithRefs } from '@/components/chat/message-with-refs'
 import {
@@ -603,50 +603,26 @@ export function useMessageSending({
       ) {
         const slashName = textMessage.slice(1).split(/\s/)[0] ?? ''
         const params = textMessage.slice(1 + slashName.length).trim()
-        const claudeSkills =
-          queryClient.getQueryData<{ name: string }[]>(
-            skillQueryKeys.claudeSkills(activeWorktreeId, activeWorktreePath)
-          ) ?? []
-        const codexSkills =
-          queryClient.getQueryData<{ name: string }[]>(
-            skillQueryKeys.codexSkills(activeWorktreeId, activeWorktreePath)
-          ) ?? []
-        const opencodeSkills =
-          queryClient.getQueryData<{ name: string }[]>(
-            skillQueryKeys.opencodeSkills()
-          ) ?? []
-        const cursorSkills =
-          queryClient.getQueryData<{ name: string }[]>(
-            skillQueryKeys.cursorSkills()
-          ) ?? []
-        const piSkills =
-          queryClient.getQueryData<{ name: string }[]>(
-            skillQueryKeys.piSkills()
-          ) ?? []
-        const commandcodeSkills =
-          queryClient.getQueryData<{ name: string }[]>(
-            skillQueryKeys.commandcodeSkills()
-          ) ?? []
-        const grokSkills =
-          queryClient.getQueryData<{ name: string }[]>(
-            skillQueryKeys.grokSkills()
-          ) ?? []
-        const isSkill =
-          claudeSkills.some(s => s.name === slashName) ||
-          codexSkills.some(s => s.name === slashName) ||
-          opencodeSkills.some(s => s.name === slashName) ||
-          cursorSkills.some(s => s.name === slashName) ||
-          piSkills.some(s => s.name === slashName) ||
-          commandcodeSkills.some(s => s.name === slashName) ||
-          grokSkills.some(s => s.name === slashName)
+        // The slash popover loads these lists only while it is open, so a
+        // pasted or recalled command may run before they are cached.
+        const skillLists = await Promise.all(
+          [
+            skillQueries.claudeSkills(activeWorktreeId, activeWorktreePath),
+            skillQueries.codexSkills(activeWorktreeId, activeWorktreePath),
+            skillQueries.opencodeSkills(),
+            skillQueries.cursorSkills(),
+            skillQueries.piSkills(),
+            skillQueries.commandcodeSkills(),
+            skillQueries.grokSkills(),
+          ].map(query => queryClient.ensureQueryData(query))
+        )
+        const isSkill = skillLists.some(list =>
+          list.some(s => s.name === slashName)
+        )
         if (!isSkill) {
-          const claudeCommands =
-            queryClient.getQueryData<{ name: string; path: string }[]>(
-              skillQueryKeys.claudeCommands(
-                activeWorktreeId,
-                activeWorktreePath
-              )
-            ) ?? []
+          const claudeCommands = await queryClient.ensureQueryData(
+            skillQueries.claudeCommands(activeWorktreeId, activeWorktreePath)
+          )
           const cmd = claudeCommands.find(c => c.name === slashName)
           if (cmd) {
             message = `Run the /${slashName} command from ${cmd.path}${params ? ` with arguments: ${params}` : ''}`

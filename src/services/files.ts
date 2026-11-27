@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { queryOptions, useQuery } from '@tanstack/react-query'
 import { invoke } from '@/lib/transport'
 import { logger } from '@/lib/logger'
 import type { WorktreeFile } from '@/types/chat'
@@ -22,17 +22,12 @@ export const fileQueryKeys = {
     ] as const,
 }
 
-/**
- * Hook to get all files in a worktree (file browser + @ mentions).
- * Includes hidden and gitignored files (e.g. `.env`); heavy trees like
- * `node_modules` / `vendor` / `target` are pruned server-side (BFS walk).
- * Results are cached and only refetched when worktree changes.
- */
-export function useWorktreeFiles(
+/** Query options for all files in a worktree (file browser + @ mentions). */
+export function worktreeFilesQuery(
   worktreePath: string | null,
   owner: FileListOwner
 ) {
-  return useQuery({
+  return queryOptions({
     queryKey: fileQueryKeys.worktreeFiles(worktreePath ?? '', owner),
     queryFn: async (): Promise<WorktreeFile[]> => {
       if (!isTauri() || !worktreePath) {
@@ -54,8 +49,23 @@ export function useWorktreeFiles(
         return []
       }
     },
-    enabled: !!worktreePath,
     staleTime: 0, // Always refetch in background so newly added files appear
     gcTime: 1000 * 60 * 10, // Keep in memory for 10 minutes
+  })
+}
+
+/**
+ * Hook to get all files in a worktree (file browser + @ mentions).
+ * Includes hidden and gitignored files (e.g. `.env`); heavy trees like
+ * `node_modules` / `vendor` / `target` are pruned server-side (BFS walk).
+ */
+export function useWorktreeFiles(
+  worktreePath: string | null,
+  owner: FileListOwner,
+  options?: { enabled?: boolean }
+) {
+  return useQuery({
+    ...worktreeFilesQuery(worktreePath, owner),
+    enabled: !!worktreePath && (options?.enabled ?? true),
   })
 }

@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { queryOptions, useQuery } from '@tanstack/react-query'
 import { invoke } from '@/lib/transport'
 import { logger } from '@/lib/logger'
 import type { ClaudeSkill, ClaudeCommand, PluginSkillGroup } from '@/types/chat'
@@ -41,87 +41,34 @@ export const skillQueryKeys = {
   pluginSkills: () => [...skillQueryKeys.all, 'plugin', 'skills'] as const,
 }
 
-export function useClaudeSkills(
-  worktreeId: string | null | undefined,
-  worktreePath: string | null | undefined
-) {
-  return useQuery({
-    queryKey: skillQueryKeys.claudeSkills(worktreeId, worktreePath),
-    queryFn: async (): Promise<ClaudeSkill[]> => {
-      if (!isTauri()) return []
+type SkillsCommand =
+  | 'list_claude_skills'
+  | 'list_codex_skills'
+  | 'list_opencode_skills'
+  | 'list_cursor_skills'
+  | 'list_pi_skills'
+  | 'list_commandcode_skills'
+  | 'list_grok_skills'
+  | 'list_plugin_skills'
 
-      try {
-        logger.debug('Loading Claude CLI skills')
-        const skills = await invoke<ClaudeSkill[]>('list_claude_skills', {
-          worktreeId: worktreeId ?? undefined,
-          worktreePath: worktreePath ?? undefined,
-        })
-        logger.info('Claude CLI skills loaded', { count: skills.length })
-        return skills
-      } catch (error) {
-        logger.error('Failed to load Claude CLI skills', { error })
-        return []
-      }
-    },
-    staleTime: 1000 * 60 * 5,
-    gcTime: 1000 * 60 * 10,
-  })
-}
-
-export function useClaudeCommands(
-  worktreeId: string | null | undefined,
-  worktreePath: string | null | undefined
-) {
-  return useQuery({
-    queryKey: skillQueryKeys.claudeCommands(worktreeId, worktreePath),
-    queryFn: async (): Promise<ClaudeCommand[]> => {
-      if (!isTauri()) return []
-
-      try {
-        logger.debug('Loading Claude CLI custom commands')
-        const commands = await invoke<ClaudeCommand[]>('list_claude_commands', {
-          worktreeId: worktreeId ?? undefined,
-          worktreePath: worktreePath ?? undefined,
-        })
-        logger.info('Claude CLI custom commands loaded', {
-          count: commands.length,
-        })
-        return commands
-      } catch (error) {
-        logger.error('Failed to load Claude CLI custom commands', { error })
-        return []
-      }
-    },
-    staleTime: 1000 * 60 * 5,
-    gcTime: 1000 * 60 * 10,
-  })
-}
-
-function useBackendSkills(
-  backend: Exclude<CliBackend, 'claude'>,
-  command:
-    | 'list_codex_skills'
-    | 'list_opencode_skills'
-    | 'list_cursor_skills'
-    | 'list_pi_skills'
-    | 'list_commandcode_skills'
-    | 'list_grok_skills',
+function skillListQuery<T>(
   queryKey: readonly unknown[],
+  command: SkillsCommand | 'list_claude_commands',
   label: string,
   args: Record<string, unknown> = {}
 ) {
-  return useQuery({
+  return queryOptions({
     queryKey,
-    queryFn: async (): Promise<ClaudeSkill[]> => {
+    queryFn: async (): Promise<T[]> => {
       if (!isTauri()) return []
 
       try {
-        logger.debug(`Loading ${label} skills`)
-        const skills = await invoke<ClaudeSkill[]>(command, args)
-        logger.info(`${label} skills loaded`, { count: skills.length })
-        return skills
+        logger.debug(`Loading ${label}`)
+        const items = await invoke<T[]>(command, args)
+        logger.info(`${label} loaded`, { count: items.length })
+        return items
       } catch (error) {
-        logger.error(`Failed to load ${label} skills`, { error, backend })
+        logger.error(`Failed to load ${label}`, { error })
         return []
       }
     },
@@ -130,65 +77,83 @@ function useBackendSkills(
   })
 }
 
-export function useCodexSkills(
+const worktreeArgs = (
   worktreeId: string | null | undefined,
   worktreePath: string | null | undefined
-) {
-  return useBackendSkills(
-    'codex',
-    'list_codex_skills',
-    skillQueryKeys.codexSkills(worktreeId, worktreePath),
-    'Codex CLI',
-    {
-      worktreeId: worktreeId ?? undefined,
-      worktreePath: worktreePath ?? undefined,
-    }
-  )
-}
+) => ({
+  worktreeId: worktreeId ?? undefined,
+  worktreePath: worktreePath ?? undefined,
+})
 
-export function useOpenCodeSkills() {
-  return useBackendSkills(
-    'opencode',
-    'list_opencode_skills',
-    skillQueryKeys.opencodeSkills(),
-    'OpenCode'
-  )
-}
-
-export function useCursorSkills() {
-  return useBackendSkills(
-    'cursor',
-    'list_cursor_skills',
-    skillQueryKeys.cursorSkills(),
-    'Cursor'
-  )
-}
-
-export function usePiSkills() {
-  return useBackendSkills(
-    'pi',
-    'list_pi_skills',
-    skillQueryKeys.piSkills(),
-    'Pi'
-  )
-}
-
-export function useCommandCodeSkills() {
-  return useBackendSkills(
-    'commandcode',
-    'list_commandcode_skills',
-    skillQueryKeys.commandcodeSkills(),
-    'Command Code'
-  )
-}
-
-export function useGrokSkills() {
-  return useBackendSkills(
-    'grok',
-    'list_grok_skills',
-    skillQueryKeys.grokSkills(),
-    'Grok'
-  )
+/** Query options for every skill and command list, shared by the slash
+ *  popover and the send path. */
+export const skillQueries = {
+  claudeSkills: (
+    worktreeId: string | null | undefined,
+    worktreePath: string | null | undefined
+  ) =>
+    skillListQuery<ClaudeSkill>(
+      skillQueryKeys.claudeSkills(worktreeId, worktreePath),
+      'list_claude_skills',
+      'Claude CLI skills',
+      worktreeArgs(worktreeId, worktreePath)
+    ),
+  claudeCommands: (
+    worktreeId: string | null | undefined,
+    worktreePath: string | null | undefined
+  ) =>
+    skillListQuery<ClaudeCommand>(
+      skillQueryKeys.claudeCommands(worktreeId, worktreePath),
+      'list_claude_commands',
+      'Claude CLI custom commands',
+      worktreeArgs(worktreeId, worktreePath)
+    ),
+  codexSkills: (
+    worktreeId: string | null | undefined,
+    worktreePath: string | null | undefined
+  ) =>
+    skillListQuery<ClaudeSkill>(
+      skillQueryKeys.codexSkills(worktreeId, worktreePath),
+      'list_codex_skills',
+      'Codex CLI skills',
+      worktreeArgs(worktreeId, worktreePath)
+    ),
+  opencodeSkills: () =>
+    skillListQuery<ClaudeSkill>(
+      skillQueryKeys.opencodeSkills(),
+      'list_opencode_skills',
+      'OpenCode skills'
+    ),
+  cursorSkills: () =>
+    skillListQuery<ClaudeSkill>(
+      skillQueryKeys.cursorSkills(),
+      'list_cursor_skills',
+      'Cursor skills'
+    ),
+  piSkills: () =>
+    skillListQuery<ClaudeSkill>(
+      skillQueryKeys.piSkills(),
+      'list_pi_skills',
+      'Pi skills'
+    ),
+  commandcodeSkills: () =>
+    skillListQuery<ClaudeSkill>(
+      skillQueryKeys.commandcodeSkills(),
+      'list_commandcode_skills',
+      'Command Code skills'
+    ),
+  grokSkills: () =>
+    skillListQuery<ClaudeSkill>(
+      skillQueryKeys.grokSkills(),
+      'list_grok_skills',
+      'Grok skills'
+    ),
+  pluginSkills: () =>
+    skillListQuery<PluginSkillGroup>(
+      skillQueryKeys.pluginSkills(),
+      'list_plugin_skills',
+      'Plugin skills'
+    ),
 }
 
 export interface BackendSkillsGroup {
@@ -200,44 +165,38 @@ export interface BackendSkillsGroup {
   pluginName?: string
 }
 
-export function usePluginSkills() {
-  return useQuery({
-    queryKey: skillQueryKeys.pluginSkills(),
-    queryFn: async (): Promise<PluginSkillGroup[]> => {
-      if (!isTauri()) return []
-
-      try {
-        logger.debug('Loading plugin skills')
-        const groups = await invoke<PluginSkillGroup[]>(
-          'list_plugin_skills',
-          {}
-        )
-        logger.info('Plugin skills loaded', { groupCount: groups.length })
-        return groups
-      } catch (error) {
-        logger.error('Failed to load plugin skills', { error })
-        return []
-      }
-    },
-    staleTime: 1000 * 60 * 5,
-    gcTime: 1000 * 60 * 10,
-  })
-}
-
+/** Skill and command lists load only while `enabled` (the popover is open).
+ *  `prefetchInputLists` loads them earlier in idle time. */
 export function useAllBackendSkills(
   worktreeId: string | null | undefined,
   worktreePath: string | null | undefined,
-  installedBackends?: CliBackend[]
+  installedBackends?: CliBackend[],
+  enabled = true
 ): BackendSkillsGroup[] {
-  const claudeSkills = useClaudeSkills(worktreeId, worktreePath)
-  const claudeCommands = useClaudeCommands(worktreeId, worktreePath)
-  const codexSkills = useCodexSkills(worktreeId, worktreePath)
-  const opencodeSkills = useOpenCodeSkills()
-  const cursorSkills = useCursorSkills()
-  const piSkills = usePiSkills()
-  const commandcodeSkills = useCommandCodeSkills()
-  const grokSkills = useGrokSkills()
-  const pluginSkillGroups = usePluginSkills()
+  const claudeSkills = useQuery({
+    ...skillQueries.claudeSkills(worktreeId, worktreePath),
+    enabled,
+  })
+  const claudeCommands = useQuery({
+    ...skillQueries.claudeCommands(worktreeId, worktreePath),
+    enabled,
+  })
+  const codexSkills = useQuery({
+    ...skillQueries.codexSkills(worktreeId, worktreePath),
+    enabled,
+  })
+  const opencodeSkills = useQuery({ ...skillQueries.opencodeSkills(), enabled })
+  const cursorSkills = useQuery({ ...skillQueries.cursorSkills(), enabled })
+  const piSkills = useQuery({ ...skillQueries.piSkills(), enabled })
+  const commandcodeSkills = useQuery({
+    ...skillQueries.commandcodeSkills(),
+    enabled,
+  })
+  const grokSkills = useQuery({ ...skillQueries.grokSkills(), enabled })
+  const pluginSkillGroups = useQuery({
+    ...skillQueries.pluginSkills(),
+    enabled,
+  })
 
   return useMemo(() => {
     const groups: BackendSkillsGroup[] = []

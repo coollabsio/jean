@@ -108,7 +108,8 @@ export function SlashPopover({
   const backendGroups = useAllBackendSkills(
     worktreeId,
     worktreePath,
-    installedBackends
+    installedBackends,
+    open
   )
   const listRef = useRef<HTMLDivElement>(null)
   const [selectedIndex, setSelectedIndex] = useState(0)

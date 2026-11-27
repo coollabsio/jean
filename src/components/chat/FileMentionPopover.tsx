@@ -133,9 +133,12 @@ export function FileMentionPopover({
     () => scopes.find(scope => scope.rootPath === selectedRootPath) ?? null,
     [scopes, selectedRootPath]
   )
+  // Loads only while open. The list is always stale, so each open reloads it
+  // and newly added files appear.
   const { data: files = [] } = useWorktreeFiles(
     selectedRootPath,
-    selectedScope?.owner ?? {}
+    selectedScope?.owner ?? {},
+    { enabled: open }
   )
 
   const selectedScopeIndex = useMemo(
@@ -144,7 +147,7 @@ export function FileMentionPopover({
   )
 
   // On open, reset scope (adjusted during render so the stale scope never
-  // paints) and invalidate so newly added files appear.
+  // paints).
   const [resetDeps, setResetDeps] = useState({ open, worktreePath })
   if (resetDeps.open !== open || resetDeps.worktreePath !== worktreePath) {
     setResetDeps({ open, worktreePath })
@@ -153,15 +156,6 @@ export function FileMentionPopover({
       setSelectedIndex(0)
     }
   }
-  useEffect(() => {
-    if (!open || !worktreePath) return
-    queryClient.invalidateQueries({
-      queryKey: fileQueryKeys.worktreeFiles(worktreePath, {
-        worktreeId: worktreeId ?? undefined,
-      }),
-    })
-  }, [open, worktreePath, worktreeId, queryClient])
-
   // Filter files based on search query (fuzzy match)
   const filteredFiles = useMemo(
     () => fuzzySearchFiles(files, searchQuery, 15),

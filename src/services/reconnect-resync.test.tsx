@@ -1,6 +1,10 @@
 import { createElement, type PropsWithChildren } from 'react'
 import { renderHook, waitFor } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import {
+  QueryClient,
+  QueryClientProvider,
+  useQuery,
+} from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as TransportNamespace from '@/lib/transport'
 import type { useChatStore as ChatStoreHook } from '@/store/chat-store'
@@ -21,6 +25,7 @@ class FakeServerSocket {
   static replies: Record<string, CommandReply> = {}
   /** Sent by the server as soon as a command arrives, before its reply. */
   static pushOnCommand: Record<string, (socket: FakeServerSocket) => void> = {}
+  static commands: string[] = []
 
   readyState = FakeServerSocket.CONNECTING
   onopen: (() => void) | null = null
@@ -44,6 +49,7 @@ class FakeServerSocket {
       args: Record<string, unknown>
     }
     if (message.type !== 'invoke') return
+    FakeServerSocket.commands.push(message.command)
     FakeServerSocket.pushOnCommand[message.command]?.(this)
     const reply = FakeServerSocket.replies[message.command]
     queueMicrotask(() =>
@@ -97,6 +103,7 @@ function runningState(sessionId: string) {
 describe('web access reconnect resync', () => {
   let queryClient: QueryClient
   let overlay: boolean
+  let wrapper: (props: PropsWithChildren) => ReturnType<typeof createElement>
   let transport: Transport
   let useChatStore: ChatStore
 
@@ -121,6 +128,7 @@ describe('web access reconnect resync', () => {
       get_session: () => ({ id: 's1', messages: [] }),
     }
     FakeServerSocket.pushOnCommand = {}
+    FakeServerSocket.commands = []
     vi.stubGlobal('WebSocket', FakeServerSocket)
     vi.stubGlobal(
       'fetch',
@@ -141,7 +149,7 @@ describe('web access reconnect resync', () => {
         if (isTransportConnected()) overlay = false
       },
     })
-    const wrapper = ({ children }: PropsWithChildren) =>
+    wrapper = ({ children }: PropsWithChildren) =>
       createElement(QueryClientProvider, { client: queryClient }, children)
     renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
     transport.connectTransport()
@@ -231,6 +239,66 @@ describe('web access reconnect resync', () => {
     expect(queryClient.getQueryState(['chat', 'session', 's1'])).toMatchObject({
       isInvalidated: true,
     })
+  })
+
+  it('loads the chat state before refetching anything else', async () => {
+    FakeServerSocket.replies.list_github_issues = () => []
+    renderHook(
+      () =>
+        useQuery({
+          queryKey: ['github-issues'],
+          queryFn: () => transport.invoke('list_github_issues'),
+        }),
+      { wrapper }
+    )
+    await waitFor(() =>
+      expect(FakeServerSocket.commands).toContain('list_github_issues')
+    )
+
+    latestSocket().close()
+    FakeServerSocket.commands = []
+    await waitFor(() => expect(overlay).toBe(false), { timeout: 3_000 })
+    await waitFor(() =>
+      expect(FakeServerSocket.commands).toContain('list_github_issues')
+    )
+
+    const sent = FakeServerSocket.commands
+    const firstRefetch = sent.indexOf('list_github_issues')
+    expect(sent.indexOf('get_run_states')).toBeLessThan(firstRefetch)
+    expect(sent.indexOf('get_session')).toBeLessThan(firstRefetch)
+  })
+
+  it('marks GitHub data stale on reconnect without loading it, but reloads attached contexts', async () => {
+    FakeServerSocket.replies.list_github_issues = () => []
+    FakeServerSocket.replies.list_loaded_issue_contexts = () => []
+    renderHook(
+      () => [
+        useQuery({
+          queryKey: ['github', 'issues'],
+          queryFn: () => transport.invoke('list_github_issues'),
+        }),
+        useQuery({
+          queryKey: ['github', 'loaded-contexts', 's1'],
+          queryFn: () => transport.invoke('list_loaded_issue_contexts'),
+        }),
+      ],
+      { wrapper }
+    )
+    await waitFor(() =>
+      expect(FakeServerSocket.commands).toContain('list_github_issues')
+    )
+
+    latestSocket().close()
+    FakeServerSocket.commands = []
+    await waitFor(() => expect(overlay).toBe(false), { timeout: 3_000 })
+    await waitFor(() =>
+      expect(queryClient.getQueryState(['github', 'issues'])).toMatchObject({
+        isInvalidated: true,
+      })
+    )
+
+    expect(FakeServerSocket.commands).not.toContain('list_github_issues')
+    expect(FakeServerSocket.commands).toContain('list_loaded_issue_contexts')
   })
 
   it('keeps the reconnecting overlay when the socket drops again during the resync', async () => {

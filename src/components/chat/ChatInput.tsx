@@ -45,6 +45,7 @@ import {
 } from './context-mention-investigation'
 import type { WorktreeFile } from '@/types/chat'
 import { SlashPopover, type SlashPopoverHandle } from './SlashPopover'
+import { prefetchInputListsWhenQuiet } from './prefetch-input-lists'
 import {
   ContextMentionPopover,
   type ContextMentionPopoverHandle,
@@ -176,6 +177,15 @@ export const ChatInput = memo(function ChatInput({
 
   // Refs to expose navigation methods from popovers
   const fileMentionHandleRef = useRef<FileMentionPopoverHandle | null>(null)
+
+  useEffect(() => {
+    if (!activeWorktreePath) return
+    return prefetchInputListsWhenQuiet(
+      queryClient,
+      activeWorktreeId,
+      activeWorktreePath
+    )
+  }, [activeWorktreeId, activeWorktreePath])
   const slashPopoverHandleRef = useRef<SlashPopoverHandle | null>(null)
   const contextMentionHandleRef = useRef<ContextMentionPopoverHandle | null>(
     null

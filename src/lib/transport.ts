@@ -852,6 +852,7 @@ export class WsTransport {
   private queue: { id: string; data: string }[] = []
   /** Events received while the app resyncs after a reconnect. */
   private heldEvents: WsMessage[] | null = null
+  private openedAt = 0
   private authAbort: AbortController | null = null
   private serverBuildId: string | null = null
   private serverBootId: string | null = null
@@ -1154,6 +1155,7 @@ export class WsTransport {
 
     this.ws.onopen = () => {
       const reconnected = this._hasConnectedOnce
+      this.openedAt = Date.now()
       this.clearConnectWatchdog()
       this._lastInbound = Date.now()
       this.inboundTimeout = FIRST_HEARTBEAT_TIMEOUT
@@ -1299,6 +1301,8 @@ export class WsTransport {
   private static readonly AUTH_TIMEOUT = 5_000
   /** Longest the app's resync may hold events after a reconnect. */
   private static readonly RESYNC_HOLD_MAX = 10_000
+  /** A socket open this long that drops is retried without a wait. */
+  private static readonly STABLE_SOCKET_AFTER = 5_000
   private static readonly WAKE_CHECK_TIMEOUT = 3_000
   /** After wake, ask the server over HTTP once the socket has been silent
    *  this long. */
@@ -1532,8 +1536,14 @@ export class WsTransport {
   private connectRetryDelay(): number {
     const attempt = this.connectRetryAttempt
     if (this.config) return 5_000
-    // A dropped socket usually comes back at once: retry fast, cap low.
-    if (this._hasConnectedOnce) return Math.min(250 * 2 ** attempt, 5_000)
+    if (this._hasConnectedOnce) {
+      // A socket that was up for a while usually comes back at once: retry
+      // now. One that drops right after it opens backs off, so a flapping
+      // server gets no reconnect loop.
+      const lived = Date.now() - this.openedAt
+      if (attempt === 0 && lived >= WsTransport.STABLE_SOCKET_AFTER) return 0
+      return Math.min(250 * 2 ** attempt, 5_000)
+    }
     // The first connection may wait for the server to start.
     return attempt === 0 ? 100 : Math.min(500 * 2 ** (attempt - 1), 30_000)
   }
