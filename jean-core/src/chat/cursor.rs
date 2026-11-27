@@ -1166,6 +1166,7 @@ pub fn execute_cursor(
         crate::platform::get_wsl_config().enabled,
     );
     cmd.args(cursor_mode_args(effective_mode, sandbox_mode)?);
+    super::extra_args::apply_extra_args(app, &super::types::Backend::Cursor, &mut cmd)?;
 
     let prepared_message = build_cursor_message(
         message,
@@ -1305,8 +1306,9 @@ pub fn execute_one_shot_cursor(
         .args(["--mode", "ask", "--sandbox", sandbox_mode]);
 
     let model = raw_cursor_model(Some(model)).unwrap_or("auto");
-    cmd.args(["--model", model])
-        .current_dir(dir)
+    cmd.args(["--model", model]);
+    super::extra_args::apply_extra_args(app, &super::types::Backend::Cursor, &mut cmd)?;
+    cmd.current_dir(dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

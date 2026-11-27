@@ -16,6 +16,7 @@ pub mod detached;
 pub(crate) mod devin;
 mod devin_permissions;
 mod devin_protocol;
+pub(crate) mod extra_args;
 pub(crate) mod grok;
 pub(crate) mod handoff;
 pub mod jean_mcp;

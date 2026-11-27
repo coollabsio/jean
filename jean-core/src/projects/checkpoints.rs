@@ -1809,6 +1809,7 @@ fn generate_checkpoint_restore_json(
         "--json-schema",
         CHECKPOINT_RESTORE_SCHEMA,
     ]);
+    crate::chat::extra_args::apply_extra_args(app, &crate::chat::types::Backend::Claude, &mut cmd)?;
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

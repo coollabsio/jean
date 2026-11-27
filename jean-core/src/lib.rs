@@ -370,6 +370,10 @@ pub struct AppPreferences {
     pub opencode_auto_steer_enabled: bool, // Steer prompts into a running OpenCode session instead of queueing (default: false)
     #[serde(default = "default_claude_auto_steer")]
     pub claude_auto_steer_enabled: bool, // Steer prompts into a running Claude turn (detached host, Unix only) instead of queueing (default: false)
+    /// Extra CLI arguments per backend, keyed by backend id ("claude",
+    /// "opencode", ...). Split with shell-words rules (issue #335).
+    #[serde(default)]
+    pub cli_extra_args: std::collections::BTreeMap<String, String>,
     #[serde(default)]
     pub claude_auto_compact_window: Option<String>, // Claude `--autocompact` value ("auto", "200k".."1M"); None = Claude's own setting
     #[serde(default)]
@@ -3637,6 +3641,7 @@ impl Default for AppPreferences {
             opencode_auto_steer_enabled: default_opencode_auto_steer(),
             claude_auto_steer_enabled: default_claude_auto_steer(),
             claude_auto_compact_window: None,
+            cli_extra_args: Default::default(),
             codex_auto_compact_token_limit: None,
             opencode_auto_compact: None,
             pi_auto_compact: None,

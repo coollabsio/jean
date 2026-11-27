@@ -628,6 +628,17 @@ pub fn ensure_running(app: &AppHandle) -> Result<OpenCodeServer, String> {
         .arg(&hostname)
         .arg("--port")
         .arg(port.to_string())
+        // User flags such as `--pure` (issue #335). The server is shared, so a
+        // changed value applies from the next server start.
+        .args(crate::chat::extra_args::extra_args_for(
+            app,
+            &crate::chat::types::Backend::Opencode,
+            &[
+                "serve".to_string(),
+                "--hostname".to_string(),
+                "--port".to_string(),
+            ],
+        )?)
         // Capture output for diagnostics (startup failures, provider issues)
         // instead of discarding it to null.
         .stdout(Stdio::piped())

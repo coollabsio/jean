@@ -450,6 +450,7 @@ pub fn execute_commandcode_headless(
             command.arg("--permission-mode").arg("plan");
         }
     }
+    super::extra_args::apply_extra_args(app, &super::types::Backend::Commandcode, &mut command)?;
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -699,6 +700,7 @@ pub fn execute_one_shot_commandcode(
             command.arg("--permission-mode").arg("plan");
         }
     }
+    super::extra_args::apply_extra_args(app, &super::types::Backend::Commandcode, &mut command)?;
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

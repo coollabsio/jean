@@ -486,6 +486,7 @@ fn generate_names(app: &AppHandle, request: &NamingRequest) -> Result<NamingOutp
     } else {
         cmd.arg("--max-turns").arg("1");
     }
+    crate::chat::extra_args::apply_extra_args(app, &crate::chat::types::Backend::Claude, &mut cmd)?;
 
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())

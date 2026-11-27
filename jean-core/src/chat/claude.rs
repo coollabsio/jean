@@ -1532,7 +1532,7 @@ pub fn execute_claude_detached(
     }
 
     // Build args
-    let (args, env_vars) = build_claude_args(
+    let (mut args, env_vars) = build_claude_args(
         app,
         session_id,
         worktree_id,
@@ -1550,6 +1550,21 @@ pub fn execute_claude_detached(
         include_recap,
         working_dir,
     );
+    match super::extra_args::extra_args_for(app, &super::types::Backend::Claude, &args) {
+        Ok(extra) => args.extend(extra),
+        Err(error_msg) => {
+            log::error!("{error_msg}");
+            let _ = app.emit_all(
+                "chat:error",
+                &ErrorEvent {
+                    session_id: session_id.to_string(),
+                    worktree_id: worktree_id.to_string(),
+                    error: error_msg.clone(),
+                },
+            );
+            return Err(error_msg);
+        }
+    }
 
     // Log the full Claude CLI command for debugging
     log::debug!(

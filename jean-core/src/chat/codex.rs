@@ -5424,14 +5424,17 @@ pub fn execute_one_shot_codex(
         }
     });
 
-    let mut cmd = crate::platform::resolved_cli_command(&cli_path, working_dir);
-    cmd.args(build_one_shot_codex_args(
+    let mut args = build_one_shot_codex_args(
         actual_model,
         is_fast,
         &schema_arg,
         working_dir_arg.as_deref(),
         None, // one-shot callers can opt into custom providers later via prefs
-    ));
+    );
+    // After `exec`, before Jean's flags.
+    super::extra_args::insert_extra_os_args(app, &super::types::Backend::Codex, &mut args, 1)?;
+    let mut cmd = crate::platform::resolved_cli_command(&cli_path, working_dir);
+    cmd.args(args);
     cmd.stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
@@ -6409,6 +6412,42 @@ mod tests {
         assert_eq!(split_fast_model("gpt-5.4"), ("gpt-5.4", false));
         assert_eq!(split_fast_model("gpt-5.4-mini"), ("gpt-5.4-mini", false));
         assert_eq!(split_fast_model("o3"), ("o3", false));
+    }
+
+    #[test]
+    fn one_shot_codex_args_insert_user_flags_after_exec() {
+        let schema_file = std::path::Path::new("/tmp/jean-codex-schema.json");
+        let mut args = build_one_shot_codex_args("gpt-5.4", false, schema_file, None, None);
+        super::super::extra_args::splice_extra_os_args(
+            Some("--profile work -c 'web_search=\"live\"' --sandbox danger-full-access --model o3"),
+            &super::super::types::Backend::Codex,
+            &mut args,
+            1,
+        )
+        .unwrap();
+
+        let args: Vec<String> = args
+            .iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            &args[..6],
+            [
+                "exec",
+                "--profile",
+                "work",
+                "-c",
+                "web_search=\"live\"",
+                "--json"
+            ]
+        );
+        // Jean's sandbox and model stay the only values.
+        assert_eq!(args.iter().filter(|arg| *arg == "--sandbox").count(), 1);
+        assert_eq!(args.iter().filter(|arg| *arg == "--model").count(), 1);
+        assert!(!args
+            .iter()
+            .any(|arg| arg == "danger-full-access" || arg == "o3"));
+        assert_eq!(args.last().map(String::as_str), Some("-"));
     }
 
     #[test]

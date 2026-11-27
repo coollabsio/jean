@@ -443,17 +443,26 @@ fn ensure_running_inner(app: &AppHandle) -> Result<(), String> {
         ));
     }
 
+    // The server is shared and outlives single turns, so a changed value
+    // applies from the next server start.
+    let extra_args = super::extra_args::extra_args_for(
+        app,
+        &super::types::Backend::Codex,
+        &["app-server".to_string(), "--listen".to_string()],
+    )?;
+
     #[cfg(unix)]
     if !use_stdio_transport() {
         let sessions_to_resume = reconnect_sessions.clone();
-        let connected = ensure_running_socket(app, &cli_path, &mut guard, reconnect_sessions);
+        let connected =
+            ensure_running_socket(app, &cli_path, &extra_args, &mut guard, reconnect_sessions);
         drop(guard);
         let result = connected.and_then(|()| do_initialize());
         finish_session_recovery(&result, sessions_to_resume.as_ref());
         return result;
     }
 
-    let spawned = ensure_running_stdio(&cli_path, &mut guard);
+    let spawned = ensure_running_stdio(&cli_path, &extra_args, &mut guard);
     drop(guard);
     spawned.and_then(|()| do_initialize())
 }
@@ -935,6 +944,7 @@ fn try_adopt_existing_server(active_sessions: Option<ActiveSessions>) -> AdoptAt
 fn ensure_running_socket(
     app: &AppHandle,
     cli_path: &std::path::Path,
+    extra_args: &[String],
     guard: &mut std::sync::MutexGuard<'_, Option<CodexAppServerInner>>,
     active_sessions: Option<ActiveSessions>,
 ) -> Result<(), String> {
@@ -971,11 +981,10 @@ fn ensure_running_socket(
         socket_path.display()
     );
 
-    let args = vec![
-        "app-server".to_string(),
-        "--listen".to_string(),
-        format!("unix://{}", socket_path.display()),
-    ];
+    let mut args = vec!["app-server".to_string()];
+    args.extend_from_slice(extra_args);
+    args.push("--listen".to_string());
+    args.push(format!("unix://{}", socket_path.display()));
     let pid = super::detached::spawn_detached_process(cli_path, &args, &log_path, &app_data)?;
 
     write_pid_file(&ServerPidRecord {
@@ -1030,6 +1039,7 @@ fn ensure_running_socket(
 
 fn ensure_running_stdio(
     cli_path: &std::path::Path,
+    extra_args: &[String],
     guard: &mut std::sync::MutexGuard<'_, Option<CodexAppServerInner>>,
 ) -> Result<(), String> {
     log::info!(
@@ -1040,6 +1050,7 @@ fn ensure_running_stdio(
     let mut command = crate::platform::resolved_cli_command(cli_path, None);
     command
         .arg("app-server")
+        .args(extra_args)
         .arg("--listen")
         .arg("stdio://")
         .stdin(Stdio::piped())
@@ -2064,7 +2075,7 @@ mod tests {
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         let _ = APP_HANDLE.set(app.clone());
         let mut guard = CODEX_SERVER.lock().unwrap();
-        ensure_running_stdio(&script, &mut guard).unwrap();
+        ensure_running_stdio(&script, &[], &mut guard).unwrap();
     }
 
     #[cfg(unix)]

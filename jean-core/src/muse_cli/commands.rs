@@ -188,6 +188,7 @@ fn catalog_models(binary: PathBuf) -> Vec<MuseModelInfo> {
             model: None,
             developer_prompt: None,
             provider: None,
+            extra_args: &[],
         },
         &[],
     ) else {

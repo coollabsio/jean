@@ -528,6 +528,9 @@ pub fn execute_antigravity(
     {
         args.extend(["--effort".to_string(), effort.to_string()]);
     }
+    let extra =
+        super::extra_args::extra_args_for(options.app, &super::types::Backend::Antigravity, &args)?;
+    args.extend(extra);
 
     #[cfg(unix)]
     {
@@ -762,6 +765,7 @@ pub fn execute_one_shot_antigravity(
     if let Some(model) = antigravity_model(Some(model)) {
         command.args(["--model", model]);
     }
+    super::extra_args::apply_extra_args(app, &super::types::Backend::Antigravity, &mut command)?;
     let output = command
         .output()
         .map_err(|error| format!("Failed to run Antigravity one-shot request: {error}"))?;

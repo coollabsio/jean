@@ -303,6 +303,22 @@ pub(crate) struct ServeOptions<'a> {
     pub model: Option<&'a str>,
     pub developer_prompt: Option<&'a str>,
     pub provider: Option<&'a str>,
+    /// User flags, already filtered by `muse_serve_extra_args`.
+    pub extra_args: &'a [String],
+}
+
+/// The user's extra `muse serve` args, filtered against Jean's serve flags.
+fn muse_serve_extra_args(app: &AppHandle) -> Result<Vec<String>, String> {
+    let jean_args = [
+        "serve",
+        "--trust-workspace",
+        "--disable-request-user-input",
+        "--provider",
+        "--model",
+        "--disable-sandbox",
+    ]
+    .map(str::to_string);
+    super::extra_args::extra_args_for(app, &super::types::Backend::Muse, &jean_args)
 }
 
 /// Spawn `muse serve` with the flags the mode table prescribes.
@@ -339,6 +355,7 @@ pub(crate) fn spawn_serve(
             Value::String(prompt.to_string())
         ));
     }
+    command.args(options.extra_args);
     for (key, value) in env {
         command.env(key, value);
     }
@@ -1112,6 +1129,7 @@ pub(crate) struct MuseHostConfig {
     pub developer_prompt: Option<String>,
     pub mcp_servers: Option<Value>,
     pub provider: Option<String>,
+    pub extra_args: Vec<String>,
 }
 
 #[cfg(unix)]
@@ -1162,6 +1180,10 @@ fn spawn_muse_msp_host(
             args.push(name.to_string());
             args.push(value.to_string());
         }
+    }
+    for value in muse_serve_extra_args(options.app)? {
+        args.push("--muse-arg".to_string());
+        args.push(value);
     }
     let mcp_servers = options
         .mcp_servers
@@ -1230,6 +1252,7 @@ fn parse_muse_host_args(args: impl Iterator<Item = String>) -> Result<MuseHostCo
             "--model" => config.model = args.next(),
             "--execution-mode" => config.execution_mode = args.next(),
             "--effort" => config.effort = args.next(),
+            "--muse-arg" => config.extra_args.extend(args.next()),
             _ => {}
         }
     }
@@ -1294,6 +1317,7 @@ pub(crate) fn run_muse_msp_host(config: MuseHostConfig) -> Result<(), String> {
             model: config.model.as_deref(),
             developer_prompt: config.developer_prompt.as_deref(),
             provider: config.provider.as_deref(),
+            extra_args: &config.extra_args,
         },
         &env_refs,
     )?;
@@ -1649,6 +1673,7 @@ fn execute_muse_attached(
         ("JEAN_WORKTREE_ID", options.worktree_id),
     ];
     let provider = crate::muse_cli::provider_override();
+    let extra_args = muse_serve_extra_args(options.app)?;
     let (mut child, mut client) = spawn_serve(
         cli_path,
         &ServeOptions {
@@ -1657,6 +1682,7 @@ fn execute_muse_attached(
             model: options.model,
             developer_prompt: options.system_prompt,
             provider: provider.as_deref(),
+            extra_args: &extra_args,
         },
         &env,
     )?;
@@ -1804,6 +1830,7 @@ pub fn execute_one_shot_muse(
     if let Some(model) = muse_model(Some(model)) {
         command.args(["--model", model]);
     }
+    super::extra_args::apply_extra_args(app, &super::types::Backend::Muse, &mut command)?;
     // `--output-schema` is meta-provider only; the prompt wrapper covers the rest.
     let schema_file = match (json_schema, provider.is_none()) {
         (Some(schema), true) => {
@@ -2117,9 +2144,17 @@ mod tests {
             "muse/muse-spark-1.2",
             "--execution-mode",
             "build",
+            "--muse-arg",
+            "--socket",
+            "--muse-arg",
+            "-c",
+            "--muse-arg",
+            "run.x=1",
         ]
         .map(String::from);
         let config = parse_muse_host_args(argv.into_iter()).unwrap();
+        // User flags are values of `--muse-arg`, never host flags.
+        assert_eq!(config.extra_args, ["--socket", "-c", "run.x=1"]);
         assert_eq!(config.socket_path, PathBuf::from("/tmp/s.sock"));
         assert_eq!(config.output_file, PathBuf::from("/tmp/run.jsonl"));
         assert_eq!(config.cwd, PathBuf::from("/tmp/repo"));
