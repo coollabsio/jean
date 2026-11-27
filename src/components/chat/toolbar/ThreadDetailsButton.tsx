@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, type ComponentType } from 'react'
 import {
   CircleDot,
+  ExternalLink,
   ListSquare,
   FolderOpen,
   GitBranch,
+  GitMerge,
   GitPullRequest,
-  Github,
-  Heart,
   MessagesSquare,
   Plug,
   Sentry,
@@ -40,6 +40,8 @@ import { usePreferences } from '@/services/preferences'
 import { useWorktree } from '@/services/projects'
 import { useUIStore } from '@/store/ui-store'
 import type { McpServerInfo, UsageData } from '@/types/chat'
+import type { PrDisplayStatus } from '@/types/pr-status'
+import { getPrStatusDisplay } from './toolbar-utils'
 import { SessionTokenUsage } from './SessionTokenUsage'
 import type {
   AttachedSavedContext,
@@ -152,6 +154,10 @@ interface ThreadDetailsButtonProps {
   availableMcpServers: McpServerInfo[]
   enabledMcpServers: string[]
   onManageContexts: () => void
+  /** PR opened from or linked to this worktree. */
+  prUrl?: string
+  prNumber?: number
+  prDisplayStatus?: PrDisplayStatus
   /** Latest run's token breakdown (context size). */
   latestUsage?: UsageData | null
   /** Session-wide token totals across runs. */
@@ -173,7 +179,7 @@ function DiffCounts({ added, removed }: { added: number; removed: number }) {
 }
 
 /**
- * Title bar button + menu with the thread details: git state, session
+ * Title bar button + menu with the thread details: git state, linked PR, session
  * tokens, attached context, MCP servers, and backend usage. Replaces the chat burger menu.
  */
 export function ThreadDetailsButton({
@@ -182,6 +188,9 @@ export function ThreadDetailsButton({
   availableMcpServers,
   enabledMcpServers,
   onManageContexts,
+  prUrl,
+  prNumber,
+  prDisplayStatus,
   latestUsage,
   totalUsage,
   onOpen,
@@ -313,6 +322,34 @@ export function ThreadDetailsButton({
                 <DiffCounts added={branchAdded} removed={branchRemoved} />
               </DropdownMenuItem>
             )}
+            {prUrl && prNumber && (
+              <DropdownMenuItem onClick={() => openExternal(prUrl)}>
+                {prDisplayStatus === 'merged' ? (
+                  <GitMerge
+                    className={cn(
+                      'h-4 w-4 shrink-0',
+                      getPrStatusDisplay(prDisplayStatus).className
+                    )}
+                  />
+                ) : (
+                  <GitPullRequest
+                    className={cn(
+                      'h-4 w-4 shrink-0',
+                      prDisplayStatus
+                        ? getPrStatusDisplay(prDisplayStatus).className
+                        : 'text-muted-foreground'
+                    )}
+                  />
+                )}
+                <span className="truncate">PR #{prNumber}</span>
+                {prDisplayStatus && (
+                  <span className="text-xs text-muted-foreground">
+                    {getPrStatusDisplay(prDisplayStatus).label}
+                  </span>
+                )}
+                <ExternalLink className="ml-auto h-3.5 w-3.5 shrink-0 opacity-60" />
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
           </>
         )}
@@ -348,22 +385,6 @@ export function ThreadDetailsButton({
               {activeMcpServers.length}
             </DropdownMenuShortcut>
           </DropdownMenuItem>
-        )}
-        {isMobile && (
-          <>
-            <DropdownMenuItem
-              onClick={() => openExternal('https://github.com/coollabsio/jean')}
-            >
-              <Github className="h-4 w-4" />
-              Jean on GitHub
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => openExternal('https://jean.build/sponsorships/')}
-            >
-              <Heart className="h-4 w-4" />
-              Sponsor Jean
-            </DropdownMenuItem>
-          </>
         )}
 
         {usageEntries.length > 0 && (

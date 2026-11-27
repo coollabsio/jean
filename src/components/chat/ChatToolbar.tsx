@@ -465,6 +465,9 @@ export const ChatToolbar = memo(function ChatToolbar({
         createPortal(
           <ThreadDetailsButton
             worktreeId={worktreeId}
+            prUrl={prUrl}
+            prNumber={prNumber}
+            prDisplayStatus={displayStatus}
             latestUsage={sessionLatestUsage}
             totalUsage={sessionTotalUsage}
             contexts={buildThreadContextItems({

@@ -4,6 +4,7 @@ import type React from 'react'
 import { act } from '@testing-library/react'
 import { render, screen } from '@/test/test-utils'
 import { useUIStore } from '@/store/ui-store'
+import type * as PlatformModule from '@/lib/platform'
 import { ThreadDetailsButton } from './ThreadDetailsButton'
 
 const environment = vi.hoisted(() => ({
@@ -40,7 +41,14 @@ vi.mock('@/services/grok-cli', () => ({
   useGrokUsage: () => ({ data: undefined }),
 }))
 
+const platform = vi.hoisted(() => ({ openExternal: vi.fn() }))
+vi.mock('@/lib/platform', async importOriginal => ({
+  ...(await importOriginal<typeof PlatformModule>()),
+  openExternal: platform.openExternal,
+}))
+
 beforeEach(() => {
+  platform.openExternal.mockClear()
   environment.mobile = false
   environment.claudeReady = false
   environment.claudeUsage = undefined
@@ -116,6 +124,34 @@ describe('ThreadDetailsButton', () => {
       type: 'uncommitted',
     })
     window.removeEventListener('open-git-diff', onDiff)
+  })
+
+  it('shows the linked PR with its status and opens it on click', async () => {
+    const user = userEvent.setup()
+    renderDetails({
+      prUrl: 'https://github.com/o/r/pull/42',
+      prNumber: 42,
+      prDisplayStatus: 'merged',
+    })
+
+    await user.click(screen.getByRole('button', { name: /^details/i }))
+    const pr = screen.getByRole('menuitem', { name: /PR #42/ })
+    expect(pr).toHaveTextContent('Merged')
+
+    await user.click(pr)
+    expect(platform.openExternal).toHaveBeenCalledWith(
+      'https://github.com/o/r/pull/42'
+    )
+  })
+
+  it('hides the PR row when no PR is linked', async () => {
+    const user = userEvent.setup()
+    renderDetails()
+
+    await user.click(screen.getByRole('button', { name: /^details/i }))
+    expect(
+      screen.queryByRole('menuitem', { name: /PR #/ })
+    ).not.toBeInTheDocument()
   })
 
   it('shows the last turn context and session token totals', async () => {
@@ -208,7 +244,7 @@ describe('ThreadDetailsButton', () => {
     expect(await screen.findByText('Attach Context...')).toBeInTheDocument()
   })
 
-  it('hides MCP Servers on mobile and shows community links', async () => {
+  it('hides MCP Servers and community links on mobile', async () => {
     environment.mobile = true
     const user = userEvent.setup()
     renderDetails()
@@ -217,8 +253,8 @@ describe('ThreadDetailsButton', () => {
 
     expect(screen.queryByRole('menuitem', { name: /mcp servers/i })).toBeNull()
     expect(
-      screen.getByRole('menuitem', { name: /jean on github/i })
-    ).toBeInTheDocument()
+      screen.queryByRole('menuitem', { name: /jean on github|sponsor jean/i })
+    ).toBeNull()
   })
 
   it('counts enabled MCP servers without listing them, and opens their settings pane', async () => {
