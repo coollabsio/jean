@@ -1452,10 +1452,24 @@ export const SessionChatModal = memo(function SessionChatModal({
                               label={config.label}
                               className="h-1.5 w-1.5"
                             />
-                            {showTabShortcutHints && idx < 9 && (
-                              <kbd className="shrink-0 rounded border border-border/50 px-1 py-px text-2xs font-medium leading-none text-muted-foreground/70">
-                                {formatShortcutDisplay(`mod+${idx + 1}`)}
-                              </kbd>
+                            {/* Portaled hint below the tab, so the tab
+                                layout does not shift while mod is held. */}
+                            {idx < 9 && (
+                              <Tooltip open={showTabShortcutHints}>
+                                <TooltipTrigger asChild>
+                                  <span
+                                    aria-hidden="true"
+                                    className="pointer-events-none absolute inset-0"
+                                  />
+                                </TooltipTrigger>
+                                <TooltipContent
+                                  side="bottom"
+                                  hideWhenDetached
+                                  className="px-1.5 py-0.5 text-2xs font-medium tabular-nums"
+                                >
+                                  {formatShortcutDisplay(`mod+${idx + 1}`)}
+                                </TooltipContent>
+                              </Tooltip>
                             )}
                             {renamingSessionId === session.id ? (
                               renderRenameInput(session.id, 'md:text-xs')
