@@ -241,10 +241,7 @@ pub fn managed_cli_dir(app: &AppHandle) -> Result<PathBuf, String> {
 fn managed_bin_path(cli_dir: &Path) -> PathBuf {
     #[cfg(windows)]
     {
-        cli_dir
-            .join("node_modules")
-            .join(".bin")
-            .join("agent-browser.cmd")
+        windows_bin_path(cli_dir, cfg!(target_arch = "aarch64"))
     }
     #[cfg(not(windows))]
     {
@@ -253,6 +250,34 @@ fn managed_bin_path(cli_dir: &Path) -> PathBuf {
             .join(".bin")
             .join("agent-browser")
     }
+}
+
+/// On Windows npm's bin entry is a `.cmd` shim that starts Node, which then
+/// starts the native exe. MCP clients get the exe directly when the install
+/// has one, so no `cmd.exe` or Node runs. The search order matches the
+/// package's `scripts/native.js` (`nativeTarget().candidates`, then the
+/// platform package).
+#[cfg_attr(not(windows), allow(dead_code))]
+fn windows_bin_path(cli_dir: &Path, arm64: bool) -> PathBuf {
+    let modules = cli_dir.join("node_modules");
+    let package_bin = modules.join(NPM_PACKAGE).join("bin");
+    let mut candidates = Vec::with_capacity(4);
+    if arm64 {
+        candidates.push(package_bin.join("agent-browser-win32-arm64.exe"));
+    }
+    candidates.push(package_bin.join("agent-browser-win32-x64.exe"));
+    candidates.push(
+        modules
+            .join("@agent-browser")
+            .join("cli-win32-x64-msvc")
+            .join("bin")
+            .join("agent-browser.exe"),
+    );
+    // A zero-byte exe is a failed download, never a runnable binary.
+    candidates
+        .into_iter()
+        .find(|path| std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.len() > 0))
+        .unwrap_or_else(|| modules.join(".bin").join("agent-browser.cmd"))
 }
 
 /// Path to Jean-managed `agent-browser` if the npm install is present.
@@ -1428,6 +1453,47 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+
+    fn write_file(path: &Path, contents: &[u8]) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, contents).unwrap();
+    }
+
+    #[test]
+    fn windows_bin_path_prefers_native_exe_over_cmd_shim() {
+        let dir = TempDir::new().unwrap();
+        let modules = dir.path().join("node_modules");
+        let cmd = modules.join(".bin").join("agent-browser.cmd");
+        let package_bin = modules.join(NPM_PACKAGE).join("bin");
+        let x64 = package_bin.join("agent-browser-win32-x64.exe");
+        let arm64 = package_bin.join("agent-browser-win32-arm64.exe");
+        let platform = modules
+            .join("@agent-browser")
+            .join("cli-win32-x64-msvc")
+            .join("bin")
+            .join("agent-browser.exe");
+
+        // Only the shim: the fallback.
+        write_file(&cmd, b"@node agent-browser.js %*");
+        assert_eq!(windows_bin_path(dir.path(), false), cmd);
+
+        // A zero-byte exe is a failed download and is skipped.
+        write_file(&platform, b"");
+        assert_eq!(windows_bin_path(dir.path(), false), cmd);
+
+        write_file(&platform, b"MZ");
+        assert_eq!(windows_bin_path(dir.path(), false), platform);
+
+        write_file(&x64, b"MZ");
+        assert_eq!(windows_bin_path(dir.path(), false), x64);
+        // ARM64 uses the x64 exe through emulation when no ARM64 build exists.
+        assert_eq!(windows_bin_path(dir.path(), true), x64);
+
+        write_file(&arm64, b"MZ");
+        assert_eq!(windows_bin_path(dir.path(), true), arm64);
+        // An x64 host never picks the ARM64 build.
+        assert_eq!(windows_bin_path(dir.path(), false), x64);
+    }
 
     #[test]
     fn mcp_entry_uses_shared_restore_key_without_shared_profile() {
