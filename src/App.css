@@ -681,6 +681,26 @@ body:not(.native-app) kbd:not([data-web-visible]) {
   inset: 0;
   z-index: -1;
   background: rgb(0 0 0 / 0.5);
+  /* Same fade as the `SheetOverlay` of `BottomSheet`. */
+  animation: mobile-sheet-backdrop-in 150ms ease;
+}
+
+[data-radix-popper-content-wrapper]:has(
+    > [data-mobile-sheet][data-slot='dropdown-menu-content'][data-state='closed']
+  )::before {
+  animation: mobile-sheet-backdrop-out 150ms ease forwards;
+}
+
+@keyframes mobile-sheet-backdrop-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes mobile-sheet-backdrop-out {
+  to {
+    opacity: 0;
+  }
 }
 
 [data-mobile-sheet]
