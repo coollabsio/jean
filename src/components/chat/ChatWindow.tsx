@@ -55,7 +55,10 @@ import {
   chatQueryKeys,
   reconnectNativeCliSession,
   canReconnectSession,
+  useCloseSession,
+  useRestoreSession,
 } from '@/services/chat'
+import { closeSessionAfterRun } from '@/lib/close-session-after-run'
 import {
   useWorktree,
   useProjects,
@@ -1977,9 +1980,9 @@ const ChatWindowContent = memo(function ChatWindowContent({
 
   // Sends a magic prompt to this session with the selected backend/model/mode
   const sendMagicPrompt = useCallback(
-    (message: string) => {
+    (message: string): boolean => {
       if (routeCurrentSessionMagicPrompt(activeSessionId, message) !== 'chat') {
-        return
+        return false
       }
       sendMessageNow({
         id: generateId(),
@@ -2002,24 +2005,47 @@ const ChatWindowContent = memo(function ChatWindowContent({
         backend: selectedBackendRef.current,
         queuedAt: Date.now(),
       })
+      return true
     },
     [activeSessionId, getMcpConfig, sendMessageNow]
   )
 
-  const handleCommitInSession = useCallback(() => {
-    const closeIssueNumbers = preferences?.commit_close_issue
-      ? [
-          ...(worktree?.issue_number ? [worktree.issue_number] : []),
-          ...(loadedIssueContexts ?? []).map(ctx => ctx.number),
-        ]
-      : []
-    sendMagicPrompt(buildCommitInSessionPrompt(closeIssueNumbers))
-  }, [
-    loadedIssueContexts,
-    preferences?.commit_close_issue,
-    sendMagicPrompt,
-    worktree?.issue_number,
-  ])
+  const { mutate: closeSessionMutate } = useCloseSession()
+  const { mutate: restoreSessionMutate } = useRestoreSession()
+  const handleCommitInSession = useCallback(
+    (closeSession = false) => {
+      const closeIssueNumbers = preferences?.commit_close_issue
+        ? [
+            ...(worktree?.issue_number ? [worktree.issue_number] : []),
+            ...(loadedIssueContexts ?? []).map(ctx => ctx.number),
+          ]
+        : []
+      const sent = sendMagicPrompt(
+        buildCommitInSessionPrompt(closeIssueNumbers)
+      )
+      if (!sent || !closeSession) return
+      if (!activeSessionId || !activeWorktreeId || !activeWorktreePath) return
+      closeSessionAfterRun(
+        {
+          worktreeId: activeWorktreeId,
+          worktreePath: activeWorktreePath,
+          sessionId: activeSessionId,
+        },
+        { close: closeSessionMutate, restore: restoreSessionMutate }
+      )
+    },
+    [
+      activeSessionId,
+      activeWorktreeId,
+      activeWorktreePath,
+      closeSessionMutate,
+      restoreSessionMutate,
+      loadedIssueContexts,
+      preferences?.commit_close_issue,
+      sendMagicPrompt,
+      worktree?.issue_number,
+    ]
+  )
 
   const handleCommentAndCloseIssue = useCallback(() => {
     if (!loadedIssueContexts?.length) {

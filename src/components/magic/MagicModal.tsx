@@ -2065,7 +2065,11 @@ ${resolveInstructions}`
 
       // Dispatch magic command for ChatWindow to handle
       window.dispatchEvent(
-        new CustomEvent('magic-command', { detail: { command: option } })
+        new CustomEvent('magic-command', {
+          detail: options?.closeSession
+            ? { command: option, closeSession: true }
+            : { command: option },
+        })
       )
 
       setMagicModalOpen(false)
@@ -2256,8 +2260,7 @@ ${resolveInstructions}`
               ))}
               {canCloseAfter && (
                 <p className="px-1 text-xs text-muted-foreground">
-                  Long-press Commit or Commit &amp; Push to also close the
-                  session.
+                  Long-press a commit action to also close the session.
                 </p>
               )}
             </div>
@@ -2288,8 +2291,7 @@ ${resolveInstructions}`
           )}
           {!isMobile && canCloseAfter && (
             <p className="shrink-0 border-t border-border/60 px-4 py-2 text-xs text-muted-foreground">
-              Hold Shift with Commit or Commit &amp; Push to also close the
-              session.
+              Hold Shift with a commit action to also close the session.
             </p>
           )}
         </DialogContent>

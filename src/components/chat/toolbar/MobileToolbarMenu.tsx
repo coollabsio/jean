@@ -278,8 +278,7 @@ export function MobileToolbarMenu({
                 </section>
               ))}
               <p className="px-3 pt-3 text-xs text-muted-foreground">
-                Long-press Commit or Commit &amp; Push to also close the
-                session.
+                Long-press a commit action to also close the session.
               </p>
             </div>
           </SheetContent>

@@ -103,4 +103,5 @@ export function afterSuccessCloseOptions(
 export const CLOSE_AFTER_OPTIONS: ReadonlySet<string> = new Set([
   'commit',
   'commit-and-push',
+  'commit-in-session',
 ])
