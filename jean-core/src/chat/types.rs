@@ -4151,6 +4151,7 @@ mod tests {
             output_tokens: 10,
             cache_read_input_tokens: 50,
             cache_creation_input_tokens: 5,
+            cost_usd: None,
         });
         let mut second = finished_run(RunStatus::Completed, Some("b"), false);
         second.usage = Some(UsageData {
@@ -4158,6 +4159,7 @@ mod tests {
             output_tokens: 20,
             cache_read_input_tokens: 70,
             cache_creation_input_tokens: 7,
+            cost_usd: None,
         });
         metadata.runs.push(first);
         metadata.runs.push(second);

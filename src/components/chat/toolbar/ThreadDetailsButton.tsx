@@ -39,7 +39,8 @@ import { useGitStatus } from '@/services/git-status'
 import { usePreferences } from '@/services/preferences'
 import { useWorktree } from '@/services/projects'
 import { useUIStore } from '@/store/ui-store'
-import type { McpServerInfo } from '@/types/chat'
+import type { McpServerInfo, UsageData } from '@/types/chat'
+import { SessionTokenUsage } from './SessionTokenUsage'
 import type {
   AttachedSavedContext,
   LoadedAdvisoryContext,
@@ -151,6 +152,10 @@ interface ThreadDetailsButtonProps {
   availableMcpServers: McpServerInfo[]
   enabledMcpServers: string[]
   onManageContexts: () => void
+  /** Latest run's token breakdown (context size). */
+  latestUsage?: UsageData | null
+  /** Session-wide token totals across runs. */
+  totalUsage?: UsageData | null
   /** Called each time the menu opens (e.g. to refresh MCP health). */
   onOpen?: () => void
 }
@@ -168,8 +173,8 @@ function DiffCounts({ added, removed }: { added: number; removed: number }) {
 }
 
 /**
- * Title bar button + menu with the thread details: git state, attached
- * context, MCP servers, and backend usage. Replaces the chat burger menu.
+ * Title bar button + menu with the thread details: git state, session
+ * tokens, attached context, MCP servers, and backend usage. Replaces the chat burger menu.
  */
 export function ThreadDetailsButton({
   worktreeId,
@@ -177,6 +182,8 @@ export function ThreadDetailsButton({
   availableMcpServers,
   enabledMcpServers,
   onManageContexts,
+  latestUsage,
+  totalUsage,
   onOpen,
 }: ThreadDetailsButtonProps) {
   const isMobile = useIsMobile()
@@ -309,6 +316,8 @@ export function ThreadDetailsButton({
             <DropdownMenuSeparator />
           </>
         )}
+
+        <SessionTokenUsage latest={latestUsage} total={totalUsage} />
 
         {contexts.map(({ key, label, Icon, iconClassName, onSelect }) => (
           <DropdownMenuItem key={key} onClick={onSelect}>

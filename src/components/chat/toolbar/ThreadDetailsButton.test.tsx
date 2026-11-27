@@ -118,6 +118,47 @@ describe('ThreadDetailsButton', () => {
     window.removeEventListener('open-git-diff', onDiff)
   })
 
+  it('shows the last turn context and session token totals', async () => {
+    const user = userEvent.setup()
+    const usage = {
+      input_tokens: 12_000,
+      output_tokens: 3_000,
+      cache_read_input_tokens: 150_000,
+      cache_creation_input_tokens: 18_000,
+    }
+    renderDetails({
+      latestUsage: usage,
+      totalUsage: { ...usage, input_tokens: 40_000, output_tokens: 9_000 },
+    })
+
+    await user.click(screen.getByRole('button', { name: /^details/i }))
+
+    const tokens = screen.getByTestId('thread-details-tokens')
+    // Context = input + cache read + cache write of the last turn
+    expect(tokens).toHaveTextContent('Context (last turn)180.0k')
+    expect(tokens).toHaveTextContent('Session40.0k in · 9.0k out')
+    expect(tokens).toHaveTextContent('Cache150.0k read · 18.0k write')
+  })
+
+  it('hides token usage until a run reports context tokens', async () => {
+    const user = userEvent.setup()
+    renderDetails({
+      latestUsage: {
+        input_tokens: 0,
+        output_tokens: 12,
+        cache_read_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+      },
+    })
+
+    await user.click(screen.getByRole('button', { name: /^details/i }))
+
+    expect(screen.getByText('feature-x')).toBeInTheDocument()
+    expect(
+      screen.queryByTestId('thread-details-tokens')
+    ).not.toBeInTheDocument()
+  })
+
   it('marks the button with a dot only while there are uncommitted changes', () => {
     const { unmount } = renderDetails()
     expect(

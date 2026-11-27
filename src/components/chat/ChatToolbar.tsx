@@ -43,7 +43,6 @@ import {
 } from '@/components/titlebar/breadcrumb-slot'
 import { ExecutionModeDropdown } from '@/components/chat/toolbar/ExecutionModeDropdown'
 import { SendCancelButton } from '@/components/chat/toolbar/SendCancelButton'
-import { SessionUsageChip } from '@/components/chat/SessionUsageChip'
 import { ContextViewerDialog } from '@/components/chat/toolbar/ContextViewerDialog'
 import { RevertLastCommitDialog } from '@/components/shared/RevertLastCommitDialog'
 import {
@@ -466,6 +465,8 @@ export const ChatToolbar = memo(function ChatToolbar({
         createPortal(
           <ThreadDetailsButton
             worktreeId={worktreeId}
+            latestUsage={sessionLatestUsage}
+            totalUsage={sessionTotalUsage}
             contexts={buildThreadContextItems({
               issues: loadedIssueContexts,
               prs: loadedPRContexts,
@@ -679,11 +680,7 @@ export const ChatToolbar = memo(function ChatToolbar({
             />
           </div>
 
-          <div className="ml-auto flex shrink-0 items-center gap-2 py-1 pl-2">
-            <SessionUsageChip
-              latest={sessionLatestUsage}
-              total={sessionTotalUsage}
-            />
+          <div className="ml-auto shrink-0 py-1 pl-2">
             <SendCancelButton
               isSending={isSending}
               canSend={canSend}
