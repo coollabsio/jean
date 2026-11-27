@@ -6,6 +6,7 @@ export const CLIENT_PREFERENCE_KEYS = [
   'terminal_renderer',
   'terminal_font',
   'terminal_font_size',
+  'terminal_font_custom',
   'editor',
   'open_in',
   'ui_font_size',

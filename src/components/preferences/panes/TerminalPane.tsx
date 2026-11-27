@@ -1,4 +1,5 @@
 import React from 'react'
+import { Input } from '@/components/ui/input'
 import {
   Select,
   SelectContent,
@@ -71,6 +72,36 @@ export const TerminalPane: React.FC = () => {
             </SelectContent>
           </Select>
         </InlineField>
+
+        {(preferences?.terminal_font ?? 'jetbrains-mono') === 'custom' && (
+          <InlineField
+            label="Custom font family"
+            description={
+              'A CSS font-family value, e.g. "Fira Code Nerd Font", monospace'
+            }
+            help="The font must be installed on this machine."
+          >
+            <Input
+              // Remount when the saved value changes elsewhere (another window).
+              key={preferences?.terminal_font_custom ?? ''}
+              aria-label="Custom terminal font family"
+              defaultValue={preferences?.terminal_font_custom ?? ''}
+              placeholder='"Fira Code Nerd Font", monospace'
+              className="w-full sm:w-80 font-mono text-sm"
+              onBlur={event => {
+                const value = event.target.value.trim()
+                if (value !== (preferences?.terminal_font_custom ?? '')) {
+                  patchPreferences.mutate({
+                    terminal_font_custom: value || null,
+                  })
+                }
+              }}
+              onKeyDown={event => {
+                if (event.key === 'Enter') event.currentTarget.blur()
+              }}
+            />
+          </InlineField>
+        )}
 
         <InlineField
           label="Terminal font size"
