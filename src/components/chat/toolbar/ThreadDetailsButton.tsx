@@ -2,12 +2,12 @@ import { useEffect, useRef, useState, type ComponentType } from 'react'
 import {
   CircleDot,
   ExternalLink,
-  ListSquare,
   FolderOpen,
   GitBranch,
   GitMerge,
   GitPullRequest,
   MessagesSquare,
+  PanelDown,
   Plug,
   Sentry,
   Shield,
@@ -278,7 +278,7 @@ export function ThreadDetailsButton({
                 open && 'bg-muted/50 text-foreground'
               )}
             >
-              <ListSquare className="size-3.5" />
+              <PanelDown className="size-3.5" />
               {hasUncommitted && (
                 <span
                   data-testid="thread-details-uncommitted-dot"
