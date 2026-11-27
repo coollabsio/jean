@@ -5,6 +5,7 @@ export interface ServerPreferencesEnvelope {
   revision: string
   preferences: Partial<AppPreferences> & {
     linear_api_key_configured?: boolean
+    plane_api_key_configured?: boolean
     sentry_auth_token_configured?: boolean
     http_server_token_configured?: boolean
   }

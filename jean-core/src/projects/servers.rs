@@ -211,6 +211,7 @@ async fn create_server_project(
         worktrees_dir: None,
         linear_api_key: None,
         linear_team_id: None,
+        plane: None,
         sentry_auth_token: None,
         sentry_organization_slug: None,
         sentry_project_slug: None,

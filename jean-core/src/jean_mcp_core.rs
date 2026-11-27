@@ -232,7 +232,7 @@ fn tool_registry_core() -> Value {
         {"name":"list_security_issues","description":"List Dependabot security alerts for a project using the same backend command as the UI. Pass projectId; the server resolves the repo path.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"},"state":{"type":"string","enum":["open","dismissed","fixed","auto_dismissed","all"],"default":"open"}},"required":["projectId"],"additionalProperties":false}},
         {"name":"list_security_advisories","description":"List repository security advisories for a project using the same backend command as the UI. Pass projectId; the server resolves the repo path.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"},"state":{"type":"string","enum":["draft","published","triage","closed","all"],"default":"all"}},"required":["projectId"],"additionalProperties":false}},
         {"name":"list_linear_issues","description":"List Linear issues for a project using the same backend command as the UI. Pass projectId; Linear API config is resolved from project/global settings.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"}},"required":["projectId"],"additionalProperties":false}},
-        {"name":"create_worktree","description":"Create a new worktree for a project. Provide issueNumber or prNumber for a GitHub issue/PR, linearIssueIdentifier (e.g. \"PLA-215\") for a Linear issue, or ghsaId (e.g. \"GHSA-xxxx-xxxx-xxxx\") for a repository security advisory; these are mutually exclusive. Jean fetches the chosen context and attaches it to the worktree, reusing the same branch naming and context-loading as the Jean UI. Pass action=\"start_autoinvestigating\" to create a session and start investigating (and magic-fix when the Magic Prompts execution mode is yolo, shown as Full access in the UI) the issue/PR/Linear issue/security advisory with the Magic Prompts settings default backend/model. This never switches/opens Jean's UI unless the user opens the worktree separately.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"},"baseBranch":{"type":"string"},"customName":{"type":"string"},"issueNumber":{"type":"integer","minimum":1},"prNumber":{"type":"integer","minimum":1},"linearIssueIdentifier":{"type":"string","description":"Linear issue identifier like \"PLA-215\". Mutually exclusive with issueNumber/prNumber/ghsaId."},"ghsaId":{"type":"string","description":"Repository security advisory GHSA id like \"GHSA-xxxx-xxxx-xxxx\". Mutually exclusive with issueNumber/prNumber/linearIssueIdentifier."},"action":{"type":"string","enum":["start_autoinvestigating"]}},"required":["projectId"],"additionalProperties":false}},
+        {"name":"create_worktree","description":"Create a new worktree for a project. Provide issueNumber or prNumber for a GitHub issue/PR, linearIssueIdentifier (e.g. \"PLA-215\") for a Linear issue, planeWorkItemIdentifier (e.g. \"PROJ-12\") for a Plane work item, or ghsaId (e.g. \"GHSA-xxxx-xxxx-xxxx\") for a repository security advisory; these are mutually exclusive. Jean fetches the chosen context and attaches it to the worktree, reusing the same branch naming and context-loading as the Jean UI. Pass action=\"start_autoinvestigating\" to create a session and start investigating (and magic-fix when the Magic Prompts execution mode is yolo, shown as Full access in the UI) the issue/PR/Linear issue/security advisory with the Magic Prompts settings default backend/model. This never switches/opens Jean's UI unless the user opens the worktree separately.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"},"baseBranch":{"type":"string"},"customName":{"type":"string"},"issueNumber":{"type":"integer","minimum":1},"prNumber":{"type":"integer","minimum":1},"linearIssueIdentifier":{"type":"string","description":"Linear issue identifier like \"PLA-215\". Mutually exclusive with issueNumber/prNumber/ghsaId."},"planeWorkItemIdentifier":{"type":"string","description":"Plane work item identifier like \"PROJ-12\". Mutually exclusive with the other context inputs. Not supported with action=start_autoinvestigating."},"ghsaId":{"type":"string","description":"Repository security advisory GHSA id like \"GHSA-xxxx-xxxx-xxxx\". Mutually exclusive with issueNumber/prNumber/linearIssueIdentifier."},"action":{"type":"string","enum":["start_autoinvestigating"]}},"required":["projectId"],"additionalProperties":false}},
         {"name":"create_worktree_from_existing_branch","description":"Create a Jean worktree from an existing local or remote-tracking branch (branch name is used as the worktree name). Does not open Jean's UI. Prefer create_worktree for new branches; use this when the branch already exists.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"},"branchName":{"type":"string","description":"Existing branch name to check out into a new worktree path."}},"required":["projectId","branchName"],"additionalProperties":false}},
         {"name":"import_worktree","description":"Import an existing git worktree/directory on disk into a Jean project. Path must already exist and be a git worktree or repo. Does not create a new git worktree.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"},"path":{"type":"string","description":"Absolute path to an existing git worktree directory."}},"required":["projectId","path"],"additionalProperties":false}},
         {"name":"rename_worktree","description":"Rename a worktree's display name in Jean (does not rename the git branch or folder).","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"newName":{"type":"string","description":"New display name. Must be unique within the project."}},"required":["worktreeId","newName"],"additionalProperties":false}},
@@ -606,11 +606,26 @@ async fn run_tool(
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .map(str::to_string);
+            let plane_identifier = args
+                .get("planeWorkItemIdentifier")
+                .or_else(|| args.get("plane_work_item_identifier"))
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
             validate_create_worktree_inputs(
                 issue_number.is_some(),
                 pr_number.is_some(),
                 linear_identifier.is_some(),
                 ghsa_id.is_some(),
+                action,
+            )?;
+            validate_plane_create_worktree_input(
+                plane_identifier.is_some(),
+                issue_number.is_some()
+                    || pr_number.is_some()
+                    || linear_identifier.is_some()
+                    || ghsa_id.is_some(),
                 action,
             )?;
 
@@ -762,6 +777,32 @@ async fn run_tool(
                         "comments": detail.get("comments").cloned().unwrap_or(json!([])),
                     }),
                 );
+            }
+            if let Some(ref identifier) = plane_identifier {
+                let detail = dispatch_command(
+                    app,
+                    "get_plane_work_item",
+                    json!({ "projectId": project_id.as_str(), "identifier": identifier }),
+                )
+                .await
+                .map_err(ToolError::internal)?;
+                if !has_custom_name {
+                    let resolved_identifier = detail
+                        .get("identifier")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(identifier);
+                    let title = detail.get("title").and_then(|v| v.as_str()).unwrap_or("");
+                    let plane_branch = crate::projects::generate_branch_name_from_plane_work_item(
+                        resolved_identifier,
+                        title,
+                    );
+                    let resolved_name =
+                        resolve_non_conflicting_worktree_name(app, &project_id, &plane_branch)?;
+                    if resolved_name != plane_branch {
+                        payload.insert("customName".to_string(), Value::String(resolved_name));
+                    }
+                }
+                payload.insert("planeContext".to_string(), detail);
             }
             if let Some(ref ghsa_id) = ghsa_id {
                 let project_path = project_path.clone().ok_or_else(|| {
@@ -2165,6 +2206,29 @@ fn validate_create_worktree_inputs(
     {
         return Err(ToolError::invalid_params(
             "action=start_autoinvestigating requires issueNumber, prNumber, linearIssueIdentifier, or ghsaId",
+        ));
+    }
+    Ok(())
+}
+
+/// `planeWorkItemIdentifier` excludes the other context inputs, and Plane has
+/// no investigation prompt, so it cannot start autoinvestigation.
+fn validate_plane_create_worktree_input(
+    has_plane: bool,
+    has_other_context: bool,
+    action: Option<&str>,
+) -> Result<(), ToolError> {
+    if !has_plane {
+        return Ok(());
+    }
+    if has_other_context {
+        return Err(ToolError::invalid_params(
+            "Pass planeWorkItemIdentifier alone, not with issueNumber, prNumber, linearIssueIdentifier, or ghsaId",
+        ));
+    }
+    if action == Some("start_autoinvestigating") {
+        return Err(ToolError::invalid_params(
+            "action=start_autoinvestigating is not supported for Plane work items",
         ));
     }
     Ok(())
@@ -3951,6 +4015,31 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"F
                 || description.contains("security advisories"),
             "create_worktree description must mention security advisories"
         );
+    }
+
+    #[test]
+    fn create_worktree_schema_exposes_plane_identifier() {
+        let tools = tool_registry();
+        let create_worktree = find_tool(&tools, "create_worktree");
+        assert_eq!(
+            create_worktree["inputSchema"]["properties"]["planeWorkItemIdentifier"]["type"],
+            "string"
+        );
+    }
+
+    #[test]
+    fn validate_plane_input_rejects_mixed_context_and_autoinvestigate() {
+        assert!(
+            validate_plane_create_worktree_input(false, true, Some("start_autoinvestigating"))
+                .is_ok()
+        );
+        assert!(validate_plane_create_worktree_input(true, false, None).is_ok());
+        let err = validate_plane_create_worktree_input(true, true, None).unwrap_err();
+        assert!(err.message.contains("planeWorkItemIdentifier"));
+        let err =
+            validate_plane_create_worktree_input(true, false, Some("start_autoinvestigating"))
+                .unwrap_err();
+        assert!(err.message.contains("not supported"));
     }
 
     #[test]

@@ -25,6 +25,7 @@ import {
 } from '@/services/sentry'
 import type { SentryProjectLink } from '@/types/projects'
 import { overrideHint } from './override-hint'
+import { PlaneProjectSection } from './PlaneProjectSection'
 
 function assignedSentryProjects(project: {
   sentry_projects?: SentryProjectLink[]
@@ -331,6 +332,8 @@ export function IntegrationsPane({ projectId }: { projectId: string }) {
           </InlineField>
         )}
       </SettingsSection>
+
+      <PlaneProjectSection projectId={projectId} />
 
       <SettingsSection title="Sentry Integration">
         <InlineField

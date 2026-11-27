@@ -154,6 +154,8 @@ export interface Project {
   linear_api_key?: string | null
   /** Linear team ID to filter issues (undefined/null = show all teams) */
   linear_team_id?: string | null
+  /** Plane settings for this project; empty values fall back to global settings */
+  plane?: PlaneProjectSettings | null
   /** Sentry auth token override for this project */
   sentry_auth_token?: string | null
   /** Sentry organization slug */
@@ -760,4 +762,14 @@ export interface MergeConflictsResponse {
   conflicts: string[]
   /** Diff showing conflict markers */
   conflict_diff: string
+}
+
+/** Per-project Plane settings (snake_case, persisted) */
+export interface PlaneProjectSettings {
+  api_key?: string | null
+  workspace_slug?: string | null
+  /** API base URL; empty = Plane Cloud (https://api.plane.so) */
+  base_url?: string | null
+  /** Plane project UUID to filter work items; empty = all projects */
+  project_id?: string | null
 }

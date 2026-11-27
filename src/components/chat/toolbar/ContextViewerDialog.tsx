@@ -18,6 +18,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Markdown } from '@/components/ui/markdown'
 import { MessageThreadContextMenu } from '../message-thread-context-menu'
 import { LinearIcon } from '@/components/icons/LinearIcon'
+import { PlaneIcon } from '@/components/icons/PlaneIcon'
 import { useUIStore } from '@/store/ui-store'
 import { useIsMobile } from '@/hooks/use-mobile'
 import type { ViewingContext } from '@/components/chat/toolbar/types'
@@ -85,6 +86,9 @@ export function ContextViewerDialog({
               )}
               {viewingContext.type === 'linear' && (
                 <LinearIcon className="h-4 w-4 text-violet-600 dark:text-violet-400" />
+              )}
+              {viewingContext.type === 'plane' && (
+                <PlaneIcon className="h-4 w-4 text-sky-600 dark:text-sky-400" />
               )}
               {viewingContext.type === 'sentry' && (
                 <Sentry className="h-4 w-4 text-warning" />

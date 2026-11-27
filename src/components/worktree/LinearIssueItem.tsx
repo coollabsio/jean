@@ -13,6 +13,8 @@ import type { ContextLinkMatch } from '@/hooks/useContextLinkUsage'
 
 export interface LinearIssueItemProps {
   issue: LinearIssue
+  /** Issue tracker name for labels (default: Linear) */
+  providerLabel?: string
   index: number
   isSelected: boolean
   isCreating: boolean
@@ -37,6 +39,7 @@ function isNewIssue(createdAt: string): boolean {
 
 export function LinearIssueItem({
   issue,
+  providerLabel = 'Linear',
   index,
   isSelected,
   isCreating,
@@ -65,7 +68,7 @@ export function LinearIssueItem({
         <ItemSelectCheckbox
           checked={isChecked}
           disabled={isCreating}
-          ariaLabel={`Select Linear issue ${issue.identifier}`}
+          ariaLabel={`Select ${providerLabel} issue ${issue.identifier}`}
           onCheckedChange={onCheckedChange}
         />
       )}

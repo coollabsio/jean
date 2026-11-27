@@ -8,6 +8,7 @@ import {
   MessagesSquare,
 } from '@/components/icons/reicon'
 import { LinearIcon } from '@/components/icons/LinearIcon'
+import { PlaneIcon } from '@/components/icons/PlaneIcon'
 import type { LucideIcon } from '@/components/icons/reicon'
 
 export type TabId =
@@ -17,6 +18,7 @@ export type TabId =
   | 'security'
   | 'branches'
   | 'linear'
+  | 'plane'
   | 'sentry'
   | 'discussions'
 
@@ -37,6 +39,7 @@ export const TABS: Tab[] = [
   { id: 'branches', label: 'Branches', key: '6', icon: GitBranch },
   { id: 'linear', label: 'Linear', key: '7', icon: LinearIcon },
   { id: 'sentry', label: 'Sentry', key: '8', icon: Sentry },
+  { id: 'plane', label: 'Plane', key: '9', icon: PlaneIcon },
 ]
 
 /** Tabs that only exist for GitHub projects (hidden for GitLab). */

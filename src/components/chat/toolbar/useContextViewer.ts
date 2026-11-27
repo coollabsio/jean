@@ -10,6 +10,7 @@ import type {
   LoadedDiscussionContext,
 } from '@/types/github'
 import type { LoadedLinearIssueContext } from '@/types/linear'
+import type { LoadedPlaneWorkItemContext } from '@/types/plane'
 import type { SentryIssueContext } from '@/types/sentry'
 import {
   getIssueContextContent,
@@ -201,6 +202,32 @@ export function useContextViewer({
     [activeSessionId, worktreeId, projectId]
   )
 
+  const handleViewPlane = useCallback(
+    async (ctx: LoadedPlaneWorkItemContext) => {
+      if (!activeSessionId || !projectId) return
+      try {
+        const contents = await invoke<LinearIssueContextContent[]>(
+          'get_plane_work_item_context_contents',
+          {
+            sessionId: activeSessionId,
+            worktreeId: worktreeId ?? undefined,
+            projectId,
+          }
+        )
+        const match = contents.find(c => c.identifier === ctx.identifier)
+        setViewingContext({
+          type: 'plane',
+          identifier: ctx.identifier,
+          title: `${ctx.identifier}: ${ctx.title}`,
+          content: match?.content ?? '',
+        })
+      } catch (error) {
+        toast.error(`Failed to load context: ${error}`)
+      }
+    },
+    [activeSessionId, worktreeId, projectId]
+  )
+
   const handleViewSentry = useCallback((ctx: SentryIssueContext) => {
     setViewingContext({
       type: 'sentry',
@@ -219,6 +246,7 @@ export function useContextViewer({
     handleViewSecurityAlert,
     handleViewAdvisory,
     handleViewLinear,
+    handleViewPlane,
     handleViewSentry,
   }
 }
