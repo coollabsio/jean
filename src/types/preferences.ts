@@ -1335,7 +1335,7 @@ export interface AppPreferences {
   terminal: TerminalApp // Terminal app: 'terminal' | 'warp' | 'ghostty' | 'kitty' | 'iterm2' | 'powershell' | 'windows-terminal'
   terminal_renderer?: TerminalRenderer // Embedded terminal renderer: 'xterm' or 'ghostty-web' (experimental)
   terminal_font?: TerminalFont // Embedded terminal font
-  terminal_font_custom?: string // Font family used when terminal_font is 'custom'
+  terminal_font_custom?: string | null // Font family used when terminal_font is 'custom'
   terminal_font_size?: number // Embedded terminal font size in pixels
   editor: EditorApp // Editor app: 'zed' | 'vscode' | 'vscodium' | 'cursor' | 'xcode' | 'intellij'
   open_in: OpenInDefault // Default Open In action: 'editor' | 'terminal' | 'finder' | 'github'
@@ -2779,7 +2779,7 @@ export const defaultPreferences: AppPreferences = {
   terminal: isServerWindows() ? 'powershell' : 'terminal',
   terminal_renderer: 'xterm',
   terminal_font: 'jetbrains-mono',
-  terminal_font_custom: '',
+  terminal_font_custom: null,
   terminal_font_size: 13,
   editor: 'zed',
   open_in: 'editor',

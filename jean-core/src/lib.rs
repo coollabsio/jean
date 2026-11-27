@@ -197,7 +197,7 @@ pub struct AppPreferences {
     pub terminal_font: String, // Embedded terminal font: jetbrains-mono, fira-code, source-code-pro, sf-mono, system
     #[serde(default = "default_terminal_font_size")]
     pub terminal_font_size: u32, // Embedded terminal font size in pixels (10-24)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub terminal_font_custom: Option<String>, // Font family when terminal_font is "custom"
     #[serde(default = "default_editor")]
     pub editor: String, // Editor app: zed, vscode, vscodium, cursor, xcode, intellij
@@ -4363,6 +4363,7 @@ const CLIENT_ONLY_PREFERENCE_KEYS: &[&str] = &[
     "terminal_renderer",
     "terminal_font",
     "terminal_font_size",
+    "terminal_font_custom",
     "editor",
     "open_in",
     "ui_font_size",

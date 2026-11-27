@@ -150,6 +150,19 @@ describe('client-preferences', () => {
     })
   })
 
+  it('keeps the custom terminal font with the terminal font choice', () => {
+    const [client, server] = splitClientPreferencePatch({
+      terminal_font: 'custom',
+      terminal_font_custom: '"Fira Code Nerd Font", monospace',
+    })
+
+    expect(client).toEqual({
+      terminal_font: 'custom',
+      terminal_font_custom: '"Fira Code Nerd Font", monospace',
+    })
+    expect(server).toEqual({})
+  })
+
   it('keeps the browser preview hostname on the server', () => {
     const [client, server] = splitClientPreferencePatch({
       theme: 'dark',
