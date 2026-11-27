@@ -836,6 +836,32 @@ export function createSessionCardDataCache(): (
   }
 }
 
+/**
+ * Cursor CLI resume args: `--resume <id>` when the chat id is known. A Cursor
+ * terminal session without a captured id uses `--continue` (latest chat)
+ * instead of starting a new chat. Persisted flags such as `--yolo` are kept.
+ */
+function getCursorResumeArgs(session: Session): string[] | null {
+  if (session.backend !== 'cursor') return null
+  const chatId = session.cursor_chat_id
+  if (!chatId && session.primary_surface !== 'terminal') return null
+  const persisted = session.terminal_command_args ?? []
+  const flags: string[] = []
+  for (let index = 0; index < persisted.length; index += 1) {
+    const arg = persisted[index]
+    if (!arg) continue
+    if (arg === '--resume') {
+      if (persisted[index + 1] && !persisted[index + 1]?.startsWith('-')) {
+        index += 1
+      }
+      continue
+    }
+    if (arg === '--continue' || arg.startsWith('--resume=')) continue
+    flags.push(arg)
+  }
+  return chatId ? [...flags, '--resume', chatId] : [...flags, '--continue']
+}
+
 export function getResumeCommand(session: Session): string | null {
   if (session.backend === 'claude' && session.claude_session_id) {
     return `claude --resume ${session.claude_session_id}`
@@ -846,8 +872,9 @@ export function getResumeCommand(session: Session): string | null {
   if (session.backend === 'opencode' && session.opencode_session_id) {
     return `opencode -s ${session.opencode_session_id}`
   }
-  if (session.backend === 'cursor' && session.cursor_chat_id) {
-    return `cursor-agent --resume ${session.cursor_chat_id}`
+  const cursorArgs = getCursorResumeArgs(session)
+  if (cursorArgs) {
+    return ['cursor-agent', ...cursorArgs].join(' ')
   }
   if (session.backend === 'pi' && session.pi_session_id) {
     return `pi --session ${session.pi_session_id}`
@@ -918,10 +945,11 @@ export function getResumeArgs(
       ),
     }
   }
-  if (session.backend === 'cursor' && session.cursor_chat_id) {
+  const cursorArgs = getCursorResumeArgs(session)
+  if (cursorArgs) {
     return {
       command: preferResolvedCliCommand(cmd, 'cursor-agent', resolved),
-      args: ['--resume', session.cursor_chat_id],
+      args: cursorArgs,
     }
   }
   if (session.backend === 'pi' && session.pi_session_id) {

@@ -36,6 +36,7 @@ import {
   getBackendIcon,
   getBackendPlainLabel,
 } from '@/components/ui/backend-label'
+import { getResumeArgs } from '@/components/chat/session-card-utils'
 import type { Session } from '@/types/chat'
 import type { CliBackend } from '@/types/preferences'
 import {
@@ -348,7 +349,9 @@ export function NativeCliSessionsModal({
           const launchMode = options?.launchMode ?? 'resume'
           const resumeLaunch =
             launchMode === 'resume'
-              ? getNativeTerminalResumeLaunch(session)
+              ? session.backend === 'cursor'
+                ? getResumeArgs(session)
+                : getNativeTerminalResumeLaunch(session)
               : null
           if (
             launchMode === 'resume' &&
@@ -455,7 +458,10 @@ export function NativeCliSessionsModal({
             },
             {
               launchMode: 'new',
-              trackNativeId: backend === 'codex' || backend === 'opencode',
+              trackNativeId:
+                backend === 'codex' ||
+                backend === 'opencode' ||
+                backend === 'cursor',
             }
           )
         },
@@ -527,6 +533,10 @@ export function NativeCliSessionsModal({
                   backend === 'opencode'
                     ? nativeSession.id
                     : session.opencode_session_id,
+                cursor_chat_id:
+                  backend === 'cursor'
+                    ? nativeSession.id
+                    : session.cursor_chat_id,
                 pi_session_id:
                   backend === 'pi' ? nativeSession.id : session.pi_session_id,
               },
