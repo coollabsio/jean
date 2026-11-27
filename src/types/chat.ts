@@ -107,16 +107,14 @@ export function getSupportedPermissionModes(
 export function getSupportedExecutionModes(
   backend: Backend | undefined
 ): ExecutionMode[] {
-  // Retain legacy Build for existing sessions, except Cursor, which never supported it.
-  return backend === 'cursor'
-    ? ['plan', 'yolo']
-    : [
-        ...new Set<ExecutionMode>([
-          'plan',
-          'build',
-          ...getSupportedPermissionModes(backend),
-        ]),
-      ]
+  // Build is the sandboxed implement mode; Cursor maps it to `--sandbox enabled`.
+  return [
+    ...new Set<ExecutionMode>([
+      'plan',
+      'build',
+      ...getSupportedPermissionModes(backend),
+    ]),
+  ]
 }
 
 export function isExecutionModeSupported(

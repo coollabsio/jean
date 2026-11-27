@@ -625,8 +625,8 @@ fn default_execution_mode_for_worktree(
 ///
 /// Uses the worktree or preference default when that backend supports it.
 /// Plan is opt-in, so a saved Plan default and any unsupported policy fall
-/// through to Build, then Full access. Cursor has no Build mode, so that
-/// fallback is Full access rather than Plan.
+/// through to Build, then Full access. Cursor Build needs the Cursor sandbox,
+/// so native Windows without WSL falls through to Full access, never to Plan.
 pub(crate) fn default_execution_policy(
     app: &AppHandle,
     worktree_id: &str,
@@ -711,7 +711,7 @@ fn resolve_send_reasoning(
 fn validate_execution_policy(mode: &str, backend: &Backend) -> Result<(), String> {
     let supported = match mode {
         "plan" | "yolo" => true,
-        "build" => *backend != Backend::Cursor,
+        "build" => *backend != Backend::Cursor || super::cursor::cursor_build_available(),
         "supervised" => matches!(
             backend,
             Backend::Claude | Backend::Codex | Backend::Opencode | Backend::Grok | Backend::Kimi
@@ -11896,7 +11896,10 @@ mod tests {
                 )
             );
         }
-        assert!(validate_execution_policy("build", &Backend::Cursor).is_err());
+        assert_eq!(
+            validate_execution_policy("build", &Backend::Cursor).is_ok(),
+            crate::chat::cursor::cursor_build_available()
+        );
     }
 
     #[test]
@@ -11914,19 +11917,28 @@ mod tests {
             implement_execution_policy("plan", &Backend::Claude),
             "build"
         );
-        assert_eq!(implement_execution_policy("plan", &Backend::Cursor), "yolo");
-        assert_eq!(
-            implement_execution_policy("build", &Backend::Cursor),
+        let cursor_implement = if crate::chat::cursor::cursor_build_available() {
+            "build"
+        } else {
             "yolo"
+        };
+        assert_eq!(
+            implement_execution_policy("plan", &Backend::Cursor),
+            cursor_implement
         );
         assert_eq!(
+            implement_execution_policy("build", &Backend::Cursor),
+            cursor_implement
+        );
+        assert_eq!(implement_execution_policy("yolo", &Backend::Cursor), "yolo");
+        assert_eq!(
             implement_execution_policy("supervised", &Backend::Cursor),
-            "yolo"
+            cursor_implement
         );
         assert_eq!(implement_execution_policy("unknown", &Backend::Pi), "build");
         assert_eq!(
             implement_execution_policy("unknown", &Backend::Cursor),
-            "yolo"
+            cursor_implement
         );
     }
 

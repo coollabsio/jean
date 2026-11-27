@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildCodexUserInputAnswerMap,
+  getSupportedExecutionModes,
   getSupportedPermissionModes,
   normalizeExecutionModeForBackend,
   findCodexUserInputRequest,
@@ -368,7 +369,12 @@ describe('permission capabilities', () => {
       expect(normalizeExecutionModeForBackend(backend, 'auto')).toBe('plan')
     }
   )
-  it('never escalates unsupported Cursor Build to Full access', () => {
-    expect(normalizeExecutionModeForBackend('cursor', 'build')).toBe('plan')
+  it('keeps Cursor Build as its own sandboxed mode', () => {
+    expect(getSupportedExecutionModes('cursor')).toEqual([
+      'plan',
+      'build',
+      'yolo',
+    ])
+    expect(normalizeExecutionModeForBackend('cursor', 'build')).toBe('build')
   })
 })

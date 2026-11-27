@@ -814,11 +814,10 @@ fn find_existing_plan_tool_id(tool_calls: &[ToolCall], plan: &str) -> Option<Str
 
 fn effective_execution_mode(execution_mode: Option<&str>) -> &'static str {
     match execution_mode {
-        Some("plan") => "plan",
-        // Missing mode implements. Cursor has no Build flag, so Build and
-        // Full access share the yolo CLI path. Unsupported policies stay
+        Some("yolo") => "yolo",
+        // Missing mode implements with the sandbox. Unsupported policies stay
         // read-only instead of escalating.
-        None | Some("build") | Some("yolo") => "yolo",
+        None | Some("build") => "build",
         _ => "plan",
     }
 }
@@ -828,6 +827,25 @@ fn cursor_sandbox_mode(is_windows: bool, wsl_enabled: bool) -> &'static str {
         "disabled"
     } else {
         "enabled"
+    }
+}
+
+/// Cursor Build relies on the Cursor sandbox, which native Windows lacks.
+pub(crate) fn cursor_build_available() -> bool {
+    cursor_sandbox_mode(
+        cfg!(target_os = "windows"),
+        crate::platform::get_wsl_config().enabled,
+    ) == "enabled"
+}
+
+/// CLI flags for a Jean execution mode. Build never escalates to Full access.
+fn cursor_mode_args(mode: &str, sandbox_mode: &str) -> Result<Vec<&'static str>, String> {
+    match (mode, sandbox_mode) {
+        ("plan", "enabled") => Ok(vec!["--mode", "plan", "--sandbox", "enabled"]),
+        ("plan", _) => Ok(vec!["--mode", "plan", "--sandbox", "disabled"]),
+        ("build", "enabled") => Ok(vec!["--sandbox", "enabled"]),
+        ("build", _) => Err("Cursor Build needs the Cursor sandbox, which is not available on native Windows. Enable WSL or select Full access.".to_string()),
+        _ => Ok(vec!["--yolo", "--sandbox", "disabled", "--force"]),
     }
 }
 
@@ -1147,17 +1165,7 @@ pub fn execute_cursor(
         cfg!(target_os = "windows"),
         crate::platform::get_wsl_config().enabled,
     );
-    match effective_mode {
-        "plan" => {
-            cmd.args(["--mode", "plan", "--sandbox", sandbox_mode]);
-        }
-        "build" | "yolo" => {
-            cmd.args(["--yolo", "--sandbox", "disabled", "--force"]);
-        }
-        _ => {
-            cmd.args(["--sandbox", sandbox_mode]);
-        }
-    }
+    cmd.args(cursor_mode_args(effective_mode, sandbox_mode)?);
 
     let prepared_message = build_cursor_message(
         message,
@@ -1409,11 +1417,38 @@ mod tests {
     }
 
     #[test]
-    fn build_mode_falls_back_to_yolo() {
-        assert_eq!(effective_execution_mode(Some("build")), "yolo");
-        assert_eq!(effective_execution_mode(None), "yolo");
+    fn build_mode_stays_sandboxed() {
+        assert_eq!(effective_execution_mode(Some("build")), "build");
+        assert_eq!(effective_execution_mode(None), "build");
+        assert_eq!(effective_execution_mode(Some("yolo")), "yolo");
         assert_eq!(effective_execution_mode(Some("plan")), "plan");
         assert_eq!(effective_execution_mode(Some("supervised")), "plan");
+    }
+
+    #[test]
+    fn cursor_mode_args_match_execution_mode() {
+        assert_eq!(
+            cursor_mode_args("plan", "enabled").unwrap(),
+            ["--mode", "plan", "--sandbox", "enabled"]
+        );
+        assert_eq!(
+            cursor_mode_args("plan", "disabled").unwrap(),
+            ["--mode", "plan", "--sandbox", "disabled"]
+        );
+        assert_eq!(
+            cursor_mode_args("build", "enabled").unwrap(),
+            ["--sandbox", "enabled"]
+        );
+        assert_eq!(
+            cursor_mode_args("yolo", "enabled").unwrap(),
+            ["--yolo", "--sandbox", "disabled", "--force"]
+        );
+    }
+
+    #[test]
+    fn cursor_build_fails_without_sandbox() {
+        let err = cursor_mode_args("build", "disabled").unwrap_err();
+        assert!(err.contains("Full access"));
     }
 
     #[test]

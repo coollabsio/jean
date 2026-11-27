@@ -1943,7 +1943,7 @@ fn supported_execution_modes(backend: &str) -> &'static [&'static str] {
     match backend {
         "claude" | "codex" | "grok" | "kimi" => EXECUTION_MODES,
         "opencode" => &["plan", "build", "yolo", "supervised"],
-        "cursor" => &["plan", "yolo"],
+        "cursor" if !crate::chat::cursor::cursor_build_available() => &["plan", "yolo"],
         _ => &["plan", "build", "yolo"],
     }
 }
@@ -3136,7 +3136,7 @@ mod tests {
             ("claude", "build", "build"),
             ("claude", "plan", "build"),
             ("codex", "supervised", "supervised"),
-            ("cursor", "build", "yolo"),
+            ("cursor", "build", "build"),
         ] {
             for force_new in [false, true] {
                 let (_temp, app) = session_lookup_app();
@@ -3820,7 +3820,14 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"F
             supported_execution_modes("opencode"),
             &["plan", "build", "yolo", "supervised"]
         );
-        assert_eq!(supported_execution_modes("cursor"), &["plan", "yolo"]);
+        assert_eq!(
+            supported_execution_modes("cursor"),
+            if crate::chat::cursor::cursor_build_available() {
+                &["plan", "build", "yolo"][..]
+            } else {
+                &["plan", "yolo"][..]
+            }
+        );
         for backend in ["pi", "commandcode", "antigravity", "muse"] {
             assert_eq!(
                 supported_execution_modes(backend),
