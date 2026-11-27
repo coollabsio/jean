@@ -30,6 +30,7 @@ import { useAvailableKimiModels } from '@/services/kimi-cli'
 import { useAvailableAntigravityModels } from '@/services/antigravity-cli'
 import { useAvailableMuseModels } from '@/services/muse-cli'
 import { startCommitJob } from '@/services/commit-jobs'
+import { openMagicPromptInTerminal } from '@/lib/magic-prompt-session'
 import { invoke, listen } from '@/lib/transport'
 import { dismissibleToast } from '@/lib/dismissible-toast'
 import { generateId } from '@/lib/uuid'
@@ -988,6 +989,60 @@ export function MagicModal() {
                 }
               )
 
+              const resolvedProvider = resolveMagicPromptProvider(
+                preferences?.magic_prompt_providers,
+                RESOLVE_CONFLICTS_PROVIDER_KEY,
+                preferences?.default_provider
+              )
+              const resolvedBackend =
+                override?.backend ??
+                resolveMagicPromptBackend(
+                  preferences?.magic_prompt_backends,
+                  RESOLVE_CONFLICTS_BACKEND_KEY,
+                  project?.default_backend ??
+                    preferences?.default_backend ??
+                    'claude'
+                ) ??
+                'claude'
+              const conflictFiles = prResult.conflicts.join('\n- ')
+              const diffSection = prResult.conflict_diff
+                ? `\n\nHere is the diff showing the conflict details:\n\n\`\`\`diff\n${prResult.conflict_diff}\n\`\`\``
+                : ''
+              const baseBranch =
+                worktree.base_branch || project?.default_branch || 'main'
+              const baseRemote = worktree.base_remote || 'origin'
+              const resolveInstructions =
+                preferences?.magic_prompts?.resolve_conflicts ??
+                DEFAULT_RESOLVE_CONFLICTS_PROMPT
+
+              const conflictPrompt = `I merged \`${baseRemote}/${baseBranch}\` into this branch to resolve PR conflicts, but there are merge conflicts.
+
+Conflicts in these files:
+- ${conflictFiles}${diffSection}
+
+${resolveInstructions}`
+
+              const terminalSession = await openMagicPromptInTerminal({
+                newSessionKind: preferences?.default_new_session_kind,
+                worktreeId: selectedWorktreeId,
+                worktreePath: worktree.path,
+                name: 'PR: resolve conflicts',
+                prompt: conflictPrompt,
+                promptBackend: resolvedBackend as CliBackend,
+                executionMode: 'yolo',
+              })
+              if (terminalSession) {
+                window.dispatchEvent(
+                  new CustomEvent('open-worktree-modal', {
+                    detail: {
+                      worktreeId: selectedWorktreeId,
+                      worktreePath: worktree.path,
+                    },
+                  })
+                )
+                return
+              }
+
               const {
                 registerWorktreePath,
                 setActiveSession,
@@ -1010,21 +1065,6 @@ export function MagicModal() {
               if (currentSessionId)
                 copySessionSettings(currentSessionId, newSession.id)
 
-              const resolvedProvider = resolveMagicPromptProvider(
-                preferences?.magic_prompt_providers,
-                RESOLVE_CONFLICTS_PROVIDER_KEY,
-                preferences?.default_provider
-              )
-              const resolvedBackend =
-                override?.backend ??
-                resolveMagicPromptBackend(
-                  preferences?.magic_prompt_backends,
-                  RESOLVE_CONFLICTS_BACKEND_KEY,
-                  project?.default_backend ??
-                    preferences?.default_backend ??
-                    'claude'
-                ) ??
-                'claude'
               const resolvedModel =
                 override?.model ??
                 preferences?.magic_prompt_models?.[
@@ -1075,24 +1115,6 @@ export function MagicModal() {
                   },
                 })
               )
-
-              const conflictFiles = prResult.conflicts.join('\n- ')
-              const diffSection = prResult.conflict_diff
-                ? `\n\nHere is the diff showing the conflict details:\n\n\`\`\`diff\n${prResult.conflict_diff}\n\`\`\``
-                : ''
-              const baseBranch =
-                worktree.base_branch || project?.default_branch || 'main'
-              const baseRemote = worktree.base_remote || 'origin'
-              const resolveInstructions =
-                preferences?.magic_prompts?.resolve_conflicts ??
-                DEFAULT_RESOLVE_CONFLICTS_PROMPT
-
-              const conflictPrompt = `I merged \`${baseRemote}/${baseBranch}\` into this branch to resolve PR conflicts, but there are merge conflicts.
-
-Conflicts in these files:
-- ${conflictFiles}${diffSection}
-
-${resolveInstructions}`
 
               setLastSentMessage(newSession.id, conflictPrompt)
               setError(newSession.id, null)
@@ -1162,6 +1184,58 @@ ${resolveInstructions}`
               }
             )
 
+            const resolvedProvider = resolveMagicPromptProvider(
+              preferences?.magic_prompt_providers,
+              RESOLVE_CONFLICTS_PROVIDER_KEY,
+              preferences?.default_provider
+            )
+            const resolvedBackend =
+              override?.backend ??
+              resolveMagicPromptBackend(
+                preferences?.magic_prompt_backends,
+                RESOLVE_CONFLICTS_BACKEND_KEY,
+                project?.default_backend ??
+                  preferences?.default_backend ??
+                  'claude'
+              ) ??
+              'claude'
+            // Build conflict resolution prompt
+            const conflictFiles = result.conflicts.join('\n- ')
+            const diffSection = result.conflict_diff
+              ? `\n\nHere is the diff showing the conflict details:\n\n\`\`\`diff\n${result.conflict_diff}\n\`\`\``
+              : ''
+            const resolveInstructions =
+              preferences?.magic_prompts?.resolve_conflicts ??
+              DEFAULT_RESOLVE_CONFLICTS_PROMPT
+
+            const conflictPrompt = `I have merge conflicts that need to be resolved.
+
+Conflicts in these files:
+- ${conflictFiles}${diffSection}
+
+${resolveInstructions}`
+
+            const terminalSession = await openMagicPromptInTerminal({
+              newSessionKind: preferences?.default_new_session_kind,
+              worktreeId: selectedWorktreeId,
+              worktreePath: worktree.path,
+              name: 'Resolve conflicts',
+              prompt: conflictPrompt,
+              promptBackend: resolvedBackend as CliBackend,
+              executionMode: 'yolo',
+            })
+            if (terminalSession) {
+              window.dispatchEvent(
+                new CustomEvent('open-worktree-modal', {
+                  detail: {
+                    worktreeId: selectedWorktreeId,
+                    worktreePath: worktree.path,
+                  },
+                })
+              )
+              return
+            }
+
             const {
               registerWorktreePath,
               setActiveSession,
@@ -1185,21 +1259,6 @@ ${resolveInstructions}`
             if (currentSessionId)
               copySessionSettings(currentSessionId, newSession.id)
 
-            const resolvedProvider = resolveMagicPromptProvider(
-              preferences?.magic_prompt_providers,
-              RESOLVE_CONFLICTS_PROVIDER_KEY,
-              preferences?.default_provider
-            )
-            const resolvedBackend =
-              override?.backend ??
-              resolveMagicPromptBackend(
-                preferences?.magic_prompt_backends,
-                RESOLVE_CONFLICTS_BACKEND_KEY,
-                project?.default_backend ??
-                  preferences?.default_backend ??
-                  'claude'
-              ) ??
-              'claude'
             const resolvedModel =
               override?.model ??
               preferences?.magic_prompt_models?.[RESOLVE_CONFLICTS_MODEL_KEY] ??
@@ -1272,22 +1331,6 @@ ${resolveInstructions}`
                 },
               })
             )
-
-            // Build conflict resolution prompt
-            const conflictFiles = result.conflicts.join('\n- ')
-            const diffSection = result.conflict_diff
-              ? `\n\nHere is the diff showing the conflict details:\n\n\`\`\`diff\n${result.conflict_diff}\n\`\`\``
-              : ''
-            const resolveInstructions =
-              preferences?.magic_prompts?.resolve_conflicts ??
-              DEFAULT_RESOLVE_CONFLICTS_PROMPT
-
-            const conflictPrompt = `I have merge conflicts that need to be resolved.
-
-Conflicts in these files:
-- ${conflictFiles}${diffSection}
-
-${resolveInstructions}`
 
             setLastSentMessage(newSession.id, conflictPrompt)
             setError(newSession.id, null)

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { openMagicPromptInTerminal } from '@/lib/magic-prompt-session'
 import { invoke } from '@/lib/transport'
 import {
   AlertCircle,
@@ -134,10 +135,38 @@ export function UpdatePrDialog() {
         const baseSessionId =
           useChatStore.getState().activeSessionIds[worktreeId]
 
+        const sessionName = `Update PR #${parsedPrNumber}`
+        const terminalSession = await openMagicPromptInTerminal({
+          newSessionKind: preferences?.default_new_session_kind,
+          worktreeId,
+          worktreePath,
+          name: sessionName,
+          prompt: buildReleaseNotesSessionPrompt(parsedPrNumber),
+          promptBackend: ((baseSessionId &&
+            useChatStore.getState().selectedBackends[baseSessionId]) ??
+            project?.default_backend ??
+            preferences?.default_backend ??
+            'claude') as CliBackend,
+          executionMode: 'yolo',
+        })
+        if (terminalSession) {
+          window.dispatchEvent(
+            new CustomEvent('open-session-modal', {
+              detail: {
+                sessionId: terminalSession.id,
+                worktreeId,
+                worktreePath,
+              },
+            })
+          )
+          setUpdatePrModalOpen(false)
+          return
+        }
+
         const session = await createSession.mutateAsync({
           worktreeId,
           worktreePath,
-          name: `Update PR #${parsedPrNumber}`,
+          name: sessionName,
         })
 
         // Inherit the worktree's current session settings (backend/model/provider)
@@ -216,8 +245,10 @@ export function UpdatePrDialog() {
       setUpdatePrModalOpen,
       project?.enabled_mcp_servers,
       project?.known_mcp_servers,
+      project?.default_backend,
       preferences?.default_enabled_mcp_servers,
       preferences?.known_mcp_servers,
+      preferences?.default_backend,
     ]
   )
 
