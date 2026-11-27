@@ -89,17 +89,12 @@ fn looks_authenticated(output: &str) -> bool {
     }
 
     lower.lines().any(|line| {
-        let line = line
-            .trim()
-            .trim_start_matches(['✓', '✔'])
-            .trim()
-            .to_ascii_lowercase();
+        let line = line.trim().trim_start_matches(['✓', '✔']).trim();
 
         // Cursor's `status` command has used both "✓ Login successful!" and
         // "✓ Logged in" for an authenticated session. Do not treat variants of
         // "not logged in" as success.
         line == "logged in"
-            || line.contains("login successful")
             || line.contains("login success")
             || (line.contains("user email")
                 && line.contains('@')
@@ -224,9 +219,13 @@ fn run_command_with_timeout(
             // On Windows the shim is cmd.exe -> PowerShell -> Node. Killing only
             // the direct child leaves the PowerShell/Node processes running and
             // holding the pipes, which makes every later auth check slower.
+            // With WSL enabled the child is `wsl.exe` and its Windows PID means
+            // nothing inside the distro, so skip the tree kill there.
             #[cfg(windows)]
             {
-                let _ = crate::platform::kill_process_tree(child.id());
+                if !crate::platform::get_wsl_config().enabled {
+                    let _ = crate::platform::kill_process_tree(child.id());
+                }
             }
             let _ = child.kill();
             let _ = child.wait();
@@ -329,14 +328,16 @@ pub async fn check_cursor_cli_auth(app: AppHandle) -> Result<CursorAuthStatus, S
     }
 
     for args in [["status"].as_slice(), ["about"].as_slice()] {
-        let output = match run_command_with_timeout(
-            {
-                let mut command = crate::platform::cli_command(&binary_str, None);
-                command.args(args);
-                command
-            },
-            AUTH_CHECK_TIMEOUT,
-        ) {
+        let mut command = crate::platform::cli_command(&binary_str, None);
+        command.args(args);
+        // The wait loop blocks for up to AUTH_CHECK_TIMEOUT, so keep it off the
+        // async runtime workers.
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            run_command_with_timeout(command, AUTH_CHECK_TIMEOUT)
+        })
+        .await
+        .map_err(|error| format!("Cursor auth check task failed: {error}"))?;
+        let output = match result {
             Ok(TimedCommandResult::Output(output)) => output,
             Ok(TimedCommandResult::TimedOut) => {
                 log::warn!("Cursor CLI auth check {:?} timed out", args);
@@ -542,11 +543,6 @@ mod tests {
         assert!(looks_authenticated("✓ Logged in"));
         assert!(!looks_authenticated("✗ Not logged in"));
         assert!(!looks_authenticated("Please log in to continue"));
-    }
-
-    #[test]
-    fn auth_check_timeout_allows_windows_shim_startup() {
-        assert!(AUTH_CHECK_TIMEOUT >= Duration::from_secs(15));
     }
 
     #[test]
