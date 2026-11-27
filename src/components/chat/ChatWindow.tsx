@@ -3592,6 +3592,10 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                         activeSessionId={activeSessionId}
                                         projectId={worktree?.project_id}
                                         runScripts={runScripts}
+                                        sessionLatestUsage={
+                                          session?.latest_usage
+                                        }
+                                        sessionTotalUsage={session?.total_usage}
                                         loadedIssueContexts={
                                           loadedIssueContexts ??
                                           EMPTY_ISSUE_CONTEXTS

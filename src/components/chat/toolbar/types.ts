@@ -9,6 +9,7 @@ import type {
   EffortLevel,
   ExecutionMode,
   Backend,
+  UsageData,
 } from '@/types/chat'
 import type { McpServerInfo } from '@/types/chat'
 import type { PrDisplayStatus, CheckStatus } from '@/types/pr-status'
@@ -82,6 +83,10 @@ export interface ChatToolbarProps {
   runScripts?: string[]
   packageScripts?: PackageScript[]
   favoritePackageScripts?: string[]
+  /** Latest run's token breakdown (context size chip). */
+  sessionLatestUsage?: UsageData | null
+  /** Session-wide token totals across runs. */
+  sessionTotalUsage?: UsageData | null
 
   loadedIssueContexts: LoadedIssueContext[]
   loadedPRContexts: LoadedPullRequestContext[]

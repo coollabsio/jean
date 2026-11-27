@@ -156,6 +156,8 @@ export const ChatToolbar = memo(function ChatToolbar({
   onRunCommand,
   onRunPackageScript,
   onToggleFavoritePackageScript,
+  sessionLatestUsage,
+  sessionTotalUsage,
 }: ChatToolbarProps) {
   const {
     statuses: mcpStatuses,
@@ -463,6 +465,8 @@ export const ChatToolbar = memo(function ChatToolbar({
         createPortal(
           <ThreadDetailsButton
             worktreeId={worktreeId}
+            latestUsage={sessionLatestUsage}
+            totalUsage={sessionTotalUsage}
             contexts={buildThreadContextItems({
               issues: loadedIssueContexts,
               prs: loadedPRContexts,
