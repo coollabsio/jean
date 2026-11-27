@@ -599,6 +599,7 @@ export const ChatToolbar = memo(function ChatToolbar({
               prDisplayStatus={displayStatus}
               worktreeId={worktreeId}
               onAttach={onAttach}
+              onLoadContext={onLoadContext}
               runScripts={runScripts}
               onRunCommand={onRunCommand}
               packageScripts={packageScripts}

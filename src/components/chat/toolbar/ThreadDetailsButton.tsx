@@ -377,34 +377,39 @@ export function ThreadDetailsButton({
             <span className="truncate">{label}</span>
           </DropdownMenuItem>
         ))}
-        {onManageContexts && (
-          <>
-            <DropdownMenuItem onClick={onManageContexts}>
-              <FolderOpen className="h-4 w-4" />
-              {contexts.length > 0 ? 'Manage Contexts...' : 'Attach Context...'}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-          </>
-        )}
+        {/* Mobile: Attach Context and MCP live in the settings menu */}
         {!isMobile && (
-          <DropdownMenuItem
-            onClick={() =>
-              useUIStore.getState().openPreferencesPane('mcp-servers')
-            }
-          >
-            <Plug
-              className={cn(
-                'h-4 w-4',
-                activeMcpServers.length > 0 && 'text-success'
-              )}
-            />
-            MCP Servers
-            {availableMcpServers && (
-              <DropdownMenuShortcut>
-                {activeMcpServers.length}
-              </DropdownMenuShortcut>
+          <>
+            {onManageContexts && (
+              <>
+                <DropdownMenuItem onClick={onManageContexts}>
+                  <FolderOpen className="h-4 w-4" />
+                  {contexts.length > 0
+                    ? 'Manage Contexts...'
+                    : 'Attach Context...'}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+              </>
             )}
-          </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() =>
+                useUIStore.getState().openPreferencesPane('mcp-servers')
+              }
+            >
+              <Plug
+                className={cn(
+                  'h-4 w-4',
+                  activeMcpServers.length > 0 && 'text-success'
+                )}
+              />
+              MCP Servers
+              {availableMcpServers && (
+                <DropdownMenuShortcut>
+                  {activeMcpServers.length}
+                </DropdownMenuShortcut>
+              )}
+            </DropdownMenuItem>
+          </>
         )}
 
         {usageEntries.length > 0 && (

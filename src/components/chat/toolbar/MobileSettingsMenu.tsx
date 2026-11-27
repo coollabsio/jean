@@ -224,6 +224,7 @@ interface MobileSettingsMenuProps {
 
   worktreeId?: string | null
   onAttach?: () => void
+  onLoadContext?: () => void
   runScripts?: string[]
   onRunCommand?: (command: string) => void
   packageScripts?: PackageScript[]
@@ -285,6 +286,7 @@ export function MobileSettingsMenu({
   prDisplayStatus,
   worktreeId,
   onAttach,
+  onLoadContext,
   runScripts = EMPTY_RUN_SCRIPTS,
   onRunCommand,
   packageScripts = EMPTY_PACKAGE_SCRIPTS,
@@ -1059,6 +1061,17 @@ export function MobileSettingsMenu({
             >
               <Paperclip className="h-4 w-4" />
               Attachments
+            </DropdownMenuItem>
+          )}
+          {onLoadContext && (
+            <DropdownMenuItem
+              onSelect={() => {
+                setMenuOpen(false)
+                onLoadContext()
+              }}
+            >
+              <FolderOpen className="h-4 w-4" />
+              {contextCount > 0 ? 'Manage Contexts...' : 'Attach Context...'}
             </DropdownMenuItem>
           )}
           {contextCount > 0 && (

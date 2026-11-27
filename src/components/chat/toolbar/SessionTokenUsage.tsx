@@ -1,6 +1,8 @@
 import { Layers } from '@/components/icons/reicon'
 import { DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
+import { useIsMobile } from '@/hooks/use-mobile'
 import { formatTokens } from '@/lib/session-debug'
+import { cn } from '@/lib/utils'
 import type { UsageData } from '@/types/chat'
 
 /**
@@ -38,6 +40,7 @@ export function SessionTokenUsage({
   latest?: UsageData | null
   total?: UsageData | null
 }) {
+  const isMobile = useIsMobile()
   const context = contextTokenCount(latest)
   if (!latest || context === 0) return null
 
@@ -49,7 +52,11 @@ export function SessionTokenUsage({
     <>
       <div
         data-testid="thread-details-tokens"
-        className="flex items-start gap-2 px-2 py-1.5 text-sm"
+        className={cn(
+          'flex items-start gap-2 px-2 py-1.5 text-sm',
+          // Match mobile menu item spacing so the icon lines up (App.css)
+          isMobile && 'gap-3 px-3'
+        )}
       >
         <Layers className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1 text-xs">

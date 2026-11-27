@@ -279,7 +279,11 @@ function DropdownMenuSeparator({
   return (
     <DropdownMenuPrimitive.Separator
       data-slot="dropdown-menu-separator"
-      className={cn('bg-border -mx-1 my-1 h-px', className)}
+      className={cn(
+        // Sections that render nothing must not leave stacked or trailing lines
+        'bg-border -mx-1 my-1 h-px last:hidden [[data-slot=dropdown-menu-separator]+&]:hidden',
+        className
+      )}
       {...props}
     />
   )
