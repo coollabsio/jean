@@ -24,18 +24,20 @@ fn execution_mode_instruction(execution_mode: Option<&str>) -> Option<&'static s
     match execution_mode.unwrap_or("build") {
         "build" | "auto" | "supervised" => Some(
             "You are in BUILD MODE. Start implementing immediately. \
-             Do NOT enter plan mode and do NOT use ExitPlanMode unless the user explicitly asks \
-             for a new plan. If a required decision is missing, use AskUserQuestion instead of \
-             ExitPlanMode; if AskUserQuestion is not in your tool set, ask inline in the \
-             question format of the recap rules.",
+             Do NOT use EnterPlanMode or ExitPlanMode. If the user asks for a plan to review \
+             or approve first, do not edit files or run mutating commands: reply with the plan \
+             and end your turn, then implement only after the user approves. \
+             If a required decision is missing, use AskUserQuestion; if AskUserQuestion is not \
+             in your tool set, ask inline in the question format of the recap rules.",
         ),
         "yolo" => Some(
             "You are in FULL ACCESS MODE. Start implementing immediately. \
-             Do NOT enter plan mode and do NOT use ExitPlanMode unless the user explicitly asks \
-             for a new plan. Do not ask for confirmation before routine implementation steps. \
-             If a required decision is missing, use AskUserQuestion instead of ExitPlanMode; \
-             if AskUserQuestion is not in your tool set, ask inline in the question format of \
-             the recap rules.",
+             Do NOT use EnterPlanMode or ExitPlanMode. If the user asks for a plan to review \
+             or approve first, do not edit files or run mutating commands: reply with the plan \
+             and end your turn, then implement only after the user approves. \
+             Do not ask for confirmation before routine implementation steps. \
+             If a required decision is missing, use AskUserQuestion; if AskUserQuestion is not \
+             in your tool set, ask inline in the question format of the recap rules.",
         ),
         _ => None,
     }
@@ -382,13 +384,14 @@ fn split_fast_model(model: &str) -> (&str, bool) {
 
 fn disallowed_tools_args(execution_mode: Option<&str>) -> Vec<String> {
     let mut tools = Vec::new();
-    // In build/yolo, remove ExitPlanMode entirely so Claude can't loop back
-    // into plan-approval after the user already approved one.
+    // In implement modes, remove both plan tools: EnterPlanMode would switch
+    // the CLI into plan permission with no way out, and ExitPlanMode would loop
+    // back into plan approval. Jean's Plan mode is the way to plan.
     if matches!(
         execution_mode.unwrap_or("build"),
         "build" | "yolo" | "auto" | "supervised"
     ) {
-        tools.push("ExitPlanMode");
+        tools.extend(["EnterPlanMode", "ExitPlanMode"]);
     }
     tools
         .into_iter()
@@ -3120,11 +3123,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn build_and_yolo_disallow_exit_plan_mode() {
-        assert_eq!(
-            disallowed_tools_args(Some("yolo")),
-            ["--disallowedTools", "ExitPlanMode"]
-        );
+    fn implement_modes_disallow_plan_tools() {
+        for mode in [
+            None,
+            Some("build"),
+            Some("yolo"),
+            Some("auto"),
+            Some("supervised"),
+        ] {
+            assert_eq!(
+                disallowed_tools_args(mode),
+                [
+                    "--disallowedTools",
+                    "EnterPlanMode",
+                    "--disallowedTools",
+                    "ExitPlanMode"
+                ],
+                "{mode:?}"
+            );
+        }
         assert_eq!(disallowed_tools_args(Some("plan")), [] as [&str; 0]);
     }
 
