@@ -1927,10 +1927,16 @@ mod tests {
     fn finds_cursor_project_dir_ignoring_case() {
         let temp = tempfile::tempdir().unwrap();
         fs::create_dir_all(temp.path().join("d-gpanel")).unwrap();
-        assert_eq!(
-            cursor_project_dir(temp.path(), "D:\\gpanel"),
-            Some(temp.path().join("d-gpanel"))
-        );
+        let found = cursor_project_dir(temp.path(), "D:\\gpanel").unwrap();
+
+        // Case-insensitive filesystems (macOS, Windows) resolve the exact `D-...` path.
+        assert!(found.is_dir());
+        assert!(found
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .eq_ignore_ascii_case("d-gpanel"));
     }
 
     #[test]

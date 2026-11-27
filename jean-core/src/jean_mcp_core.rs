@@ -3196,11 +3196,17 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_recovered_empty_session_uses_new_session_execution_policy() {
+        // Cursor Build needs a sandbox; without one (native Windows) it falls back to yolo.
+        let cursor_expected = if crate::chat::cursor::cursor_build_available() {
+            "build"
+        } else {
+            "yolo"
+        };
         for (backend, default_policy, expected_policy) in [
             ("claude", "build", "build"),
             ("claude", "plan", "build"),
             ("codex", "supervised", "supervised"),
-            ("cursor", "build", "build"),
+            ("cursor", "build", cursor_expected),
         ] {
             for force_new in [false, true] {
                 let (_temp, app) = session_lookup_app();
