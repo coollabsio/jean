@@ -21,6 +21,52 @@ const POPOVER_CLASS =
 const MOBILE_SHEET_CLASS =
   'bg-background text-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:slide-in-from-bottom data-[state=closed]:slide-out-to-bottom z-[80] w-full min-w-0 max-w-none max-h-[75svh] overflow-x-hidden overflow-y-auto overscroll-contain rounded-t-xl rounded-b-none border-x-0 border-t border-b-0 px-2 pt-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] shadow-lg'
 
+// Radix menus close on `pointerdown` outside. On a touch screen the browser
+// then sends the compat mouse events and the `click` of the same tap to the
+// element under the closed sheet, so one tap closes the sheet AND activates
+// that element. Swallow the rest of the dismissing gesture. The next
+// `pointerdown` starts a new gesture and removes the guard.
+const DISMISS_GESTURE_EVENTS = ['pointerup', 'mousedown', 'mouseup', 'click']
+
+function swallowRestOfGesture() {
+  const swallow = (e: Event) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (e.type === 'click') cleanup()
+  }
+  const cleanup = () => {
+    for (const type of DISMISS_GESTURE_EVENTS) {
+      document.removeEventListener(type, swallow, true)
+    }
+    document.removeEventListener('pointerdown', cleanup, true)
+  }
+  for (const type of DISMISS_GESTURE_EVENTS) {
+    document.addEventListener(type, swallow, true)
+  }
+  document.addEventListener('pointerdown', cleanup, true)
+}
+
+function useMobileSheetPointerDownOutside(
+  isMobile: boolean,
+  onPointerDownOutside?: (event: PointerDownOutsideEvent) => void
+) {
+  return React.useCallback(
+    (e: PointerDownOutsideEvent) => {
+      onPointerDownOutside?.(e)
+      if (isMobile && !e.defaultPrevented) swallowRestOfGesture()
+    },
+    [isMobile, onPointerDownOutside]
+  )
+}
+
+type PointerDownOutsideEvent = Parameters<
+  NonNullable<
+    React.ComponentProps<
+      typeof DropdownMenuPrimitive.Content
+    >['onPointerDownOutside']
+  >
+>[0]
+
 function DropdownMenu({
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
@@ -52,11 +98,16 @@ function DropdownMenuContent({
   enableNumberSelection = true,
   onKeyDown,
   onEscapeKeyDown,
+  onPointerDownOutside,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content> & {
   enableNumberSelection?: boolean
 }) {
   const isMobile = useIsMobile()
+  const handlePointerDownOutside = useMobileSheetPointerDownOutside(
+    isMobile,
+    onPointerDownOutside
+  )
   const handleKeyDown = React.useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
       // Number keys 1-9 select the nth selectable item
@@ -92,6 +143,7 @@ function DropdownMenuContent({
         data-mobile-sheet={isMobile ? '' : undefined}
         sideOffset={sideOffset}
         onKeyDown={handleKeyDown}
+        onPointerDownOutside={handlePointerDownOutside}
         onEscapeKeyDown={e => {
           // Keep ESC from reaching window-level handlers (e.g. SessionChatModal)
           e.stopPropagation()
@@ -282,13 +334,19 @@ function DropdownMenuSubTrigger({
 function DropdownMenuSubContent({
   className,
   onEscapeKeyDown,
+  onPointerDownOutside,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.SubContent>) {
   const isMobile = useIsMobile()
+  const handlePointerDownOutside = useMobileSheetPointerDownOutside(
+    isMobile,
+    onPointerDownOutside
+  )
   const content = (
     <DropdownMenuPrimitive.SubContent
       data-slot="dropdown-menu-sub-content"
       data-mobile-sheet={isMobile ? '' : undefined}
+      onPointerDownOutside={handlePointerDownOutside}
       onEscapeKeyDown={e => {
         // Keep ESC from reaching window-level handlers (e.g. SessionChatModal)
         e.stopPropagation()
