@@ -6,6 +6,8 @@ import {
   DialogContent,
   DialogDescription,
   DialogTitle,
+  PREVIEW_DIALOG_BODY_CLASS,
+  PREVIEW_DIALOG_CONTENT_CLASS,
 } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Markdown } from '@/components/ui/markdown'
@@ -136,16 +138,25 @@ export function SkillBadge({
       </div>
 
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
-        <DialogContent className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-fit sm:max-h-[85vh] sm:!rounded-lg sm:p-4 bg-background/95">
-          <DialogTitle className="text-sm font-medium flex items-center gap-2">
-            <Wand2 className="size-4 text-info" />
-            Skill: {skill.name}
-          </DialogTitle>
+        <DialogContent className={PREVIEW_DIALOG_CONTENT_CLASS}>
+          <div className="shrink-0 min-w-0 border-b px-4 pt-[calc(env(safe-area-inset-top)+0.75rem)] pb-3 pr-14 sm:border-b-0 sm:p-0 sm:pr-10">
+            <DialogTitle className="flex min-w-0 items-center gap-2 text-sm font-medium">
+              <Wand2 className="size-4 shrink-0 text-info" />
+              <span className="truncate">Skill: {skill.name}</span>
+            </DialogTitle>
+            <p className="mt-1 text-xs text-muted-foreground truncate">
+              {skill.path}
+            </p>
+          </div>
           <DialogDescription className="sr-only">
             Preview of the skill definition for slash command {skill.name}.
           </DialogDescription>
-          <p className="text-xs text-muted-foreground truncate">{skill.path}</p>
-          <ScrollArea className="h-[calc(85vh-6rem)] mt-2">
+          <ScrollArea
+            className={cn(
+              PREVIEW_DIALOG_BODY_CLASS,
+              'pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:h-[calc(85vh-6rem)]'
+            )}
+          >
             {isLoading ? (
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />

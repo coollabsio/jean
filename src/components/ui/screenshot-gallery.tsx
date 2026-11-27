@@ -5,6 +5,7 @@ import {
   DialogContent,
   DialogDescription,
   DialogTitle,
+  PREVIEW_DIALOG_CONTENT_CLASS,
 } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import { useImageSrc } from './use-image-src'
@@ -100,7 +101,10 @@ function ScreenshotGalleryContent({
 
   return (
     <DialogContent
-      className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-fit sm:max-h-[90vh] sm:!top-[5vh] sm:!bottom-auto sm:!rounded-lg sm:p-4 bg-background/95"
+      className={cn(
+        PREVIEW_DIALOG_CONTENT_CLASS,
+        'sm:max-h-[90vh] sm:!top-[5vh] sm:!bottom-auto'
+      )}
       onKeyDown={event => {
         if (event.key === 'ArrowLeft') step(-1)
         if (event.key === 'ArrowRight') step(1)
@@ -110,7 +114,7 @@ function ScreenshotGalleryContent({
         <DialogTitle>Screenshots</DialogTitle>
         <DialogDescription>Screenshot gallery</DialogDescription>
       </VisuallyHidden>
-      <div className="flex h-full flex-col items-center justify-center gap-3 overflow-hidden p-4 sm:p-0">
+      <div className="flex h-full flex-col items-center justify-center gap-3 overflow-hidden px-4 pt-[calc(env(safe-area-inset-top)+3rem)] pb-[calc(env(safe-area-inset-bottom)+1rem)] sm:p-0">
         <ZoomableImage
           key={`${openIndex}-${paths[openIndex]}`}
           onSwipe={paths.length > 1 ? step : undefined}

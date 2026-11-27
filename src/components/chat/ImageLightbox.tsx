@@ -1,8 +1,10 @@
 import { convertServerFileSrc } from '@/lib/transport'
+import { cn } from '@/lib/utils'
 import {
   DialogContent,
   DialogDescription,
   DialogTitle,
+  PREVIEW_DIALOG_CONTENT_CLASS,
 } from '@/components/ui/dialog'
 import { MessageThreadContextMenu } from './message-thread-context-menu'
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden'
@@ -27,14 +29,17 @@ interface ImageLightboxProps {
 function ImageLightboxContent({ src, alt }: { src: string; alt: string }) {
   return (
     <DialogContent
-      className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-fit sm:max-h-[85vh] sm:!top-[7.5vh] sm:!bottom-auto sm:!rounded-lg sm:p-4 bg-background/95"
+      className={cn(
+        PREVIEW_DIALOG_CONTENT_CLASS,
+        'pt-[calc(env(safe-area-inset-top)+3rem)] pb-[env(safe-area-inset-bottom)] sm:!top-[7.5vh] sm:!bottom-auto'
+      )}
       showCloseButton={true}
     >
       <VisuallyHidden>
         <DialogTitle>Image Preview</DialogTitle>
         <DialogDescription>Preview of image: {alt}</DialogDescription>
       </VisuallyHidden>
-      <ZoomableImage className="h-full sm:h-auto">
+      <ZoomableImage className="min-h-0 flex-1 sm:flex-none sm:h-auto">
         <MessageThreadContextMenu>
           <img
             src={src}

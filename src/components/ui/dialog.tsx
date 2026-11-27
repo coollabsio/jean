@@ -207,6 +207,25 @@ const DialogDescription = React.forwardRef<
 ))
 DialogDescription.displayName = DialogPrimitive.Description.displayName
 
+/**
+ * Preview dialogs (files, images, skills): full screen and solid on mobile,
+ * with the close button below the status bar; a centered card from `sm` up.
+ */
+export const PREVIEW_DIALOG_CONTENT_CLASS =
+  '!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none gap-0 sm:gap-4 overflow-hidden border-0 p-0 bg-background sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-fit sm:max-h-[85vh] sm:!rounded-lg sm:border sm:p-4 sm:bg-background/95 [&>[data-slot=dialog-close]]:top-[calc(env(safe-area-inset-top)+0.5rem)] sm:[&>[data-slot=dialog-close]]:top-4'
+
+/** Preview dialog title row: a divided header below the status bar on mobile. */
+export const PREVIEW_DIALOG_HEADER_CLASS =
+  'shrink-0 flex min-w-0 items-center gap-2 border-b px-4 pt-[calc(env(safe-area-inset-top)+0.75rem)] pb-3 pr-14 text-sm font-medium sm:border-b-0 sm:p-0 sm:pr-10'
+
+/** Preview dialog scroll body: fills the free height on mobile. */
+export const PREVIEW_DIALOG_BODY_CLASS =
+  'min-h-0 flex-1 px-4 py-3 sm:h-[calc(85vh-8rem)] sm:flex-none sm:p-0 sm:mt-2'
+
+/** Preview dialog action bar: kept above the home indicator on mobile. */
+export const PREVIEW_DIALOG_FOOTER_CLASS =
+  'shrink-0 flex items-center gap-1 border-t border-border/50 px-2 pt-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] sm:px-0 sm:pb-0'
+
 export {
   Dialog,
   DialogClose,

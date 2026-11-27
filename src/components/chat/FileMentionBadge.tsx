@@ -6,6 +6,9 @@ import {
   DialogContent,
   DialogDescription,
   DialogTitle,
+  PREVIEW_DIALOG_BODY_CLASS,
+  PREVIEW_DIALOG_CONTENT_CLASS,
+  PREVIEW_DIALOG_HEADER_CLASS,
 } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Markdown } from '@/components/ui/markdown'
@@ -149,21 +152,26 @@ export function FileMentionBadge({
       </Tooltip>
 
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
-        <DialogContent className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-fit sm:max-h-[85vh] sm:!rounded-lg sm:p-4 bg-background/95">
-          <DialogTitle className="text-sm font-medium flex items-center gap-2">
+        <DialogContent className={PREVIEW_DIALOG_CONTENT_CLASS}>
+          <DialogTitle className={PREVIEW_DIALOG_HEADER_CLASS}>
             {isDirectory ? (
-              <FolderIcon className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+              <FolderIcon className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
             ) : (
               <FileIcon
-                className={cn('h-4 w-4', getExtensionColor(extension))}
+                className={cn('h-4 w-4 shrink-0', getExtensionColor(extension))}
               />
             )}
-            {path}
+            <span className="truncate">{path}</span>
           </DialogTitle>
           <DialogDescription className="sr-only">
             Preview of file {path}.
           </DialogDescription>
-          <ScrollArea className="h-[calc(85vh-6rem)] mt-2">
+          <ScrollArea
+            className={cn(
+              PREVIEW_DIALOG_BODY_CLASS,
+              'pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:h-[calc(85vh-6rem)]'
+            )}
+          >
             {isLoading ? (
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />

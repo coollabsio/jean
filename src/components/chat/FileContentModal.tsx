@@ -16,6 +16,7 @@ import {
   DialogContent,
   DialogDescription,
   DialogTitle,
+  PREVIEW_DIALOG_CONTENT_CLASS,
 } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
@@ -331,9 +332,12 @@ export function FileContentModal({
         }}
         // Sit above mobile sheets (z-80) so the viewer is interactive
         overlayClassName="z-[90]"
-        className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-fit sm:max-h-[85vh] sm:!top-[7.5vh] sm:!translate-y-0 sm:!rounded-lg sm:p-4 bg-background/95 z-[90]"
+        className={cn(
+          PREVIEW_DIALOG_CONTENT_CLASS,
+          'sm:!top-[7.5vh] sm:!translate-y-0 z-[90]'
+        )}
       >
-        <div className="flex min-w-0 flex-col gap-1 px-4 pt-4 pr-14 sm:px-0 sm:pt-0 sm:pr-8">
+        <div className="flex shrink-0 min-w-0 flex-col gap-1 border-b px-4 pt-[calc(env(safe-area-inset-top)+0.5rem)] pb-3 pr-14 sm:border-b-0 sm:px-0 sm:pt-0 sm:pb-0 sm:pr-8">
           <DialogTitle>
             <div className="flex items-center gap-2">
               {isVideo ? (
@@ -420,7 +424,7 @@ export function FileContentModal({
           </div>
         )}
         {error && (
-          <div className="mx-4 sm:mx-0 flex items-center gap-2 py-4 px-3 bg-destructive/10 text-destructive rounded-md">
+          <div className="mx-4 mt-3 sm:mx-0 flex items-center gap-2 py-4 px-3 bg-destructive/10 text-destructive rounded-md">
             <AlertCircle className="h-4 w-4 shrink-0" />
             <span className="text-sm break-words">{error}</span>
           </div>
@@ -428,7 +432,7 @@ export function FileContentModal({
 
         {/* Pierre File editor (default — same on desktop and mobile) */}
         {!isLoading && !error && isEditing && content !== null ? (
-          <div className="h-[calc(100dvh-7rem)] sm:h-[calc(85vh-6rem)] mt-2 px-4 pb-4 sm:px-0 sm:pb-0 min-w-0">
+          <div className="min-h-0 min-w-0 flex-1 px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+1rem)] sm:h-[calc(85vh-6rem)] sm:flex-none sm:mt-2 sm:px-0 sm:pt-0 sm:pb-0">
             <Suspense
               fallback={
                 <div className="flex items-center justify-center py-8 text-muted-foreground">
@@ -448,7 +452,7 @@ export function FileContentModal({
             </Suspense>
           </div>
         ) : !isLoading && !error ? (
-          <ScrollArea className="h-[calc(100dvh-7rem)] sm:h-[calc(85vh-6rem)] mt-2 px-4 pb-4 sm:px-0 sm:pb-0">
+          <ScrollArea className="min-h-0 flex-1 px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+1rem)] sm:h-[calc(85vh-6rem)] sm:flex-none sm:mt-2 sm:px-0 sm:pt-0 sm:pb-0">
             {isMedia ? (
               <div className="flex flex-col items-center justify-center gap-3 p-4 min-h-[12rem]">
                 {!imageLoaded && !imageError && imageSrc && (

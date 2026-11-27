@@ -7,6 +7,10 @@ import {
   DialogContent,
   DialogDescription,
   DialogTitle,
+  PREVIEW_DIALOG_BODY_CLASS,
+  PREVIEW_DIALOG_CONTENT_CLASS,
+  PREVIEW_DIALOG_FOOTER_CLASS,
+  PREVIEW_DIALOG_HEADER_CLASS,
 } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
@@ -76,12 +80,12 @@ function TextFileLightboxContent({
   }
 
   return (
-    <DialogContent className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-fit sm:max-h-[85vh] sm:!rounded-lg sm:p-4 bg-background/95">
-      <DialogTitle className="text-sm font-medium flex items-center gap-2">
-        <FileText className="h-4 w-4" />
-        {filename}
+    <DialogContent className={PREVIEW_DIALOG_CONTENT_CLASS}>
+      <DialogTitle className={PREVIEW_DIALOG_HEADER_CLASS}>
+        <FileText className="h-4 w-4 shrink-0" />
+        <span className="truncate">{filename}</span>
         {size !== undefined && (
-          <span className="text-muted-foreground font-normal">
+          <span className="shrink-0 text-muted-foreground font-normal">
             ({formatBytes(size)})
           </span>
         )}
@@ -89,7 +93,7 @@ function TextFileLightboxContent({
       <DialogDescription className="sr-only">
         Preview of text file content for {filename}.
       </DialogDescription>
-      <ScrollArea className="h-[calc(85vh-8rem)] mt-2">
+      <ScrollArea className={PREVIEW_DIALOG_BODY_CLASS}>
         {isLoading ? (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -116,19 +120,21 @@ function TextFileLightboxContent({
         )}
       </ScrollArea>
       {content && (
-        <div className="flex items-center gap-1 pt-2 border-t border-border/50">
+        <div className={PREVIEW_DIALOG_FOOTER_CLASS}>
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type="button"
                 onClick={handleCopy}
-                className="px-3 py-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5 text-xs"
+                className="min-h-10 sm:min-h-0 px-3 py-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5 text-xs"
               >
                 <Copy className="h-3.5 w-3.5" />
                 Copy
               </button>
             </TooltipTrigger>
-            <TooltipContent>Copy to clipboard</TooltipContent>
+            <TooltipContent className="max-sm:hidden">
+              Copy to clipboard
+            </TooltipContent>
           </Tooltip>
         </div>
       )}
