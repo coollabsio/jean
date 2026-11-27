@@ -218,52 +218,61 @@ export function MobileToolbarMenu({
                     const Icon = option.icon
                     const isFavorite = favorites.includes(option.id)
                     return (
-                      <div key={option.id} className="flex items-center">
-                        <CloseAfterLongPress
-                          enabled={CLOSE_AFTER_OPTIONS.has(option.id)}
-                          label={option.label}
-                          onRun={closeSession =>
-                            runOption(option.id, closeSession)
-                          }
-                        >
-                          {({ handlers: pressHandlers, consumeLongPress }) => (
-                            <button
-                              type="button"
-                              {...pressHandlers}
-                              disabled={isMagicOptionUnavailable(
-                                option.id,
-                                availability
-                              )}
-                              className="flex min-h-12 min-w-0 flex-1 select-none items-center gap-3 rounded-lg px-3 text-left [-webkit-touch-callout:none] active:bg-accent disabled:opacity-40"
-                              onClick={() => {
-                                if (consumeLongPress()) return
-                                runOption(option.id, false)
-                              }}
-                            >
-                              <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-                              <span className="truncate text-sm">
-                                {option.label}
-                              </span>
-                            </button>
-                          )}
-                        </CloseAfterLongPress>
-                        <button
-                          type="button"
-                          aria-label={`${isFavorite ? 'Unfavorite' : 'Favorite'} ${option.label}`}
-                          aria-pressed={isFavorite}
-                          className="flex size-12 shrink-0 items-center justify-center rounded-lg active:bg-accent"
-                          onClick={() => toggleFavorite(option.id)}
-                        >
-                          <Star
-                            className={cn(
-                              'h-4 w-4',
-                              isFavorite
-                                ? 'fill-warning text-warning'
-                                : 'text-muted-foreground/40'
-                            )}
-                          />
-                        </button>
-                      </div>
+                      <CloseAfterLongPress
+                        key={option.id}
+                        enabled={CLOSE_AFTER_OPTIONS.has(option.id)}
+                        label={option.label}
+                        className="px-3"
+                        onRun={closeSession =>
+                          runOption(option.id, closeSession)
+                        }
+                      >
+                        {({
+                          handlers: pressHandlers,
+                          consumeLongPress,
+                          choices,
+                        }) => (
+                          <div>
+                            <div className="flex items-center">
+                              <button
+                                type="button"
+                                {...pressHandlers}
+                                disabled={isMagicOptionUnavailable(
+                                  option.id,
+                                  availability
+                                )}
+                                className="flex min-h-12 min-w-0 flex-1 select-none items-center gap-3 rounded-lg px-3 text-left [-webkit-touch-callout:none] active:bg-accent disabled:opacity-40"
+                                onClick={() => {
+                                  if (consumeLongPress()) return
+                                  runOption(option.id, false)
+                                }}
+                              >
+                                <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                                <span className="truncate text-sm">
+                                  {option.label}
+                                </span>
+                              </button>
+                              <button
+                                type="button"
+                                aria-label={`${isFavorite ? 'Unfavorite' : 'Favorite'} ${option.label}`}
+                                aria-pressed={isFavorite}
+                                className="flex size-12 shrink-0 items-center justify-center rounded-lg active:bg-accent"
+                                onClick={() => toggleFavorite(option.id)}
+                              >
+                                <Star
+                                  className={cn(
+                                    'h-4 w-4',
+                                    isFavorite
+                                      ? 'fill-warning text-warning'
+                                      : 'text-muted-foreground/40'
+                                  )}
+                                />
+                              </button>
+                            </div>
+                            {choices}
+                          </div>
+                        )}
+                      </CloseAfterLongPress>
                     )
                   })}
                 </section>

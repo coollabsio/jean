@@ -620,12 +620,17 @@ describe('MobileToolbarMenu', () => {
       () => new Promise(resolve => setTimeout(resolve, LONG_PRESS_MS + 50))
     )
     fireEvent.pointerUp(commit)
-    // The click after a long press must not run the plain commit.
+    // A real finger lift moves focus to the option, then clicks it. The
+    // choices must survive both, and the click must not run the commit.
+    act(() => commit.focus())
     fireEvent.click(commit)
     expect(onCommit).not.toHaveBeenCalled()
 
+    const choices = within(sheet).getByRole('group', {
+      name: 'Commit options',
+    })
     await user.click(
-      await screen.findByRole('button', { name: 'Commit & close session' })
+      within(choices).getByRole('button', { name: 'Commit & close session' })
     )
 
     expect(magicOption).toHaveBeenCalledWith({

@@ -9,7 +9,6 @@ export interface LongPressHandlers {
   onPointerMove: (e: ReactPointerEvent) => void
   onPointerUp: () => void
   onPointerCancel: () => void
-  onPointerLeave: () => void
   onContextMenu: (e: { preventDefault: () => void }) => void
 }
 
@@ -60,9 +59,9 @@ export function useLongPress(onLongPress: () => void): {
         const moved = Math.hypot(e.clientX - press.x, e.clientY - press.y)
         if (moved > LONG_PRESS_MOVE_TOLERANCE_PX) cancel()
       },
+      // No pointerleave: touch can fire it while the finger is still down.
       onPointerUp: cancel,
       onPointerCancel: cancel,
-      onPointerLeave: cancel,
       // Stop the system menu (text selection, link preview) on touch.
       onContextMenu: e => e.preventDefault(),
     }),

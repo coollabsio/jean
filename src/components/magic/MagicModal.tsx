@@ -1,4 +1,11 @@
-import { useCallback, useState, useRef, useEffect, useMemo } from 'react'
+import {
+  Fragment,
+  useCallback,
+  useState,
+  useRef,
+  useEffect,
+  useMemo,
+} from 'react'
 import { Loader2 } from '@/components/icons/reicon'
 import {
   Dialog,
@@ -2157,33 +2164,41 @@ ${resolveInstructions}`
         enabled={mobile && canCloseAfter && CLOSE_AFTER_OPTIONS.has(option.id)}
         label={option.label}
         onRun={closeSession => executeAction(option.id, { closeSession })}
+        className="col-span-2"
       >
-        {({ handlers, consumeLongPress }) => (
-          <button
-            type="button"
-            {...handlers}
-            aria-label={mobile ? option.label : `${option.label} ${option.key}`}
-            disabled={isDisabled}
-            onClick={e => {
-              if (consumeLongPress()) return
-              executeAction(option.id, { closeSession: e.shiftKey })
-            }}
-            onMouseEnter={() => setSelectedOption(option.id)}
-            className={cn(
-              'group flex w-full items-center text-left text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              mobile
-                ? 'min-h-12 select-none [-webkit-touch-callout:none] gap-2.5 rounded-lg border border-border/70 bg-muted/30 px-3 py-2.5 active:bg-accent'
-                : 'justify-between px-4 py-2',
-              isDisabled ? 'cursor-not-allowed opacity-40' : 'hover:bg-accent',
-              isSelected && !isDisabled && !mobile && 'bg-accent'
-            )}
-          >
-            <span className="flex min-w-0 items-center gap-2.5">
-              <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <span className="leading-tight">{option.label}</span>
-            </span>
-            {!mobile && <Kbd data-web-visible>{option.key}</Kbd>}
-          </button>
+        {({ handlers, consumeLongPress, choices }) => (
+          <Fragment>
+            <button
+              type="button"
+              {...handlers}
+              aria-label={
+                mobile ? option.label : `${option.label} ${option.key}`
+              }
+              disabled={isDisabled}
+              onClick={e => {
+                if (consumeLongPress()) return
+                executeAction(option.id, { closeSession: e.shiftKey })
+              }}
+              onMouseEnter={() => setSelectedOption(option.id)}
+              className={cn(
+                'group flex w-full items-center text-left text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                mobile
+                  ? 'min-h-12 select-none [-webkit-touch-callout:none] gap-2.5 rounded-lg border border-border/70 bg-muted/30 px-3 py-2.5 active:bg-accent'
+                  : 'justify-between px-4 py-2',
+                isDisabled
+                  ? 'cursor-not-allowed opacity-40'
+                  : 'hover:bg-accent',
+                isSelected && !isDisabled && !mobile && 'bg-accent'
+              )}
+            >
+              <span className="flex min-w-0 items-center gap-2.5">
+                <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <span className="leading-tight">{option.label}</span>
+              </span>
+              {!mobile && <Kbd data-web-visible>{option.key}</Kbd>}
+            </button>
+            {choices}
+          </Fragment>
         )}
       </CloseAfterLongPress>
     )
