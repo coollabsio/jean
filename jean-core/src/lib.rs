@@ -407,6 +407,12 @@ pub struct AppPreferences {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub linear_api_key: Option<String>, // Global Linear personal API key (inherited by all projects)
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plane_api_key: Option<String>, // Global Plane API key (inherited by all projects)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plane_workspace_slug: Option<String>, // Global Plane workspace slug
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plane_base_url: Option<String>, // Plane API base URL, None = Plane Cloud
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sentry_auth_token: Option<String>, // Global Sentry auth token (inherited by all projects)
     #[serde(default = "default_cli_source")]
     pub claude_cli_source: String, // Claude CLI source: "jean" (managed) or "path" (system PATH)
@@ -1026,6 +1032,7 @@ mod tests {
         preferences.theme = "dark".to_string();
         preferences.favorite_models = vec!["codex:gpt-5.6-sol".to_string()];
         preferences.linear_api_key = Some("secret".to_string());
+        preferences.plane_api_key = Some("plane-secret".to_string());
         preferences.http_server_token = Some("token".to_string());
 
         let value = server_preferences_value(&preferences).unwrap();
@@ -1034,6 +1041,8 @@ mod tests {
         assert_eq!(value["favorite_models"], json!(["codex:gpt-5.6-sol"]));
         assert!(value.get("linear_api_key").is_none());
         assert_eq!(value["linear_api_key_configured"], json!(true));
+        assert!(value.get("plane_api_key").is_none());
+        assert_eq!(value["plane_api_key_configured"], json!(true));
         assert!(value.get("http_server_token").is_none());
         assert_eq!(value["http_server_token_configured"], json!(true));
     }
@@ -3654,6 +3663,9 @@ impl Default for AppPreferences {
             build_effort_level: None,
             yolo_effort_level: None,
             linear_api_key: None,
+            plane_api_key: None,
+            plane_workspace_slug: None,
+            plane_base_url: None,
             sentry_auth_token: None,
             claude_cli_source: default_cli_source(),
             codex_cli_source: default_cli_source(),
@@ -4356,7 +4368,12 @@ fn server_preferences_value(preferences: &AppPreferences) -> Result<Value, Strin
     for key in CLIENT_ONLY_PREFERENCE_KEYS {
         object.remove(*key);
     }
-    for key in ["linear_api_key", "sentry_auth_token", "http_server_token"] {
+    for key in [
+        "linear_api_key",
+        "plane_api_key",
+        "sentry_auth_token",
+        "http_server_token",
+    ] {
         let configured = object
             .get(key)
             .is_some_and(|value| value.as_str().is_some_and(|secret| !secret.is_empty()));

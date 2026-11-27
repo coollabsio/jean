@@ -15,6 +15,7 @@ import {
 } from '@/lib/model-utils'
 import { applyYoloInvestigationFixDirective } from '@/lib/investigation-prompt'
 import { routeCurrentSessionMagicPrompt } from '@/lib/magic-prompt-pty'
+import { openMagicPromptInTerminal } from '@/lib/magic-prompt-session'
 import {
   DEFAULT_INVESTIGATE_ISSUE_PROMPT,
   DEFAULT_INVESTIGATE_PR_PROMPT,
@@ -259,6 +260,27 @@ export function useInvestigateHandlers({
       // leave earlier sessions empty. Do not Promise.all.
       const baseSessionId = useChatStore.getState().activeSessionIds[worktreeId]
       for (const { prompt, prepare } of prompts) {
+        try {
+          // react-doctor-disable-next-line react-doctor/async-await-in-loop -- sessions must be created in order; see comment above
+          const terminalSession = await openMagicPromptInTerminal({
+            newSessionKind: preferences?.default_new_session_kind,
+            worktreeId,
+            worktreePath,
+            name: 'Investigate',
+            prompt,
+            promptBackend: backend,
+            executionMode,
+            prepare,
+          })
+          if (terminalSession) continue
+        } catch (error) {
+          console.error(
+            '[NEW-SESSIONS] Failed to open terminal session:',
+            error
+          )
+          continue
+        }
+
         let session: Session
         try {
           // react-doctor-disable-next-line react-doctor/async-await-in-loop -- sessions must be created in order; see comment above
@@ -305,6 +327,7 @@ export function useInvestigateHandlers({
       sendMessage,
       createSession,
       queryClient,
+      preferences?.default_new_session_kind,
       preferences?.magic_prompts?.parallel_execution,
       preferences?.chrome_enabled,
       preferences?.ai_language,
@@ -1071,6 +1094,26 @@ export function useInvestigateHandlers({
       const project = projects?.find(p => p.path === detail.projectPath)
       if (project) expandProject(project.id)
 
+      try {
+        const terminalSession = await openMagicPromptInTerminal({
+          newSessionKind: preferences?.default_new_session_kind,
+          worktreeId,
+          worktreePath,
+          name: `Investigate: ${detail.workflowName}`,
+          prompt,
+          promptBackend: investigateBackend,
+          executionMode: investigateMode,
+        })
+        if (terminalSession) return
+      } catch (error) {
+        console.error(
+          '[INVESTIGATE-WF] Failed to open terminal session:',
+          error
+        )
+        toast.error(`Failed to create session: ${error}`)
+        return
+      }
+
       createSession.mutate(
         { worktreeId, worktreePath },
         {
@@ -1106,6 +1149,7 @@ export function useInvestigateHandlers({
       queryClient,
       preferences?.magic_prompts?.investigate_workflow_run,
       preferences?.magic_prompt_models?.investigate_workflow_run_model,
+      preferences?.default_new_session_kind,
       preferences?.default_provider,
       preferences?.magic_prompts?.parallel_execution,
       preferences?.magic_prompt_providers,

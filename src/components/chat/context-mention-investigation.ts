@@ -11,7 +11,12 @@ import {
 } from '@/services/github'
 import { linearQueryKeys, loadLinearIssueContext } from '@/services/linear'
 import { preferencesQueryKeys } from '@/services/preferences'
-import { processBackgroundInvestigation } from '@/hooks/useBackgroundInvestigation'
+import {
+  processBackgroundInvestigation,
+  resolveInvestigationTarget,
+} from '@/hooks/useBackgroundInvestigation'
+import { applyYoloInvestigationFixDirective } from '@/lib/investigation-prompt'
+import { openMagicPromptInTerminal } from '@/lib/magic-prompt-session'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import type { useCreateWorktree } from '@/services/projects'
@@ -159,6 +164,46 @@ export async function investigateInNewSession({
   openSession: boolean
   reuseSessionId?: string
 }): Promise<void> {
+  const preferences = queryClient.getQueryData<AppPreferences>(
+    preferencesQueryKeys.preferences()
+  )
+  const type = investigationType(items)
+  const loadItems = (sessionId: string) =>
+    Promise.all(
+      items.map(item =>
+        loadContextMentionItem(sessionId, item, worktreePath, projectId)
+      )
+    )
+  // A background run must not depend on an open terminal, so only an
+  // investigation that opens its session can use a terminal session.
+  if (openSession) {
+    const { backend, executionMode } = resolveInvestigationTarget(
+      type,
+      preferences
+    )
+    const terminalSession = await openMagicPromptInTerminal({
+      newSessionKind: preferences?.default_new_session_kind,
+      worktreeId,
+      worktreePath,
+      name: 'Investigate',
+      prompt: applyYoloInvestigationFixDirective(
+        buildInvestigatePrompt(items, templates),
+        executionMode
+      ),
+      promptBackend: backend,
+      executionMode,
+      prepare: loadItems,
+    })
+    if (terminalSession) {
+      window.dispatchEvent(
+        new CustomEvent('open-session-modal', {
+          detail: { sessionId: terminalSession.id, worktreeId, worktreePath },
+        })
+      )
+      return
+    }
+  }
+
   const sessionId =
     reuseSessionId ??
     (
@@ -167,18 +212,12 @@ export async function investigateInNewSession({
         worktreePath,
       })
     ).id
-  await Promise.all(
-    items.map(item =>
-      loadContextMentionItem(sessionId, item, worktreePath, projectId)
-    )
-  )
+  await loadItems(sessionId)
   useChatStore.getState().registerWorktreePath(worktreeId, worktreePath)
   await processBackgroundInvestigation(
     worktreeId,
-    investigationType(items),
-    queryClient.getQueryData<AppPreferences>(
-      preferencesQueryKeys.preferences()
-    ),
+    type,
+    preferences,
     null,
     queryClient,
     {

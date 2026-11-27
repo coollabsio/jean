@@ -73,6 +73,8 @@ import type {
   AttachedSavedContext,
 } from '@/types/github'
 import type { LoadedLinearIssueContext } from '@/types/linear'
+import type { LoadedPlaneWorkItemContext } from '@/types/plane'
+import { PlaneIcon } from '@/components/icons/PlaneIcon'
 import type { SentryIssueContext } from '@/types/sentry'
 import { LinearIcon } from '@/components/icons/LinearIcon'
 import { openExternal, preOpenWindow } from '@/lib/platform'
@@ -197,6 +199,7 @@ interface MobileSettingsMenuProps {
   loadedSecurityContexts: LoadedSecurityAlertContext[]
   loadedAdvisoryContexts: LoadedAdvisoryContext[]
   loadedLinearContexts: LoadedLinearIssueContext[]
+  loadedPlaneContexts?: LoadedPlaneWorkItemContext[]
   loadedSentryContexts: SentryIssueContext[]
   attachedSavedContexts: AttachedSavedContext[]
 
@@ -206,6 +209,7 @@ interface MobileSettingsMenuProps {
   handleViewSecurityAlert: (ctx: LoadedSecurityAlertContext) => void
   handleViewAdvisory: (ctx: LoadedAdvisoryContext) => void
   handleViewLinear: (ctx: LoadedLinearIssueContext) => void
+  handleViewPlane?: (ctx: LoadedPlaneWorkItemContext) => void
   handleViewSentry: (ctx: SentryIssueContext) => void
   handleViewSavedContext: (ctx: AttachedSavedContext) => void
 
@@ -260,6 +264,7 @@ export function MobileSettingsMenu({
   loadedSecurityContexts,
   loadedAdvisoryContexts,
   loadedLinearContexts,
+  loadedPlaneContexts = [],
   loadedSentryContexts,
   attachedSavedContexts,
   handleViewIssue,
@@ -268,6 +273,7 @@ export function MobileSettingsMenu({
   handleViewSecurityAlert,
   handleViewAdvisory,
   handleViewLinear,
+  handleViewPlane,
   handleViewSentry,
   handleViewSavedContext,
   availableMcpServers,
@@ -730,6 +736,18 @@ export function MobileSettingsMenu({
         ),
         label: `${ctx.identifier} ${ctx.title}`,
         onView: () => handleViewLinear(ctx),
+        externalUrl: ctx.url,
+      })),
+    },
+    {
+      title: 'Plane Work Items',
+      items: loadedPlaneContexts.map(ctx => ({
+        key: ctx.identifier,
+        icon: (
+          <PlaneIcon className="h-4 w-4 shrink-0 text-sky-600 dark:text-sky-400" />
+        ),
+        label: `${ctx.identifier} ${ctx.title}`,
+        onView: () => handleViewPlane?.(ctx),
         externalUrl: ctx.url,
       })),
     },

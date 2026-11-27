@@ -35,6 +35,7 @@ export interface ViewingContext {
     | 'security'
     | 'advisory'
     | 'linear'
+    | 'plane'
     | 'sentry'
   number?: number
   slug?: string

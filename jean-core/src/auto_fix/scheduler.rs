@@ -1206,6 +1206,7 @@ async fn create_auto_fix_worktree(
         None,
         None,
         None,
+        None,
         Some(false),
         Some("auto_fix".to_string()),
     )
@@ -1401,6 +1402,7 @@ fn project_from_pending_auto_yolo(entry: &PendingAutoYolo) -> Project {
         worktrees_dir: None,
         linear_api_key: None,
         linear_team_id: None,
+        plane: None,
         sentry_auth_token: None,
         sentry_organization_slug: None,
         sentry_project_slug: None,
@@ -1718,6 +1720,7 @@ mod tests {
             worktrees_dir: None,
             linear_api_key: None,
             linear_team_id: None,
+            plane: None,
             sentry_auth_token: None,
             sentry_organization_slug: None,
             sentry_project_slug: None,

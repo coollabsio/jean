@@ -55,6 +55,10 @@ import { useIsMobile } from '@/hooks/use-mobile'
 import { resolveDefaultModelForBackend } from '@/lib/session-defaults'
 import { parseServerResourceKey } from '@/lib/server-resource'
 import {
+  NATIVE_CLI_COMMANDS,
+  NATIVE_CLI_YOLO_ARGS,
+} from '@/lib/native-cli-session'
+import {
   NativeCliSessionsModal,
   type NativeCliSessionKind,
 } from './NativeCliSessionsModal'
@@ -72,31 +76,6 @@ const BACKEND_ORDER: CliBackend[] = [
   'antigravity',
   'muse',
 ]
-
-const backendCommands: Record<CliBackend, string> = {
-  codex: 'codex',
-  claude: 'claude',
-  opencode: 'opencode',
-  cursor: 'cursor-agent',
-  pi: 'pi',
-  commandcode: 'commandcode',
-  grok: 'grok',
-  kimi: 'kimi',
-  devin: 'devin',
-  antigravity: 'antigravity',
-  muse: 'muse',
-}
-
-const YOLO_ARGS_BY_BACKEND: Partial<Record<CliBackend, string[]>> = {
-  claude: ['--permission-mode', 'bypassPermissions'],
-  codex: ['--dangerously-bypass-approvals-and-sandbox'],
-  cursor: ['--yolo', '--sandbox', 'disabled'],
-  grok: ['--always-approve', '--sandbox', 'off'],
-  kimi: ['--yolo'],
-  devin: ['--permission-mode', 'dangerous'],
-  antigravity: ['--approval-mode', 'yolo'],
-  muse: ['--yolo'],
-}
 
 export function NewSessionModeModal() {
   const target = useUIStore(state => state.newSessionModeTarget)
@@ -193,7 +172,7 @@ export function NewSessionModeModal() {
         backend,
         shortcut: String(index + 2),
         installed: Boolean(status.installed),
-        command: status.path ?? backendCommands[backend],
+        command: status.path ?? NATIVE_CLI_COMMANDS[backend],
       }
     }).filter(choice => choice.installed)
   }, [
@@ -241,7 +220,7 @@ export function NewSessionModeModal() {
     return (
       installedBackendChoices.find(
         choice => choice.backend === nativePickerKind
-      )?.command ?? backendCommands[nativePickerKind]
+      )?.command ?? NATIVE_CLI_COMMANDS[nativePickerKind]
     )
   }, [installedBackendChoices, nativePickerKind])
 
@@ -329,7 +308,7 @@ export function NewSessionModeModal() {
   }, [])
 
   const chooseBackendTerminalYolo = useCallback((backend: CliBackend) => {
-    const yoloArgs = YOLO_ARGS_BY_BACKEND[backend]
+    const yoloArgs = NATIVE_CLI_YOLO_ARGS[backend]
     if (!yoloArgs) return
     setNativePickerInitialCommandArgs(yoloArgs)
     setNativePickerKind(backend)
@@ -497,7 +476,7 @@ export function NewSessionModeModal() {
                   installedBackendChoices.map(choice => {
                     const Icon = getBackendIcon(choice.backend)
                     const label = getBackendLabel(choice.backend)
-                    const yoloArgs = YOLO_ARGS_BY_BACKEND[choice.backend]
+                    const yoloArgs = NATIVE_CLI_YOLO_ARGS[choice.backend]
                     return (
                       <NativeBackendChoice
                         key={choice.backend}
@@ -569,7 +548,7 @@ function MobileBackendActions({
   onYolo: () => void
 }) {
   const label = getBackendLabel(backend)
-  const yoloAvailable = Boolean(YOLO_ARGS_BY_BACKEND[backend])
+  const yoloAvailable = Boolean(NATIVE_CLI_YOLO_ARGS[backend])
 
   return (
     <>

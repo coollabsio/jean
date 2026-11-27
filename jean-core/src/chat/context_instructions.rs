@@ -261,6 +261,11 @@ fn collect_context_paths(
     }
 
     paths.extend(get_discussion_context_paths(app, session_id, worktree_id));
+    paths.extend(crate::projects::plane_issues::get_plane_context_paths(
+        app,
+        session_id,
+        worktree_id,
+    ));
 
     if let Ok(app_data_dir) = app.path().app_data_dir() {
         let saved_contexts_dir = app_data_dir.join("session-context");

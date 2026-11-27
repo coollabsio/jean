@@ -4339,6 +4339,13 @@ async fn send_chat_message_inner(
                             &thread_worktree_id,
                         ),
                     );
+                    all_context_paths.extend(
+                        crate::projects::plane_issues::get_plane_context_paths(
+                            &thread_app,
+                            &thread_session_id,
+                            &thread_worktree_id,
+                        ),
+                    );
 
                     // Saved context files
                     if let Ok(app_data_dir) = thread_app.path().app_data_dir() {
@@ -4703,6 +4710,14 @@ async fn send_chat_message_inner(
                         &thread_app,
                         &thread_session_id,
                         &thread_worktree_id,
+                    )
+                    .into_iter()
+                    .chain(
+                        crate::projects::plane_issues::get_plane_context_paths(
+                            &thread_app,
+                            &thread_session_id,
+                            &thread_worktree_id,
+                        ),
                     ) {
                         if let Ok(content) = std::fs::read_to_string(&path) {
                             context_content.push_str(&content);

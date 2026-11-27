@@ -187,6 +187,22 @@ pub struct JeanScripts {
     pub run: Option<RunScript>,
 }
 
+/// Per-project Plane settings. Each empty value falls back to the global preference.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PlaneProjectSettings {
+    /// Plane API key (sent as `X-API-Key`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_slug: Option<String>,
+    /// API base URL (None = Plane Cloud)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    /// Plane project UUID to filter work items (None = all projects)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+}
+
 /// One Sentry project assigned to a Jean project.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SentryProjectLink {
@@ -276,6 +292,9 @@ pub struct Project {
     /// Linear team ID to filter issues (None = show all teams)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub linear_team_id: Option<String>,
+    /// Plane settings for this project. Empty values fall back to global settings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plane: Option<PlaneProjectSettings>,
     /// Sentry auth token override for this project (None = use global token)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sentry_auth_token: Option<String>,

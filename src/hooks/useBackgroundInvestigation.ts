@@ -524,6 +524,25 @@ const investigationConfig = {
   }
 >
 
+/** Model, backend, and execution mode that an investigation runs with. */
+export function resolveInvestigationTarget(
+  type: InvestigationType,
+  preferences: ReturnType<typeof usePreferences>['data'],
+  override?: Pick<InvestigationOverride, 'model' | 'backend'>
+) {
+  const { modelKey, modeKey } = investigationConfig[type]
+  const selectedModel =
+    override?.model ??
+    preferences?.magic_prompt_models?.[modelKey] ??
+    preferences?.selected_model ??
+    'sonnet'
+  const backend = override?.backend ?? resolveBackend(selectedModel)
+  const executionMode =
+    preferences?.magic_prompt_modes?.[modeKey] ??
+    DEFAULT_MAGIC_PROMPT_MODES[modeKey]
+  return { selectedModel, backend, executionMode }
+}
+
 /**
  * Process a single background investigation: build prompt, then ask the backend
  * to reuse the same active/first session selection and send flow as Jean MCP.
@@ -564,15 +583,13 @@ export async function processBackgroundInvestigation(
   const projectId = cachedWorktree?.project_id
 
   // Resolve model, provider, backend
-  const { modelKey, providerKey, effortKey, modeKey } =
-    investigationConfig[type]
+  const { providerKey, effortKey } = investigationConfig[type]
 
-  const selectedModel =
-    override?.model ??
-    preferences?.magic_prompt_models?.[modelKey] ??
-    preferences?.selected_model ??
-    'sonnet'
-  const backend = override?.backend ?? resolveBackend(selectedModel)
+  const { selectedModel, backend, executionMode } = resolveInvestigationTarget(
+    type,
+    preferences,
+    override
+  )
   const provider =
     backend !== 'claude'
       ? null
@@ -603,9 +620,6 @@ export async function processBackgroundInvestigation(
   const effortLevel =
     preferences?.magic_prompt_efforts?.[effortKey] ??
     (useAdaptive ? 'high' : undefined)
-  const executionMode =
-    preferences?.magic_prompt_modes?.[modeKey] ??
-    DEFAULT_MAGIC_PROMPT_MODES[modeKey]
 
   // Build the investigation prompt (append fix directive when mode is yolo)
   const prompt = applyYoloInvestigationFixDirective(

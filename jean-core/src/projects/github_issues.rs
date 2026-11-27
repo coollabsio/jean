@@ -869,6 +869,8 @@ pub struct ContextReferences {
     pub sentry: std::collections::HashMap<String, ContextRef>,
     #[serde(default)]
     pub discussions: std::collections::HashMap<String, ContextRef>,
+    #[serde(default)]
+    pub plane: std::collections::HashMap<String, ContextRef>,
 }
 
 /// Get the directory for shared GitHub contexts

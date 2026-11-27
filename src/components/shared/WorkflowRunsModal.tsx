@@ -49,6 +49,7 @@ import { usePreferences } from '@/services/preferences'
 import { openExternal } from '@/lib/platform'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { resolveBackend } from '@/lib/model-utils'
+import { openMagicPromptInTerminal } from '@/lib/magic-prompt-session'
 import { applyYoloInvestigationFixDirective } from '@/lib/investigation-prompt'
 import {
   DEFAULT_INVESTIGATE_WORKFLOW_RUN_PROMPT,
@@ -501,6 +502,22 @@ export function WorkflowRunsModal() {
         selectWorktree(worktreeId)
       }
 
+      const openSessionModal = (sessionId: string) => {
+        if (isOnProjectCanvas) {
+          // On project canvas — let ProjectCanvasView auto-open the session modal overlay
+          useUIStore
+            .getState()
+            .markWorktreeForAutoOpenSession(worktreeId, sessionId)
+        } else {
+          // Inside a worktree — dispatch event for ProjectCanvasView to handle
+          window.dispatchEvent(
+            new CustomEvent('open-session-modal', {
+              detail: { sessionId },
+            })
+          )
+        }
+      }
+
       const sendInvestigateToSession = (sessionId: string) => {
         setActiveSession(worktreeId, sessionId)
 
@@ -565,20 +582,27 @@ export function WorkflowRunsModal() {
           aiLanguage: preferences?.ai_language,
         })
 
-        // Open the session chat modal
-        if (isOnProjectCanvas) {
-          // On project canvas — let ProjectCanvasView auto-open the session modal overlay
-          useUIStore
-            .getState()
-            .markWorktreeForAutoOpenSession(worktreeId, sessionId)
-        } else {
-          // Inside a worktree — dispatch event for ProjectCanvasView to handle
-          window.dispatchEvent(
-            new CustomEvent('open-session-modal', {
-              detail: { sessionId },
-            })
-          )
+        openSessionModal(sessionId)
+      }
+
+      try {
+        const terminalSession = await openMagicPromptInTerminal({
+          newSessionKind: preferences?.default_new_session_kind,
+          worktreeId,
+          worktreePath,
+          name: `Investigate: ${run.workflowName}`,
+          prompt,
+          promptBackend: investigateBackend,
+          executionMode: investigateMode,
+        })
+        if (terminalSession) {
+          openSessionModal(terminalSession.id)
+          return
         }
+      } catch (error) {
+        console.error('[WF-MODAL] Failed to open terminal session:', error)
+        toast.error(`Failed to create session: ${error}`)
+        return
       }
 
       // Check if worktree already has an empty session we can reuse

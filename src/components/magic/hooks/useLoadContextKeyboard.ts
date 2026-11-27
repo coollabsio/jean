@@ -7,10 +7,18 @@ import type {
   RepositoryAdvisory,
 } from '@/types/github'
 import type { LinearIssue } from '@/types/linear'
+import type { PlaneWorkItem } from '@/types/plane'
 import type { SentryIssue } from '@/types/sentry'
 import type { SessionWithContext } from '../LoadContextItems'
 
-type TabId = 'issues' | 'prs' | 'security' | 'contexts' | 'linear' | 'sentry'
+type TabId =
+  | 'issues'
+  | 'prs'
+  | 'security'
+  | 'contexts'
+  | 'linear'
+  | 'sentry'
+  | 'plane'
 
 interface UseLoadContextKeyboardOptions {
   activeTab: TabId
@@ -22,6 +30,7 @@ interface UseLoadContextKeyboardOptions {
   filteredAdvisories: RepositoryAdvisory[]
   filteredLinearIssues: LinearIssue[]
   filteredSentryIssues: SentryIssue[]
+  filteredPlaneWorkItems: PlaneWorkItem[]
   filteredContexts: SavedContext[]
   filteredEntries: AllSessionsEntry[]
   selectedIndex: number
@@ -36,6 +45,7 @@ interface UseLoadContextKeyboardOptions {
   onPreviewAdvisory: (advisory: RepositoryAdvisory) => void
   onSelectLinearIssue: (issue: LinearIssue) => void
   onSelectSentryIssue: (issue: SentryIssue) => void
+  onSelectPlaneWorkItem: (item: PlaneWorkItem) => void
   onAttachContext: (ctx: SavedContext) => void
   onSessionClick: (s: SessionWithContext) => void
   onTabChange: (tab: TabId) => void
@@ -50,6 +60,7 @@ export function useLoadContextKeyboard({
   filteredAdvisories,
   filteredLinearIssues,
   filteredSentryIssues,
+  filteredPlaneWorkItems,
   filteredContexts,
   filteredEntries,
   selectedIndex,
@@ -64,6 +75,7 @@ export function useLoadContextKeyboard({
   onPreviewAdvisory,
   onSelectLinearIssue,
   onSelectSentryIssue,
+  onSelectPlaneWorkItem,
   onAttachContext,
   onSessionClick,
   onTabChange,
@@ -105,6 +117,11 @@ export function useLoadContextKeyboard({
         if (key === '6') {
           e.preventDefault()
           onTabChange('sentry')
+          return
+        }
+        if (key === '7') {
+          e.preventDefault()
+          onTabChange('plane')
           return
         }
       }
@@ -239,6 +256,26 @@ export function useLoadContextKeyboard({
         }
       }
 
+      if (activeTab === 'plane' && filteredPlaneWorkItems.length > 0) {
+        if (key === 'arrowdown') {
+          e.preventDefault()
+          setSelectedIndex(
+            Math.min(selectedIndex + 1, filteredPlaneWorkItems.length - 1)
+          )
+          return
+        }
+        if (key === 'arrowup') {
+          e.preventDefault()
+          setSelectedIndex(Math.max(selectedIndex - 1, 0))
+          return
+        }
+        if (key === 'enter' && filteredPlaneWorkItems[selectedIndex]) {
+          e.preventDefault()
+          onSelectPlaneWorkItem(filteredPlaneWorkItems[selectedIndex])
+          return
+        }
+      }
+
       if (activeTab === 'sentry' && filteredSentryIssues.length > 0) {
         if (key === 'arrowdown') {
           e.preventDefault()
@@ -313,6 +350,7 @@ export function useLoadContextKeyboard({
       filteredAdvisories,
       filteredLinearIssues,
       filteredSentryIssues,
+      filteredPlaneWorkItems,
       filteredContexts,
       filteredEntries,
       selectedIndex,
@@ -327,6 +365,7 @@ export function useLoadContextKeyboard({
       onPreviewAdvisory,
       onSelectLinearIssue,
       onSelectSentryIssue,
+      onSelectPlaneWorkItem,
       onAttachContext,
       onSessionClick,
       onTabChange,

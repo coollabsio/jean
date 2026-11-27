@@ -14,6 +14,7 @@ import {
   ShieldAlert,
 } from '@/components/icons/reicon'
 import { LinearIcon } from '@/components/icons/LinearIcon'
+import { PlaneIcon } from '@/components/icons/PlaneIcon'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -53,6 +54,7 @@ import type {
 } from '@/types/github'
 import { DEFAULT_KEYBINDINGS, formatShortcutDisplay } from '@/types/keybindings'
 import type { LoadedLinearIssueContext } from '@/types/linear'
+import type { LoadedPlaneWorkItemContext } from '@/types/plane'
 import { isBaseSession } from '@/types/projects'
 import type { SentryIssueContext } from '@/types/sentry'
 
@@ -71,6 +73,7 @@ interface ThreadContextSources {
   security: LoadedSecurityAlertContext[]
   advisories: LoadedAdvisoryContext[]
   linear: LoadedLinearIssueContext[]
+  plane?: LoadedPlaneWorkItemContext[]
   sentry: SentryIssueContext[]
   saved: AttachedSavedContext[]
   onViewIssue: (ctx: LoadedIssueContext) => void
@@ -79,6 +82,7 @@ interface ThreadContextSources {
   onViewSecurityAlert: (ctx: LoadedSecurityAlertContext) => void
   onViewAdvisory: (ctx: LoadedAdvisoryContext) => void
   onViewLinear: (ctx: LoadedLinearIssueContext) => void
+  onViewPlane?: (ctx: LoadedPlaneWorkItemContext) => void
   onViewSentry: (ctx: SentryIssueContext) => void
   onViewSavedContext: (ctx: AttachedSavedContext) => void
 }
@@ -130,6 +134,13 @@ export function buildThreadContextItems(
       Icon: LinearIcon,
       iconClassName: 'text-violet-600 dark:text-violet-400',
       onSelect: () => s.onViewLinear(ctx),
+    })),
+    ...(s.plane ?? []).map(ctx => ({
+      key: `plane-${ctx.identifier}`,
+      label: `${ctx.identifier} ${ctx.title}`,
+      Icon: PlaneIcon,
+      iconClassName: 'text-sky-600 dark:text-sky-400',
+      onSelect: () => s.onViewPlane?.(ctx),
     })),
     ...s.sentry.map(ctx => ({
       key: `sentry-${ctx.id}`,

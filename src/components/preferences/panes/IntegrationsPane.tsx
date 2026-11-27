@@ -7,6 +7,7 @@ import { usePreferences, usePatchPreferences } from '@/services/preferences'
 import { testSentryAuthToken } from '@/services/sentry'
 import { SettingsSection } from '../SettingsSection'
 import { InlineField } from '../InlineField'
+import { PlaneSettingsForm } from '@/components/shared/PlaneSettingsForm'
 
 export const IntegrationsPane: React.FC = () => {
   const { data: preferences } = usePreferences()
@@ -155,6 +156,29 @@ export const IntegrationsPane: React.FC = () => {
             )}
           </div>
         </InlineField>
+      </SettingsSection>
+      <SettingsSection title="Plane" anchorId="pref-integrations-section-plane">
+        <PlaneSettingsForm
+          saved={{
+            apiKey: preferences?.plane_api_key ?? '',
+            workspaceSlug: preferences?.plane_workspace_slug ?? '',
+            baseUrl: preferences?.plane_base_url ?? '',
+          }}
+          isSaving={patchPreferences.isPending}
+          onSave={changes =>
+            patchPreferences.mutateAsync({
+              ...(changes.apiKey !== undefined && {
+                plane_api_key: changes.apiKey || null,
+              }),
+              ...(changes.workspaceSlug !== undefined && {
+                plane_workspace_slug: changes.workspaceSlug || null,
+              }),
+              ...(changes.baseUrl !== undefined && {
+                plane_base_url: changes.baseUrl || null,
+              }),
+            })
+          }
+        />
       </SettingsSection>
       <SettingsSection
         title="Sentry"
