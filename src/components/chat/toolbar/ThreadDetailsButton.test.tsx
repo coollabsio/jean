@@ -257,6 +257,18 @@ describe('ThreadDetailsButton', () => {
     ).toBeNull()
   })
 
+  it('does not show the Details tooltip after the menu closes on mobile', async () => {
+    environment.mobile = true
+    const user = userEvent.setup()
+    renderDetails()
+
+    await user.click(screen.getByRole('button', { name: /^details/i }))
+    await user.keyboard('{Escape}')
+
+    expect(screen.queryByRole('menu')).toBeNull()
+    expect(screen.queryByRole('tooltip')).toBeNull()
+  })
+
   it('counts enabled MCP servers without listing them, and opens their settings pane', async () => {
     const user = userEvent.setup()
     renderDetails({

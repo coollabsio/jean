@@ -286,6 +286,8 @@ export function ThreadDetailsButton({
       </Tooltip>
       <DropdownMenuContent
         align="end"
+        // Mobile: focus returning to the trigger opens its tooltip, which then stays open
+        onCloseAutoFocus={isMobile ? e => e.preventDefault() : undefined}
         className="w-80 max-h-[min(80vh,var(--radix-dropdown-menu-content-available-height))] overflow-y-auto"
       >
         {worktree && (
