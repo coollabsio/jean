@@ -235,7 +235,7 @@ pub fn current_mode() -> JeanMcpInstallMode {
 
 /// Codex threads share the persistent `~/.codex/config.toml` Jean MCP entry,
 /// whose session env is a fixed label. This per-thread config override gives
-/// Jean MCP the real calling session (needed for agent tools and approvals).
+/// Jean MCP the real calling session (needed for the current context and secrets).
 pub fn codex_session_config_override(session_id: &str) -> Option<(String, serde_json::Value)> {
     let path = dirs::home_dir()?.join(".codex").join("config.toml");
     codex_session_config_override_at(&path, current_mode().server_name(), session_id)

@@ -127,6 +127,17 @@ describe('Command System', () => {
       expect(addProjectCmd?.label).toBe('Add Project')
     })
 
+    it('matches search terms that skip intermediate words', () => {
+      const ids = (search: string) =>
+        getAllCommands(mockContext, search).map(cmd => cmd.id)
+
+      expect(ids('Import worktree')).toContain('import-existing-worktree')
+      expect(ids('  worktree   import ')).toContain('import-existing-worktree')
+      expect(ids('import worktreezzz')).not.toContain(
+        'import-existing-worktree'
+      )
+    })
+
     it('filters commands by search term', () => {
       const searchResults = getAllCommands(mockContext, 'project')
 

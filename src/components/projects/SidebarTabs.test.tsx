@@ -5,13 +5,8 @@ import { SidebarTabs } from './SidebarTabs'
 import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
 
-const mocks = vi.hoisted(() => ({ isMobile: false, agentsEnabled: true }))
+const mocks = vi.hoisted(() => ({ isMobile: false }))
 vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => mocks.isMobile }))
-vi.mock('@/services/preferences', () => ({
-  usePreferences: () => ({
-    data: { agents_enabled: mocks.agentsEnabled },
-  }),
-}))
 
 const tabNames = () => screen.getAllByRole('tab').map(tab => tab.textContent)
 const selectedTab = () =>
@@ -22,47 +17,24 @@ const selectedTab = () =>
 describe('SidebarTabs', () => {
   beforeEach(() => {
     mocks.isMobile = false
-    mocks.agentsEnabled = true
     useProjectsStore.setState({ sidebarActiveTab: 'projects' })
     useUIStore.setState({
       leftSidebarVisible: true,
       preferencesOpen: false,
-      railSection: 'workspace',
     })
   })
 
-  it('joins Projects, Recent and Agents in one strip', () => {
-    render(<SidebarTabs />)
-
-    expect(tabNames()).toEqual(['Workspace', 'Recent', 'Agents'])
-    expect(selectedTab()).toBe('Workspace')
-  })
-
-  it('hides Agents and falls back to the workspace tab when agents are off', () => {
-    mocks.agentsEnabled = false
-    useProjectsStore.setState({ sidebarActiveTab: 'recent' })
-    useUIStore.setState({ railSection: 'agents' })
+  it('joins Workspace and Recent in one strip', () => {
     render(<SidebarTabs />)
 
     expect(tabNames()).toEqual(['Workspace', 'Recent'])
-    expect(selectedTab()).toBe('Recent')
+    expect(selectedTab()).toBe('Workspace')
   })
 
-  it('switches to Agents and keeps the sidebar open', async () => {
-    render(<SidebarTabs />)
-    await userEvent.click(screen.getByRole('tab', { name: 'Agents' }))
-
-    expect(useUIStore.getState().railSection).toBe('agents')
-    expect(useUIStore.getState().leftSidebarVisible).toBe(true)
-    expect(selectedTab()).toBe('Agents')
-  })
-
-  it('leaves Agents for the chosen workspace tab', async () => {
-    useUIStore.setState({ railSection: 'agents' })
+  it('switches to the chosen workspace tab', async () => {
     render(<SidebarTabs />)
     await userEvent.click(screen.getByRole('tab', { name: 'Recent' }))
 
-    expect(useUIStore.getState().railSection).toBe('workspace')
     expect(useProjectsStore.getState().sidebarActiveTab).toBe('recent')
     expect(selectedTab()).toBe('Recent')
   })

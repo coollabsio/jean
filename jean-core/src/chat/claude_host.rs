@@ -8,9 +8,10 @@
 //!
 //! Finish rule (see [`ClaudeHostState`]): on a `result` line the host closes
 //! child stdin (the CLI then exits) unless a steer was written that the CLI
-//! has not echoed yet. Echo filtering: the replayed initial prompt is dropped
-//! and each replayed steer is written as `steered_user_message`, so no parser
-//! sees a replayed `user` text line.
+//! has not echoed yet. Each steer is written as `steered_user_message` when
+//! the host accepts it, so a reload sees it at once (the CLI echoes it only at
+//! its next turn boundary, which can be minutes later). Replayed `user` text
+//! lines (the initial prompt and steer echoes) are dropped.
 
 use serde_json::Value;
 use std::collections::VecDeque;
@@ -39,6 +40,11 @@ pub(crate) fn host_marker_type(line: &str) -> Option<&'static str> {
         HOST_EXIT_TYPE => Some(HOST_EXIT_TYPE),
         _ => None,
     }
+}
+
+/// Run JSONL line for a steer the host accepted.
+pub(crate) fn steered_user_message_line(text: &str) -> String {
+    serde_json::json!({ "type": "steered_user_message", "text": text }).to_string()
 }
 
 /// stream-json stdin line for one user message.
@@ -126,19 +132,14 @@ impl ClaudeHostState {
             return keep;
         };
 
-        if let Some(text) = replayed_user_text(&value) {
-            if !self.initial_echo_seen {
-                self.initial_echo_seen = true;
-                return StdoutDecision {
-                    write: None,
-                    close_stdin: false,
-                };
+        if replayed_user_text(&value).is_some() {
+            // The steer line was written on accept; the echo only marks it consumed.
+            if self.initial_echo_seen {
+                self.pending_steers.pop_front();
             }
-            self.pending_steers.pop_front();
+            self.initial_echo_seen = true;
             return StdoutDecision {
-                write: Some(
-                    serde_json::json!({ "type": "steered_user_message", "text": text }).to_string(),
-                ),
+                write: None,
                 close_stdin: false,
             };
         }
@@ -251,9 +252,9 @@ pub(crate) fn spawn_claude_host(
 }
 
 /// Steers Jean already showed (`chat:steered` at send time), per session.
-/// The tailer skips its own `chat:steered` for these when the CLI consumes
-/// them, so the prompt shows at once and only once. Empty after a Jean
-/// restart, so recovered runs still emit on consumption.
+/// The tailer skips its own `chat:steered` for these when it reads the
+/// host's `steered_user_message` line, so the prompt shows only once. Empty
+/// after a Jean restart, so recovered runs still emit from the tailer.
 static ANNOUNCED_STEERS: once_cell::sync::Lazy<
     std::sync::Mutex<std::collections::HashMap<String, Vec<String>>>,
 > = once_cell::sync::Lazy::new(Default::default);
@@ -449,8 +450,13 @@ pub fn run_claude_host_from_args() -> Result<(), String> {
     {
         let stop = stop.clone();
         let shared = shared.clone();
+        let append = append.clone();
         std::thread::spawn(move || {
-            fn handle_client(stream: UnixStream, shared: Arc<Mutex<Shared>>) {
+            fn handle_client(
+                stream: UnixStream,
+                shared: Arc<Mutex<Shared>>,
+                append: impl Fn(&str),
+            ) {
                 let Ok(mut writer) = stream.try_clone() else {
                     return;
                 };
@@ -461,7 +467,7 @@ pub fn run_claude_host_from_args() -> Result<(), String> {
                 let reply = match serde_json::from_str::<Value>(line.trim()) {
                     Ok(req) if req.get("type").and_then(Value::as_str) == Some("steer") => {
                         let text = req.get("message").and_then(Value::as_str).unwrap_or("");
-                        steer(&shared, text)
+                        steer(&shared, text, &append)
                     }
                     _ => Err("Unknown Claude host command".to_string()),
                 };
@@ -472,7 +478,11 @@ pub fn run_claude_host_from_args() -> Result<(), String> {
                 let _ = writer.write_all(format!("{reply}\n").as_bytes());
             }
 
-            fn steer(shared: &Mutex<Shared>, text: &str) -> Result<(), String> {
+            fn steer(
+                shared: &Mutex<Shared>,
+                text: &str,
+                append: &impl Fn(&str),
+            ) -> Result<(), String> {
                 if text.trim().is_empty() {
                     return Err("Empty steer message".to_string());
                 }
@@ -485,8 +495,10 @@ pub fn run_claude_host_from_args() -> Result<(), String> {
                         .map_err(|e| format!("Failed to write steer to Claude: {e}")),
                     None => Err("Claude turn already finished".to_string()),
                 };
-                if written.is_err() {
-                    guard.state.reject_last_steer();
+                match written {
+                    // Under the lock, so the line keeps its place among steers.
+                    Ok(()) => append(&steered_user_message_line(text)),
+                    Err(_) => guard.state.reject_last_steer(),
                 }
                 written
             }
@@ -499,7 +511,8 @@ pub fn run_claude_host_from_args() -> Result<(), String> {
                             break;
                         }
                         let shared = shared.clone();
-                        std::thread::spawn(move || handle_client(stream, shared));
+                        let append = append.clone();
+                        std::thread::spawn(move || handle_client(stream, shared, append));
                     }
                     Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
                     Err(e) => {
@@ -577,10 +590,6 @@ mod tests {
     const TOOL_RESULT: &str = r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"A"}]},"session_id":"s"}"#;
     const RESULT: &str = r#"{"type":"result","subtype":"success","usage":{"input_tokens":1}}"#;
 
-    fn written(d: &StdoutDecision) -> Value {
-        serde_json::from_str(d.write.as_deref().unwrap()).unwrap()
-    }
-
     #[test]
     fn closes_stdin_on_result_without_steer() {
         let mut s = ClaudeHostState::new();
@@ -591,18 +600,24 @@ mod tests {
     }
 
     #[test]
-    fn consumed_steer_becomes_steered_user_message_then_closes() {
+    fn consumed_steer_echo_is_dropped_then_closes() {
         let mut s = ClaudeHostState::new();
         s.on_stdout_line(INITIAL_ECHO);
         let line = s.accept_steer("also echo").unwrap();
         assert!(line.contains(r#""type":"user""#));
         assert!(!s.on_stdout_line(TOOL_RESULT).close_stdin);
-        let d = s.on_stdout_line(STEER_ECHO);
-        assert_eq!(
-            written(&d),
-            serde_json::json!({"type":"steered_user_message","text":"also echo"})
-        );
+        // The run log already has the steer (written on accept).
+        assert_eq!(s.on_stdout_line(STEER_ECHO).write, None);
         assert!(s.on_stdout_line(RESULT).close_stdin);
+    }
+
+    #[test]
+    fn steered_line_matches_history_parsers() {
+        let line: Value = serde_json::from_str(&steered_user_message_line("hi")).unwrap();
+        assert_eq!(
+            line,
+            serde_json::json!({"type":"steered_user_message","text":"hi"})
+        );
     }
 
     #[test]

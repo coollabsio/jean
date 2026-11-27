@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@/test/test-utils'
 import { MobileFileBrowser } from './MobileFileBrowser'
 
-vi.mock('./FileBrowserSidebar', () => ({
-  FileBrowserSidebar: () => <div>Files</div>,
+vi.mock('@/components/layout/RightPanel', () => ({
+  RightPanel: () => <div>Files</div>,
 }))
 
 describe('MobileFileBrowser', () => {

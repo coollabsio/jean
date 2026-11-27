@@ -70,6 +70,14 @@ interface DesktopBackendModelPickerProps {
   keyboardShortcuts?: boolean
   /** Extra classes for the popover, e.g. a z-index above a raised dialog */
   popoverClassName?: string
+  /** Column right of the model list, e.g. reasoning levels */
+  sidePanel?: ReactNode
+  /** Row under the model list, e.g. provider and permissions */
+  footer?: ReactNode
+  /** Extra text after the model name in the trigger */
+  triggerSuffix?: ReactNode
+  /** Close after a model pick. False keeps the picker open for more changes. */
+  closeOnSelect?: boolean
 }
 
 export function DesktopBackendModelPicker({
@@ -89,6 +97,10 @@ export function DesktopBackendModelPicker({
   triggerLabel,
   keyboardShortcuts = true,
   popoverClassName,
+  sidePanel,
+  footer,
+  triggerSuffix,
+  closeOnSelect = true,
 }: DesktopBackendModelPickerProps) {
   const isMobile = useIsMobile()
   const [open, setOpen] = useState(false)
@@ -99,6 +111,12 @@ export function DesktopBackendModelPicker({
   useToolbarDropdownShortcuts({
     setModelDropdownOpen: setOpen,
     enabled: keyboardShortcutsEnabled,
+  })
+  // ⌘⇧E / ⌘⇧P opened standalone dropdowns before they moved in here.
+  useToolbarDropdownShortcuts({
+    setThinkingDropdownOpen: sidePanel ? setOpen : undefined,
+    setProviderDropdownOpen: footer ? setOpen : undefined,
+    enabled: keyboardShortcuts,
   })
 
   const { data: availableOpencodeModels, isError: opencodeModelsError } =
@@ -302,6 +320,7 @@ export function DesktopBackendModelPicker({
                       aria-label="Fast mode"
                     />
                   )}
+                  {triggerSuffix}
                 </span>
               )}
               {keyboardShortcutsEnabled && installedBackends.length > 1 && (
@@ -326,28 +345,44 @@ export function DesktopBackendModelPicker({
       </Tooltip>
       <PopoverContent
         align="end"
-        className={cn('w-[min(36rem,calc(100vw-4rem))] p-0', popoverClassName)}
+        className={cn(
+          'flex flex-col p-0',
+          sidePanel
+            ? 'w-[min(46rem,calc(100vw-4rem))]'
+            : 'w-[min(36rem,calc(100vw-4rem))]',
+          popoverClassName
+        )}
         onKeyDown={event => {
           if (event.key === 'Escape') {
             event.stopPropagation()
           }
         }}
       >
-        <BackendModelPickerContent
-          open={open}
-          selectedBackend={selectedBackend}
-          selectedProvider={selectedProvider}
-          selectedModel={selectedModel}
-          installedBackends={installedBackends}
-          customCliProfiles={customCliProfiles}
-          sessionHasMessages={sessionHasMessages}
-          providerLocked={providerLocked}
-          onProviderChange={onProviderChange}
-          onModelChange={onModelChange}
-          onBackendModelChange={onBackendModelChange}
-          onRequestClose={() => handleOpenChange(false)}
-          defaultModelOption={defaultModelOption}
-        />
+        <div className="flex min-h-0">
+          <BackendModelPickerContent
+            className="min-w-0"
+            open={open}
+            selectedBackend={selectedBackend}
+            selectedProvider={selectedProvider}
+            selectedModel={selectedModel}
+            installedBackends={installedBackends}
+            customCliProfiles={customCliProfiles}
+            sessionHasMessages={sessionHasMessages}
+            providerLocked={providerLocked}
+            onProviderChange={onProviderChange}
+            onModelChange={onModelChange}
+            onBackendModelChange={onBackendModelChange}
+            onRequestClose={() => handleOpenChange(false)}
+            closeOnSelect={closeOnSelect}
+            defaultModelOption={defaultModelOption}
+          />
+          {sidePanel}
+        </div>
+        {footer && (
+          <div className="flex items-center gap-1 border-t px-2 py-1.5">
+            {footer}
+          </div>
+        )}
       </PopoverContent>
     </Popover>
   )

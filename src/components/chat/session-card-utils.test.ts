@@ -252,6 +252,60 @@ describe('native client resume sessions', () => {
   })
 })
 
+describe('Cursor resume launch', () => {
+  const cursorSession: Session = {
+    id: 'cursor-session',
+    name: 'G Panel Parity',
+    order: 0,
+    created_at: 1,
+    updated_at: 1,
+    messages: [],
+    backend: 'cursor',
+    primary_surface: 'terminal',
+    terminal_command: 'cursor-agent',
+    terminal_command_args: ['--yolo', '--sandbox', 'disabled'],
+  }
+
+  it('resumes a known chat id and keeps launch flags', () => {
+    const session = {
+      ...cursorSession,
+      cursor_chat_id: 'chat-1',
+      terminal_command_args: [
+        '--yolo',
+        '--sandbox',
+        'disabled',
+        '--resume',
+        'old-chat',
+      ],
+    }
+    expect(getResumeArgs(session)).toEqual({
+      command: 'cursor-agent',
+      args: ['--yolo', '--sandbox', 'disabled', '--resume', 'chat-1'],
+    })
+    expect(getResumeCommand(session)).toBe(
+      'cursor-agent --yolo --sandbox disabled --resume chat-1'
+    )
+  })
+
+  it('continues the latest chat for a terminal session without a chat id', () => {
+    expect(getResumeArgs(cursorSession)).toEqual({
+      command: 'cursor-agent',
+      args: ['--yolo', '--sandbox', 'disabled', '--continue'],
+    })
+  })
+
+  it('returns no launch for a chat-surface session without a chat id', () => {
+    expect(
+      getResumeArgs({
+        ...cursorSession,
+        primary_surface: 'chat',
+        terminal_command: undefined,
+        terminal_command_args: undefined,
+      })
+    ).toBeNull()
+  })
+})
+
 describe('computeSessionCardData', () => {
   function createBaseSession(overrides: Partial<Session> = {}): Session {
     return {

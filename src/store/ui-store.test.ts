@@ -422,31 +422,60 @@ describe('mobile left sidebar closes when a surface opens over it', () => {
   })
 })
 
-describe('rail section sidebar visibility', () => {
+describe('right panel tabs', () => {
   beforeEach(() => {
     useUIStore.setState({
-      railSection: 'workspace',
-      railSidebarVisible: {},
-      leftSidebarVisible: false,
+      fileBrowserVisible: false,
+      rightPanelTab: 'files',
+      rightPanelOpenTabs: ['files'],
     })
   })
 
-  it('restores each section sidebar state when switching back', () => {
-    const ui = () => useUIStore.getState()
-    // Workspace collapsed; Agents never opened, so its panel shows
-    ui().setRailSection('agents', true)
-    expect(ui().leftSidebarVisible).toBe(true)
+  it('adds a tab once and selects it', () => {
+    useUIStore.getState().openRightPanelTab('terminal')
+    useUIStore.getState().openRightPanelTab('files')
+    useUIStore.getState().openRightPanelTab('terminal')
 
-    ui().setRailSection('workspace', true)
-    expect(ui().leftSidebarVisible).toBe(false)
-
-    ui().setRailSection('agents', true)
-    expect(ui().leftSidebarVisible).toBe(true)
+    const state = useUIStore.getState()
+    expect(state.fileBrowserVisible).toBe(true)
+    expect(state.rightPanelTab).toBe('terminal')
+    expect(state.rightPanelOpenTabs).toEqual(['files', 'terminal'])
   })
 
-  it('keeps sidebar visibility when restore is off', () => {
-    useUIStore.getState().setRailSection('agents')
-    expect(useUIStore.getState().leftSidebarVisible).toBe(false)
-    expect(useUIStore.getState().railSidebarVisible.workspace).toBe(false)
+  it('selects the neighbor when the active tab closes', () => {
+    useUIStore.setState({
+      fileBrowserVisible: true,
+      rightPanelOpenTabs: ['files', 'terminal', 'browser'],
+      rightPanelTab: 'terminal',
+    })
+
+    useUIStore.getState().closeRightPanelTab('terminal')
+    expect(useUIStore.getState().rightPanelTab).toBe('browser')
+
+    useUIStore.getState().closeRightPanelTab('browser')
+    expect(useUIStore.getState().rightPanelTab).toBe('files')
+    expect(useUIStore.getState().rightPanelOpenTabs).toEqual(['files'])
+  })
+
+  it('keeps the active tab when another tab closes', () => {
+    useUIStore.setState({
+      fileBrowserVisible: true,
+      rightPanelOpenTabs: ['files', 'terminal'],
+      rightPanelTab: 'terminal',
+    })
+
+    useUIStore.getState().closeRightPanelTab('files')
+
+    expect(useUIStore.getState().rightPanelTab).toBe('terminal')
+    expect(useUIStore.getState().fileBrowserVisible).toBe(true)
+  })
+
+  it('hides the panel when the last tab closes', () => {
+    useUIStore.setState({ fileBrowserVisible: true })
+
+    useUIStore.getState().closeRightPanelTab('files')
+
+    expect(useUIStore.getState().rightPanelOpenTabs).toEqual([])
+    expect(useUIStore.getState().fileBrowserVisible).toBe(false)
   })
 })

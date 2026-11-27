@@ -31,6 +31,7 @@ export type KeybindingAction =
   | 'focus_canvas_search'
   | 'toggle_terminal'
   | 'toggle_browser'
+  | 'open_scripts_menu'
   | 'toggle_session_label'
   | 'open_provider_dropdown'
   | 'open_model_dropdown'
@@ -48,8 +49,6 @@ export type KeybindingAction =
   | 'search_chat'
   | 'toggle_zen_mode'
   | 'clear_session_context'
-  | 'show_workspace'
-  | 'show_agents'
 
 // Shortcut string format: "mod+key" where mod is cmd/ctrl
 // Examples: "mod+l", "mod+shift+p", "mod+1"
@@ -99,6 +98,7 @@ export const DEFAULT_KEYBINDINGS: KeybindingsMap = {
   focus_canvas_search: 'slash',
   toggle_terminal: 'mod+backquote',
   toggle_browser: 'mod+shift+backquote',
+  open_scripts_menu: 'mod+shift+s',
   toggle_session_label: 'mod+s',
   open_provider_dropdown: 'mod+shift+p',
   open_model_dropdown: 'mod+shift+m',
@@ -117,8 +117,6 @@ export const DEFAULT_KEYBINDINGS: KeybindingsMap = {
   toggle_zen_mode: 'mod+shift+z',
   // Destructive (wipes the transcript in place), so unbound by default (#693).
   clear_session_context: '',
-  show_workspace: 'mod+shift+1',
-  show_agents: 'mod+shift+2',
 }
 
 // UI definitions for the settings pane
@@ -326,25 +324,18 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
     category: 'navigation',
   },
   {
+    action: 'open_scripts_menu',
+    label: 'Run package script',
+    description: 'Open the package.json Scripts menu',
+    default_shortcut: 'mod+shift+s',
+    category: 'navigation',
+  },
+  {
     action: 'toggle_zen_mode',
     label: 'Toggle zen mode',
     description:
       'Full-screen the active session: hide session tabs and top chrome',
     default_shortcut: 'mod+shift+z',
-    category: 'navigation',
-  },
-  {
-    action: 'show_workspace',
-    label: 'Show workspace',
-    description: 'Open the Workspace section in the left sidebar',
-    default_shortcut: 'mod+shift+1',
-    category: 'navigation',
-  },
-  {
-    action: 'show_agents',
-    label: 'Show agents',
-    description: 'Open the Agents section in the left sidebar',
-    default_shortcut: 'mod+shift+2',
     category: 'navigation',
   },
   {
@@ -440,8 +431,8 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
   },
   {
     action: 'open_quick_menu',
-    label: 'Quick menu',
-    description: 'Open the floating quick menu',
+    label: 'Details',
+    description: 'Toggle the details menu',
     default_shortcut: 'mod+period',
     category: 'navigation',
   },

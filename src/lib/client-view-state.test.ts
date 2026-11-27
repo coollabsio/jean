@@ -50,63 +50,12 @@ describe('client view state', () => {
       terminal_visible_by_worktree: { 'server-a:worktree-1': true },
       terminal_height: 42,
       modal_terminal_open: { 'server-a:worktree-1': true },
-      modal_terminal_dock_mode: 'right' as const,
-      modal_terminal_width: 480,
-      modal_terminal_height: 300,
-      browser_side_pane_open: { 'server-a:worktree-1': true },
-      browser_side_pane_width: 560,
       browser_modal_open: { 'server-a:worktree-1': false },
-      browser_modal_dock_mode: 'bottom' as const,
-      browser_modal_width: 600,
-      browser_modal_height: 440,
-      browser_bottom_panel_open: { 'server-a:worktree-1': true },
-      browser_bottom_panel_height: 390,
     }
 
     saveClientViewState(state)
 
     expect(loadClientViewState()).toEqual(state)
-  })
-
-  it('restores the open Agents view and falls back for invalid values', () => {
-    saveClientViewState({
-      ...defaultClientViewState,
-      rail_section: 'agents',
-      rail_sidebar_visible: { workspace: false },
-      selected_agent_id: 'reviewer',
-    })
-    expect(loadClientViewState().rail_section).toBe('agents')
-    expect(loadClientViewState().rail_sidebar_visible).toEqual({
-      workspace: false,
-    })
-    expect(loadClientViewState().selected_agent_id).toBe('reviewer')
-
-    const saved = JSON.parse(storage.get(CLIENT_VIEW_STATE_STORAGE_KEY) ?? '{}')
-    storage.set(
-      CLIENT_VIEW_STATE_STORAGE_KEY,
-      JSON.stringify({
-        ...saved,
-        rail_section: 'bogus',
-        rail_sidebar_visible: { workspace: 'no', other: true },
-        selected_agent_id: '',
-      })
-    )
-    expect(loadClientViewState().rail_section).toBe('workspace')
-    expect(loadClientViewState().rail_sidebar_visible).toEqual({})
-    expect(loadClientViewState().selected_agent_id).toBe('jean')
-  })
-
-  it('keeps the agents Advanced toggle and defaults it to off', () => {
-    expect(loadClientViewState().agents_advanced).toBe(false)
-    saveClientViewState({ ...defaultClientViewState, agents_advanced: true })
-    expect(loadClientViewState().agents_advanced).toBe(true)
-
-    const saved = JSON.parse(storage.get(CLIENT_VIEW_STATE_STORAGE_KEY) ?? '{}')
-    storage.set(
-      CLIENT_VIEW_STATE_STORAGE_KEY,
-      JSON.stringify({ ...saved, agents_advanced: 'yes' })
-    )
-    expect(loadClientViewState().agents_advanced).toBe(false)
   })
 
   it('opens the Projects view for a saved Servers tab', () => {
@@ -143,7 +92,9 @@ describe('client view state', () => {
         left_sidebar_visible: true,
         left_sidebar_size: 'wide',
         terminal_visible_by_worktree: { good: false, bad: 'yes' },
-        modal_terminal_dock_mode: 'top',
+        // Removed dock settings from older versions are dropped
+        modal_terminal_dock_mode: 'right',
+        browser_side_pane_open: { good: true },
         project_canvas_settings: {
           good: { worktree_sort_mode: 'created' },
           bad: { worktree_sort_mode: 'newest' },

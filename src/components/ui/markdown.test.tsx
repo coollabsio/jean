@@ -278,6 +278,31 @@ describe('Markdown', () => {
     )
   })
 
+  it('links inline code that holds only a web URL', () => {
+    const { container } = render(
+      <Markdown>
+        {'Open `https://dev.example.ts.net:20420/app/x` and `npm test`.'}
+      </Markdown>
+    )
+    const link = screen.getByRole('link', {
+      name: 'https://dev.example.ts.net:20420/app/x',
+    })
+    expect(link.getAttribute('href')).toBe(
+      'https://dev.example.ts.net:20420/app/x'
+    )
+    expect(link.querySelector('code')).not.toBeNull()
+    expect(container.querySelectorAll('a')).toHaveLength(1)
+  })
+
+  it('does not nest a link for inline code already inside a link', () => {
+    const { container } = render(
+      <Markdown>{'[`https://a.example/x`](https://b.example/y)'}</Markdown>
+    )
+    const links = container.querySelectorAll('a')
+    expect(links).toHaveLength(1)
+    expect(links[0]?.getAttribute('href')).toBe('https://b.example/y')
+  })
+
   it('opens relative file links in the active worktree viewer', () => {
     useChatStore.setState({ activeWorktreePath: '/repo/worktree' })
     useUIStore.getState().setViewingFilePath(null)

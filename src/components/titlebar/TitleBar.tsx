@@ -26,7 +26,15 @@ import { useRemoteConnections } from '@/lib/remote-connections'
 import { useProjectsStore } from '@/store/projects-store'
 import { resolveHeaderServerLabel } from './server-context'
 import { UpdatesIndicator } from './UpdatesIndicator'
-import { TitleBarGitDiff } from './TitleBarGitDiff'
+import {
+  TITLEBAR_BREADCRUMB_SLOT_ID,
+  TITLEBAR_CENTER_SLOT_ID,
+  TITLEBAR_ACTIONS_SLOT_ID,
+  TITLEBAR_PROJECT_MENU_SLOT_ID,
+  TITLEBAR_RIGHT_PANEL_SLOT_ID,
+  TITLEBAR_THREAD_DETAILS_SLOT_ID,
+  titleBarSlotRef,
+} from './breadcrumb-slot'
 
 // Dark pill that matches the toast surface (card bg + soft border).
 const SERVER_BADGE_CLASS = 'border border-border/60 bg-card text-2xs'
@@ -55,13 +63,6 @@ export function TitleBar({
   const isMobile = useIsMobile()
   /** Mobile zen: single header line in the title bar (name + exit). */
   const mobileZen = zenMode && isMobile
-  // Mobile: the session header is too narrow for diff counts, so show them
-  // next to the project name.
-  const diffWorktreeId = useUIStore(state =>
-    isMobile && state.sessionChatModalOpen
-      ? state.sessionChatModalWorktreeId
-      : null
-  )
 
   const sidebarShortcut = formatShortcutDisplay(
     (preferences?.keybindings?.toggle_left_sidebar ||
@@ -81,6 +82,16 @@ export function TitleBar({
   const serverLabel = resolveHeaderServerLabel(
     selectedProjectId,
     remoteConnections
+  )
+
+  const serverBadge = (
+    <Badge
+      variant="subtle"
+      className={cn(SERVER_BADGE_CLASS, 'shrink-0')}
+      aria-label={`Current Jean server: ${serverLabel}`}
+    >
+      {serverLabel}
+    </Badge>
   )
 
   return (
@@ -175,6 +186,25 @@ export function TitleBar({
                 </Kbd>
               </TooltipContent>
             </Tooltip>
+            {/* The project canvas / session view portals its actions menu here */}
+            {!isMobile && (
+              <div
+                ref={titleBarSlotRef(TITLEBAR_PROJECT_MENU_SLOT_ID)}
+                className="flex items-center"
+              />
+            )}
+            {/* The session view portals its project / worktree title here */}
+            {!isMobile && (
+              <div
+                ref={titleBarSlotRef(TITLEBAR_BREADCRUMB_SLOT_ID)}
+                className="ml-2 flex min-w-0 max-w-[40vw] items-center"
+              />
+            )}
+            {native && !isMobile && (
+              <span className="ml-2 flex shrink-0 items-center">
+                {serverBadge}
+              </span>
+            )}
           </div>
         )}
       </div>
@@ -204,19 +234,17 @@ export function TitleBar({
             className="pointer-events-auto flex max-w-[50%] items-center gap-2 px-2"
             style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
           >
-            {native && (
-              <Badge
-                variant="subtle"
-                className={SERVER_BADGE_CLASS}
-                aria-label={`Current Jean server: ${serverLabel}`}
-              >
-                {serverLabel}
-              </Badge>
+            {native && (zenMode || isMobile) && serverBadge}
+            {/* The project canvas portals its search box here */}
+            {!isMobile && (
+              <div
+                ref={titleBarSlotRef(TITLEBAR_CENTER_SLOT_ID)}
+                className="flex items-center empty:hidden"
+              />
             )}
             <div className="min-w-0">
               <UnreadBell title={title} hideTitle={hideTitle} />
             </div>
-            {diffWorktreeId && <TitleBarGitDiff worktreeId={diffWorktreeId} />}
           </div>
         </div>
       )}
@@ -252,8 +280,28 @@ export function TitleBar({
           </Tooltip>
         )}
         {!zenMode && (
-          <>
+          <div className="flex items-center gap-1">
             <UpdatesIndicator />
+            {/* The session view portals its actions and close button here */}
+            {!isMobile && (
+              <div
+                ref={titleBarSlotRef(TITLEBAR_ACTIONS_SLOT_ID)}
+                className="flex items-center empty:hidden gap-1"
+              />
+            )}
+            {/* The right panel portals its Open in / Add tab actions here */}
+            {!isMobile && (
+              <div
+                ref={titleBarSlotRef(TITLEBAR_RIGHT_PANEL_SLOT_ID)}
+                className="flex items-center empty:hidden gap-1"
+              />
+            )}
+            {/* The chat toolbar portals its thread details menu here, next to
+                the right panel toggle in the top right corner */}
+            <div
+              ref={titleBarSlotRef(TITLEBAR_THREAD_DETAILS_SLOT_ID)}
+              className="flex items-center empty:hidden"
+            />
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -266,9 +314,7 @@ export function TitleBar({
                   )}
                   aria-pressed={fileBrowserVisible}
                   aria-label={
-                    fileBrowserVisible
-                      ? 'Hide file browser'
-                      : 'Show file browser'
+                    fileBrowserVisible ? 'Hide right panel' : 'Show right panel'
                   }
                   data-testid="toggle-file-browser"
                 >
@@ -276,13 +322,13 @@ export function TitleBar({
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                {fileBrowserVisible ? 'Hide' : 'Show'} File Browser{' '}
+                {fileBrowserVisible ? 'Hide' : 'Show'} Right Panel{' '}
                 <kbd className="ml-1 text-[0.625rem] opacity-60">
                   {fileBrowserShortcut}
                 </kbd>
               </TooltipContent>
             </Tooltip>
-          </>
+          </div>
         )}
         {native && isClientLinux && <LinuxWindowControls />}
       </div>

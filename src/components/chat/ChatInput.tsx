@@ -45,8 +45,6 @@ import {
 } from './context-mention-investigation'
 import type { WorktreeFile } from '@/types/chat'
 import { SlashPopover, type SlashPopoverHandle } from './SlashPopover'
-import { AgentMentionPopover } from './AgentMentionPopover'
-import type { MentionCandidate } from './agent-mentions'
 import {
   ContextMentionPopover,
   type ContextMentionPopoverHandle,
@@ -106,13 +104,6 @@ interface ChatInputProps {
   onSteerModifierChange?: (active: boolean) => void
   investigateIssuePrompt?: string | null
   investigatePRPrompt?: string | null
-  /** Single-line pill style for the simple agent chat */
-  pill?: boolean
-  /**
-   * Agent chats: `@` picks from these (agents, remote Jeans, projects)
-   * instead of files. Undefined keeps the file picker.
-   */
-  mentionCandidates?: MentionCandidate[]
 }
 
 export const ChatInput = memo(function ChatInput({
@@ -138,8 +129,6 @@ export const ChatInput = memo(function ChatInput({
   onSteerModifierChange,
   investigateIssuePrompt,
   investigatePRPrompt,
-  pill = false,
-  mentionCandidates,
 }: ChatInputProps) {
   const isMobile = useIsMobile()
   const { data: preferences } = usePreferences()
@@ -1166,37 +1155,6 @@ export const ChatInput = memo(function ChatInput({
     [activeSessionId, atTriggerIndex, inputRef, resizeTextarea]
   )
 
-  // Handle agent/project/remote Jean selection from the agent chat @ popover
-  const handleMentionSelect = useCallback(
-    (candidate: MentionCandidate) => {
-      const triggerIndex = atTriggerIndex
-      const input = inputRef.current
-      if (triggerIndex !== null && input) {
-        const currentValue = valueRef.current
-        const cursorPos = input.selectionStart ?? currentValue.length
-        const inserted = `@${candidate.token} `
-        const newValue = `${currentValue.slice(0, triggerIndex)}${inserted}${currentValue.slice(cursorPos)}`
-        input.value = newValue
-        valueRef.current = newValue
-        if (activeSessionId) {
-          useChatStore.getState().setInputDraft(activeSessionId, newValue)
-        }
-        resizeTextarea()
-        setShowHint(false)
-        onHasValueChangeRef.current?.(true)
-        const newCursorPos = triggerIndex + inserted.length
-        requestAnimationFrame(() =>
-          inputRef.current?.setSelectionRange(newCursorPos, newCursorPos)
-        )
-      }
-      setFileMentionOpen(false)
-      setAtTriggerIndex(null)
-      setFileMentionQuery('')
-      input?.focus()
-    },
-    [activeSessionId, atTriggerIndex, inputRef, resizeTextarea]
-  )
-
   const { mutateAsync: createWorktreeAsync } = useCreateWorktree()
 
   const investigateTemplates = useMemo<InvestigatePromptTemplates>(
@@ -1543,11 +1501,9 @@ export const ChatInput = memo(function ChatInput({
         data-chat-input
         spellCheck={preferences?.spellcheck_enabled ?? true}
         placeholder={
-          pill
-            ? 'Message...'
-            : isSending
-              ? 'Queue a follow-up...'
-              : 'Ask anything. @ files, # issues, / commands, $ skills'
+          isSending
+            ? 'Queue a follow-up...'
+            : 'Ask anything. @ files, # issues, / commands, $ skills'
         }
         // PERFORMANCE: Uncontrolled input - no value prop
         // Value is managed via valueRef and direct DOM manipulation
@@ -1562,46 +1518,31 @@ export const ChatInput = memo(function ChatInput({
         disabled={false}
         className={cn(
           'min-h-[40px] w-full resize-none overflow-x-hidden overflow-y-auto border-0 dark:bg-transparent p-0 font-mono text-base placeholder:text-sm shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 md:text-sm',
-          zenMode ? 'h-12 max-h-12' : 'max-h-[30vh]',
-          pill &&
-            'min-h-8 py-1 font-sans text-base leading-6 placeholder:text-base md:text-sm md:placeholder:text-sm'
+          zenMode ? 'h-12 max-h-12' : 'max-h-[30vh]'
         )}
         rows={1}
         autoFocus={!isMobile}
       />
-      {showHint && !zenMode && !pill && (
+      {showHint && !zenMode && (
         <span className="absolute top-0 right-0 hidden sm:flex items-center gap-1.5 text-xs text-muted-foreground opacity-40">
           <Kbd>{focusChatShortcut}</Kbd>
           <span>to focus</span>
         </span>
       )}
 
-      {/* @ mentions: agents/projects/remote Jeans in agent chats, else files */}
-      {mentionCandidates ? (
-        <AgentMentionPopover
-          candidates={mentionCandidates}
-          open={fileMentionOpen}
-          onOpenChange={setFileMentionOpen}
-          onSelect={handleMentionSelect}
-          searchQuery={fileMentionQuery}
-          anchorPosition={fileMentionAnchor}
-          containerWidth={fileMentionAnchor?.containerWidth}
-          handleRef={fileMentionHandleRef}
-        />
-      ) : (
-        <FileMentionPopover
-          worktreePath={activeWorktreePath ?? null}
-          worktreeId={activeWorktreeId ?? null}
-          currentProjectId={activeProjectId ?? null}
-          open={fileMentionOpen}
-          onOpenChange={setFileMentionOpen}
-          onSelectFile={handleFileSelect}
-          searchQuery={fileMentionQuery}
-          anchorPosition={fileMentionAnchor}
-          containerWidth={fileMentionAnchor?.containerWidth}
-          handleRef={fileMentionHandleRef}
-        />
-      )}
+      {/* @ file mentions */}
+      <FileMentionPopover
+        worktreePath={activeWorktreePath ?? null}
+        worktreeId={activeWorktreeId ?? null}
+        currentProjectId={activeProjectId ?? null}
+        open={fileMentionOpen}
+        onOpenChange={setFileMentionOpen}
+        onSelectFile={handleFileSelect}
+        searchQuery={fileMentionQuery}
+        anchorPosition={fileMentionAnchor}
+        containerWidth={fileMentionAnchor?.containerWidth}
+        handleRef={fileMentionHandleRef}
+      />
 
       {/* Context mention popover (# issues, PRs, security, Linear) */}
       <ContextMentionPopover

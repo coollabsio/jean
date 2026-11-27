@@ -65,6 +65,27 @@ impl RuntimeContext {
             .is_none()
     }
 
+    /// The managed `T`, created by `init` when none exists yet. Unlike
+    /// `manage`, concurrent callers all get the same value.
+    pub fn state_or_insert_with<T: Send + Sync + 'static>(
+        &self,
+        init: impl FnOnce() -> T,
+    ) -> State<'_, T> {
+        if let Some(state) = self.try_state::<T>() {
+            return state;
+        }
+        let value = self
+            .inner
+            .state
+            .write()
+            .expect("runtime state lock")
+            .entry(TypeId::of::<T>())
+            .or_insert_with(|| Arc::new(init()))
+            .clone();
+        let value = Arc::downcast::<T>(value).expect("managed state type");
+        State(value, PhantomData)
+    }
+
     pub fn try_state<T: Send + Sync + 'static>(&self) -> Option<State<'_, T>> {
         let value = self
             .inner

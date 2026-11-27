@@ -6,20 +6,23 @@ const readSource = (path: string) =>
   readFileSync(join(process.cwd(), path), 'utf8')
 
 describe('SessionChatModal removal behavior', () => {
-  it('opens the sidebar on a worktree swipe without closing the session or terminal', () => {
+  it('goes back to the worktree list on mobile, else opens the sidebar on a left-edge swipe', () => {
     const source = readSource('src/components/chat/SessionChatModal.tsx')
-    const start = source.indexOf('const swipeOpenSidebar = useCallback(')
+    const start = source.indexOf('const swipeGoesBack = ')
     const end = source.indexOf('const { data: sessionsData }', start)
     const gesture = source.slice(start, end)
 
     expect(start).toBeGreaterThan(-1)
     expect(gesture).toContain('setLeftSidebarVisible(true)')
-    expect(gesture).toContain('onSwipeBack: swipeOpenSidebar')
+    expect(gesture).toContain('const swipeGoesBack = isMobile && !isServer')
+    expect(gesture).toContain(
+      'onSwipeBack: swipeGoesBack ? onClose : swipeOpenSidebar'
+    )
+    expect(gesture).toContain('if (swipeGoesBack) return')
     expect(gesture).toContain(
       'enabled: isTouch && isOpen && !leftSidebarVisible'
     )
     expect(gesture).toContain('animateToEnd: false')
-    expect(gesture).not.toContain('onClose()')
     expect(gesture).not.toContain('closeChatTerminal')
     expect(source).not.toContain(
       'transform: `translateX(${swipe.translateX}px)`'
@@ -114,7 +117,7 @@ describe('SessionChatModal removal behavior', () => {
 
     expect(source).toContain('flex min-w-max items-center gap-0 py-0 px-0')
     expect(source).toContain(
-      'group/tab flex shrink-0 items-center gap-1.5 border-r border-border/20 px-3 py-1.5 text-xs transition-colors whitespace-nowrap'
+      'group/tab relative flex shrink-0 items-center gap-1.5 border-r border-border/20 px-3 py-1.5 text-xs transition-colors whitespace-nowrap'
     )
     expect(source).not.toContain('group/tab flex rounded items-center')
   })

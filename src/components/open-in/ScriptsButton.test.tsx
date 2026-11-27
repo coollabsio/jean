@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import userEvent from '@testing-library/user-event'
 import { render, screen, within } from '@/test/test-utils'
+import { act } from '@testing-library/react'
 import { ScriptsButton } from './ScriptsButton'
+import { useUIStore } from '@/store/ui-store'
 
 const mocks = vi.hoisted(() => ({
   scripts: [
@@ -9,6 +11,7 @@ const mocks = vi.hoisted(() => ({
     { name: 'test:unit', command: 'pnpm', args: ['run', 'test:unit'] },
   ],
   favoritePackageScripts: ['other-project:lint', 'project-1:test:unit'],
+  keybindings: undefined as Record<string, string> | undefined,
   patchPreferences: vi.fn(),
 }))
 
@@ -18,7 +21,10 @@ vi.mock('@/services/projects', () => ({
 
 vi.mock('@/services/preferences', () => ({
   usePreferences: () => ({
-    data: { favorite_package_scripts: mocks.favoritePackageScripts },
+    data: {
+      favorite_package_scripts: mocks.favoritePackageScripts,
+      keybindings: mocks.keybindings,
+    },
   }),
   usePatchPreferences: () => ({ mutate: mocks.patchPreferences }),
 }))
@@ -30,6 +36,7 @@ describe('ScriptsButton', () => {
       { name: 'test:unit', command: 'pnpm', args: ['run', 'test:unit'] },
     ]
     mocks.favoritePackageScripts = ['other-project:lint', 'project-1:test:unit']
+    mocks.keybindings = undefined
     mocks.patchPreferences.mockReset()
   })
 
@@ -119,4 +126,61 @@ describe('ScriptsButton', () => {
     })
     expect(onRun).not.toHaveBeenCalled()
   })
+
+  it('opens from the scripts shortcut and runs a script with arrow keys and Enter', async () => {
+    const user = userEvent.setup()
+    const onRun = vi.fn()
+    render(
+      <ScriptsButton
+        inTitleBar
+        projectId="project-1"
+        owner={{ worktreeId: 'worktree-1' }}
+        worktreePath="/repo"
+        onRun={onRun}
+      />
+    )
+
+    act(() => useUIStore.getState().requestScriptsMenu())
+
+    expect(await screen.findByRole('menu')).toBeInTheDocument()
+    expect(useUIStore.getState().scriptsMenuRequested).toBe(false)
+
+    await user.keyboard('{ArrowDown}{ArrowDown}{Enter}')
+
+    // Favorites sort first: test:unit, then dev
+    expect(onRun).toHaveBeenCalledWith(mocks.scripts[0])
+  })
+
+  it.each([
+    [
+      'the default binding',
+      undefined,
+      'Scripts (package.json)Ctrl + Shift + S',
+    ],
+    [
+      'a custom binding',
+      { open_scripts_menu: 'mod+alt+p' },
+      'Scripts (package.json)Ctrl + Alt + P',
+    ],
+    ['a removed binding', { open_scripts_menu: '' }, 'Scripts (package.json)'],
+  ])(
+    'shows %s in the title bar tooltip',
+    async (_label, keybindings, expected) => {
+      mocks.keybindings = keybindings
+      const user = userEvent.setup()
+      render(
+        <ScriptsButton
+          inTitleBar
+          projectId="project-1"
+          owner={{ worktreeId: 'worktree-1' }}
+          worktreePath="/repo"
+          onRun={vi.fn()}
+        />
+      )
+
+      await user.hover(screen.getByRole('button', { name: 'Scripts' }))
+
+      expect((await screen.findByRole('tooltip')).textContent).toBe(expected)
+    }
+  )
 })

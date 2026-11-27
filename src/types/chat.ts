@@ -107,16 +107,14 @@ export function getSupportedPermissionModes(
 export function getSupportedExecutionModes(
   backend: Backend | undefined
 ): ExecutionMode[] {
-  // Retain legacy Build for existing sessions, except Cursor, which never supported it.
-  return backend === 'cursor'
-    ? ['plan', 'yolo']
-    : [
-        ...new Set<ExecutionMode>([
-          'plan',
-          'build',
-          ...getSupportedPermissionModes(backend),
-        ]),
-      ]
+  // Build is the sandboxed implement mode; Cursor maps it to `--sandbox enabled`.
+  return [
+    ...new Set<ExecutionMode>([
+      'plan',
+      'build',
+      ...getSupportedPermissionModes(backend),
+    ]),
+  ]
 }
 
 export function isExecutionModeSupported(
@@ -133,18 +131,6 @@ export function normalizeExecutionModeForBackend(
   if (isExecutionModeSupported(backend, mode)) return mode
   // Never turn an unsupported restricted policy into unrestricted execution.
   return 'plan'
-}
-
-/**
- * Agents run unattended and need the Jean MCP tools, which Plan mode blocks.
- * Same rule as the backend wake: use Build, or Yolo for Cursor (no Build).
- */
-export function agentExecutionMode(
-  backend: Backend | undefined,
-  mode: ExecutionMode
-): ExecutionMode {
-  if (mode !== 'plan') return mode
-  return backend === 'cursor' ? 'yolo' : 'build'
 }
 
 export function permissionModeForExecution(
@@ -564,6 +550,8 @@ export interface UsageData {
   cache_read_input_tokens?: number
   /** Cache creation tokens (cached for future requests) */
   cache_creation_input_tokens?: number
+  /** Cost in USD as reported by the CLI (Claude, OpenCode); absent otherwise */
+  cost_usd?: number
 }
 
 // ============================================================================
@@ -1797,23 +1785,6 @@ export interface ReviewFinding {
  * A message waiting in the queue to be sent
  * Captures all settings at the time of queueing so they're preserved
  */
-export type ChatMentionType = 'agent' | 'project' | 'remote_jean'
-
-/**
- * `@` mention in an agent chat. It only adds context for the agent; it does
- * not run an action. See `src/components/chat/agent-mentions.ts`.
- */
-export interface ChatMention {
-  type: ChatMentionType
-  /** Agent ID or project ID on its own server, or the remote Jean's ID */
-  id: string
-  name: string
-  /** Set when the item is on another Jean than the chat */
-  serverName?: string
-  /** Remote Jean URL (remote_jean only) */
-  url?: string
-}
-
 export interface QueuedMessage {
   /** Unique ID for this queued message (for reordering/removal) */
   id: string
@@ -1827,8 +1798,6 @@ export interface QueuedMessage {
   pendingSkills: PendingSkill[]
   /** Snapshot of pending text files at time of queue */
   pendingTextFiles: PendingTextFile[]
-  /** `@` mentions of agents, projects, and remote Jeans (agent chats only) */
-  mentions?: ChatMention[]
   /** Model to use for this message (snapshot at queue time) */
   model: string
   /** Provider profile name to use (snapshot at queue time, null = default) */
@@ -1859,7 +1828,6 @@ export type QueuedMessageEdit = Pick<
   | 'pendingFiles'
   | 'pendingSkills'
   | 'pendingTextFiles'
-  | 'mentions'
 >
 
 // ============================================================================

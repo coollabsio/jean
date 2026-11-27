@@ -4,7 +4,7 @@ Plan mode is a first-class, opt-in workflow on the same execution-mode control a
 
 New sessions start in the saved permission policy. That default is Full access (`yolo`) unless the user changed it. A saved default of Plan is rewritten to Build on preferences load, so new sessions are never created in Plan. Enter Plan only by choosing it in the composer mode menu, with Shift+Tab while the composer is focused, or with `/plan`. `/plan` with no extra text starts a planning turn; `/plan <task>` plans that task. `/build` with no extra text leaves Plan and restores the permission that was active before planning (Build when none was remembered) without sending a turn. `/build <task>` leaves Plan and implements that task. Approving a plan still switches to the retained permission, or to Full access when the user picks that approval. Rejecting or refining a plan stays in Plan. Switching the mode menu to a permission also leaves Plan.
 
-The composer shows a Plan banner and the mode trigger reads "Plan" while that session is in Plan mode. Missing execution mode on a backend launch implements as Build (Full access on Cursor, which has no Build flag). Explicit Plan still uses each backend's native plan mechanism. Unsupported restricted policies still do not escalate to Full access when switching backends; that fallback remains Plan.
+The composer shows a Plan banner and the mode trigger reads "Plan" while that session is in Plan mode. Missing execution mode on a backend launch implements as Build. Cursor Build runs with `--sandbox enabled` and no `--force`; on native Windows without WSL there is no Cursor sandbox, so Cursor Build fails with an explicit error and new Cursor sessions default to Full access. Explicit Plan still uses each backend's native plan mechanism. Unsupported restricted policies still do not escalate to Full access when switching backends; that fallback remains Plan.
 
 ## Wire compatibility
 
@@ -32,7 +32,8 @@ Shift+Tab toggles Plan and the retained permission while the composer is focused
 | Codex                                       | Supervised, Auto-accept edits, Auto, Full access                   |
 | OpenCode                                    | Supervised, Auto-accept edits, Full access                         |
 | Grok, Kimi                                  | Supervised, Auto-accept edits, Auto, Full access                   |
-| Cursor, PI, Command Code, Antigravity, Muse | Full access; retain existing Legacy Build sessions where supported |
+| Cursor                                      | Build (sandboxed, `--sandbox enabled`), Full access                |
+| PI, Command Code, Antigravity, Muse         | Full access; retain existing Legacy Build sessions where supported |
 
 Unsupported restricted policies must not become Full access. Backend selection falls back to Plan, and direct IPC/MCP sends reject unsupported policies.
 

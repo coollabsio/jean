@@ -4,6 +4,7 @@ import { isNativeApp, hasBackend } from '@/lib/environment'
 import { notify } from '@/lib/notifications'
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useUIStore } from '@/store/ui-store'
+import { currentRightPanelWorktreeId } from '@/lib/right-panel'
 import { useProjectsStore } from '@/store/projects-store'
 import { useChatStore } from '@/store/chat-store'
 import { isPanelTerminal, useTerminalStore } from '@/store/terminal-store'
@@ -176,18 +177,6 @@ export function findKeybindingAction(
   return null
 }
 
-/**
- * The Agents page is open (section selected and Agents on for a server, the
- * same rule as useShowAgents). It has one fixed session and no worktree, so
- * the new-session and close shortcuts must not reach the project handlers.
- */
-export function isAgentsViewActive(queryClient: QueryClient): boolean {
-  if (useUIStore.getState().railSection !== 'agents') return false
-  return queryClient
-    .getQueriesData<AppPreferences>({ queryKey: preferencesQueryKeys.all })
-    .some(([, data]) => data?.agents_enabled === true)
-}
-
 export function useWindowKeyboardFocusRestore() {
   const isMobile = useIsMobile()
 
@@ -308,6 +297,9 @@ export function applyCacheInvalidationKeys(
         break
       case 'secret-request':
         queryClient.invalidateQueries({ queryKey: ['secret-request'] })
+        break
+      case 'diff-viewed':
+        queryClient.invalidateQueries({ queryKey: ['diff-viewed'] })
         break
     }
   }
@@ -567,20 +559,12 @@ export function switchActiveTerminalTabByIndexForShortcut(
 }
 
 /**
- * View → Toggle Browser and the `toggle_browser` shortcut.
- * Session chat cycles closed → modal drawer → bottom panel → closed.
- * The main window cycles closed → side pane → bottom panel → closed.
+ * View → Toggle Browser and the `toggle_browser` shortcut: toggles the
+ * right panel's Browser tab for the current worktree.
  */
 export function toggleBrowserKeybinding(): void {
-  const uiState = useUIStore.getState()
-  const chatState = useChatStore.getState()
-  const worktreeId = uiState.sessionChatModalOpen
-    ? (uiState.sessionChatModalWorktreeId ?? chatState.activeWorktreeId)
-    : chatState.activeWorktreeId
-  if (!worktreeId) return
-  useBrowserStore
-    .getState()
-    .toggleBrowserSurface(worktreeId, uiState.sessionChatModalOpen)
+  const worktreeId = currentRightPanelWorktreeId()
+  if (worktreeId) useBrowserStore.getState().toggleModal(worktreeId)
 }
 
 /**
@@ -621,17 +605,6 @@ function executeKeybindingAction(
       const { fileBrowserVisible, setFileBrowserVisible } =
         useUIStore.getState()
       setFileBrowserVisible(!fileBrowserVisible)
-      break
-    }
-    case 'show_workspace':
-    case 'show_agents': {
-      logger.debug(`Keybinding: ${action}`)
-      // Disabled Agents falls back to Workspace in the rail
-      const ui = useUIStore.getState()
-      const section = action === 'show_agents' ? 'agents' : 'workspace'
-      // Another section: restore its panel. Same section: show it.
-      if (ui.railSection === section) ui.setLeftSidebarVisible(true)
-      else ui.setRailSection(section, true)
       break
     }
     case 'toggle_zen_mode': {
@@ -894,16 +867,8 @@ function executeKeybindingAction(
       break
     case 'toggle_terminal': {
       logger.debug('Keybinding: toggle_terminal')
-      const uiState = useUIStore.getState()
-      const chatState = useChatStore.getState()
-      if (uiState.sessionChatModalOpen) {
-        const wid =
-          uiState.sessionChatModalWorktreeId ?? chatState.activeWorktreeId
-        if (wid) useTerminalStore.getState().toggleModalTerminal(wid)
-      } else {
-        const wid = chatState.activeWorktreeId
-        if (wid) useTerminalStore.getState().toggleTerminal(wid)
-      }
+      const wid = currentRightPanelWorktreeId()
+      if (wid) useTerminalStore.getState().toggleModalTerminal(wid)
       break
     }
     case 'toggle_browser': {
@@ -911,6 +876,12 @@ function executeKeybindingAction(
       toggleBrowserKeybinding()
       break
     }
+    case 'open_scripts_menu':
+      logger.debug('Keybinding: open_scripts_menu')
+      if (currentRightPanelWorktreeId()) {
+        useUIStore.getState().requestScriptsMenu()
+      }
+      break
     case 'open_provider_dropdown':
       logger.debug('Keybinding: open_provider_dropdown')
       window.dispatchEvent(new CustomEvent('open-provider-dropdown'))
@@ -1091,17 +1062,6 @@ export function useMainWindowEventListeners() {
         return
       }
 
-      if (
-        (matchedAction === 'close_session_or_worktree' ||
-          matchedAction === 'new_session' ||
-          matchedAction === 'open_new_session_modal') &&
-        isAgentsViewActive(queryClient)
-      ) {
-        e.preventDefault()
-        e.stopPropagation()
-        return
-      }
-
       // Cancel prompt should work even when modals are open
       if (matchedAction === 'cancel_prompt') {
         logger.debug('Cancel prompt shortcut matched', { shortcut })
@@ -1170,6 +1130,7 @@ export function useMainWindowEventListeners() {
           if (
             shortcut === kb.toggle_terminal ||
             shortcut === kb.toggle_browser ||
+            shortcut === kb.open_scripts_menu ||
             shortcut === kb.open_new_session_modal ||
             shortcut === kb.cancel_prompt
           ) {

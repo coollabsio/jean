@@ -24,18 +24,20 @@ fn execution_mode_instruction(execution_mode: Option<&str>) -> Option<&'static s
     match execution_mode.unwrap_or("build") {
         "build" | "auto" | "supervised" => Some(
             "You are in BUILD MODE. Start implementing immediately. \
-             Do NOT enter plan mode and do NOT use ExitPlanMode unless the user explicitly asks \
-             for a new plan. If a required decision is missing, use AskUserQuestion instead of \
-             ExitPlanMode; if AskUserQuestion is not in your tool set, ask inline in the \
-             question format of the recap rules.",
+             Do NOT use EnterPlanMode or ExitPlanMode. If the user asks for a plan to review \
+             or approve first, do not edit files or run mutating commands: reply with the plan \
+             and end your turn, then implement only after the user approves. \
+             If a required decision is missing, use AskUserQuestion; if AskUserQuestion is not \
+             in your tool set, ask inline in the question format of the recap rules.",
         ),
         "yolo" => Some(
             "You are in FULL ACCESS MODE. Start implementing immediately. \
-             Do NOT enter plan mode and do NOT use ExitPlanMode unless the user explicitly asks \
-             for a new plan. Do not ask for confirmation before routine implementation steps. \
-             If a required decision is missing, use AskUserQuestion instead of ExitPlanMode; \
-             if AskUserQuestion is not in your tool set, ask inline in the question format of \
-             the recap rules.",
+             Do NOT use EnterPlanMode or ExitPlanMode. If the user asks for a plan to review \
+             or approve first, do not edit files or run mutating commands: reply with the plan \
+             and end your turn, then implement only after the user approves. \
+             Do not ask for confirmation before routine implementation steps. \
+             If a required decision is missing, use AskUserQuestion; if AskUserQuestion is not \
+             in your tool set, ask inline in the question format of the recap rules.",
         ),
         _ => None,
     }
@@ -380,6 +382,23 @@ fn split_fast_model(model: &str) -> (&str, bool) {
     }
 }
 
+fn disallowed_tools_args(execution_mode: Option<&str>) -> Vec<String> {
+    let mut tools = Vec::new();
+    // In implement modes, remove both plan tools: EnterPlanMode would switch
+    // the CLI into plan permission with no way out, and ExitPlanMode would loop
+    // back into plan approval. Jean's Plan mode is the way to plan.
+    if matches!(
+        execution_mode.unwrap_or("build"),
+        "build" | "yolo" | "auto" | "supervised"
+    ) {
+        tools.extend(["EnterPlanMode", "ExitPlanMode"]);
+    }
+    tools
+        .into_iter()
+        .flat_map(|tool| ["--disallowedTools".to_string(), tool.to_string()])
+        .collect()
+}
+
 fn claude_permission_mode(execution_mode: Option<&str>) -> &'static str {
     match execution_mode.unwrap_or("build") {
         "supervised" => "default",
@@ -636,7 +655,6 @@ fn build_claude_args(
     effort_level: Option<&EffortLevel>,
     allowed_tools: Option<&[String]>,
     parallel_execution_prompt: Option<&str>,
-    agent_system_prompt: Option<&str>,
     ai_language: Option<&str>,
     mcp_config: Option<&str>,
     chrome_enabled: bool,
@@ -687,8 +705,7 @@ fn build_claude_args(
     let linked_project_paths: Vec<String> = crate::projects::storage::load_projects_data(app)
         .ok()
         .and_then(|data| {
-            let worktree = data.find_worktree(worktree_id)?;
-            let project = data.find_project(&worktree.project_id)?;
+            let project = data.project_for_worktree(worktree_id)?;
             Some(
                 project
                     .linked_project_ids
@@ -735,15 +752,7 @@ fn build_claude_args(
         env_vars.push(("IS_SANDBOX".to_string(), "1".to_string()));
     }
 
-    // In build/yolo, remove ExitPlanMode entirely so Claude can't loop back
-    // into plan-approval after the user already approved one.
-    if matches!(
-        execution_mode.unwrap_or("build"),
-        "build" | "yolo" | "auto" | "supervised"
-    ) {
-        args.push("--disallowedTools".to_string());
-        args.push("ExitPlanMode".to_string());
-    }
+    args.extend(disallowed_tools_args(execution_mode));
 
     if should_mirror_custom_profile_env_for_detached() {
         env_vars.extend(load_custom_profile_env_vars(custom_profile_name));
@@ -910,33 +919,28 @@ fn build_claude_args(
         system_prompt_parts.push(mode_instruction.to_string());
     }
 
-    // Agent role prompt. Kept after the global prompt, separate from fan-out.
-    super::push_trimmed_prompt(&mut system_prompt_parts, agent_system_prompt);
-
     // Per-project custom system prompt + linked project instructions
     if let Ok(data) = load_projects_data(app) {
-        if let Some(worktree) = data.find_worktree(worktree_id) {
-            if let Some(project) = data.find_project(&worktree.project_id) {
-                if let Some(prompt) = &project.custom_system_prompt {
-                    let prompt = prompt.trim();
-                    if !prompt.is_empty() {
-                        system_prompt_parts.push(prompt.to_string());
-                    }
+        if let Some(project) = data.project_for_worktree(worktree_id) {
+            if let Some(prompt) = &project.custom_system_prompt {
+                let prompt = prompt.trim();
+                if !prompt.is_empty() {
+                    system_prompt_parts.push(prompt.to_string());
                 }
+            }
 
-                // Linked projects: inject instruction to check their directories
-                if !linked_project_paths.is_empty() {
-                    let dirs_list = linked_project_paths
-                        .iter()
-                        .map(|p| format!("- {p}"))
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    system_prompt_parts.push(format!(
-                        "This project is linked to other projects for cross-project context. \
-                         Check the following directories for additional instructions and documentation \
-                         (e.g., CLAUDE.md, AGENTS.md, docs/):\n{dirs_list}"
-                    ));
-                }
+            // Linked projects: inject instruction to check their directories
+            if !linked_project_paths.is_empty() {
+                let dirs_list = linked_project_paths
+                    .iter()
+                    .map(|p| format!("- {p}"))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                system_prompt_parts.push(format!(
+                    "This project is linked to other projects for cross-project context. \
+                     Check the following directories for additional instructions and documentation \
+                     (e.g., CLAUDE.md, AGENTS.md, docs/):\n{dirs_list}"
+                ));
             }
         }
     }
@@ -1494,7 +1498,6 @@ pub fn execute_claude_detached(
     effort_level: Option<&EffortLevel>,
     allowed_tools: Option<&[String]>,
     parallel_execution_prompt: Option<&str>,
-    agent_system_prompt: Option<&str>,
     ai_language: Option<&str>,
     mcp_config: Option<&str>,
     chrome_enabled: bool,
@@ -1540,7 +1543,6 @@ pub fn execute_claude_detached(
         effort_level,
         allowed_tools,
         parallel_execution_prompt,
-        agent_system_prompt,
         ai_language,
         mcp_config,
         chrome_enabled,
@@ -2014,7 +2016,7 @@ pub fn tail_claude_output(
 
             match msg_type {
                 "steered_user_message" => {
-                    // Written by the Claude host when the CLI consumed a steer.
+                    // Written by the Claude host when it accepts a steer.
                     if let Some(text) = msg.get("text").and_then(|v| v.as_str()) {
                         content_blocks.push(ContentBlock::UserInput {
                             text: text.to_string(),
@@ -2499,7 +2501,7 @@ pub fn tail_claude_output(
                     // Token usage: one `result` per turn; Monitor wake-ups can
                     // produce several turns in one run, so accumulate.
                     if let Some(usage_obj) = msg.get("usage") {
-                        add_result_usage(&mut usage, usage_obj);
+                        add_result_usage(&mut usage, usage_obj, msg.get("total_cost_usd"));
                         if let Some(u) = usage.as_ref() {
                             log::trace!(
                                 "Token usage: input={}, output={}, cache_read={}, cache_create={}",
@@ -3028,18 +3030,26 @@ fn is_claude_session_not_found_text(text: &str) -> bool {
 }
 
 /// Add one `result` message's `usage` object to the run total.
-fn add_result_usage(total: &mut Option<UsageData>, usage_obj: &serde_json::Value) {
+fn add_result_usage(
+    total: &mut Option<UsageData>,
+    usage_obj: &serde_json::Value,
+    cost_usd: Option<&serde_json::Value>,
+) {
     let field = |key: &str| usage_obj.get(key).and_then(|v| v.as_u64()).unwrap_or(0);
     let total = total.get_or_insert(UsageData {
         input_tokens: 0,
         output_tokens: 0,
         cache_read_input_tokens: 0,
         cache_creation_input_tokens: 0,
+        cost_usd: None,
     });
     total.input_tokens += field("input_tokens");
     total.output_tokens += field("output_tokens");
     total.cache_read_input_tokens += field("cache_read_input_tokens");
     total.cache_creation_input_tokens += field("cache_creation_input_tokens");
+    if let Some(cost) = cost_usd.and_then(|v| v.as_f64()) {
+        total.cost_usd = Some(total.cost_usd.unwrap_or(0.0) + cost);
+    }
 }
 
 /// Error text of the synthetic assistant message Claude CLI emits when the
@@ -3111,6 +3121,29 @@ fn result_error_text(msg: &serde_json::Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn implement_modes_disallow_plan_tools() {
+        for mode in [
+            None,
+            Some("build"),
+            Some("yolo"),
+            Some("auto"),
+            Some("supervised"),
+        ] {
+            assert_eq!(
+                disallowed_tools_args(mode),
+                [
+                    "--disallowedTools",
+                    "EnterPlanMode",
+                    "--disallowedTools",
+                    "ExitPlanMode"
+                ],
+                "{mode:?}"
+            );
+        }
+        assert_eq!(disallowed_tools_args(Some("plan")), [] as [&str; 0]);
+    }
 
     #[test]
     fn auto_compact_window_accepts_cli_forms_only() {
@@ -3363,10 +3396,12 @@ mod tests {
                 "cache_read_input_tokens": 100,
                 "cache_creation_input_tokens": 1
             }),
+            Some(&serde_json::json!(0.25)),
         );
         add_result_usage(
             &mut usage,
             &serde_json::json!({ "input_tokens": 3, "output_tokens": 2 }),
+            Some(&serde_json::json!(0.5)),
         );
 
         let usage = usage.unwrap();
@@ -3374,6 +3409,14 @@ mod tests {
         assert_eq!(usage.output_tokens, 7);
         assert_eq!(usage.cache_read_input_tokens, 100);
         assert_eq!(usage.cache_creation_input_tokens, 1);
+        assert_eq!(usage.cost_usd, Some(0.75));
+    }
+
+    #[test]
+    fn add_result_usage_without_cost_keeps_cost_unset() {
+        let mut usage = None;
+        add_result_usage(&mut usage, &serde_json::json!({ "input_tokens": 1 }), None);
+        assert_eq!(usage.unwrap().cost_usd, None);
     }
 
     #[test]

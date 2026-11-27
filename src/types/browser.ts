@@ -3,8 +3,6 @@
  * Mirror Rust event payload shapes from src-tauri/src/browser/types.rs
  */
 
-export type ModalBrowserDockMode = 'floating' | 'left' | 'right' | 'bottom'
-
 export interface BrowserTab {
   id: string
   worktreeId: string

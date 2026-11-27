@@ -16,7 +16,6 @@ import { useIsTouchDevice } from '@/hooks/use-touch-device'
 import { useSwipeDown } from '@/hooks/useSwipeDown'
 import { DevModeBanner } from './DevModeBanner'
 import { SidebarWidthProvider } from './SidebarWidthContext'
-import { SidebarHoverPreview } from './SidebarHoverPreview'
 import { MainWindowContent } from './MainWindowContent'
 import { CommandPalette } from '@/components/command-palette/CommandPalette'
 import { BranchConflictDialog } from '@/components/worktree/BranchConflictDialog'
@@ -30,9 +29,9 @@ const LeftSideBar = lazyWithPreload(() =>
     default: mod.LeftSideBar,
   }))
 )
-const FileBrowserSidebar = lazyWithPreload(() =>
-  import('@/components/file-browser').then(mod => ({
-    default: mod.FileBrowserSidebar,
+const RightPanel = lazyWithPreload(() =>
+  import('./RightPanel').then(mod => ({
+    default: mod.RightPanel,
   }))
 )
 const MobileFileBrowser = lazyWithPreload(() =>
@@ -200,16 +199,13 @@ const IDLE_PRELOADS = [
   OnboardingDialog,
   FeatureTourDialog,
   JeanConfigWizard,
-  FileBrowserSidebar,
+  RightPanel,
   MobileFileBrowser,
 ]
 import { Toaster } from '@/components/ui/sonner'
 import { PreviewDialogHost } from '@/components/ui/preview-dialog-host'
 import { MobileLeftSidebar } from './MobileLeftSidebar'
-import { useShowAgents } from '@/components/agents/agents-feature'
-import { AgentsTitleSync, resolveWindowTitle } from './window-title'
-import { BrowserSidePane } from '@/components/browser/BrowserSidePane'
-import { BrowserPanel } from '@/components/browser/BrowserPanel'
+import { resolveWindowTitle } from './window-title'
 import { useBrowserEvents } from '@/hooks/useBrowserPane'
 import { parseServerResourceKey } from '@/lib/server-resource'
 import { useToasterOffset } from '@/hooks/useToasterOffset'
@@ -240,14 +236,14 @@ import {
 } from '@/services/projects'
 import { isNativeApp } from '@/lib/environment'
 import { isLinux, isWindows } from '@/lib/platform'
-import { usePreferences } from '@/services/preferences'
 
 // Left sidebar resize constraints (pixels)
 const MIN_SIDEBAR_WIDTH = 150
 const MAX_SIDEBAR_WIDTH = 500
 // File browser sidebar resize constraints (pixels)
-const MIN_FILE_BROWSER_WIDTH = 180
-const MAX_FILE_BROWSER_WIDTH = 520
+const MIN_FILE_BROWSER_WIDTH = 240
+// Wide enough for the terminal and browser tabs
+const MAX_FILE_BROWSER_WIDTH = 1400
 
 function useRetainedMount(active: boolean) {
   const [shouldMount, setShouldMount] = useState(active)
@@ -289,8 +285,7 @@ export function MainWindow() {
   const { offset: toasterOffset, mobileOffset: toasterMobileOffset } =
     useToasterOffset()
   const leftSidebarVisible = useUIStore(state => state.leftSidebarVisible)
-  const showAgents = useShowAgents()
-  // One width for every sidebar tab (Projects, Recent, Agents)
+  // One width for every sidebar tab (Workspace, Recent)
   const leftSidebarSize = useUIStore(state => state.leftSidebarSize)
   const setLeftSidebarVisible = useUIStore(state => state.setLeftSidebarVisible)
   const fileBrowserVisible = useUIStore(state => state.fileBrowserVisible)
@@ -327,7 +322,6 @@ export function MainWindow() {
   const newSessionModeTarget = useUIStore(state => state.newSessionModeTarget)
   const sessionChatModalOpen = useUIStore(state => state.sessionChatModalOpen)
   const modalSidebarSwipe = useUIStore(state => state.leftSidebarSwipe)
-  const { data: preferences } = usePreferences()
   const selectedWorktreeId = useProjectsStore(state => state.selectedWorktreeId)
   const addProjectDialogOpen = useProjectsStore(
     state => state.addProjectDialogOpen
@@ -385,25 +379,16 @@ export function MainWindow() {
     ? projects?.find(p => p.id === worktree.project_id)
     : null
 
-  // Selected agent name, reported only while the Agents view is mounted.
-  const [agentName, setAgentName] = useState<string | undefined>(undefined)
-  const handleAgentName = useCallback((name: string | undefined) => {
-    setAgentName(current => (current === name ? current : name))
-  }, [])
-
   // Project pages: project name on mobile, project › worktree on desktop.
-  // Agents view: the selected agent's name, in the title bar and browser tab.
   const windowTitle = useMemo(
     () =>
       resolveWindowTitle({
-        showAgents,
-        agentName,
         projectName: project?.name,
         worktreeName: worktree?.name,
         worktreeBranch: worktree?.branch,
         isMobile,
       }),
-    [showAgents, agentName, project, worktree, isMobile]
+    [project, worktree, isMobile]
   )
 
   // Compute polling info - null if no worktree or data not loaded.
@@ -604,7 +589,6 @@ export function MainWindow() {
       )}
     >
       <UIStatePersistence onInitializedChange={setIsInitialized} />
-      {showAgents && <AgentsTitleSync onName={handleAgentName} />}
       {isNativeApp() && isLinux && <WindowResizeHandles />}
 
       {/* Touch swipe-down pull indicator */}
@@ -646,22 +630,6 @@ export function MainWindow() {
 
       {/* Main Content Area */}
       <div className="flex flex-1 overflow-hidden">
-        <SidebarHoverPreview
-          enabled={
-            !isMobile &&
-            isInitialized &&
-            !leftSidebarVisible &&
-            (preferences?.sidebar_hover_open_enabled ?? false)
-          }
-          width={leftSidebarSize}
-        >
-          <SidebarWidthProvider value={leftSidebarSize}>
-            <Suspense fallback={null}>
-              <LeftSideBar />
-            </Suspense>
-          </SidebarWidthProvider>
-        </SidebarHoverPreview>
-
         {/* Desktop: in-flow left sidebar (shifts layout). Only after UI state init. */}
         {!isMobile && leftSidebarVisible && isInitialized && (
           <SidebarWidthProvider value={leftSidebarSize}>
@@ -715,7 +683,7 @@ export function MainWindow() {
           />
         )}
 
-        {/* Mobile: file browser overlay drawer */}
+        {/* Mobile: right panel overlay drawer */}
         {isMobile && isInitialized && (
           <Suspense fallback={null}>
             <MobileFileBrowser
@@ -725,7 +693,7 @@ export function MainWindow() {
           </Suspense>
         )}
 
-        {/* Main Content + bottom browser panel stacked vertically */}
+        {/* Main Content */}
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden pt-8">
           <div className="relative min-w-0 flex-1 overflow-hidden">
             <MainWindowContent
@@ -735,17 +703,15 @@ export function MainWindow() {
               sidebarSwipeIndicator={sidebarSwipeIndicator}
             />
           </div>
-          {/* Browser bottom panel - native-only, pinned to bottom */}
-          <BrowserPanel />
         </div>
 
-        {/* Desktop: resize handle for file browser */}
+        {/* Desktop: resize handle for the right panel */}
         {!isMobile && fileBrowserVisible && isInitialized && (
           <div
             role="separator"
             tabIndex={-1}
             aria-orientation="vertical"
-            aria-label="Resize file browser"
+            aria-label="Resize right panel"
             className="relative z-20 h-full w-px shrink-0 cursor-col-resize bg-border/20"
             onMouseDown={handleFileBrowserResizeStart}
           >
@@ -753,7 +719,7 @@ export function MainWindow() {
           </div>
         )}
 
-        {/* Desktop: file browser sidebar */}
+        {/* Desktop: right panel (files, terminal, browser) */}
         {!isMobile && fileBrowserVisible && isInitialized && (
           <div
             ref={fileBrowserRef}
@@ -761,13 +727,10 @@ export function MainWindow() {
             style={{ width: fileBrowserSize }}
           >
             <Suspense fallback={null}>
-              <FileBrowserSidebar />
+              <RightPanel />
             </Suspense>
           </div>
         )}
-
-        {/* Browser side pane - native-only, mounts on right edge */}
-        <BrowserSidePane />
       </div>
 
       {/* Global UI Components (hidden until triggered) */}

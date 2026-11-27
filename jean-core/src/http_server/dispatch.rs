@@ -130,6 +130,115 @@ where
         .map_err(|error| format!("Command task failed: {error}"))?
 }
 
+/// `send_chat_message` from command args. The typed error tells in-process
+/// callers whether the prompt reached the chat.
+pub(crate) async fn send_chat_message_from_args(
+    app: &AppHandle,
+    args: &Value,
+) -> Result<crate::chat::types::ChatMessage, crate::chat::SendError> {
+    let session_id: String = field(args, "sessionId", "session_id")?;
+    let worktree_id: String = field(args, "worktreeId", "worktree_id")?;
+    let worktree_path: String = field(args, "worktreePath", "worktree_path")?;
+    let message: String = from_field(args, "message")?;
+    let model: Option<String> = from_field_opt(args, "model")?;
+    let thinking_level_raw: Option<String> = field_opt(args, "thinkingLevel", "thinking_level")?;
+    let parallel_execution_prompt: Option<String> =
+        field_opt(args, "parallelExecutionPrompt", "parallel_execution_prompt")?;
+    let execution_mode: Option<String> = field_opt(args, "executionMode", "execution_mode")?;
+    let ai_language: Option<String> = field_opt(args, "aiLanguage", "ai_language")?;
+    let allowed_tools: Option<Vec<String>> = field_opt(args, "allowedTools", "allowed_tools")?;
+    let mut effort_level: Option<crate::chat::types::EffortLevel> =
+        field_opt(args, "effortLevel", "effort_level")?;
+    let thinking_level: Option<crate::chat::types::ThinkingLevel> =
+        match thinking_level_raw.as_deref() {
+            None => None,
+            Some("off") => Some(crate::chat::types::ThinkingLevel::Off),
+            // Adaptive: omit forced thinking settings. Also map to effort
+            // Adaptive when no explicit effort was provided.
+            Some("adaptive") => {
+                if effort_level.is_none() {
+                    effort_level = Some(crate::chat::types::EffortLevel::Adaptive);
+                }
+                Some(crate::chat::types::ThinkingLevel::Adaptive)
+            }
+            Some("think") => Some(crate::chat::types::ThinkingLevel::Think),
+            Some("megathink") => Some(crate::chat::types::ThinkingLevel::Megathink),
+            Some("ultrathink") => Some(crate::chat::types::ThinkingLevel::Ultrathink),
+            // Backward compatibility:
+            // Some frontend flows may send Codex effort values in thinkingLevel.
+            // Translate to effortLevel and force thinking off instead of failing.
+            Some("low") => {
+                if effort_level.is_none() {
+                    effort_level = Some(crate::chat::types::EffortLevel::Low);
+                }
+                Some(crate::chat::types::ThinkingLevel::Off)
+            }
+            Some("minimal") => {
+                if effort_level.is_none() {
+                    effort_level = Some(crate::chat::types::EffortLevel::Minimal);
+                }
+                Some(crate::chat::types::ThinkingLevel::Off)
+            }
+            Some("medium") => {
+                if effort_level.is_none() {
+                    effort_level = Some(crate::chat::types::EffortLevel::Medium);
+                }
+                Some(crate::chat::types::ThinkingLevel::Off)
+            }
+            Some("high") => {
+                if effort_level.is_none() {
+                    effort_level = Some(crate::chat::types::EffortLevel::High);
+                }
+                Some(crate::chat::types::ThinkingLevel::Off)
+            }
+            Some("xhigh") => {
+                if effort_level.is_none() {
+                    effort_level = Some(crate::chat::types::EffortLevel::Xhigh);
+                }
+                Some(crate::chat::types::ThinkingLevel::Off)
+            }
+            Some("max") => {
+                if effort_level.is_none() {
+                    effort_level = Some(crate::chat::types::EffortLevel::Max);
+                }
+                Some(crate::chat::types::ThinkingLevel::Off)
+            }
+            Some("ultracode") => {
+                if effort_level.is_none() {
+                    effort_level = Some(crate::chat::types::EffortLevel::Ultracode);
+                }
+                Some(crate::chat::types::ThinkingLevel::Off)
+            }
+            Some(other) => Some(crate::chat::types::ThinkingLevel::Other(other.to_string())),
+        };
+    let mcp_config: Option<String> = field_opt(args, "mcpConfig", "mcp_config")?;
+    let chrome_enabled: Option<bool> = field_opt(args, "chromeEnabled", "chrome_enabled")?;
+    let custom_profile_name: Option<String> =
+        field_opt(args, "customProfileName", "custom_profile_name")?;
+    let backend: Option<String> = field_opt(args, "backend", "backend")?;
+    let include_recap: Option<bool> = field_opt(args, "includeRecap", "include_recap")?;
+    crate::chat::send_chat_message_checked(
+        app.clone(),
+        session_id,
+        worktree_id,
+        worktree_path,
+        message,
+        model,
+        execution_mode,
+        thinking_level,
+        effort_level,
+        parallel_execution_prompt,
+        ai_language,
+        allowed_tools,
+        mcp_config,
+        chrome_enabled,
+        custom_profile_name,
+        backend,
+        include_recap,
+    )
+    .await
+}
+
 /// Dispatch a command by name to the corresponding Rust handler.
 /// This mirrors Tauri's invoke system but routes through WebSocket.
 ///
@@ -318,6 +427,24 @@ pub async fn dispatch_command(
             // (worktree:creating/created/error) that preserves the optimistic pending status.
             // Invalidating would refetch list_worktrees which overwrites status: 'pending',
             // preventing WorktreeSetupCard from appearing on the canvas.
+            to_value(result)
+        }
+        "start_prompt_on_models" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let prompt: String = from_field(&args, "prompt")?;
+            let targets: Vec<crate::projects::PromptModelTarget> = from_field(&args, "targets")?;
+            let execution_mode: Option<String> =
+                field_opt(&args, "executionMode", "execution_mode")?;
+            let result = Box::pin(crate::projects::start_prompt_on_models(
+                app.clone(),
+                project_id,
+                prompt,
+                targets,
+                execution_mode,
+            ))
+            .await?;
+            // Worktrees sync through worktree:* events (see create_worktree);
+            // each background task invalidates sessions once its prompt is queued.
             to_value(result)
         }
         "fork_session_to_worktree" => {
@@ -909,6 +1036,20 @@ pub async fn dispatch_command(
             )
             .await?;
             to_value(result)
+        }
+        "attach_loaded_context_to_session" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let kind: String = from_field(&args, "kind")?;
+            let number: u32 = from_field(&args, "number")?;
+            let project_path: String = field(&args, "projectPath", "project_path")?;
+            crate::projects::attach_loaded_context_to_session(
+                app.clone(),
+                session_id,
+                kind,
+                number,
+                project_path,
+            )?;
+            Ok(Value::Null)
         }
         "list_loaded_issue_contexts" => {
             let session_id: String = field(&args, "sessionId", "session_id")?;
@@ -1512,117 +1653,11 @@ pub async fn dispatch_command(
         // =====================================================================
         // Chat Messaging
         // =====================================================================
-        "send_chat_message" => {
-            let session_id: String = field(&args, "sessionId", "session_id")?;
-            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
-            let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
-            let message: String = from_field(&args, "message")?;
-            let model: Option<String> = from_field_opt(&args, "model")?;
-            let thinking_level_raw: Option<String> =
-                field_opt(&args, "thinkingLevel", "thinking_level")?;
-            let parallel_execution_prompt: Option<String> = field_opt(
-                &args,
-                "parallelExecutionPrompt",
-                "parallel_execution_prompt",
-            )?;
-            let execution_mode: Option<String> =
-                field_opt(&args, "executionMode", "execution_mode")?;
-            let ai_language: Option<String> = field_opt(&args, "aiLanguage", "ai_language")?;
-            let allowed_tools: Option<Vec<String>> =
-                field_opt(&args, "allowedTools", "allowed_tools")?;
-            let mut effort_level: Option<crate::chat::types::EffortLevel> =
-                field_opt(&args, "effortLevel", "effort_level")?;
-            let thinking_level: Option<crate::chat::types::ThinkingLevel> = match thinking_level_raw
-                .as_deref()
-            {
-                None => None,
-                Some("off") => Some(crate::chat::types::ThinkingLevel::Off),
-                // Adaptive: omit forced thinking settings. Also map to effort
-                // Adaptive when no explicit effort was provided.
-                Some("adaptive") => {
-                    if effort_level.is_none() {
-                        effort_level = Some(crate::chat::types::EffortLevel::Adaptive);
-                    }
-                    Some(crate::chat::types::ThinkingLevel::Adaptive)
-                }
-                Some("think") => Some(crate::chat::types::ThinkingLevel::Think),
-                Some("megathink") => Some(crate::chat::types::ThinkingLevel::Megathink),
-                Some("ultrathink") => Some(crate::chat::types::ThinkingLevel::Ultrathink),
-                // Backward compatibility:
-                // Some frontend flows may send Codex effort values in thinkingLevel.
-                // Translate to effortLevel and force thinking off instead of failing.
-                Some("low") => {
-                    if effort_level.is_none() {
-                        effort_level = Some(crate::chat::types::EffortLevel::Low);
-                    }
-                    Some(crate::chat::types::ThinkingLevel::Off)
-                }
-                Some("minimal") => {
-                    if effort_level.is_none() {
-                        effort_level = Some(crate::chat::types::EffortLevel::Minimal);
-                    }
-                    Some(crate::chat::types::ThinkingLevel::Off)
-                }
-                Some("medium") => {
-                    if effort_level.is_none() {
-                        effort_level = Some(crate::chat::types::EffortLevel::Medium);
-                    }
-                    Some(crate::chat::types::ThinkingLevel::Off)
-                }
-                Some("high") => {
-                    if effort_level.is_none() {
-                        effort_level = Some(crate::chat::types::EffortLevel::High);
-                    }
-                    Some(crate::chat::types::ThinkingLevel::Off)
-                }
-                Some("xhigh") => {
-                    if effort_level.is_none() {
-                        effort_level = Some(crate::chat::types::EffortLevel::Xhigh);
-                    }
-                    Some(crate::chat::types::ThinkingLevel::Off)
-                }
-                Some("max") => {
-                    if effort_level.is_none() {
-                        effort_level = Some(crate::chat::types::EffortLevel::Max);
-                    }
-                    Some(crate::chat::types::ThinkingLevel::Off)
-                }
-                Some("ultracode") => {
-                    if effort_level.is_none() {
-                        effort_level = Some(crate::chat::types::EffortLevel::Ultracode);
-                    }
-                    Some(crate::chat::types::ThinkingLevel::Off)
-                }
-                Some(other) => Some(crate::chat::types::ThinkingLevel::Other(other.to_string())),
-            };
-            let mcp_config: Option<String> = field_opt(&args, "mcpConfig", "mcp_config")?;
-            let chrome_enabled: Option<bool> = field_opt(&args, "chromeEnabled", "chrome_enabled")?;
-            let custom_profile_name: Option<String> =
-                field_opt(&args, "customProfileName", "custom_profile_name")?;
-            let backend: Option<String> = field_opt(&args, "backend", "backend")?;
-            let include_recap: Option<bool> = field_opt(&args, "includeRecap", "include_recap")?;
-            let result = crate::chat::send_chat_message(
-                app.clone(),
-                session_id,
-                worktree_id,
-                worktree_path,
-                message,
-                model,
-                execution_mode,
-                thinking_level,
-                effort_level,
-                parallel_execution_prompt,
-                ai_language,
-                allowed_tools,
-                mcp_config,
-                chrome_enabled,
-                custom_profile_name,
-                backend,
-                include_recap,
-            )
-            .await?;
-            to_value(result)
-        }
+        "send_chat_message" => to_value(
+            send_chat_message_from_args(app, &args)
+                .await
+                .map_err(|e| e.message)?,
+        ),
         "cancel_chat_message" => {
             let session_id: String = field(&args, "sessionId", "session_id")?;
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
@@ -2558,6 +2593,10 @@ pub async fn dispatch_command(
             )
             .await?;
             to_value(result)
+        }
+        "get_usage_summary" => {
+            let days: Option<u32> = from_field_opt(&args, "days")?;
+            to_value(crate::chat::get_usage_summary(app.clone(), days).await?)
         }
         "resume_session" => {
             let session_id: String = field(&args, "sessionId", "session_id")?;
@@ -4203,15 +4242,46 @@ pub async fn dispatch_command(
         // =====================================================================
         // Unknown command
         // =====================================================================
-        // Agents: a separate (boxed) function keeps this function's stack frame small.
-        agent_command if AGENT_COMMANDS.contains(&agent_command) => {
-            Box::pin(dispatch_agents_command(app, agent_command, &args)).await
-        }
         muse_command if MUSE_CLI_COMMANDS.contains(&muse_command) => {
             Box::pin(dispatch_muse_cli_command(app, muse_command, &args)).await
         }
+        "get_diff_viewed_files" | "set_diff_file_viewed" => {
+            Box::pin(dispatch_diff_viewed_command(app, command, &args)).await
+        }
         _ => Err(format!("Unknown command: {command}")),
     }
+}
+
+async fn dispatch_diff_viewed_command(
+    app: &AppHandle,
+    command: &str,
+    args: &Value,
+) -> Result<Value, String> {
+    let worktree_id: String = field(args, "worktreeId", "worktree_id")?;
+    let diff_type: String = field(args, "diffType", "diff_type")?;
+    if command == "get_diff_viewed_files" {
+        let result = crate::projects::diff_viewed::get_diff_viewed_files(
+            app.clone(),
+            worktree_id,
+            diff_type,
+        )
+        .await?;
+        return to_value(result);
+    }
+    let path: String = from_field(args, "path")?;
+    let hash: String = from_field(args, "hash")?;
+    let viewed: bool = from_field(args, "viewed")?;
+    let result = crate::projects::diff_viewed::set_diff_file_viewed(
+        app.clone(),
+        worktree_id,
+        path,
+        hash,
+        viewed,
+        diff_type,
+    )
+    .await?;
+    emit_cache_invalidation(app, &["diff-viewed"]);
+    to_value(result)
 }
 
 const MUSE_CLI_COMMANDS: &[&str] = &[
@@ -4271,278 +4341,6 @@ fn emit_cache_invalidation(app: &AppHandle, keys: &[&str]) {
 // =============================================================================
 // Helper functions for JSON deserialization
 // =============================================================================
-
-const AGENT_COMMANDS: &[&str] = &[
-    "get_jean_agent_workdir",
-    "get_agent_workdir",
-    "list_agents",
-    "get_agent_details",
-    "create_agent",
-    "list_agent_templates",
-    "install_agent_template",
-    "update_agent",
-    "delete_agent",
-    "decide_agent_approval",
-    "cancel_agent_schedule",
-    "create_agent_schedule",
-    "update_agent_schedule",
-    "save_agent_memory",
-    "search_agent_memory",
-    "update_agent_memory",
-    "delete_agent_memory",
-    "supersede_agent_memory",
-    "export_agent_memory",
-    "save_agent_journal",
-    "search_agent_journal",
-    "mark_agent_notifications_read",
-    // Subagent types. Own block so a later rebase can move these names.
-    "list_agent_subagent_types",
-    "save_agent_subagent_type",
-    "delete_agent_subagent_type",
-    "spawn_agent_subagent",
-    "revert_agent_change",
-    "get_agent_connector_catalog",
-];
-
-/// Agent commands (see `crate::agents::commands`).
-async fn dispatch_agents_command(
-    app: &AppHandle,
-    command: &str,
-    args: &Value,
-) -> Result<Value, String> {
-    {
-        match command {
-            "get_jean_agent_workdir" => to_value(crate::agents::agent_workdir(app, "jean")?),
-            "get_agent_workdir" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                to_value(crate::agents::agent_workdir(app, &agent_id)?)
-            }
-            "list_agents" => to_value(crate::agents::commands::list_agents(app).await?),
-            "get_agent_details" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                to_value(crate::agents::commands::get_agent_details(app, &agent_id)?)
-            }
-            "create_agent" => {
-                let name: String = from_field(args, "name")?;
-                let description: Option<String> = from_field_opt(args, "description")?;
-                let icon: Option<String> = from_field_opt(args, "icon")?;
-                let role_prompt: Option<String> = field_opt(args, "rolePrompt", "role_prompt")?;
-                let backend: Option<String> = from_field_opt(args, "backend")?;
-                let model: Option<String> = from_field_opt(args, "model")?;
-                let effort: Option<String> = from_field_opt(args, "effort")?;
-                let thinking_level: Option<String> =
-                    field_opt(args, "thinkingLevel", "thinking_level")?;
-                let skills: Option<Vec<crate::agents::db::AgentSkill>> =
-                    from_field_opt(args, "skills")?;
-                to_value(
-                    crate::agents::commands::create_agent(
-                        app,
-                        &name,
-                        description.as_deref().unwrap_or(""),
-                        icon.as_deref().unwrap_or("blue"),
-                        role_prompt.as_deref().unwrap_or(""),
-                        crate::agents::db::AgentRunConfig {
-                            backend,
-                            model,
-                            effort,
-                            thinking_level,
-                            skills: skills.unwrap_or_default(),
-                        },
-                    )
-                    .await?,
-                )
-            }
-            "list_agent_templates" => to_value(crate::agents::commands::list_agent_templates()?),
-            "install_agent_template" => {
-                let template_id: String = field(args, "templateId", "template_id")?;
-                to_value(crate::agents::commands::install_agent_template(app, &template_id).await?)
-            }
-            "update_agent" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                let patch: crate::agents::db::AgentPatch = from_field(args, "patch")?;
-                to_value(crate::agents::commands::update_agent(app, &agent_id, patch).await?)
-            }
-            "delete_agent" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                crate::agents::commands::delete_agent(app, &agent_id)?;
-                Ok(Value::Null)
-            }
-            "decide_agent_approval" => {
-                let approval_id: i64 = field(args, "approvalId", "approval_id")?;
-                let approve: bool = from_field(args, "approve")?;
-                to_value(crate::agents::commands::decide_approval(app, approval_id, approve).await?)
-            }
-            "cancel_agent_schedule" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                let schedule_id: i64 = field(args, "scheduleId", "schedule_id")?;
-                crate::agents::commands::cancel_schedule(app, &agent_id, schedule_id)?;
-                Ok(Value::Null)
-            }
-            "create_agent_schedule" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                let input: crate::agents::commands::ScheduleCommandInput =
-                    serde_json::from_value(args.clone())
-                        .map_err(|e| format!("Invalid schedule: {e}"))?;
-                to_value(crate::agents::commands::create_schedule_for_agent(
-                    app, &agent_id, input,
-                )?)
-            }
-            "update_agent_schedule" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                let schedule_id: i64 = field(args, "scheduleId", "schedule_id")?;
-                let patch: crate::agents::commands::ScheduleCommandPatch =
-                    serde_json::from_value(args.clone())
-                        .map_err(|e| format!("Invalid schedule: {e}"))?;
-                to_value(crate::agents::commands::update_schedule_for_agent(
-                    app,
-                    &agent_id,
-                    schedule_id,
-                    patch,
-                )?)
-            }
-            "save_agent_memory" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                let content: String = from_field(args, "content")?;
-                let kind: String = from_field(args, "kind")?;
-                let scope: Option<String> = from_field_opt(args, "scope")?;
-                let shared: Option<bool> = from_field_opt(args, "shared")?;
-                let pinned: Option<bool> = from_field_opt(args, "pinned")?;
-                let project_id: Option<String> = field_opt(args, "projectId", "project_id")?;
-                to_value(crate::agents::commands::save_memory(
-                    app,
-                    &agent_id,
-                    &content,
-                    &kind,
-                    scope.as_deref(),
-                    shared.unwrap_or(false),
-                    pinned.unwrap_or(false),
-                    project_id.as_deref(),
-                )?)
-            }
-            "search_agent_memory" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                let query: Option<String> = from_field_opt(args, "query")?;
-                let kind: Option<String> = from_field_opt(args, "kind")?;
-                let scope: Option<String> = from_field_opt(args, "scope")?;
-                let project_id: Option<String> = field_opt(args, "projectId", "project_id")?;
-                let pinned: Option<bool> = from_field_opt(args, "pinned")?;
-                let from: Option<i64> = from_field_opt(args, "from")?;
-                let to: Option<i64> = from_field_opt(args, "to")?;
-                let limit: Option<i64> = from_field_opt(args, "limit")?;
-                to_value(crate::agents::commands::search_memory(
-                    app,
-                    &agent_id,
-                    crate::agents::commands::MemorySearchRequest {
-                        query,
-                        kind,
-                        scope,
-                        project_id,
-                        pinned,
-                        from,
-                        to,
-                        limit,
-                    },
-                )?)
-            }
-            "update_agent_memory" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                let memory_id: i64 = field(args, "memoryId", "memory_id")?;
-                let patch: crate::agents::db::MemoryPatch = from_field(args, "patch")?;
-                to_value(crate::agents::commands::update_memory(
-                    app, &agent_id, memory_id, patch,
-                )?)
-            }
-            "delete_agent_memory" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                let memory_id: i64 = field(args, "memoryId", "memory_id")?;
-                crate::agents::commands::delete_memory(app, &agent_id, memory_id)?;
-                Ok(Value::Null)
-            }
-            "supersede_agent_memory" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                let memory_id: i64 = field(args, "memoryId", "memory_id")?;
-                let content: String = from_field(args, "content")?;
-                to_value(crate::agents::commands::supersede_memory(
-                    app, &agent_id, memory_id, &content,
-                )?)
-            }
-            "save_agent_journal" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                let content: String = from_field(args, "content")?;
-                let occurred_at: Option<i64> = field_opt(args, "occurredAt", "occurred_at")?;
-                let project_id: Option<String> = field_opt(args, "projectId", "project_id")?;
-                to_value(crate::agents::commands::save_journal(
-                    app,
-                    &agent_id,
-                    &content,
-                    occurred_at,
-                    project_id.as_deref(),
-                )?)
-            }
-            "search_agent_journal" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                let query: Option<String> = from_field_opt(args, "query")?;
-                let from: Option<i64> = from_field_opt(args, "from")?;
-                let to: Option<i64> = from_field_opt(args, "to")?;
-                let limit: Option<i64> = from_field_opt(args, "limit")?;
-                to_value(crate::agents::commands::search_journal(
-                    app,
-                    &agent_id,
-                    query.as_deref(),
-                    from,
-                    to,
-                    limit,
-                )?)
-            }
-            "mark_agent_notifications_read" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                crate::agents::commands::mark_notifications_read(app, &agent_id)?;
-                Ok(Value::Null)
-            }
-            "export_agent_memory" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                to_value(crate::agents::commands::export_memory(app, &agent_id)?)
-            }
-            // Subagent types. Own arms so a later rebase can move this block.
-            "list_agent_subagent_types" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                to_value(crate::agents::with_db(app, |conn| {
-                    crate::agents::db::list_subagent_types(conn, &agent_id)
-                })?)
-            }
-            "save_agent_subagent_type" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                let input: crate::agents::commands::SubagentTypeCommandInput =
-                    serde_json::from_value(args.clone())
-                        .map_err(|error| format!("Invalid subagent type: {error}"))?;
-                to_value(crate::agents::commands::save_subagent_type(
-                    app, &agent_id, input,
-                )?)
-            }
-            "delete_agent_subagent_type" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                let id: i64 = field(args, "typeId", "type_id")?;
-                crate::agents::commands::delete_subagent_type(app, &agent_id, id)?;
-                Ok(Value::Null)
-            }
-            "spawn_agent_subagent" => {
-                let agent_id: String = field(args, "agentId", "agent_id")?;
-                let type_name: String = field(args, "typeName", "type_name")?;
-                let task: String = from_field(args, "task")?;
-                to_value(
-                    crate::agents::commands::spawn_subagent(app, &agent_id, &type_name, &task)
-                        .await?,
-                )
-            }
-            "revert_agent_change" => {
-                let change_id: i64 = field(args, "changeId", "change_id")?;
-                to_value(crate::agents::commands::revert_agent_change(app, change_id).await?)
-            }
-            "get_agent_connector_catalog" => to_value(crate::agents::connectors::catalog_payload()),
-            _ => Err(format!("Unknown command: {command}")),
-        }
-    }
-}
 
 pub(crate) fn to_value<T: serde::Serialize>(val: T) -> Result<Value, String> {
     serde_json::to_value(val).map_err(|e| format!("Serialization error: {e}"))

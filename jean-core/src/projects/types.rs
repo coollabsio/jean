@@ -504,6 +504,12 @@ impl ProjectsData {
         self.worktrees.iter().find(|w| w.id == id)
     }
 
+    /// Project a worktree ID belongs to.
+    pub fn project_for_worktree(&self, worktree_id: &str) -> Option<&Project> {
+        let worktree = self.find_worktree(worktree_id)?;
+        self.find_project(&worktree.project_id)
+    }
+
     /// Find a worktree by ID (mutable)
     pub fn find_worktree_mut(&mut self, id: &str) -> Option<&mut Worktree> {
         self.worktrees.iter_mut().find(|w| w.id == id)

@@ -8,9 +8,9 @@ import {
 } from '@/components/ui/sheet'
 import { useUIStore } from '@/store/ui-store'
 
-const FileBrowserSidebar = lazy(() =>
-  import('./FileBrowserSidebar').then(mod => ({
-    default: mod.FileBrowserSidebar,
+const RightPanel = lazy(() =>
+  import('@/components/layout/RightPanel').then(mod => ({
+    default: mod.RightPanel,
   }))
 )
 
@@ -20,7 +20,8 @@ interface MobileFileBrowserProps {
 }
 
 /**
- * Mobile file browser as a right overlay drawer.
+ * Mobile right panel (files, terminal, browser, scripts) as a right overlay
+ * drawer.
  */
 export function MobileFileBrowser({
   open,
@@ -44,6 +45,13 @@ export function MobileFileBrowser({
         side="right"
         showCloseButton={false}
         onOpenAutoFocus={e => e.preventDefault()}
+        onEscapeKeyDown={e => {
+          // Escape belongs to the terminal program, not the drawer
+          const target = e.target as HTMLElement | null
+          if (target?.closest?.('[data-terminal-root="true"]')) {
+            e.preventDefault()
+          }
+        }}
         onInteractOutside={e => {
           // File viewer dialog sits above this sheet; never treat it as "outside"
           // dismiss for the browser (would race-close both layers on mobile).
@@ -61,13 +69,13 @@ export function MobileFileBrowser({
         data-testid="mobile-file-browser"
       >
         <SheetHeader className="sr-only">
-          <SheetTitle>File browser</SheetTitle>
+          <SheetTitle>Right panel</SheetTitle>
           <SheetDescription>
-            Browse and open files in the current worktree
+            Files, terminal, browser and scripts for the current worktree
           </SheetDescription>
         </SheetHeader>
         <Suspense fallback={null}>
-          <FileBrowserSidebar />
+          <RightPanel />
         </Suspense>
       </SheetContent>
     </Sheet>

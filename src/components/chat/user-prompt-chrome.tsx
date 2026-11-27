@@ -15,6 +15,14 @@ import {
   stripAllMarkers,
 } from './message-content-utils'
 
+/**
+ * Chat user prompt: a filled card, so it stands out from assistant output on
+ * the page background. Code and attachments use bg-muted too, so they get the
+ * page background to stand out.
+ */
+export const USER_CARD_BUBBLE_CLASS =
+  'min-w-0 break-words [overflow-wrap:anywhere] rounded-lg border border-border/50 bg-muted/60 px-3 py-2 text-foreground [&_pre]:bg-background [&_:not(pre)>code]:bg-background [&_[data-attachments]>*]:bg-background'
+
 // Per-message chrome (settings, copy, restore, duration) appears on hover or
 // keyboard focus. Touch devices have no hover, so it stays visible there.
 export const USER_HOVER_REVEAL =

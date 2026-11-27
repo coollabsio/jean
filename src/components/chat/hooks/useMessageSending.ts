@@ -47,7 +47,6 @@ import {
 import { applySessionSettingToSession } from './session-setting-sync'
 import { saveQueuedMessageEdit } from './useQueuedPromptActions'
 import { CODEX_GOAL_TURN_PREFIX } from '../goal-utils'
-import { resolveMentions, type MentionCandidate } from '../agent-mentions'
 
 interface UseMessageSendingParams {
   activeSessionId: string | null | undefined
@@ -64,8 +63,6 @@ interface UseMessageSendingParams {
   mcpServersDataRef: RefObject<McpServerInfo[] | undefined>
   enabledMcpServersRef: RefObject<string[]>
   selectedBackendRef: RefObject<CliBackend>
-  /** Agent chats: `@` mention candidates; undefined in project chats */
-  mentionCandidatesRef?: RefObject<MentionCandidate[] | undefined>
   preferences:
     | {
         custom_cli_profiles?: { name: string }[]
@@ -139,7 +136,6 @@ export function useMessageSending({
   mcpServersDataRef,
   enabledMcpServersRef,
   selectedBackendRef,
-  mentionCandidatesRef,
   preferences,
   sendMessage,
   createSession,
@@ -374,10 +370,6 @@ export function useMessageSending({
       const files = getPendingFiles(activeSessionId ?? '')
       const skills = getPendingSkills(activeSessionId ?? '')
       const textFiles = getPendingTextFiles(activeSessionId ?? '')
-      const mentionCandidates = mentionCandidatesRef?.current
-      const mentions = mentionCandidates
-        ? resolveMentions(textMessage, mentionCandidates)
-        : []
 
       if (
         !textMessage &&
@@ -403,7 +395,6 @@ export function useMessageSending({
             pendingFiles: files,
             pendingSkills: skills,
             pendingTextFiles: textFiles,
-            ...(mentionCandidates ? { mentions } : {}),
           }
         )
         if (saved) {
@@ -705,7 +696,6 @@ export function useMessageSending({
         pendingFiles: files,
         pendingSkills: skills,
         pendingTextFiles: textFiles,
-        ...(mentions.length > 0 ? { mentions } : {}),
         model: selectedModelRef.current,
         provider: selectedProviderRef.current,
         executionMode: mode,
@@ -838,7 +828,6 @@ export function useMessageSending({
       refetchAuth,
       sendMessageNow,
       inputRef,
-      mentionCandidatesRef,
       selectedBackendRef,
       selectedProviderRef,
       executionModeRef,

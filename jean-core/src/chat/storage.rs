@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use once_cell::sync::Lazy;
 use tauri::AppHandle;
 
+use super::run_state_index::RunStateIndex;
 use super::types::{
     RunStateStamp, SavedContextsMetadata, Session, SessionIndexEntry, SessionMetadata,
     WorktreeIndex, WorktreeSessions,
@@ -321,8 +322,39 @@ fn save_metadata_file(app: &AppHandle, metadata: &SessionMetadata) -> Result<(),
 
     crate::platform::write_file_atomically(&path, &json_content)
         .map_err(|error| format!("Failed to save metadata file: {error}"))?;
+    RunStateIndex::for_app(app).record(metadata);
 
     log::trace!("Saved metadata for session: {}", metadata.id);
+    Ok(())
+}
+
+/// Read every session's metadata once, record it in the run-state index, and
+/// hand it to `visit`. Each read and its index entry share the session's
+/// metadata lock, so a concurrent write cannot leave an older entry behind.
+/// An unreadable session is skipped.
+pub fn scan_all_metadata(
+    app: &AppHandle,
+    mut visit: impl FnMut(&SessionMetadata),
+) -> Result<(), String> {
+    let index = RunStateIndex::for_app(app);
+    for session_id in list_all_session_ids(app)? {
+        let metadata = {
+            let lock = get_metadata_lock(&session_id);
+            let _guard = lock.lock().unwrap();
+            match load_metadata_internal(app, &session_id) {
+                Ok(Some(metadata)) => {
+                    index.record(&metadata);
+                    metadata
+                }
+                Ok(None) => continue,
+                Err(e) => {
+                    log::warn!("Skipping session {session_id} in metadata scan: {e}");
+                    continue;
+                }
+            }
+        };
+        visit(&metadata);
+    }
     Ok(())
 }
 
@@ -535,11 +567,18 @@ pub fn delete_session_data(app: &AppHandle, session_id: &str) -> Result<(), Stri
     let data_dir = get_data_dir(app)?;
     let session_dir = data_dir.join(session_id);
 
-    if session_dir.exists() {
+    let removed = if session_dir.exists() {
         fs::remove_dir_all(&session_dir)
-            .map_err(|e| format!("Failed to delete session directory: {e}"))?;
-        log::trace!("Deleted session data for: {session_id}");
+            .map_err(|e| format!("Failed to delete session directory: {e}"))
+    } else {
+        Ok(())
+    };
+    // A failed removal may still have deleted the metadata file.
+    if !session_dir.join("metadata.json").exists() {
+        RunStateIndex::for_app(app).forget(session_id);
     }
+    removed?;
+    log::trace!("Deleted session data for: {session_id}");
 
     Ok(())
 }
@@ -736,8 +775,7 @@ fn cleanup_orphaned_session_indexes_in_dir(
             continue;
         };
 
-        // Agent sessions use reserved IDs with no worktree record.
-        if valid_index_stems.contains(stem) || crate::agents::is_agent_worktree_id(stem) {
+        if valid_index_stems.contains(stem) {
             continue;
         }
 
@@ -1885,10 +1923,6 @@ mod tests {
         std::fs::write(index_dir.join("orphan-wt.json"), "{}").expect("write orphan index");
         std::fs::write(index_dir.join("base-old-project.json"), "{}").expect("write stale base");
         std::fs::write(index_dir.join("notes.txt"), "ignore").expect("write non-json");
-        let jean_agent_index = "__jean_agent__.json";
-        let custom_agent_index = "__agent_reviewer__.json";
-        std::fs::write(index_dir.join(jean_agent_index), "{}").expect("write jean agent index");
-        std::fs::write(index_dir.join(custom_agent_index), "{}").expect("write agent index");
 
         let valid_stems = HashSet::from(["wt-1".to_string(), "base-project-1".to_string()]);
 
@@ -1901,8 +1935,6 @@ mod tests {
         assert!(!index_dir.join("orphan-wt.json").exists());
         assert!(!index_dir.join("base-old-project.json").exists());
         assert!(index_dir.join("notes.txt").exists());
-        assert!(index_dir.join(jean_agent_index).exists());
-        assert!(index_dir.join(custom_agent_index).exists());
     }
 
     #[test]

@@ -48,6 +48,7 @@ import { useInstalledBackends } from '@/hooks/useInstalledBackends'
 import { DesktopBackendModelPicker } from '@/components/chat/toolbar/DesktopBackendModelPicker'
 import type { InvestigateOverride } from '@/components/chat/hooks/useMagicCommands'
 import { Markdown } from '@/components/ui/markdown'
+import { MessageThreadContextMenu } from '@/components/chat/message-thread-context-menu'
 import { cn } from '@/lib/utils'
 import type {
   GitHubReviewComment,
@@ -255,6 +256,69 @@ function ReviewStateBadge({ state }: { state: string }) {
       )}
       {reviewStateLabel(state)}
     </span>
+  )
+}
+
+function TabButton({
+  active,
+  icon,
+  label,
+  count,
+  onClick,
+}: {
+  active: boolean
+  icon: ReactNode
+  label: string
+  count: number
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={cn(
+        'flex h-8 min-w-0 items-center justify-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors cursor-pointer',
+        active
+          ? 'bg-background text-foreground shadow-sm'
+          : 'text-muted-foreground hover:text-foreground'
+      )}
+    >
+      {icon}
+      <span className="truncate">{label}</span>
+      <span
+        className={cn(
+          'rounded-full px-1.5 text-2xs tabular-nums',
+          active ? 'bg-muted text-foreground' : 'bg-background/60'
+        )}
+      >
+        {count}
+      </span>
+    </button>
+  )
+}
+
+function EmptyState({
+  icon,
+  title,
+  description,
+  children,
+}: {
+  icon: ReactNode
+  title: string
+  description: string
+  children?: ReactNode
+}) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 rounded-md border border-dashed px-6 py-12 text-center">
+      <div className="mb-2 flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
+        {icon}
+      </div>
+      <p className="text-sm font-medium text-foreground">{title}</p>
+      <p className="max-w-xs text-xs text-muted-foreground">{description}</p>
+      {children}
+    </div>
   )
 }
 
@@ -757,9 +821,14 @@ export function ReviewCommentsDialog() {
         onKeyDown={handleDialogKeyDown}
         className="!fixed !inset-0 !w-screen !h-dvh !max-w-screen !max-h-none !rounded-none flex flex-col overflow-hidden sm:!w-[calc(100vw-4rem)] sm:!h-[85vh] sm:!max-w-none sm:!rounded-lg"
       >
-        <DialogHeader className="pr-10 sm:pr-0">
-          <DialogTitle>
-            PR Comments {prNumber ? `#${prNumber}` : ''}
+        <DialogHeader className="pr-10 text-left sm:pr-0">
+          <DialogTitle className="flex items-baseline gap-2">
+            PR Comments
+            {prNumber ? (
+              <span className="font-mono text-sm font-normal text-muted-foreground">
+                #{prNumber}
+              </span>
+            ) : null}
           </DialogTitle>
         </DialogHeader>
 
@@ -794,77 +863,71 @@ export function ReviewCommentsDialog() {
         {phase === 'select' && !error && hasAnyComments && (
           <>
             {/* Tab toggle */}
-            <div className="flex flex-wrap gap-1 px-1">
-              <Button
-                variant={tab === 'inline' ? 'default' : 'outline'}
-                size="sm"
-                className="h-7 text-xs gap-1.5"
+            <div
+              role="tablist"
+              className="grid shrink-0 grid-cols-2 gap-1 rounded-lg bg-muted p-1 sm:inline-grid sm:w-fit"
+            >
+              <TabButton
+                active={tab === 'inline'}
+                icon={<Code className="size-3.5" />}
+                label="Code comments"
+                count={
+                  inlineFilter === 'open' ? openInlineCount : comments.length
+                }
                 onClick={() => {
                   setTab('inline')
                   setActiveIndex(0)
                 }}
-              >
-                <Code className="size-3" />
-                Code Comments (
-                {inlineFilter === 'open' ? openInlineCount : comments.length}
-                {inlineFilter === 'open' && openInlineCount !== comments.length
-                  ? ` open`
-                  : ''}
-                )
-              </Button>
-              <Button
-                variant={tab === 'conversation' ? 'default' : 'outline'}
-                size="sm"
-                className="h-7 text-xs gap-1.5"
+              />
+              <TabButton
+                active={tab === 'conversation'}
+                icon={<MessagesSquare className="size-3.5" />}
+                label="Conversation"
+                count={conversationItems.length}
                 onClick={() => {
                   setTab('conversation')
                   setActiveIndex(0)
                 }}
-              >
-                <MessagesSquare className="size-3" />
-                Conversation ({conversationItems.length})
-              </Button>
+              />
             </div>
 
             {/* Selection controls */}
-            <div className="flex items-center justify-between gap-3 px-1 pb-2">
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                <span>
-                  {activeSelectedCount} of {activeItemsLength} selected
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5 shrink-0">
-                {tab === 'inline' && comments.length > 0 && (
-                  <div className="flex items-center gap-0.5 rounded-md border p-0.5">
-                    <Button
-                      variant={inlineFilter === 'open' ? 'secondary' : 'ghost'}
-                      size="sm"
-                      className="h-6 px-2 text-xs"
-                      onClick={() => setInlineFilter('open')}
-                      data-testid="review-filter-open"
-                    >
-                      Open ({openInlineCount})
-                    </Button>
-                    <Button
-                      variant={inlineFilter === 'all' ? 'secondary' : 'ghost'}
-                      size="sm"
-                      className="h-6 px-2 text-xs"
-                      onClick={() => setInlineFilter('all')}
-                      data-testid="review-filter-all"
-                    >
-                      All ({comments.length})
-                    </Button>
-                  </div>
-                )}
+            <div className="flex min-h-8 shrink-0 items-center gap-2">
+              {tab === 'inline' && comments.length > 0 && (
+                <div className="flex items-center gap-0.5 rounded-md border p-0.5">
+                  <Button
+                    variant={inlineFilter === 'open' ? 'secondary' : 'ghost'}
+                    size="sm"
+                    className="h-7 px-2.5 text-xs"
+                    onClick={() => setInlineFilter('open')}
+                    data-testid="review-filter-open"
+                  >
+                    Open ({openInlineCount})
+                  </Button>
+                  <Button
+                    variant={inlineFilter === 'all' ? 'secondary' : 'ghost'}
+                    size="sm"
+                    className="h-7 px-2.5 text-xs"
+                    onClick={() => setInlineFilter('all')}
+                    data-testid="review-filter-all"
+                  >
+                    All ({comments.length})
+                  </Button>
+                </div>
+              )}
+              <span className="ml-auto truncate text-xs text-muted-foreground">
+                {activeSelectedCount} of {activeItemsLength} selected
+              </span>
+              {activeItemsLength > 0 && (
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-6 shrink-0 text-xs"
+                  className="h-7 shrink-0 px-2.5 text-xs"
                   onClick={toggleAll}
                 >
                   {allSelected ? 'Deselect All' : 'Select All'}
                 </Button>
-              </div>
+              )}
             </div>
 
             {/* Inline code comments tab */}
@@ -953,7 +1016,14 @@ export function ReviewCommentsDialog() {
                             </button>
                             {isExpanded && (
                               <div className="mt-2 pl-5">
-                                <Markdown compact>{comment.body}</Markdown>
+                                <MessageThreadContextMenu
+                                  messageText={comment.body}
+                                  copyMessageLabel="Copy comment"
+                                >
+                                  <div>
+                                    <Markdown compact>{comment.body}</Markdown>
+                                  </div>
+                                </MessageThreadContextMenu>
                                 <button
                                   type="button"
                                   className="mt-2 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
@@ -984,24 +1054,30 @@ export function ReviewCommentsDialog() {
 
             {/* Inline tab empty state */}
             {tab === 'inline' && filteredInlineEntries.length === 0 && (
-              <div className="flex flex-col items-center justify-center gap-2 py-12 flex-1">
-                <Code className="size-8 text-muted-foreground/40" />
-                <p className="text-sm text-muted-foreground">
-                  {comments.length === 0
-                    ? 'No inline code comments on this PR'
-                    : 'No open review comments — switch to All to see resolved or outdated ones'}
-                </p>
+              <EmptyState
+                icon={<Code className="size-5" />}
+                title={
+                  comments.length === 0
+                    ? 'No inline code comments'
+                    : 'No open review comments'
+                }
+                description={
+                  comments.length === 0
+                    ? 'This PR has no comments on code lines.'
+                    : 'Resolved and outdated comments are hidden.'
+                }
+              >
                 {comments.length > 0 && inlineFilter === 'open' && (
                   <Button
                     variant="outline"
                     size="sm"
-                    className="mt-1"
+                    className="mt-2"
                     onClick={() => setInlineFilter('all')}
                   >
                     Show all ({comments.length})
                   </Button>
                 )}
-              </div>
+              </EmptyState>
             )}
 
             {/* Conversation tab */}
@@ -1086,7 +1162,14 @@ export function ReviewCommentsDialog() {
                             </button>
                             {isExpanded && (
                               <div className="mt-2 pl-5">
-                                <Markdown compact>{body}</Markdown>
+                                <MessageThreadContextMenu
+                                  messageText={body}
+                                  copyMessageLabel="Copy comment"
+                                >
+                                  <div>
+                                    <Markdown compact>{body}</Markdown>
+                                  </div>
+                                </MessageThreadContextMenu>
                               </div>
                             )}
                           </div>
@@ -1100,18 +1183,17 @@ export function ReviewCommentsDialog() {
 
             {/* Conversation tab empty state */}
             {tab === 'conversation' && conversationItems.length === 0 && (
-              <div className="flex flex-col items-center justify-center gap-2 py-12 flex-1">
-                <MessagesSquare className="size-8 text-muted-foreground/40" />
-                <p className="text-sm text-muted-foreground">
-                  No conversation comments on this PR
-                </p>
-              </div>
+              <EmptyState
+                icon={<MessagesSquare className="size-5" />}
+                title="No conversation comments"
+                description="This PR has no general comments or reviews."
+              />
             )}
 
             {/* Footer actions */}
-            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 pt-2 pb-[env(safe-area-inset-bottom)]">
+            <div className="-mx-6 flex shrink-0 flex-col gap-2 border-t px-6 pt-3 pb-[env(safe-area-inset-bottom)] sm:flex-row sm:items-center">
               <div
-                className="mr-auto min-w-0"
+                className="min-w-0 sm:mr-auto"
                 onKeyDown={event => event.stopPropagation()}
               >
                 <DesktopBackendModelPicker
@@ -1130,39 +1212,43 @@ export function ReviewCommentsDialog() {
                   }
                 />
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={activeSelectedCount === 0 || isSending}
-                onClick={handleSendToChat}
-              >
-                {isSending ? (
-                  <Loader2 className="size-3.5 mr-1.5 animate-spin" />
-                ) : (
-                  <MessageSquare className="size-3.5 mr-1.5" />
-                )}
-                Send to Chat ({activeSelectedCount})
-                <KbdGroup modHint className="ml-1.5">
-                  <Kbd>⇧</Kbd>
-                  <Kbd>⌘↵</Kbd>
-                </KbdGroup>
-              </Button>
-              <Button
-                size="sm"
-                disabled={activeSelectedCount === 0 || isSending}
-                onClick={handleSendSeparately}
-              >
-                {isSending ? (
-                  <Loader2 className="size-3.5 mr-1.5 animate-spin" />
-                ) : (
-                  <MessagesSquare className="size-3.5 mr-1.5" />
-                )}
-                Send Separately ({activeSelectedCount})
-                <KbdGroup modHint className="ml-1.5">
-                  <Kbd>⌘</Kbd>
-                  <Kbd>↵</Kbd>
-                </KbdGroup>
-              </Button>
+              <div className="grid grid-cols-2 gap-2 sm:flex">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-9 sm:h-8"
+                  disabled={activeSelectedCount === 0 || isSending}
+                  onClick={handleSendToChat}
+                >
+                  {isSending ? (
+                    <Loader2 className="size-3.5 mr-1.5 animate-spin" />
+                  ) : (
+                    <MessageSquare className="size-3.5 mr-1.5" />
+                  )}
+                  Send to Chat ({activeSelectedCount})
+                  <KbdGroup modHint className="ml-1.5">
+                    <Kbd>⇧</Kbd>
+                    <Kbd>⌘↵</Kbd>
+                  </KbdGroup>
+                </Button>
+                <Button
+                  size="sm"
+                  className="h-9 sm:h-8"
+                  disabled={activeSelectedCount === 0 || isSending}
+                  onClick={handleSendSeparately}
+                >
+                  {isSending ? (
+                    <Loader2 className="size-3.5 mr-1.5 animate-spin" />
+                  ) : (
+                    <MessagesSquare className="size-3.5 mr-1.5" />
+                  )}
+                  Send Separately ({activeSelectedCount})
+                  <KbdGroup modHint className="ml-1.5">
+                    <Kbd>⌘</Kbd>
+                    <Kbd>↵</Kbd>
+                  </KbdGroup>
+                </Button>
+              </div>
             </div>
           </>
         )}

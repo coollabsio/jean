@@ -415,8 +415,6 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
       // ProjectCanvasView consumes pendingAutoOpenSessionIds in its own effect.
       const ui = useUIStore.getState()
       ui.markWorktreeForAutoOpenSession(item.worktreeId, item.session.id)
-      // Leave the Agents page so the project canvas can open the session
-      ui.setRailSection('workspace')
 
       // Mark read AFTER auto-open is queued so unreadCount->0 unmount can't race
       // the modal-open path. Bell popover closes via the unreadCount===0 check.
@@ -530,9 +528,7 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
         collisionPadding={16}
         className={cn(
           'p-0',
-          isMobile
-            ? 'w-[calc(100vw-2rem)]'
-            : 'w-[min(440px,calc(100vw-2rem))]'
+          isMobile ? 'w-[calc(100vw-2rem)]' : 'w-[min(440px,calc(100vw-2rem))]'
         )}
         tabIndex={-1}
         onKeyDown={handleKeyDown}

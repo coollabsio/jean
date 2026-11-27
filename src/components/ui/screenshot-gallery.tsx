@@ -32,6 +32,25 @@ export function parseScreenshotPaths(source: string): string[] {
     .filter(Boolean)
 }
 
+const SCREENSHOTS_BLOCK_RE =
+  /^ {0,3}(`{3,}|~{3,})[ \t]*screenshots[ \t]*\n([\s\S]*?)^ {0,3}\1[ \t]*$\n?/gm
+
+/**
+ * Removes every ```screenshots block from markdown and returns their paths,
+ * so a message can show all its screenshots in one gallery at the bottom.
+ */
+export function extractScreenshotBlocks(markdown: string): {
+  text: string
+  paths: string[]
+} {
+  const paths: string[] = []
+  const text = markdown.replace(SCREENSHOTS_BLOCK_RE, (_, _fence, body) => {
+    paths.push(...parseScreenshotPaths(body))
+    return ''
+  })
+  return { text, paths }
+}
+
 function fileName(path: string): string {
   return path.split(/[/\\]/).pop() || path
 }

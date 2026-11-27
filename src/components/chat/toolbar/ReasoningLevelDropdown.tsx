@@ -1,4 +1,4 @@
-import { Brain, ChevronsUpDown } from '@/components/icons/reicon'
+import { Brain, Check, ChevronsUpDown } from '@/components/icons/reicon'
 import { Kbd } from '@/components/ui/kbd'
 import {
   Tooltip,
@@ -19,6 +19,17 @@ export interface ReasoningLevelOption {
   label: string
   description?: string
   tokens?: string
+}
+
+const MAX_INLINE_HINT_LENGTH = 24
+
+/** Short hint next to the label. Long catalog sentences go to the tooltip only. */
+function inlineHint(option: ReasoningLevelOption): string | undefined {
+  if (option.tokens) return option.tokens
+  if (!option.description) return undefined
+  return option.description.length <= MAX_INLINE_HINT_LENGTH
+    ? option.description
+    : undefined
 }
 
 const TRIGGER_CLASS =
@@ -113,12 +124,16 @@ export function ReasoningLevelDropdown({
       >
         <DropdownMenuRadioGroup value={value} onValueChange={onValueChange}>
           {options.map((option, i) => (
-            <DropdownMenuRadioItem key={option.value} value={option.value}>
+            <DropdownMenuRadioItem
+              key={option.value}
+              value={option.value}
+              title={option.description}
+            >
               <Brain className="mr-2 h-4 w-4" />
               {option.label}
-              {(option.tokens ?? option.description) && (
+              {inlineHint(option) && (
                 <span className="ml-auto pl-4 text-xs text-muted-foreground">
-                  {option.tokens ?? option.description}
+                  {inlineHint(option)}
                 </span>
               )}
               {showShortcuts && <Kbd className="ml-2 text-2xs">{i + 1}</Kbd>}
@@ -127,5 +142,71 @@ export function ReasoningLevelDropdown({
         </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>
+  )
+}
+
+interface ReasoningLevelListProps {
+  title: string
+  subtitle?: string
+  value: string
+  options: readonly ReasoningLevelOption[]
+  onValueChange: (value: string) => void
+}
+
+/** Inline effort or thinking column for the model picker popover. */
+export function ReasoningLevelList({
+  title,
+  subtitle,
+  value,
+  options,
+  onValueChange,
+}: ReasoningLevelListProps) {
+  return (
+    <div className="flex w-60 shrink-0 flex-col border-l">
+      <div className="flex border-b p-2">
+        <div className="flex h-9 min-w-0 flex-1 items-center justify-between gap-2 px-2 text-sm text-muted-foreground">
+          <span>{title}</span>
+          {subtitle && <span className="truncate text-xs">{subtitle}</span>}
+        </div>
+      </div>
+      <div
+        role="radiogroup"
+        aria-label={title}
+        className="flex max-h-[24rem] flex-col gap-0.5 overflow-y-auto p-1"
+      >
+        {options.map(option => {
+          const checked = option.value === value
+          const hint = inlineHint(option)
+          return (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={checked}
+              title={option.description}
+              onClick={() => onValueChange(option.value)}
+              className={cn(
+                'flex items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                checked && 'bg-accent/60 text-accent-foreground'
+              )}
+            >
+              <span className="min-w-0 flex-1 truncate">{option.label}</span>
+              {hint && (
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  {hint}
+                </span>
+              )}
+              <Check
+                className={cn(
+                  'h-4 w-4 shrink-0',
+                  checked ? 'opacity-100' : 'opacity-0'
+                )}
+              />
+            </button>
+          )
+        })}
+      </div>
+    </div>
   )
 }

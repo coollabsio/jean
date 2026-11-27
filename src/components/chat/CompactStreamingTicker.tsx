@@ -27,8 +27,6 @@ import type { ComponentProps } from 'react'
 type StreamingMessageProps = ComponentProps<typeof StreamingMessage>
 type CompactStreamingTickerProps = StreamingMessageProps & {
   showLoadingIndicator?: boolean
-  /** Agent chat: steered prompts use the pill bubble style */
-  bubble?: boolean
 }
 
 /**
@@ -217,7 +215,6 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
     worktreePath,
     sessionId,
     showLoadingIndicator = true,
-    bubble = false,
   } = props
   const serverId = parseServerResourceKey(sessionId)?.serverId
   const [isOpen, setIsOpen] = useState(false)
@@ -358,7 +355,6 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
               <SteeredPromptGroup
                 key={key}
                 texts={segment.texts}
-                bubble={bubble}
                 settings={props.turnPrompt}
                 worktreePath={worktreePath}
                 serverId={serverId}
@@ -396,7 +392,6 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
       <div className="space-y-3">
         <SteeredPromptGroup
           texts={steeredTexts}
-          bubble={bubble}
           settings={props.turnPrompt}
           worktreePath={worktreePath}
           serverId={serverId}
@@ -422,7 +417,6 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
     <div className="space-y-3">
       <SteeredPromptGroup
         texts={steeredTexts}
-        bubble={bubble}
         settings={props.turnPrompt}
         worktreePath={worktreePath}
         serverId={serverId}

@@ -710,6 +710,12 @@ async fn load_active_sessions_windowed(
 /// windowed messages for the focused session). Additional data is lazy-loaded
 /// by the frontend via TanStack Query hooks when the user navigates.
 async fn init_handler(Query(params): Query<WsAuth>, State(state): State<AppState>) -> Response {
+    // The desktop app can serve a client while its startup pass still runs.
+    // Sessions read before run recovery would show a crashed run as running.
+    if let Err(e) = crate::chat::startup_scan::finished(&state.app).await {
+        log::warn!("Startup session pass unavailable for /api/init: {e}");
+    }
+
     // Fetch base (always-included) data in parallel
     let client_id = params.client_id.clone();
     let (projects_result, preferences_result, ui_state_result) = tokio::join!(

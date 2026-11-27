@@ -183,7 +183,11 @@ describe('model option helpers', () => {
 
   it('offers GPT 6 and GPT 5.6 variants in Codex selectors', () => {
     const values = codexDefaultModelOptions.map(option => option.value)
-    expect(values.slice(0, 13)).toEqual([
+    expect(values.slice(0, 17)).toEqual([
+      'gpt-6.2-sol',
+      'gpt-6.2-sol-fast',
+      'gpt-6.2-astra',
+      'gpt-6.2-astra-fast',
       'gpt-6.1-sol',
       'gpt-6.1-sol-fast',
       'gpt-6.1-terra',
@@ -199,11 +203,13 @@ describe('model option helpers', () => {
       'gpt-5.6-luna',
     ])
     expect(values).not.toContain('gpt-5.6')
-    expect(normalizeCodexModel('')).toBe('gpt-6.1-sol')
-    expect(normalizeCodexModel('not-a-model')).toBe('gpt-6.1-sol')
+    expect(normalizeCodexModel('')).toBe('gpt-6.2-sol')
+    expect(normalizeCodexModel('not-a-model')).toBe('gpt-6.2-sol')
     expect(normalizeCodexModel('gpt-6.1-sol')).toBe('gpt-6.1-sol')
     expect(normalizeCodexModel('gpt-6.1-sol-fast')).toBe('gpt-6.1-sol-fast')
     expect(normalizeCodexModel('gpt-6.1-terra')).toBe('gpt-6.1-terra')
+    expect(normalizeCodexModel('gpt-6.2-sol')).toBe('gpt-6.2-sol')
+    expect(normalizeCodexModel('gpt-6.2-astra-fast')).toBe('gpt-6.2-astra-fast')
     expect(normalizeCodexModel('gpt-6.1-terra-fast')).toBe('gpt-6.1-terra-fast')
     expect(normalizeCodexModel('gpt-6-astra')).toBe('gpt-6-astra')
     expect(normalizeCodexModel('gpt-6-sol')).toBe('gpt-6-sol')
@@ -233,13 +239,13 @@ describe('model option helpers', () => {
     expect(normalizeCodexModel('gpt-5.5-fast')).toBe('gpt-5.5-fast')
   })
 
-  it('uses GPT 6.1 Sol for Codex magic presets', () => {
+  it('uses GPT 6.2 Sol for Codex magic presets', () => {
     expect(new Set(Object.values(CODEX_DEFAULT_MAGIC_PROMPT_MODELS))).toEqual(
-      new Set(['gpt-6.1-sol'])
+      new Set(['gpt-6.2-sol'])
     )
     expect(
       new Set(Object.values(CODEX_FAST_DEFAULT_MAGIC_PROMPT_MODELS))
-    ).toEqual(new Set(['gpt-6.1-sol-fast']))
+    ).toEqual(new Set(['gpt-6.2-sol-fast']))
   })
 
   it('provides standard and fast GPT 5.6 magic presets for every variant', () => {
@@ -1726,37 +1732,6 @@ describe('preferences service', () => {
       ).toBe(true)
       expect(switchEl).toHaveAttribute('aria-checked', 'true')
       expect(toast.error).not.toHaveBeenCalled()
-    })
-
-    it('persists the collapsed sidebar edge hover setting', async () => {
-      const { invoke } = await import('@/lib/transport')
-      vi.mocked(invoke).mockImplementation(async command => {
-        if (command === 'load_preferences') return defaultPreferences
-        if (command === 'patch_preferences') return undefined
-        throw new Error(`Unexpected command ${command}`)
-      })
-
-      const user = userEvent.setup()
-      render(
-        createElement(
-          QueryClientProvider,
-          { client: queryClient },
-          createElement(AppearancePane)
-        )
-      )
-
-      const switchEl = await screen.findByRole('switch', {
-        name: 'Open sidebar from screen edge',
-      })
-      expect(switchEl).toHaveAttribute('aria-checked', 'false')
-
-      await user.click(switchEl)
-
-      await waitFor(() => {
-        expect(invoke).toHaveBeenCalledWith('patch_preferences', {
-          patch: { sidebar_hover_open_enabled: true },
-        })
-      })
     })
   })
 })

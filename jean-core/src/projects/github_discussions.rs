@@ -157,7 +157,7 @@ impl RawDiscussion {
 }
 
 /// Unwrap a GraphQL envelope into its `data` value, surfacing GraphQL errors.
-fn graphql_data(stdout: &str) -> Result<serde_json::Value, String> {
+pub(super) fn graphql_data(stdout: &str) -> Result<serde_json::Value, String> {
     let mut value: serde_json::Value = serde_json::from_str(stdout)
         .map_err(|e| format!("Failed to parse GitHub GraphQL response: {e}"))?;
     let data = value.get_mut("data").map(serde_json::Value::take);
@@ -320,7 +320,7 @@ pub fn generate_branch_name_from_discussion(discussion_number: u32, title: &str)
 
 const DISCUSSION_FIELDS: &str = "number title body url closed isAnswered createdAt updatedAt author { login } category { name emoji }";
 
-fn run_gh_graphql(
+pub(super) fn run_gh_graphql(
     app: &AppHandle,
     project_path: &str,
     query: &str,

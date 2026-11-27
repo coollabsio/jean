@@ -199,13 +199,36 @@ its metadata lock with the registry re-checked inside it, and resume tails
 finalize the run before they unregister, so a snapshot in that gap never
 marks a finished run crashed.
 
+**Run-state index and the startup pass.** `get_run_states` does not read
+session files. `chat/run_state_index.rs` keeps one `PersistedRunState` per
+session in memory (per `RuntimeContext`). `storage.rs` updates it in the two
+places every metadata change passes through: `save_metadata_file` records the
+written copy and `delete_session_data` forgets the session, both under the
+session's metadata lock. Never write or delete a session's `metadata.json`
+outside those two functions, or the index goes stale. `RunState` is built by
+`PersistedRunState::resolve(actively_managed)`; `SessionMetadata::run_state()`
+calls the same function. Orphan repair, `check_resumable_sessions`,
+`has_incomplete_opencode_turns` and `has_incomplete_codex_runs` read only the
+sessions the index marks unfinished.
+
+The index is filled by one scan at startup. `initialize_runtime` calls
+`chat::startup_scan::start`, which claims the index and runs the pass on a
+blocking thread: `storage::scan_all_metadata` parses each `metadata.json` once
+and feeds the index, `wakeup::restore`, run recovery and resume, and the
+delegation sweep. The index reports "loading" until the whole pass ends, so
+`get_run_states`, `check_resumable_sessions`, `/api/init` and the orphaned
+server cleanups wait for the result. `run_headless` awaits
+`startup_scan::finished` before it binds the port. A context with no startup
+pass (tests) scans on first read. A new consumer of all session metadata at
+startup belongs in `StartupScan::visit`, not in another directory scan.
+
 ### Backend-Owned Long-Running Jobs
 
 Long-running operations that must survive web/mobile WebSocket disconnects
 should be owned by Rust, not by a pending frontend `invoke()` response. The
 frontend should start the job and receive an immediate job id; Rust
 should run the process, persist the final state, and emit best-effort progress
-events. After a disconnect-triggered reload, the frontend recovers from
+events. After a reconnect or a page reload, the frontend recovers from
 persisted session/project data or job query commands instead of relying on the
 original WebSocket response.
 
@@ -535,13 +558,36 @@ Additional systems (no dedicated docs yet):
   through jean-core or MCP. See `docs/developer/ssh-tunnel.md`. Notifications
   such as ntfy are not part of this transport.
 
-  When an established WebSocket disconnects, the frontend reloads the page
-  instead of repairing stale in-memory state. The normal
-  HTTP bootstrap then restores current persisted state, while backend-owned
-  jobs and terminals keep running. Before reload, the current canvas session
-  modal and active session are copied to short-lived `sessionStorage` so the
-  same session header is restored even if the debounced UI-state save has not
-  completed yet.
+  **Web Access reconnect.** When an established WebSocket drops, the page
+  stays and `WsTransport` (`src/lib/transport.ts`) opens a new socket: backoff
+  from 250ms to 5s, and at once on `online`, `visibilitychange`, `pageshow`
+  or a network type change. The "Reconnecting to Jean..." overlay covers the
+  view until the page has caught up. `onWsRecovery` in `App.tsx` drives this:
+  - Commands pending at the drop reject with `WebSocket disconnected`. Unsent
+    commands are dropped with them. A command sent during the gap is queued
+    and runs on the new socket, unless its caller timed out first.
+  - On open, the transport asks for the missed output of every terminal it
+    tracks (`terminal_replay` with the last seen `seq`) and holds all events
+    until the app resync settles (10s cap). Held events are dispatched in
+    `seq` order, because live output can overtake a replay.
+  - `resyncAfterReconnect` (`src/services/reconnect-resync.ts`) invalidates
+    every query except `ui-state`, runs `refreshRunStates`, and replaces each
+    running turn with a fresh `get_session` snapshot through
+    `hydrateRunningSnapshot` (`dedupeReplayedOutput`). The held events then
+    pass the replay filter, so text that is already in the snapshot is not
+    shown twice.
+  - The page reloads only when the server changed: `/api/auth` reports another
+    `webBuildId`, or the heartbeat carries another `boot_id` (a restarted
+    server has new sequence numbers and no terminals). Before that reload, the
+    current canvas session modal and active session are copied to short-lived
+    `sessionStorage` so the same session header is restored.
+
+  **Dead-socket detection.** The server sends an app-level heartbeat when a
+  socket opens and every 5s after that
+  (`jean-core/src/http_server/websocket.rs`). The client checks every second
+  and closes a socket with no inbound frame for two intervals, about 10-11s.
+  Until the first heartbeat the limit is 25s, for servers that send no
+  heartbeat on connect; a heartbeat without `interval_ms` keeps 50s.
   1. **Backend PTY registry** (`src-tauri/src/terminal/registry.rs`) keeps the
      real `portable_pty` process alive in `TERMINAL_SESSIONS` keyed by
      `terminal_id`. The frontend is a viewer; refresh never kills the PTY.
@@ -550,9 +596,9 @@ Additional systems (no dedicated docs yet):
      `TERMINAL_BUFFER_MAX_EVENTS = 12000` events/terminal and
      `TERMINAL_BUFFER_MAX_BYTES = 3MB` per terminal) holds the most
      recent `terminal:output` and `terminal:started` envelopes with monotonic
-     sequence numbers. After a full-page refresh, `requestTerminalReplay` asks
-     for events after a given `last_seq` and the backend streams the buffered
-     slice.
+     sequence numbers. After a full-page refresh (`requestTerminalReplay`)
+     or a reconnect, the frontend asks for events after a given `last_seq` and
+     the backend streams the buffered slice.
 
   3. **UI state hydration** (`src/hooks/useUIStatePersistence.ts`,
      `restoreTerminalRuntimeState`) is web-only. On load it reads
@@ -579,7 +625,7 @@ Additional systems (no dedicated docs yet):
 - **Background Tasks** - Git/PR polling with focus-aware intervals (`src-tauri/src/background_tasks/`); Auto Fix (Mr. Robot) issue polling/planning/yolo handoff and scheduler active-hours window via `chrono` local time with midnight-crossing support (`jean-core/src/auto_fix/`). Scans list only issue numbers + labels; worktrees are never auto-deleted; closed/ineligible ones stop using capacity, get their queued or running plan-mode investigation stopped, and never go to yolo; failed starts/yolo runs give up after 3 attempts; GitHub rate limits defer the project 15 min. Runtime status (last scan, errors, failed issues) is in memory and exposed via `get_auto_fix_status` / `clear_auto_fix_failures`. See [Mr. Robot workspace](./mr-robot.md) for the canvas controls, preview, activity, and view separation.
 - **HTTP Server** - Tauri-free Axum server + WebSocket from `jean-core`; `src-server` provides the standalone Tokio adapter. See [server-architecture.md](./server-architecture.md).
 - **Diagnostics** - CPU/memory monitoring panel (`src-tauri/src/diagnostics/`)
-- **MCP** - Model Context Protocol server integration with per-project overrides (`src/services/mcp.ts`). First-party **Jean MCP** (`jean-core/src/jean_mcp_core.rs`) exposes project/worktree/session tools, usage + session model controls (`get_usage`, `set_session_model`), Run-command / panel-command dev environments (`get_run_environments`: running state, worktree/base session, startup command, ports, URL), plus the ship loop: `create_commit`, `push_worktree`, `detect_open_pr`, `link_worktree_pr`, `unlink_worktree_pr`, `create_pull_request`, `merge_pull_request`, `run_review` (thin wrappers over existing project commands). MCP `create_session` reuses an empty, idle chat session in the worktree before it creates another session; terminal, queued, running, closed, or previously used sessions are never reused. PR tools resolve repository paths from Jean's worktree ID; creation and linking persist the PR number and URL on the worktree. `request_secret` asks the user for a secret in a chat card (`SecretRequestCard.tsx`) without blocking: the tool returns at once, the card sends the value to `save_secret_request`, which writes it to an owner-only file under `<app_data>/secrets/` (`jean-core/src/chat/secrets.rs`, no encryption), and the chat gets only the file path as the next user message. The file name comes from the session and tool call ids, so the card can show (`secret_request_status`) and delete (`forget_secret_request`) it. The user picks the retention on the card: until forgotten (default, for periodic tasks) or 24 hours (`-24h` suffix, removed by the hourly sweep). A `<stem>.json` file beside each value holds its label and ids. `list_secrets` shows every saved secret in a chat card (`SecretListCard.tsx`) with Delete buttons (`delete_secret`); the agent gets labels only, never values or paths. Secrets are scoped to an owner (`ownerId` in the info file): `project:<id>` for worktree sessions, `agent:<id>` for an agent's chat, task sessions, and subagents (their `__agent_*__` worktrees are outside any project). `list_secrets` shows only that owner (the card can switch to all), and `get_secret(label)` returns the path of a saved secret of the same owner, so new sessions and scheduled tasks can reuse it. Scope is not a security wall: all agents run as the same OS user.
+- **MCP** - Model Context Protocol server integration with per-project overrides (`src/services/mcp.ts`). First-party **Jean MCP** (`jean-core/src/jean_mcp_core.rs`) exposes project/worktree/session tools, usage + session model controls (`get_usage`, `set_session_model`), Run-command / panel-command dev environments (`get_run_environments`: running state, worktree/base session, startup command, ports, URL), plus the ship loop: `create_commit`, `push_worktree`, `detect_open_pr`, `link_worktree_pr`, `unlink_worktree_pr`, `create_pull_request`, `merge_pull_request`, `run_review` (thin wrappers over existing project commands). MCP `create_session` reuses an empty, idle chat session in the worktree before it creates another session; terminal, queued, running, closed, or previously used sessions are never reused. PR tools resolve repository paths from Jean's worktree ID; creation and linking persist the PR number and URL on the worktree. `request_secret` asks the user for a secret in a chat card (`SecretRequestCard.tsx`) without blocking: the tool returns at once, the card sends the value to `save_secret_request`, which writes it to an owner-only file under `<app_data>/secrets/` (`jean-core/src/chat/secrets.rs`, no encryption), and the chat gets only the file path as the next user message. The file name comes from the session and tool call ids, so the card can show (`secret_request_status`) and delete (`forget_secret_request`) it. The user picks the retention on the card: until forgotten (default, for periodic tasks) or 24 hours (`-24h` suffix, removed by the hourly sweep). A `<stem>.json` file beside each value holds its label and ids. `list_secrets` shows every saved secret in a chat card (`SecretListCard.tsx`) with Delete buttons (`delete_secret`); the agent gets labels only, never values or paths. Secrets are scoped to an owner (`ownerId` in the info file): `project:<id>` for worktree sessions, `agent:<id>` for an agent's chat and task sessions (their `__agent_*__` worktrees are outside any project). `list_secrets` shows only that owner (the card can switch to all), and `get_secret(label)` returns the path of a saved secret of the same owner, so new sessions and scheduled tasks can reuse it. Scope is not a security wall: all agents run as the same OS user.
 - **Model Catalog** - CDN-driven model lists and reasoning capabilities with bundled offline fallback ([model-catalog.md](./model-catalog.md))
 - **CLI Management** - Claude CLI, Codex CLI, Cursor CLI, OpenCode, PI, Command Code, Grok, Kimi Code, Antigravity, Muse, and gh CLI installation/versioning (backend-specific modules under `src-tauri/src/`)
 
@@ -588,7 +634,7 @@ Cursor-specific notes:
 - Cursor auth/status checks must use short timeouts; `cursor-agent status/about` can hang indefinitely
 - Cursor chat integration should use `cursor-agent --print --output-format stream-json` and parse structured NDJSON, not terminal text scraping
 - Native Windows does not provide Cursor's OS sandbox, so Jean uses Cursor's `--sandbox disabled` allowlist mode there; enable WSL and use the Linux CLI when OS-level sandboxing is required
-- Cursor only supports `--mode plan` and `--mode ask`; build/yolo omit `--mode` (defaults to full agent) and use `--sandbox disabled --force`
+- Cursor only supports `--mode plan` and `--mode ask`; build/yolo omit `--mode` (full agent). Build uses `--sandbox enabled` (no `--force`, errors if the sandbox is unavailable); yolo uses `--yolo --sandbox disabled --force`
 - Cursor `plan` runs synthesize an `EnterPlanMode` timeline item from Jean so the native plan banner/instructions survive streaming + JSONL reload
 - Cursor history repair should prefer complete message snapshots / repeated-prefix cleanup; avoid destructive suffix trimming during reload
 
@@ -619,7 +665,7 @@ MainWindow (Top-level orchestrator)
 ├── TitleBar (Window controls + toolbar, Settings gear on desktop)
 ├── LeftSideBar (Collapsible, pixel-resizable)
 │   ├── SidebarTabs (Projects | Recent | Agents)
-│   └── ProjectsSidebar → ProjectTree → WorktreeList per project, or AgentsSidebar
+│   └── ProjectsSidebar → ProjectTree → WorktreeList per project
 ├── MainWindowContent (Primary content area)
 │   ├── ChatWindow (when worktree selected — always shows chat view)
 │   │   ├── Chat view (CompactMessageList + ChatInput + ChatToolbar)
@@ -643,21 +689,6 @@ MainWindow (Top-level orchestrator)
     ├── CloseWorktreeDialog / QuitConfirmationDialog
     └── Toaster (Notifications)
 ```
-
-### Collapsed Sidebar Edge Preview
-
-On desktop pointer devices, `SidebarHoverPreview.tsx` temporarily renders
-`LeftSideBar` above the main content when the pointer rests on the left edge.
-This preview does not update `leftSidebarVisible`, so navigation inside it does
-not pin the sidebar or change persisted UI state. The normal sidebar toggle
-still updates `leftSidebarVisible`, converting the preview into the persistent,
-in-flow sidebar.
-
-The behavior is controlled by the persisted
-`sidebar_hover_open_enabled` preference, which defaults to `false` for both
-new installs and existing preference files that omit the field. Portaled
-sidebar menus and active drag operations hold the preview open until the
-interaction finishes.
 
 ### Canvas View
 
@@ -1003,13 +1034,13 @@ Claude runs normally use `cat input.jsonl | nohup claude --print --input-format 
 - Jean launches itself with `--jean-claude-host` via `spawn_detached_process_with_env` (`set -m; nohup`, own process group). The host owns the `claude` child, writes the initial prompt, keeps stdin open, and appends child stdout/stderr to the run JSONL. The run survives Jean quitting.
 - Socket: `<app_data>/r/c<sid8><run8>.sock`. Request `{"type":"steer","message":...}`; reply `{"ok":true}` or `{"ok":false,"error":...}`. `steer_claude_turn` returns the error and the frontend falls back to the queue.
 - Finish rule (pure `ClaudeHostState`): on `result`, close stdin (CLI exits) unless a steer was written that the CLI has not echoed yet. A safety net closes stdin 30 s after a `result` when a pending steer is never consumed.
-- Echo filter: with `--replay-user-messages` the CLI re-emits each consumed stdin message as `{"type":"user","isReplay":true,...}`. The host drops the first one (the initial prompt) and rewrites each later one as `{"type":"steered_user_message","text":...}`. No parser sees a replayed user line, so the prompt never shows twice. `parse_run_to_message` already maps `steered_user_message` to `ContentBlock::UserInput`.
-- Markers: the host writes `{"type":"jean_claude_host_start"}` first and `{"type":"jean_claude_host_exit","code":N}` last. `tail_claude_output` sees the start marker and then ends only at the exit marker (or on cancel / dead process), not at the first `result`. Usage is summed over all `result` lines. `steer_claude_turn` emits `chat:steered` when the host accepts the steer, so the prompt shows at once. The tailer emits `chat:steered` on `steered_user_message` only for steers that this Jean process did not announce (for example after a restart). The live position can be earlier than the history position, which is the consumption point.
+- Echo filter: with `--replay-user-messages` the CLI re-emits each consumed stdin message as `{"type":"user","isReplay":true,...}`. The host drops all of them. It writes `{"type":"steered_user_message","text":...}` itself when it accepts a steer, so a page reload or another web client sees the steer before the CLI consumes it. No parser sees a replayed user line, so the prompt never shows twice. `parse_run_to_message` already maps `steered_user_message` to `ContentBlock::UserInput`.
+- Markers: the host writes `{"type":"jean_claude_host_start"}` first and `{"type":"jean_claude_host_exit","code":N}` last. `tail_claude_output` sees the start marker and then ends only at the exit marker (or on cancel / dead process), not at the first `result`. Usage is summed over all `result` lines. `steer_claude_turn` emits `chat:steered` when the host accepts the steer, so the prompt shows at once. The tailer emits `chat:steered` on `steered_user_message` only for steers that this Jean process did not announce (for example after a restart). Live and history show the steer at the accept point. Runs from hosts started by older Jean builds still write it at the consumption point.
 - Recovery and cancel are unchanged: `run.pid` is the host PID, `recover_incomplete_runs` uses liveness + `type:"result"`, and `kill_process_tree` reaps the host process group (host + `claude` + MCP children).
 
 Known limitations:
 
-- A steer only lands at a tool boundary. A long tool call or a subagent Task call delays it. Nothing shows in the UI until the CLI consumes the steer.
+- A steer only lands at a tool boundary. A long tool call or a subagent Task call delays it. The UI shows it at once, but the model sees it only then.
 - A steer during a no-tool answer becomes a second turn in the same process (like the queue, but without a new run).
 - Model, execution mode, effort, and thinking cannot change for a steer. They apply from the next normal message.
 - Mid-turn injection is observed CLI behavior (tested with Claude Code 2.1.285+), not a documented contract. This is why the setting is off by default.

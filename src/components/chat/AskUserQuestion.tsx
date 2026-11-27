@@ -11,6 +11,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Markdown } from '@/components/ui/markdown'
+import { MessageThreadContextMenu } from './message-thread-context-menu'
 import { Kbd } from '@/components/ui/kbd'
 import {
   Collapsible,
@@ -290,62 +291,103 @@ export function AskUserQuestion({
   // Render full question content (used both inline and in collapsible)
   function renderQuestionContent() {
     return (
-      <div className="space-y-6">
-        {/* Intro text (e.g., "Before we continue, I have some questions:") */}
-        {introText && (
-          <div className="text-muted-foreground">
-            <Markdown>{introText}</Markdown>
-          </div>
-        )}
-        {questions.map((question, qIndex) => {
-          const answer = readOnly
-            ? effectiveAnswers?.find(a => a.questionIndex === qIndex)
-            : answers.get(qIndex)
-          const allowsCustomText = question.isOther ?? true
-          const selectedOptionsSet = new Set(answer?.selectedOptions)
+      <MessageThreadContextMenu
+        messageText={[introText, ...questions.map(q => q.question)]
+          .filter(Boolean)
+          .join('\n\n')}
+        copyMessageLabel="Copy questions"
+      >
+        <div className="space-y-6">
+          {/* Intro text (e.g., "Before we continue, I have some questions:") */}
+          {introText && (
+            <div className="text-muted-foreground">
+              <Markdown>{introText}</Markdown>
+            </div>
+          )}
+          {questions.map((question, qIndex) => {
+            const answer = readOnly
+              ? effectiveAnswers?.find(a => a.questionIndex === qIndex)
+              : answers.get(qIndex)
+            const allowsCustomText = question.isOther ?? true
+            const selectedOptionsSet = new Set(answer?.selectedOptions)
 
-          return (
-            <div key={qIndex}>
-              {/* Header (optional) */}
-              {question.header && (
-                <div className="mb-2 text-xs font-medium text-muted-foreground">
-                  {question.header}
+            return (
+              <div key={qIndex}>
+                {/* Header (optional) */}
+                {question.header && (
+                  <div className="mb-2 text-xs font-medium text-muted-foreground">
+                    {question.header}
+                  </div>
+                )}
+
+                {/* Question text */}
+                <div className="mb-3 font-medium text-foreground">
+                  <Markdown>{question.question}</Markdown>
                 </div>
-              )}
 
-              {/* Question text */}
-              <div className="mb-3 font-medium text-foreground">
-                <Markdown>{question.question}</Markdown>
-              </div>
-
-              {/* Options - indented section */}
-              <div className="ml-3 space-y-3">
-                {readOnly ? (
-                  <div className="space-y-2.5">
-                    {question.options.map((option, oIndex) => {
-                      const isSelected = selectedOptionsSet.has(oIndex)
-                      return (
+                {/* Options - indented section */}
+                <div className="ml-3 space-y-3">
+                  {readOnly ? (
+                    <div className="space-y-2.5">
+                      {question.options.map((option, oIndex) => {
+                        const isSelected = selectedOptionsSet.has(oIndex)
+                        return (
+                          <div
+                            key={oIndex}
+                            className={cn(
+                              'flex items-start gap-2.5 rounded-md border px-2.5 py-2',
+                              isSelected
+                                ? 'border-success/40 bg-success/10 text-foreground'
+                                : 'border-transparent bg-muted/25 text-muted-foreground'
+                            )}
+                          >
+                            {isSelected ? (
+                              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" />
+                            ) : (
+                              <Circle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground/60" />
+                            )}
+                            <div className="flex flex-1 flex-col items-start">
+                              <span
+                                className={cn(
+                                  'font-medium',
+                                  !isSelected && 'text-muted-foreground'
+                                )}
+                              >
+                                <Markdown>{option.label}</Markdown>
+                              </span>
+                              {option.description && (
+                                <span className="mt-1 text-xs text-muted-foreground">
+                                  <Markdown>{option.description}</Markdown>
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ) : question.multiSelect ? (
+                    <div className="space-y-2.5">
+                      {question.options.map((option, oIndex) => (
                         <div
                           key={oIndex}
                           className={cn(
-                            'flex items-start gap-2.5 rounded-md border px-2.5 py-2',
-                            isSelected
-                              ? 'border-success/40 bg-success/10 text-foreground'
-                              : 'border-transparent bg-muted/25 text-muted-foreground'
+                            'flex items-start gap-2.5 rounded-md border px-2.5 py-2 transition-colors',
+                            selectedOptionsSet.has(oIndex)
+                              ? 'border-success/40 bg-success/10'
+                              : 'border-transparent bg-muted/25 hover:bg-muted/40'
                           )}
                         >
-                          {isSelected ? (
-                            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" />
-                          ) : (
-                            <Circle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground/60" />
-                          )}
-                          <div className="flex flex-1 flex-col items-start">
-                            <span
-                              className={cn(
-                                'font-medium',
-                                !isSelected && 'text-muted-foreground'
-                              )}
-                            >
+                          <Checkbox
+                            id={`${toolCallId}-q${qIndex}-o${oIndex}`}
+                            checked={selectedOptionsSet.has(oIndex)}
+                            onCheckedChange={() => toggleOption(qIndex, oIndex)}
+                            className="mt-0.5 cursor-pointer"
+                          />
+                          <Label
+                            htmlFor={`${toolCallId}-q${qIndex}-o${oIndex}`}
+                            className="flex flex-1 cursor-pointer flex-col items-start"
+                          >
+                            <span className="font-medium">
                               <Markdown>{option.label}</Markdown>
                             </span>
                             {option.description && (
@@ -353,128 +395,94 @@ export function AskUserQuestion({
                                 <Markdown>{option.description}</Markdown>
                               </span>
                             )}
-                          </div>
+                          </Label>
                         </div>
-                      )
-                    })}
-                  </div>
-                ) : question.multiSelect ? (
-                  <div className="space-y-2.5">
-                    {question.options.map((option, oIndex) => (
-                      <div
-                        key={oIndex}
-                        className={cn(
-                          'flex items-start gap-2.5 rounded-md border px-2.5 py-2 transition-colors',
-                          selectedOptionsSet.has(oIndex)
-                            ? 'border-success/40 bg-success/10'
-                            : 'border-transparent bg-muted/25 hover:bg-muted/40'
-                        )}
-                      >
-                        <Checkbox
-                          id={`${toolCallId}-q${qIndex}-o${oIndex}`}
-                          checked={selectedOptionsSet.has(oIndex)}
-                          onCheckedChange={() => toggleOption(qIndex, oIndex)}
-                          className="mt-0.5 cursor-pointer"
-                        />
-                        <Label
-                          htmlFor={`${toolCallId}-q${qIndex}-o${oIndex}`}
-                          className="flex flex-1 cursor-pointer flex-col items-start"
-                        >
-                          <span className="font-medium">
-                            <Markdown>{option.label}</Markdown>
-                          </span>
-                          {option.description && (
-                            <span className="mt-1 text-xs text-muted-foreground">
-                              <Markdown>{option.description}</Markdown>
-                            </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <RadioGroup
+                      value={answer?.selectedOptions[0]?.toString() ?? ''}
+                      onValueChange={value => {
+                        const optionIndex = parseInt(value, 10)
+                        if (submitOnSelect)
+                          submitAnswers([
+                            {
+                              questionIndex: qIndex,
+                              selectedOptions: [optionIndex],
+                            },
+                          ])
+                        else selectOption(qIndex, optionIndex)
+                      }}
+                      disabled={submitOnSelect && submitDisabled}
+                      className="space-y-2.5"
+                    >
+                      {question.options.map((option, oIndex) => (
+                        <div
+                          key={oIndex}
+                          className={cn(
+                            'flex items-start gap-2.5 rounded-md border px-2.5 py-2 transition-colors',
+                            selectedOptionsSet.has(oIndex)
+                              ? 'border-success/40 bg-success/10'
+                              : 'border-transparent bg-muted/25 hover:bg-muted/40'
                           )}
-                        </Label>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <RadioGroup
-                    value={answer?.selectedOptions[0]?.toString() ?? ''}
-                    onValueChange={value => {
-                      const optionIndex = parseInt(value, 10)
-                      if (submitOnSelect)
-                        submitAnswers([
-                          {
-                            questionIndex: qIndex,
-                            selectedOptions: [optionIndex],
-                          },
-                        ])
-                      else selectOption(qIndex, optionIndex)
-                    }}
-                    disabled={submitOnSelect && submitDisabled}
-                    className="space-y-2.5"
-                  >
-                    {question.options.map((option, oIndex) => (
-                      <div
-                        key={oIndex}
-                        className={cn(
-                          'flex items-start gap-2.5 rounded-md border px-2.5 py-2 transition-colors',
-                          selectedOptionsSet.has(oIndex)
-                            ? 'border-success/40 bg-success/10'
-                            : 'border-transparent bg-muted/25 hover:bg-muted/40'
-                        )}
-                      >
-                        <RadioGroupItem
-                          value={oIndex.toString()}
-                          id={`${toolCallId}-q${qIndex}-o${oIndex}`}
-                          className="mt-0.5 cursor-pointer"
-                        />
-                        <Label
-                          htmlFor={`${toolCallId}-q${qIndex}-o${oIndex}`}
-                          className="flex flex-1 cursor-pointer flex-col items-start"
                         >
-                          <span className="font-medium">
-                            <Markdown>{option.label}</Markdown>
-                          </span>
-                          {option.description && (
-                            <span className="mt-1 text-xs text-muted-foreground">
-                              <Markdown>{option.description}</Markdown>
+                          <RadioGroupItem
+                            value={oIndex.toString()}
+                            id={`${toolCallId}-q${qIndex}-o${oIndex}`}
+                            className="mt-0.5 cursor-pointer"
+                          />
+                          <Label
+                            htmlFor={`${toolCallId}-q${qIndex}-o${oIndex}`}
+                            className="flex flex-1 cursor-pointer flex-col items-start"
+                          >
+                            <span className="font-medium">
+                              <Markdown>{option.label}</Markdown>
                             </span>
-                          )}
-                        </Label>
-                      </div>
-                    ))}
-                  </RadioGroup>
-                )}
+                            {option.description && (
+                              <span className="mt-1 text-xs text-muted-foreground">
+                                <Markdown>{option.description}</Markdown>
+                              </span>
+                            )}
+                          </Label>
+                        </div>
+                      ))}
+                    </RadioGroup>
+                  )}
 
-                {/* Show custom text if provided (read-only) or input field (editable) */}
-                {readOnly ? (
-                  answer?.customText ? (
-                    <div className="rounded-md border border-success/30 bg-success/10 px-3 py-2 text-foreground">
-                      <div className="mb-1 text-xs font-medium text-success">
-                        Custom answer
+                  {/* Show custom text if provided (read-only) or input field (editable) */}
+                  {readOnly ? (
+                    answer?.customText ? (
+                      <div className="rounded-md border border-success/30 bg-success/10 px-3 py-2 text-foreground">
+                        <div className="mb-1 text-xs font-medium text-success">
+                          Custom answer
+                        </div>
+                        <div className="italic">
+                          &ldquo;{answer.customText}&rdquo;
+                        </div>
                       </div>
-                      <div className="italic">
-                        &ldquo;{answer.customText}&rdquo;
+                    ) : !answer ? (
+                      <div className="pt-1 text-sm text-muted-foreground italic">
+                        Answer details unavailable after reload.
                       </div>
+                    ) : null
+                  ) : allowsCustomText ? (
+                    <div className="pt-1">
+                      <Input
+                        placeholder="Or type your own answer..."
+                        type={question.isSecret ? 'password' : 'text'}
+                        value={answers.get(qIndex)?.customText ?? ''}
+                        onChange={e => updateCustomText(qIndex, e.target.value)}
+                        disabled={readOnly}
+                        className="cursor-text text-base select-text bg-white dark:bg-input md:text-sm"
+                      />
                     </div>
-                  ) : !answer ? (
-                    <div className="pt-1 text-sm text-muted-foreground italic">
-                      Answer details unavailable after reload.
-                    </div>
-                  ) : null
-                ) : allowsCustomText ? (
-                  <div className="pt-1">
-                    <Input
-                      placeholder="Or type your own answer..."
-                      type={question.isSecret ? 'password' : 'text'}
-                      value={answers.get(qIndex)?.customText ?? ''}
-                      onChange={e => updateCustomText(qIndex, e.target.value)}
-                      disabled={readOnly}
-                      className="cursor-text text-base select-text bg-white dark:bg-input md:text-sm"
-                    />
-                  </div>
-                ) : null}
+                  ) : null}
+                </div>
               </div>
-            </div>
-          )
-        })}
-      </div>
+            )
+          })}
+        </div>
+      </MessageThreadContextMenu>
     )
   }
 

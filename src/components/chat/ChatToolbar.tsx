@@ -1,5 +1,6 @@
 import { DevinLocationPicker } from '@/components/chat/toolbar/DevinLocationPicker'
 import { memo, useCallback, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Zap } from '@/components/icons/reicon'
 import { dismissibleToast } from '@/lib/dismissible-toast'
 import { invoke } from '@/lib/transport'
@@ -32,7 +33,14 @@ import {
 } from '@/components/chat/toolbar/MobileSettingsMenu'
 import { MobileBackendModelPickerSheet } from '@/components/chat/toolbar/MobileBackendModelPickerSheet'
 import { DesktopToolbarControls } from '@/components/chat/toolbar/DesktopToolbarControls'
-import { DockBurgerButton } from '@/components/chat/toolbar/DockBurgerButton'
+import {
+  ThreadDetailsButton,
+  buildThreadContextItems,
+} from '@/components/chat/toolbar/ThreadDetailsButton'
+import {
+  TITLEBAR_THREAD_DETAILS_SLOT_ID,
+  useTitleBarSlot,
+} from '@/components/titlebar/breadcrumb-slot'
 import { ExecutionModeDropdown } from '@/components/chat/toolbar/ExecutionModeDropdown'
 import { SendCancelButton } from '@/components/chat/toolbar/SendCancelButton'
 import { ContextViewerDialog } from '@/components/chat/toolbar/ContextViewerDialog'
@@ -46,7 +54,6 @@ import {
   PI_MODEL_OPTIONS,
   THINKING_LEVEL_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
-import { useToolbarDropdownShortcuts } from '@/components/chat/toolbar/useToolbarDropdownShortcuts'
 import { useToolbarDerivedState } from '@/components/chat/toolbar/useToolbarDerivedState'
 import { useContextViewer } from '@/components/chat/toolbar/useContextViewer'
 import {
@@ -84,7 +91,6 @@ export const ChatToolbar = memo(function ChatToolbar({
   hasPendingAttachments,
   hasInputValue,
   executionMode,
-  hidePlanMode = false,
   selectedBackend,
   selectedModel,
   selectedProvider,
@@ -157,14 +163,20 @@ export const ChatToolbar = memo(function ChatToolbar({
     refetchAll: checkHealth,
   } = useAllBackendsMcpHealth(installedBackends, activeWorktreePath)
 
-  const [providerDropdownOpen, setProviderDropdownOpen] = useState(false)
-  const [thinkingDropdownOpen, setThinkingDropdownOpen] = useState(false)
   const [mcpDropdownOpen, setMcpDropdownOpen] = useState(false)
   const [mobileBackendModelPickerOpen, setMobileBackendModelPickerOpen] =
     useState(false)
   const mobileSettingsMenuRef = useRef<MobileSettingsMenuHandle>(null)
   const isMobile = useIsMobile()
+  const focusChatInputOnClose = useCallback((event: Event) => {
+    event.preventDefault()
+    window.dispatchEvent(new CustomEvent('focus-chat-input'))
+  }, [])
   const zenMode = useUIStore(state => state.zenMode)
+  const threadDetailsSlot = useTitleBarSlot(
+    TITLEBAR_THREAD_DETAILS_SLOT_ID,
+    !zenMode
+  )
   const [revertConfirmOpen, setRevertConfirmOpen] = useState(false)
 
   const pickRemoteOrRun = useRemotePicker(
@@ -181,11 +193,6 @@ export const ChatToolbar = memo(function ChatToolbar({
     },
     [checkHealth]
   )
-
-  useToolbarDropdownShortcuts({
-    setProviderDropdownOpen,
-    setThinkingDropdownOpen,
-  })
 
   const { data: availableOpencodeModels } = useAvailableOpencodeModels({
     enabled: selectedBackend === 'opencode',
@@ -222,9 +229,7 @@ export const ChatToolbar = memo(function ChatToolbar({
     availableMcpServers,
     enabledMcpServers,
   })
-  const availableExecutionModes = getSupportedExecutionModes(
-    selectedBackend
-  ).filter(mode => !hidePlanMode || mode !== 'plan')
+  const availableExecutionModes = getSupportedExecutionModes(selectedBackend)
   const hasMultipleBackendModelChoices =
     backendModelSections.reduce(
       (count, section) => count + section.options.length,
@@ -454,6 +459,36 @@ export const ChatToolbar = memo(function ChatToolbar({
         onConfirm={executeRevertLastCommit}
       />
 
+      {threadDetailsSlot &&
+        createPortal(
+          <ThreadDetailsButton
+            worktreeId={worktreeId}
+            contexts={buildThreadContextItems({
+              issues: loadedIssueContexts,
+              prs: loadedPRContexts,
+              discussions: loadedDiscussionContexts,
+              security: loadedSecurityContexts,
+              advisories: loadedAdvisoryContexts,
+              linear: loadedLinearContexts,
+              sentry: loadedSentryContexts,
+              saved: attachedSavedContexts,
+              onViewIssue: handleViewIssue,
+              onViewPR: handleViewPR,
+              onViewDiscussion: handleViewDiscussion,
+              onViewSecurityAlert: handleViewSecurityAlert,
+              onViewAdvisory: handleViewAdvisory,
+              onViewLinear: handleViewLinear,
+              onViewSentry: handleViewSentry,
+              onViewSavedContext: handleViewSavedContext,
+            })}
+            availableMcpServers={availableMcpServers}
+            enabledMcpServers={enabledMcpServers}
+            onManageContexts={onLoadContext}
+            onOpen={checkHealth}
+          />,
+          threadDetailsSlot
+        )}
+
       <div className="@container flex px-4 py-2 md:px-6">
         <div className="flex w-full min-w-0 flex-nowrap items-center overflow-x-auto whitespace-nowrap bg-transparent scrollbar-hide">
           {selectedBackend === 'devin' && (
@@ -465,11 +500,6 @@ export const ChatToolbar = memo(function ChatToolbar({
             />
           )}
           <div className={zenMode ? 'hidden' : 'contents'}>
-            <DockBurgerButton
-              activeMcpCount={activeMcpCount}
-              className="flex @xl:hidden"
-            />
-
             {onOpenMagicModal && (
               <MobileToolbarMenu
                 isDisabled={false}
@@ -516,6 +546,10 @@ export const ChatToolbar = memo(function ChatToolbar({
               handleProviderChange={handleProviderChange}
               handleEffortLevelChange={handleEffortLevelChange}
               handleThinkingLevelChange={handleThinkingLevelChange}
+              sessionId={activeSessionId}
+              executionMode={executionMode}
+              availableExecutionModes={availableExecutionModes}
+              onSetExecutionMode={onSetExecutionMode}
               ref={mobileSettingsMenuRef}
               loadedIssueContexts={loadedIssueContexts}
               loadedPRContexts={loadedPRContexts}
@@ -567,16 +601,19 @@ export const ChatToolbar = memo(function ChatToolbar({
               />
             )}
 
-            <ExecutionModeDropdown
-              backend={selectedBackend}
-              sessionId={activeSessionId}
-              executionMode={executionMode}
-              availableModes={availableExecutionModes}
-              onSetExecutionMode={onSetExecutionMode}
-              className="flex @xl:hidden shrink-0"
-              align="end"
-              iconOnly
-            />
+            {!isMobile && (
+              <ExecutionModeDropdown
+                backend={selectedBackend}
+                sessionId={activeSessionId}
+                executionMode={executionMode}
+                availableModes={availableExecutionModes}
+                onSetExecutionMode={onSetExecutionMode}
+                className="flex @xl:hidden shrink-0"
+                align="end"
+                iconOnly
+                onCloseAutoFocus={focusChatInputOnClose}
+              />
+            )}
 
             <DesktopToolbarControls
               activeSessionId={activeSessionId}
@@ -603,7 +640,6 @@ export const ChatToolbar = memo(function ChatToolbar({
               worktreeId={worktreeId}
               availableMcpServers={availableMcpServers}
               enabledMcpServers={enabledMcpServers}
-              activeMcpCount={activeMcpCount}
               isHealthChecking={isHealthChecking}
               mcpStatuses={mcpStatuses}
               loadedIssueContexts={loadedIssueContexts}
@@ -614,11 +650,7 @@ export const ChatToolbar = memo(function ChatToolbar({
               loadedLinearContexts={loadedLinearContexts}
               loadedSentryContexts={loadedSentryContexts}
               attachedSavedContexts={attachedSavedContexts}
-              providerDropdownOpen={providerDropdownOpen}
-              thinkingDropdownOpen={thinkingDropdownOpen}
               mcpDropdownOpen={mcpDropdownOpen}
-              setProviderDropdownOpen={setProviderDropdownOpen}
-              setThinkingDropdownOpen={setThinkingDropdownOpen}
               onMcpDropdownOpenChange={handleMcpDropdownOpenChange}
               onOpenMagicModal={onOpenMagicModal}
               onOpenProjectSettings={onOpenProjectSettings}

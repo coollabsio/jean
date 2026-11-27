@@ -17,7 +17,6 @@ import {
   getTerminalShortcutWorktreeId,
   hasBlockingOpenOverlay,
   handleRunEnvironmentStarted,
-  isAgentsViewActive,
   isChatComposerTarget,
   isPlainSessionTerminalFocused,
   shouldAllowKeybindingThroughOpenOverlay,
@@ -280,9 +279,6 @@ describe('useMainWindowEventListeners terminal shortcuts', () => {
       terminalPanelOpen: {},
       terminalHeight: 30,
       modalTerminalOpen: {},
-      modalTerminalDockMode: 'floating',
-      modalTerminalWidth: 400,
-      modalTerminalHeight: 280,
     })
 
     useUIStore.setState({
@@ -364,7 +360,6 @@ describe('useMainWindowEventListeners terminal shortcuts', () => {
     })
     useTerminalStore.setState({
       modalTerminalOpen: { 'modal-worktree': true },
-      modalTerminalDockMode: 'bottom',
     })
 
     expect(getTerminalShortcutWorktreeId()).toBe('modal-worktree')
@@ -899,43 +894,7 @@ describe('applyCacheInvalidationKeys', () => {
   })
 })
 
-describe('isAgentsViewActive', () => {
-  beforeEach(() => {
-    useUIStore.setState({ railSection: 'workspace' })
-  })
-
-  it('is active on the Agents section when Agents is on for a server', () => {
-    const queryClient = new QueryClient()
-    queryClient.setQueryData(['preferences'], { agents_enabled: true })
-    useUIStore.setState({ railSection: 'agents' })
-    expect(isAgentsViewActive(queryClient)).toBe(true)
-  })
-
-  it('counts Agents turned on for a remote server only', () => {
-    const queryClient = new QueryClient()
-    queryClient.setQueryData(['preferences'], { agents_enabled: false })
-    queryClient.setQueryData(['preferences', 'server', 'srv'], {
-      agents_enabled: true,
-    })
-    useUIStore.setState({ railSection: 'agents' })
-    expect(isAgentsViewActive(queryClient)).toBe(true)
-  })
-
-  it('is inactive in the workspace section', () => {
-    const queryClient = new QueryClient()
-    queryClient.setQueryData(['preferences'], { agents_enabled: true })
-    expect(isAgentsViewActive(queryClient)).toBe(false)
-  })
-
-  it('is inactive when Agents is off, since the projects view shows instead', () => {
-    const queryClient = new QueryClient()
-    queryClient.setQueryData(['preferences'], { agents_enabled: false })
-    useUIStore.setState({ railSection: 'agents' })
-    expect(isAgentsViewActive(queryClient)).toBe(false)
-  })
-})
-
-describe('close shortcut on the Agents page', () => {
+describe('close shortcut', () => {
   function renderListeners(queryClient: QueryClient) {
     return renderHook(() => useMainWindowEventListeners(), {
       wrapper: ({ children }) => (
@@ -962,7 +921,6 @@ describe('close shortcut on the Agents page', () => {
   beforeEach(() => {
     document.body.innerHTML = ''
     useUIStore.setState({
-      railSection: 'workspace',
       sessionChatModalOpen: false,
       commandPaletteOpen: false,
       preferencesOpen: false,
@@ -970,51 +928,8 @@ describe('close shortcut on the Agents page', () => {
     })
   })
 
-  it('does nothing while an agent page is open', () => {
+  it('closes the session or worktree in the projects view', () => {
     const queryClient = new QueryClient()
-    queryClient.setQueryData(['preferences'], { agents_enabled: true })
-    useUIStore.setState({ railSection: 'agents' })
-    const onClose = vi.fn()
-    window.addEventListener('close-session-or-worktree', onClose)
-    const { unmount } = renderListeners(queryClient)
-
-    const event = pressCloseShortcut()
-
-    expect(onClose).not.toHaveBeenCalled()
-    expect(event.defaultPrevented).toBe(true)
-    unmount()
-    window.removeEventListener('close-session-or-worktree', onClose)
-  })
-
-  it.each([
-    ['new session', { key: 't', code: 'KeyT', shiftKey: false }],
-    ['new session picker', { key: 'T', code: 'KeyT', shiftKey: true }],
-  ])('blocks the %s shortcut while an agent page is open', (_, keys) => {
-    const queryClient = new QueryClient()
-    queryClient.setQueryData(['preferences'], { agents_enabled: true })
-    useUIStore.setState({ railSection: 'agents' })
-    const onCreate = vi.fn()
-    window.addEventListener('create-new-session', onCreate)
-    const { unmount } = renderListeners(queryClient)
-
-    const event = new KeyboardEvent('keydown', {
-      ...keys,
-      metaKey: true,
-      ctrlKey: true,
-      bubbles: true,
-      cancelable: true,
-    })
-    document.body.dispatchEvent(event)
-
-    expect(onCreate).not.toHaveBeenCalled()
-    expect(event.defaultPrevented).toBe(true)
-    unmount()
-    window.removeEventListener('create-new-session', onCreate)
-  })
-
-  it('still closes the session or worktree in the projects view', () => {
-    const queryClient = new QueryClient()
-    queryClient.setQueryData(['preferences'], { agents_enabled: true })
     const onClose = vi.fn()
     window.addEventListener('close-session-or-worktree', onClose)
     const { unmount } = renderListeners(queryClient)
@@ -1024,43 +939,6 @@ describe('close shortcut on the Agents page', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
     unmount()
     window.removeEventListener('close-session-or-worktree', onClose)
-  })
-})
-
-describe('sidebar section shortcuts', () => {
-  function press(digit: string) {
-    document.body.dispatchEvent(
-      new KeyboardEvent('keydown', {
-        key: digit,
-        code: `Digit${digit}`,
-        metaKey: true,
-        ctrlKey: true,
-        shiftKey: true,
-        bubbles: true,
-        cancelable: true,
-      })
-    )
-  }
-
-  it('switches the section and shows the hidden sidebar', () => {
-    document.body.innerHTML = ''
-    useUIStore.setState({ railSection: 'workspace', leftSidebarVisible: false })
-    const queryClient = new QueryClient()
-    const { unmount } = renderHook(() => useMainWindowEventListeners(), {
-      wrapper: ({ children }) => (
-        <QueryClientProvider client={queryClient}>
-          {children}
-        </QueryClientProvider>
-      ),
-    })
-
-    press('2')
-    expect(useUIStore.getState().railSection).toBe('agents')
-    expect(useUIStore.getState().leftSidebarVisible).toBe(true)
-
-    press('1')
-    expect(useUIStore.getState().railSection).toBe('workspace')
-    unmount()
   })
 })
 
@@ -1093,7 +971,6 @@ describe('text editing shortcuts in editable fields', () => {
   beforeEach(() => {
     document.body.innerHTML = ''
     useUIStore.setState({
-      railSection: 'workspace',
       zenMode: false,
       sessionChatModalOpen: false,
       commandPaletteOpen: false,
@@ -1249,104 +1126,6 @@ describe('removed keybindings', () => {
   })
 })
 
-describe('toggleBrowserKeybinding', () => {
-  beforeEach(() => {
-    useChatStore.setState({ activeWorktreeId: null })
-    useUIStore.setState({
-      sessionChatModalOpen: false,
-      sessionChatModalWorktreeId: null,
-    })
-    useBrowserStore.setState({
-      sidePaneOpen: {},
-      modalOpen: {},
-      bottomPanelOpen: {},
-    })
-    useTerminalStore.setState({ modalTerminalOpen: {} })
-  })
-
-  it('does nothing when no worktree is active', () => {
-    toggleBrowserKeybinding()
-
-    expect(useBrowserStore.getState().sidePaneOpen).toEqual({})
-    expect(useBrowserStore.getState().modalOpen).toEqual({})
-    expect(useBrowserStore.getState().bottomPanelOpen).toEqual({})
-  })
-
-  it('cycles the main-window shortcut from the side pane to the bottom panel', () => {
-    useChatStore.setState({ activeWorktreeId: 'canvas-wt' })
-    useUIStore.setState({
-      sessionChatModalOpen: false,
-      sessionChatModalWorktreeId: 'ignored',
-    })
-
-    toggleBrowserKeybinding()
-
-    expect(useBrowserStore.getState().sidePaneOpen['canvas-wt']).toBe(true)
-    expect(useBrowserStore.getState().sidePaneOpen).not.toHaveProperty(
-      'ignored'
-    )
-
-    toggleBrowserKeybinding()
-
-    expect(useBrowserStore.getState().bottomPanelOpen['canvas-wt']).toBe(true)
-    expect(useBrowserStore.getState().sidePaneOpen['canvas-wt']).toBe(false)
-
-    toggleBrowserKeybinding()
-
-    expect(useBrowserStore.getState().bottomPanelOpen['canvas-wt']).toBe(false)
-  })
-
-  it('cycles the session shortcut from the modal drawer to the bottom panel', () => {
-    useChatStore.setState({ activeWorktreeId: 'active-wt' })
-    useUIStore.setState({
-      sessionChatModalOpen: true,
-      sessionChatModalWorktreeId: 'modal-wt',
-    })
-
-    toggleBrowserKeybinding()
-
-    expect(useBrowserStore.getState().modalOpen['modal-wt']).toBe(true)
-    expect(useBrowserStore.getState().modalOpen).not.toHaveProperty('active-wt')
-
-    toggleBrowserKeybinding()
-
-    expect(useBrowserStore.getState().bottomPanelOpen['modal-wt']).toBe(true)
-    expect(useBrowserStore.getState().modalOpen['modal-wt']).toBe(false)
-    expect(useBrowserStore.getState().sidePaneOpen['modal-wt']).toBe(false)
-
-    toggleBrowserKeybinding()
-
-    expect(useBrowserStore.getState().bottomPanelOpen['modal-wt']).toBe(false)
-  })
-
-  it('uses the active worktree when the session modal has no worktree id', () => {
-    useChatStore.setState({ activeWorktreeId: 'active-wt' })
-    useUIStore.setState({
-      sessionChatModalOpen: true,
-      sessionChatModalWorktreeId: null,
-    })
-
-    toggleBrowserKeybinding()
-
-    expect(useBrowserStore.getState().modalOpen['active-wt']).toBe(true)
-  })
-
-  it('closes the terminal modal when the shortcut opens the bottom panel', () => {
-    useChatStore.setState({ activeWorktreeId: 'canvas-wt' })
-    useBrowserStore.getState().setSidePaneOpen('canvas-wt', true)
-    useTerminalStore.setState({
-      modalTerminalOpen: { 'canvas-wt': true },
-    })
-
-    toggleBrowserKeybinding()
-
-    expect(useBrowserStore.getState().bottomPanelOpen['canvas-wt']).toBe(true)
-    expect(useTerminalStore.getState().modalTerminalOpen['canvas-wt']).toBe(
-      false
-    )
-  })
-})
-
 describe('Recent session navigation shortcuts', () => {
   function pressArrow(key: 'ArrowUp' | 'ArrowDown', shiftKey: boolean) {
     const event = new KeyboardEvent('keydown', {
@@ -1428,5 +1207,33 @@ describe('Recent session navigation shortcuts', () => {
     expect(onAdjacent).not.toHaveBeenCalled()
     unmount()
     window.removeEventListener('open-adjacent-recent-session', onAdjacent)
+  })
+})
+
+describe('toggleBrowserKeybinding (desktop right panel)', () => {
+  beforeEach(() => {
+    useChatStore.setState({ activeWorktreeId: 'canvas-wt' })
+    useUIStore.setState({
+      sessionChatModalOpen: true,
+      sessionChatModalWorktreeId: 'modal-wt',
+      fileBrowserVisible: false,
+      rightPanelTab: 'files',
+    })
+    useBrowserStore.setState({
+      modalOpen: {},
+    })
+    useTerminalStore.setState({ modalTerminalOpen: {} })
+  })
+
+  it('toggles the browser tab for the session view worktree', () => {
+    toggleBrowserKeybinding()
+
+    expect(useUIStore.getState().fileBrowserVisible).toBe(true)
+    expect(useUIStore.getState().rightPanelTab).toBe('browser')
+    expect(useBrowserStore.getState().modalOpen['modal-wt']).toBe(true)
+
+    toggleBrowserKeybinding()
+
+    expect(useUIStore.getState().fileBrowserVisible).toBe(false)
   })
 })

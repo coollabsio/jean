@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Markdown } from '@/components/ui/markdown'
+import { MessageThreadContextMenu } from './message-thread-context-menu'
 import { cn } from '@/lib/utils'
 import type { PendingSkill } from '@/types/chat'
 import {
@@ -155,7 +156,14 @@ export function SkillBadge({
               </div>
             ) : (
               <div className="p-3">
-                <Markdown className="text-sm">{content ?? ''}</Markdown>
+                <MessageThreadContextMenu
+                  messageText={content ?? ''}
+                  copyMessageLabel="Copy file"
+                >
+                  <div>
+                    <Markdown className="text-sm">{content ?? ''}</Markdown>
+                  </div>
+                </MessageThreadContextMenu>
               </div>
             )}
           </ScrollArea>

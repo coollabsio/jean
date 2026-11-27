@@ -21,6 +21,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Markdown } from '@/components/ui/markdown'
+import { MessageThreadContextMenu } from '@/components/chat/message-thread-context-menu'
 import {
   Tooltip,
   TooltipContent,
@@ -113,9 +114,16 @@ function PostCard({
       </div>
       <div className="px-4 py-3">
         {body ? (
-          <Markdown compact className="text-sm">
-            {body}
-          </Markdown>
+          <MessageThreadContextMenu
+            messageText={body}
+            copyMessageLabel="Copy text"
+          >
+            <div>
+              <Markdown compact className="text-sm">
+                {body}
+              </Markdown>
+            </div>
+          </MessageThreadContextMenu>
         ) : (
           <p className="text-sm text-muted-foreground italic">
             No description provided.
@@ -185,9 +193,16 @@ function ReviewItem({ review }: { review: GitHubReview }) {
       </div>
       {review.body && (
         <div className="px-4 py-3">
-          <Markdown compact className="text-sm">
-            {review.body}
-          </Markdown>
+          <MessageThreadContextMenu
+            messageText={review.body}
+            copyMessageLabel="Copy text"
+          >
+            <div>
+              <Markdown compact className="text-sm">
+                {review.body}
+              </Markdown>
+            </div>
+          </MessageThreadContextMenu>
         </div>
       )}
     </div>
@@ -514,9 +529,16 @@ function AdvisoryContent({ advisory }: { advisory: RepositoryAdvisory }) {
 
           {advisory.description && (
             <div className="pt-2">
-              <Markdown compact className="text-sm">
-                {advisory.description}
-              </Markdown>
+              <MessageThreadContextMenu
+                messageText={advisory.description}
+                copyMessageLabel="Copy text"
+              >
+                <div>
+                  <Markdown compact className="text-sm">
+                    {advisory.description}
+                  </Markdown>
+                </div>
+              </MessageThreadContextMenu>
             </div>
           )}
         </div>

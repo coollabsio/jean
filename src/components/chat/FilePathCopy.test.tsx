@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import type * as EnvironmentModule from '@/lib/environment'
 import { fireEvent, render, screen, waitFor } from '@/test/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { FileContentModal } from './FileContentModal'
@@ -21,7 +22,8 @@ vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => false }))
 vi.mock('@/services/preferences', () => ({
   usePreferences: () => ({ data: undefined }),
 }))
-vi.mock('@/lib/environment', () => ({
+vi.mock('@/lib/environment', async importOriginal => ({
+  ...(await importOriginal<typeof EnvironmentModule>()),
   canOpenInEditor: () => false,
   isNativeApp: () => false,
   isLocalBackend: () => false,

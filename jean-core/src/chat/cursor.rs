@@ -6,9 +6,9 @@ use crate::http_server::EmitExt;
 use serde_json::Value;
 use std::cell::RefCell;
 use std::collections::HashSet;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
-use std::process::Stdio;
+use std::process::{Child, Stdio};
 use tauri::AppHandle;
 
 #[derive(serde::Serialize, Clone)]
@@ -222,6 +222,7 @@ fn extract_usage(value: &Value) -> Option<UsageData> {
         output_tokens,
         cache_read_input_tokens,
         cache_creation_input_tokens,
+        cost_usd: None,
     })
 }
 
@@ -813,11 +814,10 @@ fn find_existing_plan_tool_id(tool_calls: &[ToolCall], plan: &str) -> Option<Str
 
 fn effective_execution_mode(execution_mode: Option<&str>) -> &'static str {
     match execution_mode {
-        Some("plan") => "plan",
-        // Missing mode implements. Cursor has no Build flag, so Build and
-        // Full access share the yolo CLI path. Unsupported policies stay
+        Some("yolo") => "yolo",
+        // Missing mode implements with the sandbox. Unsupported policies stay
         // read-only instead of escalating.
-        None | Some("build") | Some("yolo") => "yolo",
+        None | Some("build") => "build",
         _ => "plan",
     }
 }
@@ -827,6 +827,25 @@ fn cursor_sandbox_mode(is_windows: bool, wsl_enabled: bool) -> &'static str {
         "disabled"
     } else {
         "enabled"
+    }
+}
+
+/// Cursor Build relies on the Cursor sandbox, which native Windows lacks.
+pub(crate) fn cursor_build_available() -> bool {
+    cursor_sandbox_mode(
+        cfg!(target_os = "windows"),
+        crate::platform::get_wsl_config().enabled,
+    ) == "enabled"
+}
+
+/// CLI flags for a Jean execution mode. Build never escalates to Full access.
+fn cursor_mode_args(mode: &str, sandbox_mode: &str) -> Result<Vec<&'static str>, String> {
+    match (mode, sandbox_mode) {
+        ("plan", "enabled") => Ok(vec!["--mode", "plan", "--sandbox", "enabled"]),
+        ("plan", _) => Ok(vec!["--mode", "plan", "--sandbox", "disabled"]),
+        ("build", "enabled") => Ok(vec!["--sandbox", "enabled"]),
+        ("build", _) => Err("Cursor Build needs the Cursor sandbox, which is not available on native Windows. Enable WSL or select Full access.".to_string()),
+        _ => Ok(vec!["--yolo", "--sandbox", "disabled", "--force"]),
     }
 }
 
@@ -1076,6 +1095,28 @@ where
     })
 }
 
+/// Send the prompt on stdin, then close it so the CLI reads EOF.
+///
+/// The Cursor CLI reads stdin when it gets no positional prompt and stdin is
+/// not a TTY. A prompt in argv breaks on Windows: `cmd.exe /C` (the `.cmd`
+/// shim wrapper) parses `&`/`|` in it and caps the line at ~8K characters, and
+/// `CreateProcessW` fails over 32K with os error 206 (issue #937).
+///
+/// The write runs on its own thread so a prompt larger than the pipe buffer
+/// cannot block the caller while the CLI waits on its own stdout.
+fn write_prompt_to_stdin(child: &mut Child, prompt: String) -> Result<(), String> {
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or("Failed to open Cursor CLI stdin".to_string())?;
+    std::thread::spawn(move || {
+        if let Err(error) = stdin.write_all(prompt.as_bytes()) {
+            log::warn!("Failed to write prompt to Cursor CLI stdin: {error}");
+        }
+    });
+    Ok(())
+}
+
 pub fn execute_cursor(
     app: &AppHandle,
     session_id: &str,
@@ -1124,25 +1165,15 @@ pub fn execute_cursor(
         cfg!(target_os = "windows"),
         crate::platform::get_wsl_config().enabled,
     );
-    match effective_mode {
-        "plan" => {
-            cmd.args(["--mode", "plan", "--sandbox", sandbox_mode]);
-        }
-        "build" | "yolo" => {
-            cmd.args(["--yolo", "--sandbox", "disabled", "--force"]);
-        }
-        _ => {
-            cmd.args(["--sandbox", sandbox_mode]);
-        }
-    }
+    cmd.args(cursor_mode_args(effective_mode, sandbox_mode)?);
 
     let prepared_message = build_cursor_message(
         message,
         effective_mode,
         if is_new_chat { system_prompt } else { None },
     );
-    cmd.arg(&prepared_message)
-        .current_dir(working_dir)
+    cmd.current_dir(working_dir)
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
@@ -1166,6 +1197,7 @@ pub fn execute_cursor(
     }
 
     if !super::registry::register_process(session_id.to_string(), pid) {
+        crate::platform::kill_and_reap(&mut child);
         return Ok(CursorResponse {
             content: String::new(),
             chat_id: chat_id.clone().unwrap_or_default(),
@@ -1176,6 +1208,7 @@ pub fn execute_cursor(
         });
     }
 
+    write_prompt_to_stdin(&mut child, prepared_message)?;
     let stdout = child
         .stdout
         .take()
@@ -1273,13 +1306,17 @@ pub fn execute_one_shot_cursor(
 
     let model = raw_cursor_model(Some(model)).unwrap_or("auto");
     cmd.args(["--model", model])
-        .arg(prompt)
         .current_dir(dir)
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    let output = cmd
-        .output()
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to run Cursor one-shot request: {e}"))?;
+    write_prompt_to_stdin(&mut child, prompt.to_string())?;
+    let output = child
+        .wait_with_output()
         .map_err(|e| format!("Failed to run Cursor one-shot request: {e}"))?;
 
     if !output.status.success() {
@@ -1306,6 +1343,23 @@ pub fn execute_one_shot_cursor(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn prompt_on_stdin_reaches_child_intact_past_argv_limits() {
+        // Larger than the Windows argv cap (32K) and a pipe buffer (64K), with
+        // characters `cmd.exe` would parse as separators.
+        let prompt = "line & | ^ \"quoted\"\n".repeat(10_000);
+        let mut child = std::process::Command::new("cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("spawn cat");
+        write_prompt_to_stdin(&mut child, prompt.clone()).expect("write prompt");
+        let output = child.wait_with_output().expect("wait for cat");
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8(output.stdout).unwrap(), prompt);
+    }
 
     #[test]
     fn strip_ansi_removes_escape_sequences() {
@@ -1363,11 +1417,38 @@ mod tests {
     }
 
     #[test]
-    fn build_mode_falls_back_to_yolo() {
-        assert_eq!(effective_execution_mode(Some("build")), "yolo");
-        assert_eq!(effective_execution_mode(None), "yolo");
+    fn build_mode_stays_sandboxed() {
+        assert_eq!(effective_execution_mode(Some("build")), "build");
+        assert_eq!(effective_execution_mode(None), "build");
+        assert_eq!(effective_execution_mode(Some("yolo")), "yolo");
         assert_eq!(effective_execution_mode(Some("plan")), "plan");
         assert_eq!(effective_execution_mode(Some("supervised")), "plan");
+    }
+
+    #[test]
+    fn cursor_mode_args_match_execution_mode() {
+        assert_eq!(
+            cursor_mode_args("plan", "enabled").unwrap(),
+            ["--mode", "plan", "--sandbox", "enabled"]
+        );
+        assert_eq!(
+            cursor_mode_args("plan", "disabled").unwrap(),
+            ["--mode", "plan", "--sandbox", "disabled"]
+        );
+        assert_eq!(
+            cursor_mode_args("build", "enabled").unwrap(),
+            ["--sandbox", "enabled"]
+        );
+        assert_eq!(
+            cursor_mode_args("yolo", "enabled").unwrap(),
+            ["--yolo", "--sandbox", "disabled", "--force"]
+        );
+    }
+
+    #[test]
+    fn cursor_build_fails_without_sandbox() {
+        let err = cursor_mode_args("build", "disabled").unwrap_err();
+        assert!(err.contains("Full access"));
     }
 
     #[test]

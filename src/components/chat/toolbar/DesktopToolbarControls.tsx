@@ -1,5 +1,7 @@
 import {
+  ChevronsUpDown,
   CircleDot,
+  ClipboardList,
   ExternalLink,
   FolderOpen,
   GitMerge,
@@ -12,7 +14,6 @@ import {
   Sentry,
 } from '@/components/icons/reicon'
 import { useCallback } from 'react'
-import { Kbd } from '@/components/ui/kbd'
 import {
   Tooltip,
   TooltipContent,
@@ -77,9 +78,11 @@ import {
 import { cn } from '@/lib/utils'
 import { DesktopBackendModelPicker } from '@/components/chat/toolbar/DesktopBackendModelPicker'
 import { ExecutionModeDropdown } from '@/components/chat/toolbar/ExecutionModeDropdown'
-import { DockBurgerButton } from '@/components/chat/toolbar/DockBurgerButton'
-import { ReasoningLevelDropdown } from '@/components/chat/toolbar/ReasoningLevelDropdown'
+import { ReasoningLevelList } from '@/components/chat/toolbar/ReasoningLevelDropdown'
 import type { ModelReasoningCapability } from '@/services/model-catalog'
+
+const FOOTER_BUTTON_CLASS =
+  'flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground'
 
 /** Stable default so omit/undefined doesn't allocate a new [] each render. */
 const EMPTY_CODEX_PROVIDERS: CodexProviderProfile[] = []
@@ -112,7 +115,6 @@ interface DesktopToolbarControlsProps {
 
   availableMcpServers: McpServerInfo[]
   enabledMcpServers: string[]
-  activeMcpCount: number
   isHealthChecking: boolean
   mcpStatuses: Record<string, McpHealthStatus> | undefined
 
@@ -125,11 +127,7 @@ interface DesktopToolbarControlsProps {
   loadedSentryContexts: SentryIssueContext[]
   attachedSavedContexts: AttachedSavedContext[]
 
-  providerDropdownOpen: boolean
-  thinkingDropdownOpen: boolean
   mcpDropdownOpen: boolean
-  setProviderDropdownOpen: (open: boolean) => void
-  setThinkingDropdownOpen: (open: boolean) => void
   onMcpDropdownOpenChange: (open: boolean) => void
 
   onOpenMagicModal?: () => void
@@ -181,7 +179,6 @@ export function DesktopToolbarControls({
   worktreeId,
   availableMcpServers: _availableMcpServers,
   enabledMcpServers: _enabledMcpServers,
-  activeMcpCount,
   isHealthChecking: _isHealthChecking,
   mcpStatuses: _mcpStatuses,
   loadedIssueContexts,
@@ -192,11 +189,7 @@ export function DesktopToolbarControls({
   loadedLinearContexts,
   loadedSentryContexts,
   attachedSavedContexts,
-  providerDropdownOpen,
-  thinkingDropdownOpen,
   mcpDropdownOpen: _mcpDropdownOpen,
-  setProviderDropdownOpen,
-  setThinkingDropdownOpen,
   onMcpDropdownOpenChange: _onMcpDropdownOpenChange,
   onOpenMagicModal,
   onOpenProjectSettings: _onOpenProjectSettings,
@@ -335,14 +328,92 @@ export function DesktopToolbarControls({
   const showCodexProviders =
     customCodexProviders.length > 0 && selectedBackend === 'codex'
   const showProviderDropdown = showClaudeProviders || showCodexProviders
+  // Non-modal: a modal menu turns off pointer events on the picker popover,
+  // so clicks fall through to the chat input and close the whole picker.
+  const providerMenu = showProviderDropdown ? (
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label={`Provider: ${providerDisplayName}`}
+          className={FOOTER_BUTTON_CLASS}
+        >
+          <span>{providerDisplayName}</span>
+          <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="min-w-40">
+        <DropdownMenuRadioGroup
+          value={
+            selectedProvider ??
+            (showClaudeProviders ? '__anthropic__' : '__default__')
+          }
+          onValueChange={handleProviderChange}
+        >
+          <DropdownMenuRadioItem
+            value={showClaudeProviders ? '__anthropic__' : '__default__'}
+          >
+            {showClaudeProviders ? 'Anthropic' : 'OpenAI'}
+          </DropdownMenuRadioItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuLabel className="text-xs text-muted-foreground flex items-center gap-1.5">
+            Custom Providers
+            <span className="rounded bg-muted px-1 py-0.5 text-2xs font-medium leading-none">
+              {showClaudeProviders ? 'cc' : 'cx'}
+            </span>
+          </DropdownMenuLabel>
+          {(showClaudeProviders ? customCliProfiles : customCodexProviders).map(
+            profile => (
+              <DropdownMenuRadioItem key={profile.name} value={profile.name}>
+                {profile.name}
+              </DropdownMenuRadioItem>
+            )
+          )}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  ) : null
+
+  const reasoningPanel = hideReasoningControl ? null : usesEffortControl ? (
+    <ReasoningLevelList
+      title="Effort"
+      value={displayedEffortLevel}
+      options={effortLevelOptions}
+      onValueChange={handleEffortLevelChange}
+    />
+  ) : (
+    <ReasoningLevelList
+      title="Thinking"
+      value={displayedThinkingLevel}
+      options={thinkingLevelOptions}
+      onValueChange={handleThinkingLevelChange}
+    />
+  )
+  const reasoningLabel = hideReasoningControl
+    ? null
+    : usesEffortControl
+      ? displayedEffortLabel
+      : displayedThinkingLevel === 'off'
+        ? null
+        : displayedThinkingLabel
+
+  const executionModeControl = (
+    <ExecutionModeDropdown
+      backend={selectedBackend}
+      sessionId={activeSessionId}
+      executionMode={executionMode}
+      availableModes={availableExecutionModes}
+      disabled={false}
+      onSetExecutionMode={onSetExecutionMode}
+      className={hideModelPicker ? 'hidden @xl:flex' : 'ml-auto'}
+      align="end"
+      onCloseAutoFocus={hideModelPicker ? focusChatInput : undefined}
+      modal={hideModelPicker}
+    />
+  )
 
   return (
     <>
-      <DockBurgerButton
-        activeMcpCount={activeMcpCount}
-        className="hidden @xl:flex"
-      />
-
       {onOpenMagicModal && (
         <Tooltip>
           <TooltipTrigger asChild>
@@ -731,97 +802,14 @@ export function DesktopToolbarControls({
         </Tooltip>
       )}
 
-      {showProviderDropdown && (
-        <>
-          <DropdownMenu
-            open={providerDropdownOpen}
-            onOpenChange={setProviderDropdownOpen}
-          >
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type="button"
-                    className="hidden @xl:flex h-8 items-center gap-1.5 px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-                  >
-                    <span>{providerDisplayName}</span>
-                  </button>
-                </DropdownMenuTrigger>
-              </TooltipTrigger>
-              <TooltipContent>Provider (⌘⇧P)</TooltipContent>
-            </Tooltip>
-            <DropdownMenuContent
-              align="start"
-              className="min-w-40"
-              onCloseAutoFocus={focusChatInput}
-            >
-              {showClaudeProviders ? (
-                <DropdownMenuRadioGroup
-                  value={selectedProvider ?? '__anthropic__'}
-                  onValueChange={handleProviderChange}
-                >
-                  <DropdownMenuRadioItem value="__anthropic__">
-                    Anthropic
-                    <Kbd className="ml-auto text-2xs">1</Kbd>
-                  </DropdownMenuRadioItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuLabel className="text-xs text-muted-foreground flex items-center gap-1.5">
-                    Custom Providers
-                    <span className="rounded bg-muted px-1 py-0.5 text-2xs font-medium leading-none">
-                      cc
-                    </span>
-                  </DropdownMenuLabel>
-                  {customCliProfiles.map((profile, i) => (
-                    <DropdownMenuRadioItem
-                      key={profile.name}
-                      value={profile.name}
-                    >
-                      {profile.name}
-                      <Kbd className="ml-auto text-2xs">{i + 2}</Kbd>
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              ) : (
-                <DropdownMenuRadioGroup
-                  value={selectedProvider ?? '__default__'}
-                  onValueChange={handleProviderChange}
-                >
-                  <DropdownMenuRadioItem value="__default__">
-                    OpenAI
-                    <Kbd className="ml-auto text-2xs">1</Kbd>
-                  </DropdownMenuRadioItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuLabel className="text-xs text-muted-foreground flex items-center gap-1.5">
-                    Custom Providers
-                    <span className="rounded bg-muted px-1 py-0.5 text-2xs font-medium leading-none">
-                      cx
-                    </span>
-                  </DropdownMenuLabel>
-                  {customCodexProviders.map((profile, i) => (
-                    <DropdownMenuRadioItem
-                      key={profile.name}
-                      value={profile.name}
-                    >
-                      {profile.name}
-                      <Kbd className="ml-auto text-2xs">{i + 2}</Kbd>
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </>
-      )}
-
-      {!hideModelPicker && (
+      {hideModelPicker ? (
+        executionModeControl
+      ) : (
         <DesktopBackendModelPicker
           disabled={false}
           sessionHasMessages={sessionHasMessages}
           providerLocked={providerLocked}
-          triggerClassName={cn(
-            'rounded-none border-0 bg-transparent px-3',
-            !hideReasoningControl && 'px-2'
-          )}
+          triggerClassName="rounded-none border-0 bg-transparent px-3"
           selectedBackend={selectedBackend}
           selectedModel={selectedModel}
           selectedProvider={selectedProvider}
@@ -829,46 +817,31 @@ export function DesktopToolbarControls({
           customCliProfiles={customCliProfiles}
           onModelChange={handleModelChange}
           onBackendModelChange={handleBackendModelChange}
+          triggerSuffix={
+            <>
+              {reasoningLabel && (
+                <span className="shrink-0 text-muted-foreground/80">
+                  · {reasoningLabel}
+                </span>
+              )}
+              {executionMode === 'plan' && (
+                <span className="flex shrink-0 items-center gap-1 text-info">
+                  <ClipboardList className="h-3.5 w-3.5" />
+                  Plan
+                </span>
+              )}
+            </>
+          }
+          sidePanel={reasoningPanel}
+          closeOnSelect={false}
+          footer={
+            <>
+              {providerMenu}
+              {executionModeControl}
+            </>
+          }
         />
       )}
-
-      {hideReasoningControl ? null : usesEffortControl ? (
-        <ReasoningLevelDropdown
-          open={thinkingDropdownOpen}
-          onOpenChange={setThinkingDropdownOpen}
-          value={displayedEffortLevel}
-          options={effortLevelOptions}
-          onValueChange={handleEffortLevelChange}
-          tooltip={`Effort: ${displayedEffortLabel} (⌘⇧E)`}
-          showShortcuts
-          triggerClassName={cn('hidden @xl:flex', !hideModelPicker && 'px-2')}
-          onCloseAutoFocus={focusChatInput}
-        />
-      ) : (
-        <ReasoningLevelDropdown
-          open={thinkingDropdownOpen}
-          onOpenChange={setThinkingDropdownOpen}
-          value={displayedThinkingLevel}
-          options={thinkingLevelOptions}
-          onValueChange={handleThinkingLevelChange}
-          active={displayedThinkingLevel !== 'off'}
-          tooltip={`Thinking: ${displayedThinkingLabel} (⌘⇧E)`}
-          showShortcuts
-          triggerClassName={cn('hidden @xl:flex', !hideModelPicker && 'px-2')}
-          onCloseAutoFocus={focusChatInput}
-        />
-      )}
-
-      <ExecutionModeDropdown
-        backend={selectedBackend}
-        sessionId={activeSessionId}
-        executionMode={executionMode}
-        availableModes={availableExecutionModes}
-        disabled={false}
-        onSetExecutionMode={onSetExecutionMode}
-        className="hidden @xl:flex"
-        onCloseAutoFocus={focusChatInput}
-      />
     </>
   )
 }

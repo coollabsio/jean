@@ -5,7 +5,8 @@
 //!
 //! 1. The `provider` block in the repo's `jean.json` (explicit, committed).
 //! 2. Auto-detection from the `origin` remote URL (github.com / gitlab.com).
-//! 3. Default to GitHub (preserves historical behavior).
+//! 3. A host that `glab` is configured for (self-hosted GitLab on any domain).
+//! 4. Default to GitHub (preserves historical behavior).
 //!
 //! No secrets ever live in `jean.json` — the host is non-secret and each CLI
 //! manages its own auth. Only the provider selection + optional (self-hosted)
@@ -150,8 +151,8 @@ pub fn extract_repo_path(remote_url: &str) -> Option<String> {
 /// Detect the provider + host from a raw git remote URL.
 ///
 /// Returns `None` when the host contains neither `github` nor `gitlab`
-/// (for example `git.company.com`). [`resolve_git_provider`] then defaults
-/// to GitHub unless `jean.json` sets `provider.git`.
+/// (for example `git.company.com`). [`resolve_git_provider`] then checks the
+/// hosts `glab` is configured for, and defaults to GitHub after that.
 pub fn detect_provider_from_url(remote_url: &str) -> Option<(GitProvider, String)> {
     let host = extract_host(remote_url)?;
     let lower = host.to_ascii_lowercase();
@@ -187,18 +188,33 @@ fn get_origin_remote_url(repo_path: &str) -> Option<String> {
 
 /// Resolve the effective `(provider, host)` for a repository.
 ///
-/// Precedence: `jean.json` `provider.git` → origin-remote detection → GitHub.
-/// A host with neither `github` nor `gitlab` in the name, and no `provider.git`,
-/// falls through to GitHub so `gh` is used exactly as it was before GitLab support.
+/// Precedence: `jean.json` `provider.git` → origin-remote detection → origin
+/// host is configured in `glab` → GitHub. Any other unclassified host falls
+/// through to GitHub so `gh` is used exactly as it was before GitLab support.
 pub fn resolve_git_provider(repo_path: &str) -> (GitProvider, String) {
+    resolve_git_provider_with(repo_path, glab_configured_hosts)
+}
+
+fn resolve_git_provider_with(
+    repo_path: &str,
+    glab_hosts: impl FnOnce() -> Vec<String>,
+) -> (GitProvider, String) {
     let cfg = crate::projects::git::read_jean_config(repo_path).and_then(|c| c.provider);
     let origin = get_origin_remote_url(repo_path);
+    let origin_host = origin.as_deref().and_then(extract_host);
     let detected = origin.as_deref().and_then(detect_provider_from_url);
 
     let provider = cfg
         .as_ref()
         .and_then(|c| c.git)
         .or(detected.map(|(p, _)| p))
+        .or_else(|| {
+            let host = origin_host.as_deref()?;
+            glab_hosts()
+                .iter()
+                .any(|h| h.eq_ignore_ascii_case(host))
+                .then_some(GitProvider::Gitlab)
+        })
         .unwrap_or_default();
 
     // Host: explicit config → the actual origin host (covers self-hosted) →
@@ -206,10 +222,66 @@ pub fn resolve_git_provider(repo_path: &str) -> (GitProvider, String) {
     let host = cfg
         .and_then(|c| c.host)
         .map(|h| normalize_host(&h))
-        .or_else(|| origin.as_deref().and_then(extract_host))
+        .or(origin_host)
         .unwrap_or_else(|| provider.default_host().to_string());
 
     (provider, host)
+}
+
+/// Hosts `glab` is configured for: `GITLAB_HOST` / `GL_HOST`, plus the keys of
+/// `hosts:` in the first global glab `config.yml` found, in glab's search order
+/// (https://docs.gitlab.com/cli/configuration/). Lets a self-hosted GitLab on a
+/// domain without `gitlab` in its name work without a `jean.json` block.
+fn glab_configured_hosts() -> Vec<String> {
+    let mut hosts: Vec<String> = ["GITLAB_HOST", "GL_HOST"]
+        .iter()
+        .filter_map(|key| std::env::var(key).ok())
+        .map(|h| normalize_host(&h))
+        .filter(|h| !h.is_empty())
+        .collect();
+
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(dir) = std::env::var_os("GLAB_CONFIG_DIR") {
+        candidates.push(dir.into());
+    }
+    if let Some(home) = dirs::home_dir() {
+        candidates.push(home.join(".config").join("glab-cli"));
+    }
+    if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
+        candidates.push(std::path::PathBuf::from(xdg).join("glab-cli"));
+    }
+    for base in [dirs::config_dir(), dirs::data_local_dir()]
+        .into_iter()
+        .flatten()
+    {
+        candidates.push(base.join("glab-cli"));
+    }
+
+    if let Some(yaml) = candidates
+        .iter()
+        .find_map(|dir| std::fs::read_to_string(dir.join("config.yml")).ok())
+    {
+        hosts.extend(hosts_from_glab_config(&yaml));
+    }
+    hosts
+}
+
+/// Keys of the `hosts:` mapping in a glab `config.yml`.
+fn hosts_from_glab_config(yaml: &str) -> Vec<String> {
+    let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(yaml) else {
+        return Vec::new();
+    };
+    value
+        .get("hosts")
+        .and_then(|h| h.as_mapping())
+        .map(|m| {
+            m.keys()
+                .filter_map(|k| k.as_str())
+                .map(normalize_host)
+                .filter(|h| !h.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Normalize a user-supplied host from `jean.json` (`provider.host`): strip any
@@ -383,9 +455,44 @@ mod tests {
     }
 
     #[test]
+    fn glab_config_hosts_are_parsed() {
+        let yaml = "git_protocol: ssh\nhosts:\n  gitlab.com:\n    token: x\n  git.company.com:\n    api_protocol: https\n";
+        assert_eq!(
+            hosts_from_glab_config(yaml),
+            vec!["gitlab.com".to_string(), "git.company.com".to_string()]
+        );
+        assert!(hosts_from_glab_config("not: [valid").is_empty());
+        assert!(hosts_from_glab_config("editor: vim\n").is_empty());
+    }
+
+    #[test]
+    fn unknown_host_configured_in_glab_resolves_to_gitlab() {
+        let dir = git_repo_with_origin("git@Git.Company.com:group/sub/repo.git");
+        let (provider, host) = resolve_git_provider_with(dir.path().to_str().unwrap(), || {
+            vec!["gitlab.com".to_string(), "git.company.com".to_string()]
+        });
+        assert_eq!(provider, GitProvider::Gitlab);
+        assert_eq!(host, "Git.Company.com");
+    }
+
+    #[test]
+    fn explicit_github_wins_over_glab_hosts() {
+        let dir = git_repo_with_origin("https://git.company.com/group/repo.git");
+        std::fs::write(
+            dir.path().join("jean.json"),
+            r#"{"provider":{"git":"github"}}"#,
+        )
+        .unwrap();
+        let (provider, _) = resolve_git_provider_with(dir.path().to_str().unwrap(), || {
+            vec!["git.company.com".to_string()]
+        });
+        assert_eq!(provider, GitProvider::Github);
+    }
+
+    #[test]
     fn unknown_host_without_provider_git_falls_through_to_github() {
         let dir = git_repo_with_origin("https://git.company.com/group/repo.git");
-        let (provider, host) = resolve_git_provider(dir.path().to_str().unwrap());
+        let (provider, host) = resolve_git_provider_with(dir.path().to_str().unwrap(), Vec::new);
         assert_eq!(provider, GitProvider::Github);
         assert_eq!(host, "git.company.com");
     }

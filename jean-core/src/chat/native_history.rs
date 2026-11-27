@@ -133,6 +133,9 @@ fn persist_native_cli_session_id(
             ("antigravity", Backend::Antigravity) => {
                 metadata.antigravity_session_id = Some(native_session_id.to_string())
             }
+            ("cursor", Backend::Cursor) => {
+                metadata.cursor_chat_id = Some(native_session_id.to_string())
+            }
             ("pi", Backend::Pi) => metadata.pi_session_id = Some(native_session_id.to_string()),
             _ => {
                 return Err(format!(
@@ -163,7 +166,8 @@ fn validate_native_cli_tracking_metadata(
     match (backend, &metadata.backend) {
         ("codex", Backend::Codex)
         | ("opencode", Backend::Opencode)
-        | ("antigravity", Backend::Antigravity) => Ok(()),
+        | ("antigravity", Backend::Antigravity)
+        | ("cursor", Backend::Cursor) => Ok(()),
         _ => Err(format!(
             "Backend {backend} does not match session {}",
             metadata.id
@@ -189,7 +193,10 @@ pub async fn track_native_cli_session(
     session_id: String,
     backend: String,
 ) -> Result<(), String> {
-    if backend != "codex" && backend != "opencode" && backend != "antigravity" {
+    if !matches!(
+        backend.as_str(),
+        "codex" | "opencode" | "antigravity" | "cursor"
+    ) {
         return Err(format!(
             "Native CLI tracking is not supported for backend {backend}"
         ));
@@ -351,6 +358,10 @@ fn load_native_session_ids_uncached(
                 .map(|session| session.id)
                 .collect()
         }
+        "cursor" => list_cursor_cli_chats(&home.join(".cursor").join("chats"), worktree_path)
+            .into_iter()
+            .map(|session| session.id)
+            .collect(),
         other => return Err(format!("Unsupported native CLI tracking backend: {other}")),
     };
     ids.sort();
@@ -429,22 +440,74 @@ fn list_cursor_sessions(
     let Some(home) = dirs::home_dir() else {
         return Ok(Vec::new());
     };
-    let transcripts_root = home
-        .join(".cursor")
-        .join("projects")
-        .join(escape_cursor_project_dir(worktree_path))
-        .join("agent-transcripts");
-    if !transcripts_root.exists() {
-        return Ok(Vec::new());
-    }
+    let cursor_root = home.join(".cursor");
 
     let mut results = Vec::new();
-    for path in collect_jsonl_files(&transcripts_root, None)? {
-        if let Some(session) = parse_cursor_session_file(&path, worktree_path) {
-            push_if_matches(&mut results, session, query);
+    let mut seen = HashSet::new();
+    for session in list_cursor_cli_chats(&cursor_root.join("chats"), worktree_path) {
+        seen.insert(session.id.clone());
+        push_if_matches(&mut results, session, query);
+    }
+
+    // Cursor IDE Composer transcripts, kept as a fallback.
+    if let Some(project_dir) = cursor_project_dir(&cursor_root.join("projects"), worktree_path) {
+        let transcripts_root = project_dir.join("agent-transcripts");
+        if transcripts_root.is_dir() {
+            for path in collect_jsonl_files(&transcripts_root, None)? {
+                if let Some(session) = parse_cursor_session_file(&path, worktree_path) {
+                    if seen.insert(session.id.clone()) {
+                        push_if_matches(&mut results, session, query);
+                    }
+                }
+            }
         }
     }
     sort_and_limit(results, limit)
+}
+
+/// Cursor CLI chats: `~/.cursor/chats/<workspace-hash>/<chat-id>/meta.json`.
+fn list_cursor_cli_chats(chats_root: &Path, worktree_path: &str) -> Vec<NativeCliHistorySession> {
+    let Ok(workspaces) = fs::read_dir(chats_root) else {
+        return Vec::new();
+    };
+    workspaces
+        .flatten()
+        .filter_map(|workspace| fs::read_dir(workspace.path()).ok())
+        .flat_map(|chats| chats.flatten())
+        .filter_map(|chat| parse_cursor_chat_meta(&chat.path().join("meta.json"), worktree_path))
+        .collect()
+}
+
+fn parse_cursor_chat_meta(path: &Path, worktree_path: &str) -> Option<NativeCliHistorySession> {
+    let value: Value = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
+    if value.get("hasConversation").and_then(Value::as_bool) == Some(false) {
+        return None;
+    }
+    let cwd = value.get("cwd")?.as_str()?;
+    if !same_path(cwd, worktree_path) {
+        return None;
+    }
+    let id = path.parent()?.file_name()?.to_str()?.to_string();
+    let title = value
+        .get("title")
+        .and_then(Value::as_str)
+        .and_then(trim_title)
+        .unwrap_or_else(|| "Untitled Cursor chat".to_string());
+    let updated_at = value
+        .get("updatedAtMs")
+        .or_else(|| value.get("createdAtMs"))
+        .and_then(Value::as_u64)
+        .map(|ms| ms / 1000)
+        .unwrap_or_else(|| file_updated_at(path));
+    Some(NativeCliHistorySession {
+        backend: "cursor".to_string(),
+        id: id.clone(),
+        title,
+        cwd: cwd.to_string(),
+        updated_at,
+        resume_args: vec!["--resume".to_string(), id],
+        source_path: path.to_string_lossy().to_string(),
+    })
 }
 
 fn list_opencode_sessions(
@@ -1121,8 +1184,30 @@ fn claude_project_dir(projects_root: &Path, worktree_path: &str) -> Option<PathB
         .map(|entry| entry.path())
 }
 
+/// Cursor IDE project folder: `/home/u/app` -> `home-u-app`, `D:\gpanel` -> `d-gpanel`.
 fn escape_cursor_project_dir(path: &str) -> String {
-    path.trim_start_matches('/').replace('/', "-")
+    path.replace(':', "")
+        .split(['/', '\\'])
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
+fn cursor_project_dir(projects_root: &Path, worktree_path: &str) -> Option<PathBuf> {
+    let escaped = escape_cursor_project_dir(worktree_path);
+    let exact = projects_root.join(&escaped);
+    if exact.is_dir() {
+        return Some(exact);
+    }
+    let wanted = escaped.to_lowercase();
+    fs::read_dir(projects_root)
+        .ok()?
+        .flatten()
+        .find(|entry| {
+            entry.file_type().map(|t| t.is_dir()).unwrap_or(false)
+                && entry.file_name().to_string_lossy().to_lowercase() == wanted
+        })
+        .map(|entry| entry.path())
 }
 
 fn same_path(a: &str, b: &str) -> bool {
@@ -1746,7 +1831,14 @@ mod tests {
 
         let found = claude_project_dir(temp.path(), r"D:\work\repo").unwrap();
 
-        assert_eq!(found.file_name().unwrap(), "d--work-repo");
+        // Case-insensitive filesystems (macOS) resolve the exact `D--...` path.
+        assert!(found.is_dir());
+        assert!(found
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .eq_ignore_ascii_case("d--work-repo"));
     }
 
     #[test]
@@ -1769,5 +1861,89 @@ mod tests {
 
         assert_eq!(parsed.id, "s1");
         assert!(!parsed.title.is_empty());
+    }
+    fn write_cursor_meta(chats_root: &Path, workspace: &str, chat_id: &str, meta: Value) {
+        let dir = chats_root.join(workspace).join(chat_id);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("meta.json"), meta.to_string()).unwrap();
+    }
+
+    #[test]
+    fn cursor_cli_chats_match_worktree_and_skip_empty_chats() {
+        let temp = tempfile::tempdir().unwrap();
+        let worktree = temp.path().join("gpanel");
+        let other = temp.path().join("other");
+        fs::create_dir_all(&worktree).unwrap();
+        fs::create_dir_all(&other).unwrap();
+        let worktree = worktree.to_string_lossy().to_string();
+        let chats = temp.path().join("chats");
+
+        write_cursor_meta(
+            &chats,
+            "hash-a",
+            "chat-1",
+            serde_json::json!({
+                "schemaVersion": 1,
+                "createdAtMs": 1795196051297u64,
+                "hasConversation": true,
+                "title": "G Panel Parity",
+                "updatedAtMs": 1795231089543u64,
+                "cwd": worktree,
+            }),
+        );
+        write_cursor_meta(
+            &chats,
+            "hash-a",
+            "chat-empty",
+            serde_json::json!({ "hasConversation": false, "cwd": worktree }),
+        );
+        write_cursor_meta(
+            &chats,
+            "hash-b",
+            "chat-other",
+            serde_json::json!({ "hasConversation": true, "title": "x", "cwd": other }),
+        );
+
+        let sessions = list_cursor_cli_chats(&chats, &worktree);
+        assert_eq!(sessions.len(), 1);
+        let session = &sessions[0];
+        assert_eq!(session.id, "chat-1");
+        assert_eq!(session.title, "G Panel Parity");
+        assert_eq!(session.updated_at, 1795231089);
+        assert_eq!(session.resume_args, vec!["--resume", "chat-1"]);
+    }
+
+    #[test]
+    fn escapes_cursor_project_paths() {
+        assert_eq!(escape_cursor_project_dir("/home/u/app"), "home-u-app");
+        assert_eq!(escape_cursor_project_dir("D:\\gpanel"), "D-gpanel");
+        assert_eq!(
+            escape_cursor_project_dir("C:\\Users\\me\\app"),
+            "C-Users-me-app"
+        );
+    }
+
+    #[test]
+    fn finds_cursor_project_dir_ignoring_case() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("d-gpanel")).unwrap();
+        assert_eq!(
+            cursor_project_dir(temp.path(), "D:\\gpanel"),
+            Some(temp.path().join("d-gpanel"))
+        );
+    }
+
+    #[test]
+    fn native_session_tracking_accepts_cursor_terminal_sessions() {
+        let mut metadata = crate::chat::types::SessionMetadata::new(
+            "jean-session".to_string(),
+            "worktree-1".to_string(),
+            "Cursor".to_string(),
+            0,
+        );
+        metadata.backend = Backend::Cursor;
+        metadata.primary_surface = Some("terminal".to_string());
+        assert!(validate_native_cli_tracking_metadata(&metadata, "cursor").is_ok());
+        assert!(validate_native_cli_tracking_metadata(&metadata, "codex").is_err());
     }
 }

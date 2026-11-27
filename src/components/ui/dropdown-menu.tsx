@@ -8,7 +8,18 @@ import {
   CircleIcon,
 } from '@/components/icons/reicon'
 
+import { useIsMobile } from '@/hooks/use-mobile'
 import { cn } from '@/lib/utils'
+
+const POPOVER_CLASS =
+  'bg-popover text-popover-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-[80] max-h-(--radix-dropdown-menu-content-available-height) min-w-[8rem] origin-(--radix-dropdown-menu-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-md border p-1'
+
+// On mobile every menu opens as a bottom sheet, like MobileContextsSheet.
+// App.css pins the Radix popper wrapper of `[data-mobile-sheet]` content to
+// the bottom edge. These classes come after the caller's className so they
+// win over desktop sizing such as `w-56` or `max-h-[300px]`.
+const MOBILE_SHEET_CLASS =
+  'bg-background text-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:slide-in-from-bottom data-[state=closed]:slide-out-to-bottom z-[80] w-full min-w-0 max-w-none max-h-[75svh] overflow-x-hidden overflow-y-auto overscroll-contain rounded-t-xl rounded-b-none border-x-0 border-t border-b-0 px-2 pt-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] shadow-lg'
 
 function DropdownMenu({
   ...props
@@ -45,6 +56,7 @@ function DropdownMenuContent({
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content> & {
   enableNumberSelection?: boolean
 }) {
+  const isMobile = useIsMobile()
   const handleKeyDown = React.useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
       // Number keys 1-9 select the nth selectable item
@@ -77,6 +89,7 @@ function DropdownMenuContent({
     <DropdownMenuPrimitive.Portal>
       <DropdownMenuPrimitive.Content
         data-slot="dropdown-menu-content"
+        data-mobile-sheet={isMobile ? '' : undefined}
         sideOffset={sideOffset}
         onKeyDown={handleKeyDown}
         onEscapeKeyDown={e => {
@@ -85,8 +98,9 @@ function DropdownMenuContent({
           onEscapeKeyDown?.(e)
         }}
         className={cn(
-          'bg-popover text-popover-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-[80] max-h-(--radix-dropdown-menu-content-available-height) min-w-[8rem] origin-(--radix-dropdown-menu-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-md border p-1 shadow-md',
-          className
+          !isMobile && cn(POPOVER_CLASS, 'shadow-md'),
+          className,
+          isMobile && MOBILE_SHEET_CLASS
         )}
         {...props}
       />
@@ -270,20 +284,30 @@ function DropdownMenuSubContent({
   onEscapeKeyDown,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.SubContent>) {
-  return (
+  const isMobile = useIsMobile()
+  const content = (
     <DropdownMenuPrimitive.SubContent
       data-slot="dropdown-menu-sub-content"
+      data-mobile-sheet={isMobile ? '' : undefined}
       onEscapeKeyDown={e => {
         // Keep ESC from reaching window-level handlers (e.g. SessionChatModal)
         e.stopPropagation()
         onEscapeKeyDown?.(e)
       }}
       className={cn(
-        'bg-popover text-popover-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-[80] max-h-(--radix-dropdown-menu-content-available-height) min-w-[8rem] origin-(--radix-dropdown-menu-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-md border p-1 shadow-lg',
-        className
+        !isMobile && cn(POPOVER_CLASS, 'shadow-lg'),
+        className,
+        isMobile && cn(MOBILE_SHEET_CLASS, 'z-[81]')
       )}
       {...props}
     />
+  )
+  // Portal on mobile so the sheet is fixed to the viewport, not to the
+  // parent sheet.
+  return isMobile ? (
+    <DropdownMenuPrimitive.Portal>{content}</DropdownMenuPrimitive.Portal>
+  ) : (
+    content
   )
 }
 

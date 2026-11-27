@@ -1574,6 +1574,22 @@ mod tests {
         );
     }
 
+    /// Opens a preview forward on a free port. A child process that a parallel
+    /// test spawns can inherit the probe socket of `free_port` for a moment, so
+    /// the bind check of the supervisor can still see the port in use. Then try
+    /// the next port.
+    fn forward_on_free_port(
+        supervisor: &SshTunnelSupervisor,
+    ) -> (u16, Result<PreviewForwardPayload, String>) {
+        loop {
+            let port = free_port();
+            match supervisor.ensure_preview_forward(PROFILE, port) {
+                Err(error) if error.contains("already in use") => continue,
+                result => return (port, result),
+            }
+        }
+    }
+
     fn free_port() -> u16 {
         // Ephemeral ports (typically 32768–60999) can stay busy for a moment
         // after a probe bind. Preview tests use a private range instead.
@@ -1657,11 +1673,8 @@ time.sleep(30)
     fn preview_reports_ssh_auth_failure() {
         let harness = harness("#!/bin/sh\necho 'Permission denied (publickey).' >&2\nexit 255\n");
         seed_ready(&harness.supervisor, 41_000);
-        let port = free_port();
-        let error = harness
-            .supervisor
-            .ensure_preview_forward(PROFILE, port)
-            .unwrap_err();
+        let (_, result) = forward_on_free_port(&harness.supervisor);
+        let error = result.unwrap_err();
         assert!(
             error.contains("authentication"),
             "error should explain the SSH failure: {error}"
@@ -1675,11 +1688,8 @@ time.sleep(30)
         let log = dir.path().join("ssh.log");
         let harness = harness(&listening_script(&log));
         seed_ready(&harness.supervisor, 41_000);
-        let port = free_port();
-        let first = harness
-            .supervisor
-            .ensure_preview_forward(PROFILE, port)
-            .unwrap();
+        let (port, first) = forward_on_free_port(&harness.supervisor);
+        let first = first.unwrap();
         assert_eq!(first.local_port, port);
         assert_eq!(first.remote_port, port);
         std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();

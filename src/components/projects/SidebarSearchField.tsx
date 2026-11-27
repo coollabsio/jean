@@ -1,15 +1,8 @@
 import { Search } from '@/components/icons/reicon'
-import { Kbd } from '@/components/ui/kbd'
-import { usePreferences } from '@/services/preferences'
 import { useUIStore } from '@/store/ui-store'
-import { DEFAULT_KEYBINDINGS, formatShortcutDisplay } from '@/types/keybindings'
 
 /** Looks like a search field; opens the command palette, where search lives. */
 export function SidebarSearchField() {
-  const { data: preferences } = usePreferences()
-  const shortcut =
-    preferences?.keybindings?.open_command_palette ??
-    DEFAULT_KEYBINDINGS.open_command_palette
   return (
     <button
       type="button"
@@ -19,7 +12,6 @@ export function SidebarSearchField() {
     >
       <Search className="size-3.5 shrink-0" />
       <span className="min-w-0 flex-1 truncate text-left">Search…</span>
-      {shortcut && <Kbd>{formatShortcutDisplay(shortcut)}</Kbd>}
     </button>
   )
 }

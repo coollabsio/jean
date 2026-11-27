@@ -14,14 +14,19 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { copyImageToClipboard, copyToClipboard } from '@/lib/clipboard'
+import { parseGitHubItemUrl } from '@/lib/github-item-link'
 import {
   downloadLocalFile,
   openLocalFile,
   resolveWorktreeFilePath,
 } from '@/lib/local-file'
+import { GitHubLinkMenuItems } from './GitHubLinkMenuItems'
 
 const LONG_PRESS_MS = 500
 const LONG_PRESS_MOVE_TOLERANCE_PX = 10
+// Pointer downs already taken by an inner menu. Menus can nest (a question
+// card inside a message), and only the innermost one runs the long press.
+const claimedPointerDowns = new WeakSet<Event>()
 
 /** Read the current window selection as trimmed plain text. */
 export function getTrimmedSelectionText(): string {
@@ -88,14 +93,14 @@ export function MessageThreadContextMenu({
   }, [])
 
   // Radix cancels its touch long press on any pointermove, and a finger
-  // held on iOS always jitters a little. Open the menu for file paths with
-  // our own long press that allows small moves.
+  // held on iOS always jitters a little. Open the menu for file paths and
+  // links with our own long press that allows small moves.
   const longPressRef = useRef<{
     timer: ReturnType<typeof setTimeout>
     x: number
     y: number
   } | null>(null)
-  // The click that ends a long press must not also open the file.
+  // The click that ends a long press must not also open the file or link.
   const longPressFiredRef = useRef(false)
 
   const cancelLongPress = useCallback(() => {
@@ -109,9 +114,11 @@ export function MessageThreadContextMenu({
       cancelLongPress()
       longPressFiredRef.current = false
       if (event.pointerType === 'mouse') return
+      if (claimedPointerDowns.has(event.nativeEvent)) return
+      claimedPointerDowns.add(event.nativeEvent)
       const target = event.target instanceof Element ? event.target : null
-      const fileCode = target?.closest('code[data-file-path]')
-      if (!fileCode) return
+      const pressTarget = target?.closest('code[data-file-path], a[href]')
+      if (!pressTarget) return
       const { clientX, clientY } = event
       longPressRef.current = {
         x: clientX,
@@ -119,7 +126,7 @@ export function MessageThreadContextMenu({
         timer: setTimeout(() => {
           longPressRef.current = null
           longPressFiredRef.current = true
-          fileCode.dispatchEvent(
+          pressTarget.dispatchEvent(
             new MouseEvent('contextmenu', {
               bubbles: true,
               cancelable: true,
@@ -210,6 +217,7 @@ export function MessageThreadContextMenu({
       .catch(() => toast.error('Failed to copy'))
   }, [messageText, onCopyMessage])
 
+  const githubLink = linkUrl ? parseGitHubItemUrl(linkUrl) : null
   const canCopyMessage = Boolean(onCopyMessage || messageText.trim())
   const canCopySelection = selection.length > 0
 
@@ -226,7 +234,8 @@ export function MessageThreadContextMenu({
       >
         {children}
       </ContextMenuTrigger>
-      <ContextMenuContent className="w-48">
+      <ContextMenuContent className={githubLink ? 'w-60' : 'w-48'}>
+        {githubLink && <GitHubLinkMenuItems link={githubLink} url={linkUrl} />}
         {imageSrc && (
           <ContextMenuItem onSelect={handleCopyImage}>
             <Copy className="h-4 w-4" />

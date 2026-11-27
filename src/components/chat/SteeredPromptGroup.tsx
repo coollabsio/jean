@@ -1,7 +1,6 @@
 import { memo, useCallback, useState } from 'react'
 import { normalizePath } from '@/lib/path-utils'
 import { cn } from '@/lib/utils'
-import { USER_CARD_BUBBLE_CLASS, USER_PILL_BUBBLE_CLASS } from './ReplyBubble'
 import { ImageLightbox } from './ImageLightbox'
 import { TextFileLightbox } from './TextFileLightbox'
 import { FileMentionBadge } from './FileMentionBadge'
@@ -17,6 +16,7 @@ import {
 import { MessageSettingsBadges } from './MessageSettingsBadges'
 import {
   CopyIconButton,
+  USER_CARD_BUBBLE_CLASS,
   USER_HOVER_REVEAL,
   USER_TAP_HIDDEN,
   copyPromptToClipboard,
@@ -28,19 +28,16 @@ import type { ChatMessage } from '@/types/chat'
  * Right-aligned card grouping one or more user prompts that were steered
  * into a running turn (Codex `turn/steer`). Consecutive steered prompts
  * render as connected rows in a single bubble so they read as one batch.
- * `bubble` uses the agent chat pill style, like other user prompts there.
  * `settings` is the prompt that started the turn: steers run with its
  * model and modes, so its settings show under the group like on prompts.
  */
 export const SteeredPromptGroup = memo(function SteeredPromptGroup({
   texts,
-  bubble = false,
   worktreePath,
   serverId,
   settings,
 }: {
   texts: string[]
-  bubble?: boolean
   worktreePath?: string
   serverId?: string
   settings?: ChatMessage
@@ -57,7 +54,7 @@ export const SteeredPromptGroup = memo(function SteeredPromptGroup({
   }, [fullText])
 
   if (texts.length === 0) return null
-  const model = bubble ? undefined : settings?.model
+  const model = settings?.model
   return (
     <div className="flex justify-end">
       <div className="group flex max-w-[85%] min-w-0 flex-col items-end gap-1 sm:max-w-[70%]">
@@ -66,9 +63,8 @@ export const SteeredPromptGroup = memo(function SteeredPromptGroup({
           onClick={handleBubbleClick}
           className={cn(
             'max-w-full divide-y',
-            bubble
-              ? cn(USER_PILL_BUBBLE_CLASS, 'divide-(--bubble-fg)/20 p-0')
-              : cn(USER_CARD_BUBBLE_CLASS, 'divide-border/50 p-0')
+            USER_CARD_BUBBLE_CLASS,
+            'divide-border/50 p-0'
           )}
         >
           {texts.map((text, textIndex) => {
@@ -89,10 +85,7 @@ export const SteeredPromptGroup = memo(function SteeredPromptGroup({
             return (
               <div
                 key={textKey}
-                className={cn(
-                  'min-w-0 break-words [overflow-wrap:anywhere]',
-                  bubble ? 'px-4 py-2.5' : 'px-3 py-2'
-                )}
+                className="min-w-0 break-words [overflow-wrap:anywhere] px-3 py-2"
               >
                 {imagePaths.length > 0 && (
                   <div className="flex flex-wrap gap-2 mb-2">

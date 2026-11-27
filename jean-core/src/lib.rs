@@ -41,7 +41,6 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod agent_browser;
-pub mod agents;
 mod antigravity_cli;
 mod auto_fix;
 mod background_tasks;
@@ -229,8 +228,6 @@ pub struct AppPreferences {
     pub syntax_theme_dark: String, // Syntax highlighting theme for dark mode
     #[serde(default = "default_syntax_theme_light")]
     pub syntax_theme_light: String, // Syntax highlighting theme for light mode
-    #[serde(default = "default_sidebar_hover_open_enabled")]
-    pub sidebar_hover_open_enabled: bool, // Temporarily reveal collapsed sidebar from left edge
     #[serde(default = "default_keep_ai_servers_warm")]
     pub keep_ai_servers_warm: bool, // Keep Codex/OpenCode servers alive briefly after a request
     #[serde(default)]
@@ -283,8 +280,6 @@ pub struct AppPreferences {
     pub auto_delete_worktree_on_pr_merged: bool, // Delete a worktree when its linked PR is merged (default: true)
     #[serde(default)]
     pub debug_mode_enabled: bool, // Show debug panel in chat sessions (default: false)
-    #[serde(default)]
-    pub agents_enabled: bool, // Experimental: show the Agents tab (default: false)
     #[serde(default)]
     pub default_enabled_mcp_servers: Vec<String>, // MCP server names enabled by default (empty = none)
     #[serde(default)]
@@ -692,10 +687,6 @@ fn default_file_edit_mode() -> String {
     "inline".to_string() // Default to Jean's Pierre inline editor
 }
 
-fn default_sidebar_hover_open_enabled() -> bool {
-    false // Opt-in for new and existing installs
-}
-
 fn default_keep_ai_servers_warm() -> bool {
     true // Enabled by default to make follow-up requests start faster
 }
@@ -818,7 +809,7 @@ fn maybe_auto_select_system_cli_preferences(
 }
 
 fn default_codex_model() -> String {
-    "gpt-6.1-sol".to_string()
+    "gpt-6.2-sol".to_string()
 }
 
 fn default_opencode_model() -> String {
@@ -1001,9 +992,9 @@ mod tests {
         default_global_system_prompt_without_security, default_model,
         default_parallel_execution_prompt, effective_global_system_prompt,
         is_legacy_default_global_system_prompt,
-        legacy_parallel_execution_prompt_before_subagent_strategy, normalize_browser_default_host,
-        parse_cli_args_from, preferences_file_contents, resolve_headless_bind_host,
-        resolve_headless_token_required, resolve_http_server_bind_host,
+        legacy_parallel_execution_prompt_before_subagent_strategy, merge_preferences_patch,
+        normalize_browser_default_host, parse_cli_args_from, preferences_file_contents,
+        resolve_headless_bind_host, resolve_headless_token_required, resolve_http_server_bind_host,
         resolve_stored_parallel_execution_prompt, server_preferences_value,
         should_auto_select_cli_source, upgrade_legacy_parallel_execution_prompt,
         validate_headless_security, AppPreferences, MagicPrompts,
@@ -1043,6 +1034,16 @@ mod tests {
         assert_eq!(value["linear_api_key_configured"], json!(true));
         assert!(value.get("http_server_token").is_none());
         assert_eq!(value["http_server_token_configured"], json!(true));
+    }
+
+    #[test]
+    fn preference_patch_with_an_old_key_sets_the_renamed_field() {
+        let current = AppPreferences::default();
+
+        let merged =
+            merge_preferences_patch(&current, &json!({ "gemini_cli_source": "path" })).unwrap();
+
+        assert_eq!(merged.antigravity_cli_source, "path");
     }
 
     #[test]
@@ -1351,26 +1352,6 @@ mod tests {
             custom_prompts.parallel_execution.as_deref(),
             Some("Custom parallel prompt.")
         );
-    }
-
-    #[test]
-    fn sidebar_hover_open_defaults_off() {
-        let prefs = AppPreferences::default();
-
-        assert!(!prefs.sidebar_hover_open_enabled);
-    }
-
-    #[test]
-    fn sidebar_hover_open_defaults_off_for_existing_preferences() {
-        let mut value = serde_json::to_value(AppPreferences::default()).unwrap();
-        value
-            .as_object_mut()
-            .unwrap()
-            .remove("sidebar_hover_open_enabled");
-
-        let prefs: AppPreferences = serde_json::from_value(value).unwrap();
-
-        assert!(!prefs.sidebar_hover_open_enabled);
     }
 
     #[test]
@@ -2828,7 +2809,7 @@ const PREVIOUS_DEFAULT_GLOBAL_SYSTEM_PROMPT: &str = r#"Always use ASD-STE100 Sim
 - Write detailed specs upfront to reduce ambiguity
 - Keep plans concise but complete enough for zero-context handoff (Full access/Build in a new worktree must not require re-scanning the repo). Prefer short wording over thin checklists.
 - When the current execution mode is plan, use the backend's native plan tool/UI call when available (Claude ExitPlanMode, Codex `<proposed_plan>` / collaboration Plan mode, Cursor/OpenCode equivalent), not plain text only.
-- For unresolved questions while planning, prefer the backend-native interactive question UI instead of plain text when available: Claude AskUserQuestion, Codex request_user_input, OpenCode question. If no such interactive question tool is present in your current tool set (headless/`--print` runs may omit Claude AskUserQuestion), do NOT skip the question and do NOT dead-end on a tool search — instead ask inline in this exact format: one line with the question, then the line `Reply with a number:`, then a numbered list (`1.`, `2.`, `3.`...) of 2 to 8 short options, one option per line. Jean shows these options as buttons. If you end with a `## Recap`, put this question at the end of the recap, not before it.
+- For unresolved questions while planning, prefer the backend-native interactive question UI instead of plain text when available: Claude AskUserQuestion, Codex request_user_input, OpenCode question. If no such interactive question tool is present in your current tool set (headless/`--print` runs may omit Claude AskUserQuestion), do NOT skip the question and do NOT dead-end on a tool search — instead ask inline in this exact format: one line with the question, then the line `Reply with a number:`, then a numbered list (`1.`, `2.`, `3.`...) of 2 to 8 short options, one option per line. Use `Reply with one or more numbers:` when several options can apply. For several questions, repeat this block per question. Jean shows these options as buttons. If you end with a `## Recap`, put this question at the end of the recap, not before it.
 - For Codex specifically, when the current execution mode is plan: do not write plan files or code; when the plan is ready wrap it in `<proposed_plan>...</proposed_plan>` so Jean can show the approval UI. Do not use the `update_plan` checklist tool in plan mode.
 - Every Codex response that contains or revises a plan while the current execution mode is plan must use a complete `<proposed_plan>` block (or a native plan item); do not provide plain-text-only plans, and do not attempt file writes.
 - Use a plain-text Unresolved Questions section only for non-actionable notes or when the backend cannot ask interactively.
@@ -3581,7 +3562,6 @@ impl Default for AppPreferences {
             applied_keybinding_migrations: Vec::new(),
             syntax_theme_dark: default_syntax_theme_dark(),
             syntax_theme_light: default_syntax_theme_light(),
-            sidebar_hover_open_enabled: default_sidebar_hover_open_enabled(),
             keep_ai_servers_warm: default_keep_ai_servers_warm(),
             magic_prompts: MagicPrompts::default(),
             magic_prompt_models: MagicPromptModels::default(),
@@ -3608,7 +3588,6 @@ impl Default for AppPreferences {
             auto_pull_base_branch: default_auto_pull_base_branch(),
             auto_delete_worktree_on_pr_merged: default_auto_delete_worktree_on_pr_merged(),
             debug_mode_enabled: false,
-            agents_enabled: false,
             default_effort_level: default_effort_level(),
             default_enabled_mcp_servers: Vec::new(),
             known_mcp_servers: Vec::new(),
@@ -3794,25 +3773,9 @@ pub struct UIState {
     #[serde(default)]
     pub review_sidebar_visible: Option<bool>,
 
-    /// Modal terminal drawer open state per worktree
+    /// Right panel terminal tab open state per worktree
     #[serde(default)]
     pub modal_terminal_open: std::collections::HashMap<String, bool>,
-
-    /// Modal terminal dock mode
-    #[serde(default)]
-    pub modal_terminal_dock_mode: Option<String>,
-
-    /// Legacy pinned state; maps to right dock when true
-    #[serde(default)]
-    pub modal_terminal_pinned: Option<bool>,
-
-    /// Modal terminal width in pixels for left/right dock
-    #[serde(default)]
-    pub modal_terminal_width: Option<f64>,
-
-    /// Modal terminal height in pixels for bottom dock
-    #[serde(default)]
-    pub modal_terminal_height: Option<f64>,
 
     /// Terminal instances persisted per worktree for restoration after web refresh
     #[serde(default)]
@@ -3850,37 +3813,9 @@ pub struct UIState {
     #[serde(default)]
     pub browser_active_tab_ids: std::collections::HashMap<String, String>,
 
-    /// Browser side-pane open state per worktree
-    #[serde(default)]
-    pub browser_side_pane_open: std::collections::HashMap<String, bool>,
-
-    /// Browser side-pane width in pixels (global)
-    #[serde(default)]
-    pub browser_side_pane_width: Option<f64>,
-
-    /// Browser modal drawer open state per worktree
+    /// Right panel browser tab open state per worktree
     #[serde(default)]
     pub browser_modal_open: std::collections::HashMap<String, bool>,
-
-    /// Browser modal drawer dock mode
-    #[serde(default)]
-    pub browser_modal_dock_mode: Option<String>,
-
-    /// Browser modal drawer width in pixels for left/right dock
-    #[serde(default)]
-    pub browser_modal_width: Option<f64>,
-
-    /// Browser modal drawer height in pixels for bottom dock
-    #[serde(default)]
-    pub browser_modal_height: Option<f64>,
-
-    /// Browser bottom panel open state per worktree
-    #[serde(default)]
-    pub browser_bottom_panel_open: std::collections::HashMap<String, bool>,
-
-    /// Browser bottom panel height in pixels (global)
-    #[serde(default)]
-    pub browser_bottom_panel_height: Option<f64>,
 
     /// Last-accessed timestamps per project for recency sorting (projectId → unix ms)
     #[serde(default)]
@@ -3906,10 +3841,6 @@ pub struct UIState {
     /// Failed-run badges only count runs not present in this list.
     #[serde(default)]
     pub seen_failed_workflow_run_ids: Vec<u64>,
-
-    /// Agent ID → newest agent update time (Unix seconds) the user has seen
-    #[serde(default)]
-    pub agent_updates_seen_at: std::collections::HashMap<String, u64>,
 
     /// Sessions armed for auto-continue after a usage limit resets
     #[serde(default)]
@@ -4053,10 +3984,6 @@ impl Default for UIState {
             expanded_queued_prompts_sessions: Vec::new(),
             review_sidebar_visible: None,
             modal_terminal_open: std::collections::HashMap::new(),
-            modal_terminal_dock_mode: None,
-            modal_terminal_pinned: None,
-            modal_terminal_width: None,
-            modal_terminal_height: None,
             terminal_instances: std::collections::HashMap::new(),
             terminal_active_ids: std::collections::HashMap::new(),
             terminal_panel_open: std::collections::HashMap::new(),
@@ -4066,21 +3993,13 @@ impl Default for UIState {
             session_primary_surface: std::collections::HashMap::new(),
             browser_tabs: std::collections::HashMap::new(),
             browser_active_tab_ids: std::collections::HashMap::new(),
-            browser_side_pane_open: std::collections::HashMap::new(),
-            browser_side_pane_width: None,
             browser_modal_open: std::collections::HashMap::new(),
-            browser_modal_dock_mode: None,
-            browser_modal_width: None,
-            browser_modal_height: None,
-            browser_bottom_panel_open: std::collections::HashMap::new(),
-            browser_bottom_panel_height: None,
             project_access_timestamps: std::collections::HashMap::new(),
             dashboard_worktree_collapse_overrides: std::collections::HashMap::new(),
             project_canvas_settings: std::collections::HashMap::new(),
             pinned_recent_session_ids: Vec::new(),
             last_opened_per_project: std::collections::HashMap::new(),
             seen_failed_workflow_run_ids: Vec::new(),
-            agent_updates_seen_at: std::collections::HashMap::new(),
             auto_resume: Vec::new(),
             git_diff_view_mode: None,
             version: default_ui_state_version(),
@@ -4340,16 +4259,38 @@ async fn save_preferences(app: AppHandle, mut preferences: AppPreferences) -> Re
 /// This avoids race conditions when multiple components save concurrently.
 async fn patch_preferences(app: AppHandle, patch: Value) -> Result<(), String> {
     let current = load_preferences(app.clone()).await?;
+    let merged = merge_preferences_patch(&current, &patch)?;
+    save_preferences(app, merged).await
+}
+
+/// Old key → current key for renamed preferences (the `#[serde(alias)]` pairs).
+/// A patch from an older client still uses the old key. Merged as-is, the
+/// object would hold both keys and serde rejects it as a duplicate field.
+const RENAMED_PREFERENCE_KEYS: &[(&str, &str)] = &[
+    ("selected_gemini_model", "selected_antigravity_model"),
+    (
+        "gemini_auto_steer_enabled",
+        "antigravity_auto_steer_enabled",
+    ),
+    ("gemini_cli_source", "antigravity_cli_source"),
+];
+
+fn merge_preferences_patch(
+    current: &AppPreferences,
+    patch: &Value,
+) -> Result<AppPreferences, String> {
     let mut current_json =
-        serde_json::to_value(&current).map_err(|e| format!("Serialize error: {e}"))?;
+        serde_json::to_value(current).map_err(|e| format!("Serialize error: {e}"))?;
     if let (Some(base), Some(patch_obj)) = (current_json.as_object_mut(), patch.as_object()) {
         for (key, value) in patch_obj {
-            base.insert(key.clone(), value.clone());
+            let key = RENAMED_PREFERENCE_KEYS
+                .iter()
+                .find(|(old, _)| old == key)
+                .map_or(key.as_str(), |(_, new)| *new);
+            base.insert(key.to_string(), value.clone());
         }
     }
-    let merged: AppPreferences =
-        serde_json::from_value(current_json).map_err(|e| format!("Merge error: {e}"))?;
-    save_preferences(app, merged).await
+    serde_json::from_value(current_json).map_err(|e| format!("Merge error: {e}"))
 }
 
 const SERVER_PREFERENCES_SCHEMA_VERSION: u32 = 1;
@@ -4743,6 +4684,32 @@ mod ui_state_pin_tests {
 
     fn write_state(path: &std::path::Path, ui_state: &UIState) {
         std::fs::write(path, serde_json::to_string_pretty(ui_state).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn reads_state_saved_with_removed_dock_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ui-state.json");
+        std::fs::write(
+            &path,
+            r#"{
+                "active_worktree_id": "worktree-1",
+                "modal_terminal_open": { "worktree-1": true },
+                "modal_terminal_dock_mode": "right",
+                "modal_terminal_pinned": true,
+                "modal_terminal_width": 480,
+                "browser_side_pane_open": { "worktree-1": true },
+                "browser_modal_dock_mode": "bottom",
+                "browser_bottom_panel_open": { "worktree-1": true },
+                "browser_bottom_panel_height": 390
+            }"#,
+        )
+        .unwrap();
+
+        let state = read_ui_state_file(&path).unwrap();
+
+        assert_eq!(state.active_worktree_id.as_deref(), Some("worktree-1"));
+        assert_eq!(state.modal_terminal_open.get("worktree-1"), Some(&true));
     }
 
     #[test]
@@ -5618,32 +5585,15 @@ pub fn initialize_runtime(context: &RuntimeContext) -> Result<(), String> {
         None::<jean_mcp_socket::JeanMcpSocketHandle>,
     )));
 
-    if let Err(error) = chat::wakeup::load_all_from_disk(context) {
-        log::warn!("Failed to restore scheduled wakeups: {error}");
-    }
-    // Finish runs orphaned by a crash/reboot before any client connects.
-    // Headless servers otherwise only recover on a full page load, so an
-    // open web tab that just reconnects keeps showing the dead run as running.
-    // Runs whose detached host survived the restart are resumed here, by the
-    // server that owns them, so a headless server with no client (or only a
-    // native desktop connected remotely) keeps tailing them.
-    match chat::run_log::recover_incomplete_runs(context) {
-        Ok(recovered) => chat::resume_recovered_runs(context.clone(), recovered),
-        Err(error) => log::warn!("Failed to recover incomplete runs: {error}"),
-    }
-    // Delegated runs that ended while Jean was closed still owe their origin
-    // an update. Live runs were just resumed above and report when they end.
-    chat::delegation::report_armed_links_on_startup(context);
+    // One background pass over session metadata restores wakeups, recovers
+    // and resumes runs, and reports delegated runs. Run-state readers wait
+    // for it; the headless server awaits it before accepting clients.
+    chat::startup_scan::start(context);
     let task_manager = background_tasks::BackgroundTaskManager::new(context.clone());
     task_manager.start();
     context.manage(task_manager);
     chat::auth_failure::start_auth_failure_listener(context);
     auto_fix::scheduler::start_auto_fix_scheduler(context.clone());
-    // Agents keep working without clients: open their database and start the loop.
-    match agents::init(context) {
-        Ok(()) => agents::start(context.clone()),
-        Err(error) => log::error!("Agents are unavailable: {error}"),
-    }
 
     // Closed sessions stay on disk for DELETED_ITEM_RETENTION_DAYS. Purge once
     // now and then daily, for the desktop app and the headless server alike.
@@ -5668,6 +5618,13 @@ pub fn initialize_runtime(context: &RuntimeContext) -> Result<(), String> {
 
     let cleanup_context = context.clone();
     async_runtime::spawn_blocking(move || {
+        // The orphan cleanups keep a server that unfinished runs still need,
+        // so they must see the runs as startup recovery left them.
+        if let Err(error) = chat::run_state_index::RunStateIndex::for_app(&cleanup_context)
+            .ensure_loaded(&cleanup_context)
+        {
+            log::warn!("Startup session scan unavailable for server cleanup: {error}");
+        }
         opencode_server::cleanup_orphaned_server(&cleanup_context);
         chat::codex_server::cleanup_orphaned_server(&cleanup_context);
         if let Err(error) = opinionated::cleanup_disallowed_opinionated_skills_on_startup() {
@@ -6060,6 +6017,11 @@ pub async fn run_server() -> Result<(), String> {
     platform::set_allow_native_open(cli.allow_native_open);
     let context = RuntimeContext::from_environment()?;
     initialize_runtime(&context)?;
+    // No client may connect before crashed runs are repaired: an open web tab
+    // that only reconnects would keep showing a dead run as running.
+    if let Err(error) = chat::startup_scan::finished(&context).await {
+        log::warn!("Startup session pass did not finish: {error}");
+    }
 
     let mut preferences = load_preferences(context.clone()).await.unwrap_or_default();
     if let Err(error) = sync_jean_mcp_socket_from_preferences(context.clone(), &preferences).await {

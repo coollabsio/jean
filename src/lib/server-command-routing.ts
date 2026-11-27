@@ -32,9 +32,6 @@ export const ROUTED_ARGUMENT_KEYS: ReadonlySet<string> = new Set([
   'target_session_id',
   'sourceWorktreeId',
   'source_worktree_id',
-  // Agents: each Jean server has its own agents
-  'agentId',
-  'agent_id',
 ])
 
 export const PATH_ARGUMENT_KEYS: ReadonlySet<string> = new Set([
@@ -245,9 +242,7 @@ export const COMMAND_OWNERS: Record<
   get_review_job: { owner: ['worktreeId', 'worktreePath'] },
   cancel_review_job: { owner: ['worktreeId', 'worktreePath'] },
   cancel_review_with_ai: { owner: ['worktreeId', 'worktreePath'] },
-  decide_agent_approval: { owner: ['agentId'] },
-  install_agent_template: { owner: ['agentId'] },
-  revert_agent_change: { owner: ['agentId'] },
+  start_prompt_on_models: { owner: ['projectId'] },
   attach_session_reference: { routeBy: ['targetSessionId'] },
   reorder_projects: { fanOut: 'projectIds' },
   set_sessions_last_opened_bulk: { fanOut: 'sessionIds' },

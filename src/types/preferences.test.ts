@@ -28,6 +28,7 @@ import {
   PI_DEFAULT_MAGIC_PROMPT_MODELS,
   resolveMagicPromptBackend,
   resolveMagicPromptProvider,
+  fromProviderAliasModel,
   toProviderAliasModel,
 } from './preferences'
 
@@ -60,10 +61,6 @@ describe('magic prompt preference resolvers', () => {
 
   it('defaults font weight to normal', () => {
     expect(defaultPreferences.font_weight).toBe('normal')
-  })
-
-  it('keeps collapsed sidebar edge hover off by default', () => {
-    expect(defaultPreferences.sidebar_hover_open_enabled).toBe(false)
   })
 
   it('uses Jean-managed Command Code CLI by default', () => {
@@ -140,7 +137,7 @@ describe('magic prompt preference resolvers', () => {
 
   it('defaults Claude to Opus 5.5 and Codex/OpenCode to GPT 6.1 Sol', () => {
     expect(defaultPreferences.selected_model).toBe('claude-opus-5-5')
-    expect(defaultPreferences.selected_codex_model).toBe('gpt-6.1-sol')
+    expect(defaultPreferences.selected_codex_model).toBe('gpt-6.2-sol')
     expect(defaultPreferences.selected_opencode_model).toBe(
       'opencode/gpt-6.1-sol'
     )
@@ -308,6 +305,19 @@ describe('toProviderAliasModel', () => {
     expect(toProviderAliasModel('opus')).toBe('opus')
     expect(toProviderAliasModel('claude-fable-5-2')).toBe('claude-fable-5-2')
     expect(toProviderAliasModel('glm-4.7')).toBe('glm-4.7')
+  })
+})
+
+describe('fromProviderAliasModel', () => {
+  it('maps a provider alias to the newest first-party id of its family', () => {
+    expect(fromProviderAliasModel('opus')).toBe('claude-opus-5-5')
+    expect(fromProviderAliasModel('sonnet')).toBe('claude-sonnet-5-5')
+  })
+
+  it('keeps aliases in the model list, full ids, and other models', () => {
+    expect(fromProviderAliasModel('haiku')).toBe('haiku')
+    expect(fromProviderAliasModel('claude-opus-4-8')).toBe('claude-opus-4-8')
+    expect(fromProviderAliasModel('glm-4.7')).toBe('glm-4.7')
   })
 })
 

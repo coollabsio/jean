@@ -4,6 +4,7 @@ import {
   ChevronsUpDown,
   GitBranch,
   GitFork,
+  Layers,
   Loader2,
   Plus,
   Settings,
@@ -38,6 +39,7 @@ import {
   type JeanConfig,
   type ProjectRemote,
 } from '@/services/projects'
+import { MultiModelPromptDialog } from './MultiModelPromptDialog'
 
 export interface QuickActionsTabProps {
   hasBaseSession: boolean
@@ -99,6 +101,7 @@ export function QuickActionsTab({
     defaultBranch ?? ''
   )
   const [baseBranchOpen, setBaseBranchOpen] = useState(false)
+  const [multiModelOpen, setMultiModelOpen] = useState(false)
   const setupScript = jeanConfig?.scripts.setup
   const runScripts = normalizeRunScripts(jeanConfig?.scripts.run)
 
@@ -371,37 +374,95 @@ export function QuickActionsTab({
   )
 
   return (
-    <div className="flex flex-col items-center justify-center flex-1 p-4 sm:p-10">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 w-full max-w-xl">
-        {hasRemoteOptions ? (
-          remoteOptions.map((remote, index) => {
-            const baseBranch = `${remote.name}/${effectiveBaseBranch ?? defaultBranch}`
-            const RemoteIcon = index === 0 ? Plus : GitFork
-            return (
+    <div className="flex flex-col flex-1 min-h-0 overflow-y-auto">
+      {/* m-auto centers when content fits and keeps the top reachable when it overflows */}
+      <div className="m-auto flex flex-col items-center w-full p-4 sm:p-10">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 w-full max-w-xl">
+          {hasRemoteOptions ? (
+            remoteOptions.map((remote, index) => {
+              const baseBranch = `${remote.name}/${effectiveBaseBranch ?? defaultBranch}`
+              const RemoteIcon = index === 0 ? Plus : GitFork
+              return (
+                <button
+                  type="button"
+                  key={remote.name}
+                  onClick={() => handleCreateClick(baseBranch)}
+                  disabled={isCreating || isInvalid || !effectiveBaseBranch}
+                  className={cn(
+                    'relative flex flex-col items-center justify-center gap-3 sm:gap-4 p-4 sm:p-8 sm:h-full rounded-xl text-sm transition-colors',
+                    'hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring',
+                    'border border-border bg-card disabled:opacity-50'
+                  )}
+                >
+                  {isCreating ? (
+                    <Loader2 className="h-10 w-10 shrink-0 text-muted-foreground animate-spin" />
+                  ) : (
+                    <RemoteIcon className="h-10 w-10 shrink-0 text-muted-foreground" />
+                  )}
+                  <div className="flex flex-col items-center gap-1.5">
+                    <span className="font-medium text-base font-mono">
+                      {baseBranch}
+                    </span>
+                    <span className="text-xs text-muted-foreground text-center">
+                      {remote.repo
+                        ? `New worktree from ${remote.repo}`
+                        : `New worktree from the "${remote.name}" remote`}
+                    </span>
+                    {setupScript && (
+                      <span className="text-xs text-muted-foreground/70 font-mono truncate max-w-[200px]">
+                        Setup: {setupScript}
+                      </span>
+                    )}
+                  </div>
+                  {index === 0 && (
+                    <Kbd className="absolute top-3 right-3">N</Kbd>
+                  )}
+                </button>
+              )
+            })
+          ) : (
+            <>
+              {/* Base Session button */}
               <button
                 type="button"
-                key={remote.name}
-                onClick={() => handleCreateClick(baseBranch)}
-                disabled={isCreating || isInvalid || !effectiveBaseBranch}
+                onClick={onBaseSession}
+                disabled={isCreating}
                 className={cn(
-                  'relative flex flex-col items-center justify-center gap-3 sm:gap-4 p-4 sm:p-8 sm:h-full rounded-xl text-sm transition-colors',
+                  'relative flex flex-col items-center justify-center gap-4 p-4 sm:p-8 sm:h-full rounded-xl text-sm transition-colors',
                   'hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring',
-                  'border border-border bg-card disabled:opacity-50'
+                  'border border-border bg-card'
+                )}
+              >
+                <GitBranch className="h-10 w-10 shrink-0 text-muted-foreground" />
+                <div className="flex flex-col items-center gap-1.5">
+                  <span className="font-medium text-base">
+                    {hasBaseSession
+                      ? 'Switch to Base Session'
+                      : 'New Base Session'}
+                  </span>
+                  <span className="text-xs text-muted-foreground text-center">
+                    Work directly on the project folder
+                  </span>
+                </div>
+                <Kbd className="absolute top-3 right-3">M</Kbd>
+              </button>
+
+              {/* New Worktree button */}
+              <div
+                className={cn(
+                  'relative flex flex-col items-center justify-center gap-3 sm:gap-4 sm:h-full p-4 sm:p-8 rounded-xl text-sm transition-colors',
+                  'border border-border bg-card'
                 )}
               >
                 {isCreating ? (
                   <Loader2 className="h-10 w-10 shrink-0 text-muted-foreground animate-spin" />
                 ) : (
-                  <RemoteIcon className="h-10 w-10 shrink-0 text-muted-foreground" />
+                  <Plus className="h-10 w-10 shrink-0 text-muted-foreground" />
                 )}
                 <div className="flex flex-col items-center gap-1.5">
-                  <span className="font-medium text-base font-mono">
-                    {baseBranch}
-                  </span>
+                  <span className="font-medium text-base">New Worktree</span>
                   <span className="text-xs text-muted-foreground text-center">
-                    {remote.repo
-                      ? `New worktree from ${remote.repo}`
-                      : `New worktree from the "${remote.name}" remote`}
+                    Create an isolated branch for your task
                   </span>
                   {setupScript && (
                     <span className="text-xs text-muted-foreground/70 font-mono truncate max-w-[200px]">
@@ -409,129 +470,94 @@ export function QuickActionsTab({
                     </span>
                   )}
                 </div>
-                {index === 0 && <Kbd className="absolute top-3 right-3">N</Kbd>}
-              </button>
-            )
-          })
-        ) : (
-          <>
-            {/* Base Session button */}
+                {baseBranchPicker}
+                {branchNameInput}
+                <button
+                  type="button"
+                  onClick={() => handleCreateClick()}
+                  disabled={isCreating || isInvalid}
+                  className={cn(
+                    'px-3 py-1 rounded text-xs transition-colors',
+                    'bg-primary text-primary-foreground hover:bg-primary/90',
+                    'focus:outline-none focus:ring-2 focus:ring-ring',
+                    'disabled:opacity-50'
+                  )}
+                >
+                  Create
+                </button>
+                <Kbd className="absolute top-3 right-3">N</Kbd>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Shared base branch + branch name for the per-remote actions */}
+        {hasRemoteOptions && (
+          <div className="flex flex-col items-center gap-2 mt-6">
+            {baseBranchPicker}
+            {branchNameInput}
+          </div>
+        )}
+
+        <div
+          className={cn(
+            'flex-wrap justify-center items-center gap-1 mt-6',
+            hasRemoteOptions || projectId ? 'flex' : 'hidden'
+          )}
+        >
+          {/* Base session stays available, just not as a headline action */}
+          {hasRemoteOptions && (
             <button
               type="button"
               onClick={onBaseSession}
               disabled={isCreating}
-              className={cn(
-                'relative flex flex-col items-center justify-center gap-4 p-4 sm:p-8 sm:h-full rounded-xl text-sm transition-colors',
-                'hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring',
-                'border border-border bg-card'
-              )}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs text-muted-foreground/40 hover:text-foreground hover:bg-accent cursor-pointer transition-colors disabled:opacity-50"
             >
-              <GitBranch className="h-10 w-10 shrink-0 text-muted-foreground" />
-              <div className="flex flex-col items-center gap-1.5">
-                <span className="font-medium text-base">
-                  {hasBaseSession
-                    ? 'Switch to Base Session'
-                    : 'New Base Session'}
-                </span>
-                <span className="text-xs text-muted-foreground text-center">
-                  Work directly on the project folder
-                </span>
-              </div>
-              <Kbd className="absolute top-3 right-3">M</Kbd>
+              <GitBranch className="h-4 w-4" />
+              <span>
+                {hasBaseSession ? 'Switch to Base Session' : 'New Base Session'}
+              </span>
             </button>
+          )}
 
-            {/* New Worktree button */}
-            <div
-              className={cn(
-                'relative flex flex-col items-center justify-center gap-3 sm:gap-4 sm:h-full p-4 sm:p-8 rounded-xl text-sm transition-colors',
-                'border border-border bg-card'
-              )}
+          {projectId && (
+            <button
+              type="button"
+              onClick={() => setMultiModelOpen(true)}
+              disabled={isCreating}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs text-muted-foreground/40 hover:text-foreground hover:bg-accent cursor-pointer transition-colors disabled:opacity-50"
             >
-              {isCreating ? (
-                <Loader2 className="h-10 w-10 shrink-0 text-muted-foreground animate-spin" />
-              ) : (
-                <Plus className="h-10 w-10 shrink-0 text-muted-foreground" />
-              )}
-              <div className="flex flex-col items-center gap-1.5">
-                <span className="font-medium text-base">New Worktree</span>
-                <span className="text-xs text-muted-foreground text-center">
-                  Create an isolated branch for your task
-                </span>
-                {setupScript && (
-                  <span className="text-xs text-muted-foreground/70 font-mono truncate max-w-[200px]">
-                    Setup: {setupScript}
-                  </span>
-                )}
-              </div>
-              {baseBranchPicker}
-              {branchNameInput}
-              <button
-                type="button"
-                onClick={() => handleCreateClick()}
-                disabled={isCreating || isInvalid}
-                className={cn(
-                  'px-3 py-1 rounded text-xs transition-colors',
-                  'bg-primary text-primary-foreground hover:bg-primary/90',
-                  'focus:outline-none focus:ring-2 focus:ring-ring',
-                  'disabled:opacity-50'
-                )}
-              >
-                Create
-              </button>
-              <Kbd className="absolute top-3 right-3">N</Kbd>
-            </div>
-          </>
-        )}
-      </div>
+              <Layers className="h-4 w-4" />
+              <span>Prompt multiple models</span>
+            </button>
+          )}
 
-      {/* Shared base branch + branch name for the per-remote actions */}
-      {hasRemoteOptions && (
-        <div className="flex flex-col items-center gap-2 mt-6">
-          {baseBranchPicker}
-          {branchNameInput}
+          {/* Configure jean.json - only show when not configured */}
+          {runScripts.length === 0 && projectId && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={handleRunClick}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs text-muted-foreground/40 hover:text-foreground hover:bg-accent cursor-pointer transition-colors"
+                >
+                  <Settings className="h-4 w-4" />
+                  <span>Configure jean.json</span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Configure jean.json</TooltipContent>
+            </Tooltip>
+          )}
         </div>
-      )}
-
-      <div
-        className={cn(
-          'items-center gap-1 mt-6',
-          hasRemoteOptions || (runScripts.length === 0 && projectId)
-            ? 'flex'
-            : 'hidden'
-        )}
-      >
-        {/* Base session stays available, just not as a headline action */}
-        {hasRemoteOptions && (
-          <button
-            type="button"
-            onClick={onBaseSession}
-            disabled={isCreating}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs text-muted-foreground/40 hover:text-foreground hover:bg-accent cursor-pointer transition-colors disabled:opacity-50"
-          >
-            <GitBranch className="h-4 w-4" />
-            <span>
-              {hasBaseSession ? 'Switch to Base Session' : 'New Base Session'}
-            </span>
-          </button>
-        )}
-
-        {/* Configure jean.json - only show when not configured */}
-        {runScripts.length === 0 && projectId && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={handleRunClick}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs text-muted-foreground/40 hover:text-foreground hover:bg-accent cursor-pointer transition-colors"
-              >
-                <Settings className="h-4 w-4" />
-                <span>Configure jean.json</span>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">Configure jean.json</TooltipContent>
-          </Tooltip>
-        )}
       </div>
+      {/* Mounted only while open so its model queries stay idle. */}
+      {projectId && multiModelOpen && (
+        <MultiModelPromptDialog
+          open
+          onOpenChange={setMultiModelOpen}
+          projectId={projectId}
+        />
+      )}
     </div>
   )
 }

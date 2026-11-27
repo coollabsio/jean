@@ -10,12 +10,18 @@ import {
   type MouseEvent,
   type RefObject,
 } from 'react'
+import { createPortal } from 'react-dom'
+import {
+  TITLEBAR_BREADCRUMB_SLOT_ID,
+  TITLEBAR_ACTIONS_SLOT_ID,
+  TITLEBAR_PROJECT_MENU_SLOT_ID,
+  useTitleBarSlot,
+} from '@/components/titlebar/breadcrumb-slot'
 import {
   GitBranchPlus,
   GitPullRequestArrow,
-  Globe,
   Plus,
-  Terminal,
+  X,
 } from '@/components/icons/reicon'
 import { ModalCloseButton } from '@/components/ui/modal-close-button'
 import { cn } from '@/lib/utils'
@@ -48,10 +54,8 @@ import {
   useCloseSession,
   useCloseSessions,
 } from '@/services/chat'
-import { usePreferences } from '@/services/preferences'
 import { useQueryClient } from '@tanstack/react-query'
 import { useHoverIntent } from '@/hooks/useHoverIntent'
-import { LOCAL_SERVER_ID } from '@/types/server-resource'
 import { usePackageScripts, type PackageScript } from '@/services/projects'
 import { useGitHubPRs } from '@/services/github'
 import { usePrStatus } from '@/services/pr-status'
@@ -69,15 +73,9 @@ import { isNativeApp } from '@/lib/environment'
 import { isImeComposingEvent } from '@/lib/ime-composition'
 import { toast } from 'sonner'
 import { ChatWindow } from './ChatWindow'
-import { ModalTerminalDrawer } from './ModalTerminalDrawer'
-import { TerminalActivityIcon } from './TerminalActivityIcon'
-import { useWorktreeTerminalStatus } from '@/hooks/useWorktreeTerminalStatus'
-import { ModalBrowserDrawer } from '@/components/browser/ModalBrowserDrawer'
-import { OpenInButton } from '@/components/open-in/OpenInButton'
-import { ScriptsButton } from '@/components/open-in/ScriptsButton'
 import { DevToolsDropdown } from './DevToolsDropdown'
 import { TerminalMagicButton } from './TerminalMagicButton'
-import { DEFAULT_KEYBINDINGS, formatShortcutDisplay } from '@/types/keybindings'
+import { formatShortcutDisplay } from '@/types/keybindings'
 import {
   createSessionCardDataCache,
   getResumeCommand,
@@ -89,6 +87,7 @@ import {
   decideSessionClose,
   finishedSubSessionIds,
   isActiveSessionGone,
+  groupRunningTabs,
   isSessionBusy,
   leadIdsOf,
   nestUnderLeads,
@@ -101,6 +100,7 @@ import {
 } from './session-lifecycle'
 import { useSubSessionStore } from '@/store/sub-session-store'
 import { DisclosureChevron } from '@/components/projects/DisclosureChevron'
+import { RunningSessionsTab } from './RunningSessionsTab'
 import { useCanvasStoreState } from './hooks/useCanvasStoreState'
 import {
   ContextMenu,
@@ -213,60 +213,6 @@ function HeaderPrLink({ worktree }: { worktree: Worktree }) {
   )
 }
 
-function HeaderSurfaceToggle({
-  label,
-  icon: Icon,
-  isOpen,
-  shortcut,
-  onClick,
-  active,
-}: {
-  label: string
-  icon: typeof Terminal
-  isOpen: boolean
-  shortcut: string | undefined
-  onClick: () => void
-  /** When set, the control shows a live-PTY badge and an active label. */
-  active?: boolean
-}) {
-  const activityLabel = active ? `${label} active` : label
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className={cn(
-            'text-muted-foreground hover:text-foreground',
-            isOpen && 'bg-muted text-foreground'
-          )}
-          aria-label={
-            active
-              ? `Toggle ${label.toLowerCase()} (active)`
-              : `Toggle ${label.toLowerCase()}`
-          }
-          aria-pressed={isOpen}
-          onClick={onClick}
-        >
-          {active === undefined ? (
-            <Icon className="h-4 w-4" />
-          ) : (
-            <TerminalActivityIcon active={active} className="h-4 w-4" />
-          )}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>
-        {activityLabel}
-        {isNativeApp() && (
-          <kbd className="ml-1 text-[0.625rem] opacity-60">
-            {formatShortcutDisplay(shortcut)}
-          </kbd>
-        )}
-      </TooltipContent>
-    </Tooltip>
-  )
-}
-
 interface SessionChatModalProps {
   worktreeId: string
   worktreePath: string
@@ -290,9 +236,6 @@ export const SessionChatModal = memo(function SessionChatModal({
   const isTouch = useIsTouchDevice()
   const isServer = !!project?.server
   const zenMode = useUIStore(state => state.zenMode)
-  const isModalTerminalOpen = useTerminalStore(
-    state => state.modalTerminalOpen[worktreeId] ?? false
-  )
   const leftSidebarVisible = useUIStore(state => state.leftSidebarVisible)
   // While the Recent list is visible, Cmd/Ctrl+1-9 opens Recent sessions,
   // so the session tab number hints are hidden.
@@ -304,23 +247,28 @@ export const SessionChatModal = memo(function SessionChatModal({
     isModOnlyHeld,
     isOpen && isNativeApp() && !isMobile && !recentShortcutsActive
   )
-  // Left-edge swipe right: open the sidebar without leaving the worktree.
+  // Left-edge swipe right: on mobile, go back to the worktree list. Elsewhere
+  // (tablets, or servers that have no worktree list), open the sidebar
+  // without leaving the worktree.
+  const swipeGoesBack = isMobile && !isServer
   const swipeOpenSidebar = useCallback(() => {
     useUIStore.getState().setLeftSidebarVisible(true)
   }, [])
   const swipe = useSwipeBack({
-    onSwipeBack: swipeOpenSidebar,
+    onSwipeBack: swipeGoesBack ? onClose : swipeOpenSidebar,
     enabled: isTouch && isOpen && !leftSidebarVisible,
     animateToEnd: false,
     visualFeedback: true,
   })
   useEffect(() => {
+    // Only drag the sidebar in when the swipe opens it.
+    if (swipeGoesBack) return
     useUIStore.getState().setLeftSidebarSwipe({
       isDragging: swipe.isSwiping,
       dragOffset: swipe.translateX,
       dragTransition: swipe.transitionStyle,
     })
-  }, [swipe.isSwiping, swipe.translateX, swipe.transitionStyle])
+  }, [swipeGoesBack, swipe.isSwiping, swipe.translateX, swipe.transitionStyle])
   useEffect(() => {
     return () => {
       useUIStore.getState().setLeftSidebarSwipe({
@@ -379,19 +327,19 @@ export const SessionChatModal = memo(function SessionChatModal({
   const { data: packageScripts = [] } = usePackageScripts(worktreePath, {
     worktreeId,
   })
-  const modalTerminalDockMode = useTerminalStore(
-    state => state.modalTerminalDockMode
+  const titleBarSlot = useTitleBarSlot(TITLEBAR_BREADCRUMB_SLOT_ID, !isMobile)
+  // Desktop: the worktree menu sits next to Settings and the actions on the
+  // right side of the window title bar, so the session header row goes away
+  const titleBarMenuSlot = useTitleBarSlot(
+    TITLEBAR_PROJECT_MENU_SLOT_ID,
+    !isMobile && !zenMode
   )
-  const hasBottomTerminal =
-    isModalTerminalOpen && modalTerminalDockMode === 'bottom'
-  const isBrowserModalOpen = useBrowserStore(
-    state => state.modalOpen[worktreeId] ?? false
+  const titleBarActionsSlot = useTitleBarSlot(
+    TITLEBAR_ACTIONS_SLOT_ID,
+    !isMobile && !zenMode
   )
-  const browserModalDockMode = useBrowserStore(state => state.modalDockMode)
-  const hasBottomBrowser =
-    isBrowserModalOpen && browserModalDockMode === 'bottom'
-  const hasBottomDock = hasBottomTerminal || hasBottomBrowser
-  const { hasActiveTerminal } = useWorktreeTerminalStatus(worktreeId)
+  const headerInTitleBar =
+    !!titleBarSlot && !!titleBarMenuSlot && !!titleBarActionsSlot
   // Horizontal scroll on session tabs
   const modalTabScrollRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -896,6 +844,11 @@ export const SessionChatModal = memo(function SessionChatModal({
     () => visibleTabs.map(tab => tab.item),
     [visibleTabs]
   )
+  // Running sessions other than the active one share a single last tab.
+  const tabRow = useMemo(
+    () => groupRunningTabs(visibleTabs, currentSessionId),
+    [visibleTabs, currentSessionId]
+  )
 
   // Opening a hidden sub-session (sidebar, Recent, notification) shows it.
   useEffect(() => {
@@ -1004,9 +957,6 @@ export const SessionChatModal = memo(function SessionChatModal({
   }, [isOpen, sortedSessions, currentSessionId, worktreeId])
 
   const pickRemoteOrRun = useRemotePicker(worktreePath, { worktreeId })
-
-  // Display preference of this client, not of the worktree's server
-  const { data: localPreferences } = usePreferences(LOCAL_SERVER_ID)
 
   const handleSync = useCallback(
     (e: React.MouseEvent) => {
@@ -1121,6 +1071,34 @@ export const SessionChatModal = memo(function SessionChatModal({
 
   if (!isOpen || !worktreeId) return null
 
+  // Desktop: the title sits in the window title bar, next to Settings.
+  const sessionTitle = (
+    <h2
+      className={cn(
+        'text-sm font-medium min-w-0 truncate',
+        !isMobile && !headerInTitleBar && 'flex-1'
+      )}
+    >
+      {project && !isMobile && !isServer && (
+        <span className="text-muted-foreground font-normal">
+          <button
+            type="button"
+            className="hover:text-foreground transition-colors cursor-pointer"
+            onClick={handleClose}
+          >
+            {project.name}
+          </button>
+          <span className="mx-1.5 text-muted-foreground/40">/</span>
+        </span>
+      )}
+      {isServer
+        ? project?.name
+        : isBase
+          ? 'Base Session'
+          : (worktree?.name ?? 'Worktree')}
+    </h2>
+  )
+
   const worktreeMenu = !zenMode && worktree && project && (
     <WorktreeDropdownMenu
       worktree={worktree}
@@ -1137,6 +1115,7 @@ export const SessionChatModal = memo(function SessionChatModal({
       packageScripts={packageScripts}
       onRunPackageScript={handlePackageScript}
       serverProject={project.server ? project : null}
+      inTitleBar={headerInTitleBar}
       onCloseSession={
         currentSessionId && !isServer
           ? () =>
@@ -1228,8 +1207,7 @@ export const SessionChatModal = memo(function SessionChatModal({
         ref={isTouch ? swipe.containerRef : undefined}
         className={cn(
           'absolute inset-0 z-10 flex min-w-0 overflow-hidden bg-background',
-          !isMobile && 'pb-2',
-          hasBottomDock ? 'flex-col' : 'flex-row'
+          !isMobile && 'pb-2'
         )}
         data-testid="session-chat-modal-swipe"
       >
@@ -1249,23 +1227,63 @@ export const SessionChatModal = memo(function SessionChatModal({
             />
           </div>
         )}
-        {isModalTerminalOpen && modalTerminalDockMode === 'left' && (
-          <ModalTerminalDrawer
-            worktreeId={worktreeId}
-            worktreePath={worktreePath}
-            dockMode="left"
-          />
-        )}
-        <ModalBrowserDrawer worktreeId={worktreeId} dockMode="left" />
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          {!zenMode && (
+          {!zenMode &&
+            headerInTitleBar &&
+            titleBarSlot &&
+            titleBarMenuSlot &&
+            titleBarActionsSlot && (
+              <>
+                {createPortal(
+                  <div className="flex min-w-0 items-center gap-2">
+                    {sessionTitle}
+                    {gitBadges}
+                  </div>,
+                  titleBarSlot
+                )}
+                {createPortal(worktreeMenu, titleBarMenuSlot)}
+                {createPortal(
+                  <>
+                    {currentSessionId && !project?.server && (
+                      <TerminalMagicButton sessionId={currentSessionId} />
+                    )}
+                    {currentSessionId && (
+                      <DevToolsDropdown
+                        sessionId={currentSessionId}
+                        worktreeId={worktreeId}
+                        worktreePath={worktreePath}
+                        session={currentSession}
+                      />
+                    )}
+                    {!isServer && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-xs"
+                            aria-label="Close"
+                            className="rounded-none text-foreground/70 hover:text-foreground"
+                            onClick={handleClose}
+                          >
+                            <X className="size-3.5" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Close</TooltipContent>
+                      </Tooltip>
+                    )}
+                  </>,
+                  titleBarActionsSlot
+                )}
+              </>
+            )}
+          {!zenMode && !headerInTitleBar && (
             <div className="shrink-0 sm:text-left">
               <div
                 className={cn(
                   // Container queries: the modal is narrower than the window
                   // when side panels are open, so buttons hide by header width.
-                  // Border sits inside the row so the height matches the project header
-                  '@container/header flex items-center justify-between gap-2 border-b border-border/20 px-4 py-2',
+                  '@container/header flex items-center justify-between gap-2 px-4 py-2',
                   MODAL_TERMINAL_PRIMARY_ROW_CLASS
                 )}
               >
@@ -1281,32 +1299,7 @@ export const SessionChatModal = memo(function SessionChatModal({
                       isMobile ? 'flex min-w-0 items-center gap-2' : 'contents'
                     )}
                   >
-                    <h2
-                      className={cn(
-                        'text-sm font-medium min-w-0 truncate',
-                        !isMobile && 'flex-1'
-                      )}
-                    >
-                      {project && !isMobile && !isServer && (
-                        <span className="text-muted-foreground font-normal">
-                          <button
-                            type="button"
-                            className="hover:text-foreground transition-colors cursor-pointer"
-                            onClick={handleClose}
-                          >
-                            {project.name}
-                          </button>
-                          <span className="mx-1.5 text-muted-foreground/40">
-                            /
-                          </span>
-                        </span>
-                      )}
-                      {isServer
-                        ? project?.name
-                        : isBase
-                          ? 'Base Session'
-                          : (worktree?.name ?? 'Worktree')}
-                    </h2>
+                    {sessionTitle}
                     {worktreeMenu}
                   </div>
                   {isMobile ? (
@@ -1342,48 +1335,8 @@ export const SessionChatModal = memo(function SessionChatModal({
                       {currentSessionId && !project?.server && (
                         <TerminalMagicButton sessionId={currentSessionId} />
                       )}
-                      {!isMobile && !project?.server && (
-                        <>
-                          <HeaderSurfaceToggle
-                            label="Terminal"
-                            icon={Terminal}
-                            isOpen={isModalTerminalOpen}
-                            active={hasActiveTerminal}
-                            shortcut={
-                              localPreferences?.keybindings?.toggle_terminal ??
-                              DEFAULT_KEYBINDINGS.toggle_terminal
-                            }
-                            onClick={handleToggleModalTerminal}
-                          />
-                          {isNativeApp() && (
-                            <HeaderSurfaceToggle
-                              label="Browser"
-                              icon={Globe}
-                              isOpen={isBrowserModalOpen}
-                              shortcut={
-                                localPreferences?.keybindings?.toggle_browser ??
-                                DEFAULT_KEYBINDINGS.toggle_browser
-                              }
-                              onClick={handleToggleModalBrowser}
-                            />
-                          )}
-                        </>
-                      )}
                       {/* Desktop: secondary tools that are not in the menu */}
                       <div className="hidden items-center gap-1 @3xl/header:flex">
-                        <OpenInButton
-                          worktreeId={worktreeId}
-                          worktreePath={worktreePath}
-                          serverId={worktree?.serverId}
-                          branch={worktree?.branch}
-                          server={project?.server}
-                        />
-                        <ScriptsButton
-                          projectId={worktree?.project_id}
-                          owner={{ worktreeId }}
-                          worktreePath={worktreePath}
-                          onRun={handlePackageScript}
-                        />
                         {currentSessionId && (
                           <DevToolsDropdown
                             sessionId={currentSessionId}
@@ -1413,7 +1366,7 @@ export const SessionChatModal = memo(function SessionChatModal({
           {!zenMode && showSessionTabs && (
             <div
               className={cn(
-                'relative flex shrink-0 items-center gap-0.5 border-b border-border/20 pr-4',
+                'relative flex shrink-0 items-start gap-0.5 border-b border-border/20 pr-4',
                 MODAL_TERMINAL_SECONDARY_ROW_CLASS
               )}
             >
@@ -1443,7 +1396,9 @@ export const SessionChatModal = memo(function SessionChatModal({
                   aria-label="Sessions"
                   className="flex min-w-max items-center gap-0 py-0 px-0"
                 >
-                  {visibleTabs.map((tab, idx) => {
+                  {tabRow.tabs.map(tab => {
+                    // Shortcut hints follow mod+N, which counts every tab.
+                    const idx = visibleTabs.indexOf(tab)
                     const card = tab.item
                     const session = card.session
                     const isActive = session.id === currentSessionId
@@ -1574,6 +1529,12 @@ export const SessionChatModal = memo(function SessionChatModal({
                       </ContextMenu>
                     )
                   })}
+                  {tabRow.running.length > 0 && (
+                    <RunningSessionsTab
+                      cards={tabRow.running.map(tab => tab.item)}
+                      onSelect={handleTabClick}
+                    />
+                  )}
                 </div>
                 <ScrollBar orientation="horizontal" className="h-1" />
               </ScrollArea>
@@ -1632,34 +1593,6 @@ export const SessionChatModal = memo(function SessionChatModal({
             )}
           </div>
         </div>
-
-        {isModalTerminalOpen && modalTerminalDockMode === 'right' && (
-          <ModalTerminalDrawer
-            worktreeId={worktreeId}
-            worktreePath={worktreePath}
-            dockMode="right"
-          />
-        )}
-        <ModalBrowserDrawer worktreeId={worktreeId} dockMode="right" />
-        {isModalTerminalOpen && modalTerminalDockMode === 'bottom' && (
-          <ModalTerminalDrawer
-            worktreeId={worktreeId}
-            worktreePath={worktreePath}
-            dockMode="bottom"
-          />
-        )}
-        {/* Browser bottom drawer sits at outer-flex bottom row alongside
-            terminal-bottom; outer flex flips to flex-col when either is
-            docked at bottom (see hasBottomDock). */}
-        <ModalBrowserDrawer worktreeId={worktreeId} dockMode="bottom" />
-        {modalTerminalDockMode === 'floating' && (
-          <ModalTerminalDrawer
-            worktreeId={worktreeId}
-            worktreePath={worktreePath}
-            dockMode="floating"
-          />
-        )}
-        <ModalBrowserDrawer worktreeId={worktreeId} dockMode="floating" />
       </div>
       <LabelModal
         isOpen={labelModalOpen}

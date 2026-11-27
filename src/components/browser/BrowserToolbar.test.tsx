@@ -53,9 +53,7 @@ describe('BrowserToolbar grab control', () => {
     useBrowserStore.setState({
       tabs: {},
       activeTabIds: {},
-      sidePaneOpen: {},
       modalOpen: {},
-      bottomPanelOpen: {},
     })
     useBrowserStore.getState().addTab('worktree-1', 'http://localhost:3000')
   })
@@ -110,9 +108,7 @@ describe('BrowserToolbar port picker', () => {
     useBrowserStore.setState({
       tabs: {},
       activeTabIds: {},
-      sidePaneOpen: {},
       modalOpen: {},
-      bottomPanelOpen: {},
     })
     useBrowserStore.getState().addTab('worktree-1', 'http://localhost:3000')
   })

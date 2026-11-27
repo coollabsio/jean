@@ -1,13 +1,13 @@
 import {
   Activity,
   AlertCircle,
+  Category,
   CircleDot,
   Code,
   FolderOpen,
   GitBranch,
   GitPullRequestArrow,
   Globe,
-  ListChecks,
   Maximize,
   MoreHorizontal,
   Play,
@@ -84,6 +84,8 @@ interface WorktreeDropdownMenuProps {
   serverProject?: Project | null
   /** Closes the open chat session (not the worktree) */
   onCloseSession?: () => void
+  /** Renders the trigger as a window title bar button */
+  inTitleBar?: boolean
 }
 
 const BADGE_STALE_TIME = 5 * 60 * 1000
@@ -104,6 +106,7 @@ export function WorktreeDropdownMenu({
   onRunPackageScript,
   serverProject,
   onCloseSession,
+  inTitleBar = false,
 }: WorktreeDropdownMenuProps) {
   const server = serverProject?.server
   const isServer = !!server
@@ -274,15 +277,27 @@ export function WorktreeDropdownMenu({
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className="text-muted-foreground hover:text-foreground"
-            onClick={e => e.stopPropagation()}
-            aria-label="Actions"
-          >
-            <MoreHorizontal className="h-4 w-4" />
-          </Button>
+          {inTitleBar ? (
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              className="rounded-none text-foreground/70 hover:text-foreground"
+              onClick={e => e.stopPropagation()}
+              aria-label="Actions"
+            >
+              <Category className="size-3.5" />
+            </Button>
+          ) : (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="text-muted-foreground hover:text-foreground"
+              onClick={e => e.stopPropagation()}
+              aria-label="Actions"
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          )}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-48">
           <DropdownMenuItem
@@ -364,7 +379,7 @@ export function WorktreeDropdownMenu({
             onRunPackageScript && (
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger>
-                  <ListChecks className="mr-2 h-4 w-4" />
+                  <Play className="mr-2 h-4 w-4" />
                   <span className="flex-1">Scripts</span>
                   <span className="ml-3 text-2xs text-muted-foreground">
                     package.json

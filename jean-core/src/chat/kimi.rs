@@ -276,6 +276,7 @@ fn usage_from_value(usage: &Value) -> UsageData {
             .or_else(|| usage.get("cacheCreationInputTokens"))
             .and_then(Value::as_u64)
             .unwrap_or_default(),
+        cost_usd: None,
     }
 }
 

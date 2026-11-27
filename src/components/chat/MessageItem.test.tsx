@@ -89,6 +89,44 @@ describe('MessageItem', () => {
     isFindingFixed: vi.fn(() => false),
   }
 
+  it('moves all screenshots blocks of a message into one gallery at the bottom', () => {
+    render(
+      <MessageItem
+        {...baseProps}
+        message={{
+          ...baseMessage,
+          tool_calls: [
+            { id: 'bash-1', name: 'Bash', input: { command: 'ls' } },
+          ],
+          content_blocks: [
+            {
+              type: 'text',
+              text: 'Took a shot.\n\n```screenshots\n/tmp/a.png\n```',
+            },
+            { type: 'tool_use', tool_call_id: 'bash-1' },
+            {
+              type: 'text',
+              text: '## Recap\n\n```screenshots\n/tmp/b.png\n/tmp/a.png\n```\n\nAll done.',
+            },
+          ],
+        }}
+      />
+    )
+
+    const first = screen.getByRole('button', { name: 'Open a.png' })
+    const second = screen.getByRole('button', { name: 'Open b.png' })
+    expect(
+      screen.getAllByRole('button', { name: /^Open .*\.png$/ })
+    ).toHaveLength(2)
+    const recapEnd = screen.getByText('All done.')
+    expect(
+      recapEnd.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(
+      first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+  })
+
   it('renders user prompts without a collapsed prompt-sent indicator', () => {
     render(
       <MessageItem

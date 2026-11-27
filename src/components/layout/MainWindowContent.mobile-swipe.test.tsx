@@ -15,11 +15,6 @@ vi.mock('@/services/projects', () => ({
   useProjects: () => ({ data: [] }),
 }))
 
-vi.mock('@/components/agents/agents-feature', () => ({
-  useShowAgents: () => false,
-  useAgentsEnabled: () => false,
-  useAgentsEnabledServers: () => [],
-}))
 vi.mock('@/services/preferences', () => ({
   usePreferences: () => ({ data: undefined }),
 }))

@@ -41,12 +41,6 @@ vi.mock('@/services/projects', () => ({
     ],
   }),
 }))
-vi.mock('@/components/agents/agents-feature', () => ({
-  useShowAgents: () => false,
-}))
-vi.mock('@/components/agents/AgentNotificationsListener', () => ({
-  AgentNotificationsListener: () => null,
-}))
 vi.mock('@/hooks/useInstalledBackends', () => ({
   useInstalledBackends: () => ({ installedBackends: [], isLoading: false }),
 }))

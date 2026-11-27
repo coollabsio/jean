@@ -163,7 +163,6 @@ export function useToolbarHandlers({
           }
         )
       }
-      window.dispatchEvent(new CustomEvent('focus-chat-input'))
     },
     [
       activeSessionId,
@@ -198,7 +197,6 @@ export function useToolbarHandlers({
           value: model,
         }).catch(() => undefined)
       }
-      window.dispatchEvent(new CustomEvent('focus-chat-input'))
     },
     [
       activeSessionId,
@@ -266,7 +264,6 @@ export function useToolbarHandlers({
           value: provider ?? '',
         }).catch(() => undefined)
       }
-      window.dispatchEvent(new CustomEvent('focus-chat-input'))
     },
     [
       activeSessionId,
@@ -302,7 +299,6 @@ export function useToolbarHandlers({
         key: 'thinkingLevel',
         value: level,
       }).catch(() => undefined)
-      window.dispatchEvent(new CustomEvent('focus-chat-input'))
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mutate is stable, refs used for IDs
     []
@@ -331,7 +327,6 @@ export function useToolbarHandlers({
       key: 'effortLevel',
       value: level,
     }).catch(() => undefined)
-    window.dispatchEvent(new CustomEvent('focus-chat-input'))
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mutate is stable, refs used for IDs
   }, [])
 
@@ -394,7 +389,6 @@ export function useToolbarHandlers({
           value: normalizedMode,
         }).catch(() => undefined)
       }
-      window.dispatchEvent(new CustomEvent('focus-chat-input'))
     },
     [
       activeSessionIdRef,

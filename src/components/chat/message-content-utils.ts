@@ -1,5 +1,3 @@
-import { stripMentionRefs } from './agent-mentions'
-
 /** Regex to extract image paths from message content */
 const IMAGE_ATTACHMENT_REGEX =
   /\[Image attached: (.+?) - Use the Read tool to view this image\]/g
@@ -216,67 +214,9 @@ export function stripSkillMarkers(content: string): string {
 
 /** Strip all attachment markers from message content */
 export function stripAllMarkers(content: string): string {
-  return stripMentionRefs(
-    stripSkillMarkers(
-      stripDirectoryMentionMarkers(
-        stripFileMentionMarkers(
-          stripTextFileMarkers(stripImageMarkers(content))
-        )
-      )
+  return stripSkillMarkers(
+    stripDirectoryMentionMarkers(
+      stripFileMentionMarkers(stripTextFileMarkers(stripImageMarkers(content)))
     )
   )
-}
-
-/** Automatic update that Jean sends to an agent session (see `compose_update` in jean-core) */
-export function isAgentUpdateMessage(content: string): boolean {
-  return stripAllMarkers(content).startsWith('[Jean agent update]')
-}
-
-/** First message of an agent chat that continues a long, archived chat (see `chat_continued_message` in jean-core) */
-export function isChatContinuedMessage(content: string): boolean {
-  return stripAllMarkers(content).startsWith('[Jean chat continued]')
-}
-
-/** Journal entry that holds the archived chat, or null when it was not saved */
-export function chatContinuedJournalId(content: string): number | null {
-  const match = /journal entry #(\d+)/.exec(content)
-  return match?.[1] ? Number(match[1]) : null
-}
-
-/**
- * Splits an agent chat into the user's conversation and the agent's replies
- * to Jean's automatic updates. An update turn (the update message and the
- * assistant messages after it) leaves the chat, so many delegated sessions do
- * not flood it. Returns the input array when there are no updates.
- */
-export function splitAgentUpdateTurns<
-  T extends { role: string; content: string },
->(messages: T[]): { chat: T[]; updates: T[] } {
-  if (!messages.some(m => m.role === 'user' && isAgentUpdateMessage(m.content)))
-    return { chat: messages, updates: [] }
-  const chat: T[] = []
-  const updates: T[] = []
-  let inUpdateTurn = false
-  for (const message of messages) {
-    if (message.role === 'user') {
-      inUpdateTurn = isAgentUpdateMessage(message.content)
-      if (!inUpdateTurn) chat.push(message)
-    } else if (inUpdateTurn) {
-      updates.push(message)
-    } else {
-      chat.push(message)
-    }
-  }
-  return { chat, updates }
-}
-
-/** True when the newest turn is the agent's reply to an automatic update. */
-export function isAgentUpdateTurn(
-  messages: { role: string; content: string }[]
-): boolean {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i]
-    if (message?.role === 'user') return isAgentUpdateMessage(message.content)
-  }
-  return false
 }

@@ -8,6 +8,14 @@ import { useClientZoom } from '@/lib/client-zoom'
 
 const tickValues = zoomLevelTicks.map(t => t.value)
 
+/** Gap from the window edge to the title bar actions at 100% zoom (CSS px). */
+const MAC_TITLEBAR_ACTION_LEFT_INSET = 68
+/**
+ * Center of the title bar icons from the window top (CSS px): the h-8 bar
+ * centers the actions, and their 4px top padding moves the icons down 2px.
+ */
+const MAC_TITLEBAR_ICON_CENTER = 18
+
 function findNearestTickIndex(zoom: number): number {
   let closest = 0
   let minDiff = Infinity
@@ -27,9 +35,10 @@ function findNearestTickIndex(zoom: number): number {
 async function applyZoom(scaleFactor: number) {
   const root = document.documentElement
   root.style.setProperty('--app-zoom', String(scaleFactor))
+  // Fallback when the traffic lights cannot move (they stay at 68pt).
   root.style.setProperty(
     '--mac-titlebar-action-left-inset',
-    `${68 / scaleFactor}px`
+    `${MAC_TITLEBAR_ACTION_LEFT_INSET / scaleFactor}px`
   )
   root.style.setProperty(
     '--mac-titlebar-action-top-inset',
@@ -50,6 +59,37 @@ async function applyZoom(scaleFactor: number) {
     await getCurrentWebview().setZoom(scaleFactor)
   } catch (error) {
     console.error('Failed to set zoom:', error)
+  }
+
+  if (isClientMacOS) await moveTrafficLights(scaleFactor)
+}
+
+/**
+ * Move the native macOS traffic lights with the zoom and center them on the
+ * title bar icons. AppKit buttons keep their size, so only their position
+ * scales; the action inset follows them.
+ */
+async function moveTrafficLights(scaleFactor: number) {
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const span = await invoke<number | null>('set_traffic_light_zoom', {
+      zoom: scaleFactor,
+      centerY: MAC_TITLEBAR_ICON_CENTER * scaleFactor,
+    })
+    const root = document.documentElement
+    // A newer zoom change already ran; do not write a stale inset.
+    if (
+      span == null ||
+      root.style.getPropertyValue('--app-zoom') !== String(scaleFactor)
+    ) {
+      return
+    }
+    const leftInset =
+      MAC_TITLEBAR_ACTION_LEFT_INSET + span * (1 / scaleFactor - 1)
+    root.style.setProperty('--mac-titlebar-action-left-inset', `${leftInset}px`)
+    root.style.setProperty('--mac-titlebar-action-top-inset', '4px')
+  } catch (error) {
+    console.error('Failed to move traffic lights:', error)
   }
 }
 

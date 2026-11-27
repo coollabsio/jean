@@ -95,7 +95,7 @@ export function touchRecentSessionCaches(
   )
 }
 
-/** Check if an error is from a WebSocket disconnect (suppress toasts before reload). */
+/** Check if an error is from a WebSocket disconnect (no toast: the app resyncs on reconnect). */
 function isWsDisconnectError(error: unknown): boolean {
   const msg = error instanceof Error ? error.message : String(error)
   return msg.includes('WebSocket disconnected')
@@ -292,7 +292,7 @@ export const SEND_MESSAGE_MUTATION_KEY = ['chat', 'send-message'] as const
 /**
  * True while this client's useSendMessage call for the session is in flight.
  * Its onSuccess then replaces the chat:done message with the backend one.
- * Turns started elsewhere (agent wakes, MCP, schedules, other clients) have
+ * Turns started elsewhere (MCP, schedules, other clients) have
  * no such call.
  */
 export function hasLocalSendInFlight(
@@ -1767,6 +1767,8 @@ export function resetSendTracking() {
   appliedVerdictRuns.clear()
   returnedQueuedMessageIds.clear()
   userTurnOutcomes.clear()
+  for (const waiter of userTurnWaiters.values()) waiter('not_accepted')
+  userTurnWaiters.clear()
 }
 
 /**
@@ -1777,17 +1779,65 @@ export function resetSendTracking() {
  */
 const userTurnOutcomes = new Map<string, UserTurnOutcome>()
 
+/** `onError` calls that wait for a verdict, keyed by session. */
+const userTurnWaiters = new Map<string, (outcome: UserTurnOutcome) => void>()
+
+/**
+ * How long a rejected send waits for its `chat:user-turn` verdict. The event
+ * and the invoke rejection travel on different channels, so the rejection can
+ * arrive first (#927). Only rejections before acceptance, which get no
+ * verdict, wait the full time.
+ */
+export const USER_TURN_VERDICT_GRACE_MS = 1_500
+
 export function recordUserTurnOutcome(
   sessionId: string,
   outcome: UserTurnOutcome
 ) {
+  const waiter = userTurnWaiters.get(sessionId)
+  if (waiter) {
+    userTurnWaiters.delete(sessionId)
+    waiter(outcome)
+    return
+  }
   userTurnOutcomes.set(sessionId, outcome)
 }
 
-export function takeUserTurnOutcome(sessionId: string): UserTurnOutcome {
-  const outcome = userTurnOutcomes.get(sessionId) ?? 'not_accepted'
+/** Forget a verdict or a wait left over from an earlier send. */
+export function clearUserTurnOutcome(sessionId: string) {
   userTurnOutcomes.delete(sessionId)
-  return outcome
+  userTurnWaiters.get(sessionId)?.('not_accepted')
+  userTurnWaiters.delete(sessionId)
+}
+
+/**
+ * The verdict on the send that just failed. Resolves at once when it is
+ * already recorded, else when it arrives, else `not_accepted` after
+ * `timeoutMs`.
+ */
+export function awaitUserTurnOutcome(
+  sessionId: string,
+  timeoutMs = USER_TURN_VERDICT_GRACE_MS
+): Promise<UserTurnOutcome> {
+  const recorded = userTurnOutcomes.get(sessionId)
+  if (recorded) {
+    userTurnOutcomes.delete(sessionId)
+    return Promise.resolve(recorded)
+  }
+  clearUserTurnOutcome(sessionId)
+  return new Promise(resolve => {
+    const timer = setTimeout(() => {
+      if (userTurnWaiters.get(sessionId) === finish) {
+        userTurnWaiters.delete(sessionId)
+      }
+      resolve('not_accepted')
+    }, timeoutMs)
+    const finish = (outcome: UserTurnOutcome) => {
+      clearTimeout(timer)
+      resolve(outcome)
+    }
+    userTurnWaiters.set(sessionId, finish)
+  })
 }
 
 /**
@@ -1914,7 +1964,7 @@ export function useSendMessage() {
       backend,
     }) => {
       console.log(`[SendMutation] onMutate sessionId=${sessionId}`)
-      takeUserTurnOutcome(sessionId)
+      clearUserTurnOutcome(sessionId)
       beginOwnSend(sessionId)
       // Cancel in-flight queries to avoid overwriting optimistic update
       await queryClient.cancelQueries({
@@ -2069,7 +2119,7 @@ export function useSendMessage() {
         queryKey: chatQueryKeys.sessions(worktreeId),
       })
     },
-    onError: (error, variables, context) => {
+    onError: async (error, variables, context) => {
       const { sessionId, worktreeId } = variables
       endOwnSend(sessionId)
       // Check for cancellation - Tauri errors may not be Error instances
@@ -2155,9 +2205,24 @@ export function useSendMessage() {
         return
       }
 
+      // The verdict can arrive after the rejection. Keep the optimistic
+      // prompt on screen until it does (#927).
+      const userTurn = await awaitUserTurnOutcome(sessionId)
+
+      // Sending was cleared above, so a newer send owns the session now.
+      if (useChatStore.getState().sendingSessionIds[sessionId]) {
+        queryClient.invalidateQueries({
+          queryKey: chatQueryKeys.session(sessionId),
+        })
+        queryClient.invalidateQueries({
+          queryKey: chatQueryKeys.sessions(worktreeId),
+        })
+        return
+      }
+
       // The backend recorded the prompt before it failed (crashed run or a
       // provider rejection). History owns it; refetch instead of rolling back.
-      if (takeUserTurnOutcome(sessionId) === 'persisted') {
+      if (userTurn === 'persisted') {
         logger.warn('Error after the prompt was recorded, refetching', {
           sessionId,
           error: errorMessage,

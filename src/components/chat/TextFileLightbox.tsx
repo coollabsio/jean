@@ -15,6 +15,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { Markdown } from '@/components/ui/markdown'
+import { MessageThreadContextMenu } from './message-thread-context-menu'
 import type { ReadTextResponse } from '@/types/chat'
 import { getFilename } from '@/lib/path-utils'
 import { usePreviewStore } from '@/store/preview-store'
@@ -99,7 +100,14 @@ function TextFileLightboxContent({
           </div>
         ) : isMarkdownFile(filename) ? (
           <div className="p-3 select-text cursor-text">
-            <Markdown className="text-sm">{content ?? ''}</Markdown>
+            <MessageThreadContextMenu
+              messageText={content ?? ''}
+              copyMessageLabel="Copy file"
+            >
+              <div>
+                <Markdown className="text-sm">{content ?? ''}</Markdown>
+              </div>
+            </MessageThreadContextMenu>
           </div>
         ) : (
           <pre className="text-xs font-mono whitespace-pre-wrap break-words p-3 bg-muted rounded-md select-text cursor-text">

@@ -3,7 +3,8 @@ use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::sync::LazyLock;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
 use tokio::sync::{broadcast, mpsc};
 
@@ -151,15 +152,47 @@ fn dispatch_client_invoke(
     }
 }
 
+/// Identifies this server process. Event sequence numbers and terminals do not
+/// survive a restart, so a client that reconnects to a new id reloads.
+static BOOT_ID: LazyLock<String> = LazyLock::new(|| {
+    let started = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos())
+        .unwrap_or_default();
+    format!("{started:x}-{:x}", std::process::id())
+});
+
+fn heartbeat_json(interval: Duration) -> String {
+    serde_json::json!({
+        "type": "heartbeat",
+        "interval_ms": interval.as_millis() as u64,
+        "boot_id": BOOT_ID.as_str(),
+    })
+    .to_string()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::command_must_run_in_ws_order;
+    use super::{command_must_run_in_ws_order, heartbeat_json};
+    use serde_json::Value;
+    use std::time::Duration;
 
     #[test]
     fn terminal_input_writes_run_in_websocket_order() {
         assert!(command_must_run_in_ws_order("terminal_write"));
         assert!(!command_must_run_in_ws_order("terminal_resize"));
         assert!(!command_must_run_in_ws_order("create_session"));
+    }
+
+    #[test]
+    fn heartbeat_announces_interval_and_one_boot_id_per_process() {
+        let first: Value = serde_json::from_str(&heartbeat_json(Duration::from_secs(5))).unwrap();
+        let second: Value = serde_json::from_str(&heartbeat_json(Duration::from_secs(5))).unwrap();
+
+        assert_eq!(first["type"], "heartbeat");
+        assert_eq!(first["interval_ms"], 5000);
+        assert!(!first["boot_id"].as_str().unwrap().is_empty());
+        assert_eq!(first["boot_id"], second["boot_id"]);
     }
 }
 
@@ -238,7 +271,7 @@ pub async fn handle_ws_connection(
 
     // Heartbeat: server-driven protocol ping every PING_INTERVAL. If no
     // inbound traffic (pong, text, ping) for PONG_TIMEOUT, treat connection as
-    // dead and break — the client reloads and performs a fresh bootstrap.
+    // dead and break — the client opens a new socket and resyncs.
     //
     // Also send an app-level heartbeat text frame. Browser JS does not expose
     // protocol ping/pong frames to `WebSocket.onmessage`, so the frontend
@@ -248,11 +281,23 @@ pub async fn handle_ws_connection(
     // few missed beats, while still tolerating older servers.
     const PING_INTERVAL: Duration = Duration::from_secs(5);
     const PONG_TIMEOUT: Duration = Duration::from_secs(45);
-    let interval_ms = PING_INTERVAL.as_millis();
-    let app_heartbeat_json = format!(r#"{{"type":"heartbeat","interval_ms":{interval_ms}}}"#);
+    let app_heartbeat_json = heartbeat_json(PING_INTERVAL);
     let mut ping_interval = tokio::time::interval(PING_INTERVAL);
     ping_interval.tick().await; // skip immediate fire
     let mut last_inbound = Instant::now();
+
+    // The first heartbeat goes out at once: the client learns the interval
+    // and the server process it reached without waiting a full interval.
+    if ws_tx
+        .send(Message::Text(app_heartbeat_json.as_str().into()))
+        .await
+        .is_err()
+    {
+        if let Some(manager) = app.try_state::<BackgroundTaskManager>() {
+            manager.remove_client(ui_client);
+        }
+        return;
+    }
 
     // Main loop — four event sources, never blocks on command dispatch.
     loop {

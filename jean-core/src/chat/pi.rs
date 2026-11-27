@@ -128,6 +128,7 @@ fn usage_from_value(value: &Value) -> Option<UsageData> {
             .or_else(|| usage.get("cacheWrite"))
             .and_then(Value::as_u64)
             .unwrap_or(0),
+        cost_usd: None,
     })
 }
 
@@ -203,6 +204,26 @@ fn merge_assistant_text(response: &mut PiResponse, text: &str) {
 
     response.content.push_str(text);
     push_text_block(&mut response.content_blocks, text);
+}
+
+/// Older Jean builds appended a whole-turn `assistant` snapshot (see
+/// `append_synthetic_reply`) after PI's own stream. Its text equals the text
+/// already streamed, and it uses `tool_use` blocks, which PI never emits.
+/// Merging it again duplicates the turn, so detect and skip it.
+fn is_replayed_turn_snapshot(response: &PiResponse, message: &Value) -> bool {
+    let mut snapshot_text = String::new();
+    for block in iter_content_blocks(message) {
+        match block.get("type").and_then(Value::as_str) {
+            Some("tool_use") => return true,
+            Some("text") => {
+                if let Some(text) = block.get("text").and_then(Value::as_str) {
+                    snapshot_text.push_str(text);
+                }
+            }
+            _ => {}
+        }
+    }
+    !snapshot_text.is_empty() && response.content.ends_with(&snapshot_text)
 }
 
 fn message_usage_from_value(value: &Value) -> Option<UsageData> {
@@ -365,6 +386,14 @@ fn merge_pi_line(response: &mut PiResponse, value: &Value) {
 
     let event_type = value.get("type").and_then(Value::as_str).unwrap_or("");
     match event_type {
+        // Written by Jean when the PI host accepts a steer (`steer_pi_turn`).
+        "steered_user_message" => {
+            if let Some(text) = value.get("text").and_then(Value::as_str) {
+                response.content_blocks.push(ContentBlock::UserInput {
+                    text: text.to_string(),
+                });
+            }
+        }
         "message" => {
             let Some(message) = value.get("message") else {
                 return;
@@ -397,7 +426,13 @@ fn merge_pi_line(response: &mut PiResponse, value: &Value) {
         }
         "assistant" => {
             if let Some(message) = value.get("message") {
-                merge_assistant_message(response, message);
+                if is_replayed_turn_snapshot(response, message) {
+                    if let Some(next_usage) = usage_from_value(message) {
+                        response.usage = Some(next_usage);
+                    }
+                } else {
+                    merge_assistant_message(response, message);
+                }
             } else if let Some(text) = text_delta_from_value(value) {
                 response.content.push_str(text);
                 push_text_block(&mut response.content_blocks, text);
@@ -619,16 +654,37 @@ fn auto_compaction_rpc_line(enabled: Option<bool>) -> String {
         .unwrap_or_default()
 }
 
-fn pi_line_is_completion_result(line: &str) -> bool {
+/// Whether a PI RPC stdout line ends the Jean run, so the host can stop PI.
+///
+/// `agent_end` only ends one low-level agent run: PI can still retry,
+/// recover from overflow, compact, or run queued follow-ups after it.
+/// `agent_settled` (PI 0.80.4+) is the documented end of all automatic work.
+/// Older PI has no `agent_settled`, so there `agent_end` ends the run unless
+/// it reports `willRetry: true`.
+/// See https://pi.dev/docs/latest/rpc and PI `docs/json.md`.
+fn pi_line_ends_run(line: &str, pi_emits_agent_settled: bool) -> bool {
+    let Ok(value) = serde_json::from_str::<Value>(line) else {
+        return false;
+    };
+    match value.get("type").and_then(Value::as_str) {
+        Some("agent_settled") => true,
+        Some("agent_end") => {
+            !pi_emits_agent_settled
+                && !value
+                    .get("willRetry")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+        }
+        _ => false,
+    }
+}
+
+/// Whether a run log line is the host's synthetic `result` marker. The host
+/// writes it after PI settles; the tailer stops on it only.
+fn pi_line_is_host_result(line: &str) -> bool {
     serde_json::from_str::<Value>(line)
         .ok()
-        .and_then(|value| {
-            value
-                .get("type")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        })
-        .is_some_and(|event_type| event_type == "agent_end" || event_type == "result")
+        .is_some_and(|value| value.get("type").and_then(Value::as_str) == Some("result"))
 }
 
 fn pi_line_session_id(line: &str) -> Option<String> {
@@ -908,6 +964,19 @@ pub fn run_pi_rpc_host_from_args() -> Result<(), String> {
             .map_err(|e| format!("Failed to flush PI RPC get_state command: {e}"))?;
     }
 
+    // `pi --version` runs next to the RPC child, so it adds no prompt latency.
+    let version_cli = pi_cli.clone();
+    let settled_support = std::thread::spawn(move || {
+        let version = silent_command(&version_cli)
+            .arg("--version")
+            .output()
+            .ok()
+            .and_then(|o| crate::pi_cli::parse_version(&o.stdout, &o.stderr));
+        crate::pi_cli::pi_version_emits_agent_settled(version.as_deref())
+    });
+    let mut settled_support = Some(settled_support);
+    let mut pi_emits_agent_settled = false;
+
     let mut pi_session_id: Option<String> = None;
     let reader = BufReader::new(stdout);
     for line in reader.lines() {
@@ -923,7 +992,11 @@ pub fn run_pi_rpc_host_from_args() -> Result<(), String> {
             out.flush()
                 .map_err(|e| format!("Failed to flush PI output: {e}"))?;
         }
-        if pi_line_is_completion_result(&line) {
+        // Only `agent_end` needs the version; join the check on the first one.
+        if let Some(handle) = settled_support.take_if(|_| line.contains("\"agent_end\"")) {
+            pi_emits_agent_settled = handle.join().unwrap_or(false);
+        }
+        if pi_line_ends_run(&line, pi_emits_agent_settled) {
             let result = serde_json::json!({
                 "type": "result",
                 "session_id": pi_session_id,
@@ -1252,7 +1325,7 @@ pub fn tail_pi_output(
             if line.trim().is_empty() {
                 continue;
             }
-            if pi_line_is_completion_result(&line) {
+            if pi_line_is_host_result(&line) {
                 completed = true;
             }
             let Ok(value) = serde_json::from_str::<Value>(&line) else {
@@ -1650,6 +1723,38 @@ mod tests {
     }
 
     #[test]
+    fn does_not_duplicate_synthetic_whole_turn_snapshot_after_tool() {
+        let stream = r#"
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"Investigating."}}
+{"type":"tool_execution_start","toolCallId":"call_1","toolName":"bash","args":{"command":"ls"}}
+{"type":"tool_execution_end","toolCallId":"call_1","result":{"stdout":"ok"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"Done."}}
+{"type":"result"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Investigating."},{"type":"tool_use","id":"call_1","name":"Bash","input":{"command":"ls"}},{"type":"text","text":"Done."}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"call_1","content":"ok"}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Investigating.Done."}]}}
+"#;
+
+        let response = parse_pi_json_stream_inner(stream);
+
+        assert_eq!(response.content, "Investigating.Done.");
+        assert_eq!(response.tool_calls.len(), 1);
+        assert_eq!(response.content_blocks.len(), 3);
+        assert!(matches!(
+            &response.content_blocks[0],
+            ContentBlock::Text { text } if text == "Investigating."
+        ));
+        assert!(matches!(
+            &response.content_blocks[1],
+            ContentBlock::ToolUse { tool_call_id } if tool_call_id == "call_1"
+        ));
+        assert!(matches!(
+            &response.content_blocks[2],
+            ContentBlock::Text { text } if text == "Done."
+        ));
+    }
+
+    #[test]
     fn parses_native_pi_message_jsonl() {
         let stream = r#"
 {"type":"session","version":3,"id":"019ea639-cda3-7de3-9a29-2b8ff0e154db","timestamp":"2026-06-08T07:54:26.595Z","cwd":"/tmp/project"}
@@ -1929,10 +2034,46 @@ mod tests {
     }
 
     #[test]
-    fn pi_rpc_agent_end_counts_as_completion_result() {
-        let line = r#"{"type":"agent_end","messages":[]}"#;
+    fn pi_rpc_run_ends_at_agent_settled_not_agent_end() {
+        // Issue #966: PI 1.6 sequence for a retried 503.
+        let error = r#"{"type":"message_end","message":{"role":"assistant","stopReason":"error","errorMessage":"503 upstream connect error"}}"#;
+        let retry_end = r#"{"type":"agent_end","messages":[],"willRetry":true}"#;
+        let final_end = r#"{"type":"agent_end","messages":[],"willRetry":false}"#;
+        let settled = r#"{"type":"agent_settled","aborted":false}"#;
 
-        assert!(pi_line_is_completion_result(line));
+        assert!(!pi_line_ends_run(error, true));
+        assert!(!pi_line_ends_run(retry_end, true));
+        assert!(!pi_line_ends_run(final_end, true));
+        assert!(pi_line_ends_run(settled, true));
+    }
+
+    #[test]
+    fn pi_rpc_run_ends_at_agent_end_for_pi_without_agent_settled() {
+        assert!(pi_line_ends_run(
+            r#"{"type":"agent_end","messages":[]}"#,
+            false
+        ));
+        assert!(pi_line_ends_run(
+            r#"{"type":"agent_end","messages":[],"willRetry":false}"#,
+            false
+        ));
+        assert!(!pi_line_ends_run(
+            r#"{"type":"agent_end","messages":[],"willRetry":true}"#,
+            false
+        ));
+    }
+
+    #[test]
+    fn pi_tailer_stops_only_at_host_result_marker() {
+        assert!(pi_line_is_host_result(
+            r#"{"type":"result","session_id":"s"}"#
+        ));
+        assert!(!pi_line_is_host_result(
+            r#"{"type":"agent_end","messages":[]}"#
+        ));
+        assert!(!pi_line_is_host_result(
+            r#"{"type":"agent_settled","aborted":false}"#
+        ));
     }
 
     #[test]
@@ -2074,5 +2215,21 @@ mod tests {
         assert_eq!(pi_thinking_level(Some(&EffortLevel::High)), Some("high"));
         assert_eq!(pi_thinking_level(Some(&EffortLevel::Xhigh)), Some("xhigh"));
         assert_eq!(pi_thinking_level(None), None);
+    }
+
+    #[test]
+    fn history_keeps_steered_user_messages_in_order() {
+        let input = [
+            r#"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"Working"}}"#,
+            r#"{"type":"steered_user_message","text":"also run tests"}"#,
+            r#"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"Done"}}"#,
+        ]
+        .join("\n");
+
+        let blocks = parse_pi_json_stream_inner(&input).content_blocks;
+
+        assert!(matches!(&blocks[0], ContentBlock::Text { text } if text == "Working"));
+        assert!(matches!(&blocks[1], ContentBlock::UserInput { text } if text == "also run tests"));
+        assert!(matches!(&blocks[2], ContentBlock::Text { text } if text == "Done"));
     }
 }

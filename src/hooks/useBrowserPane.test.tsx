@@ -112,9 +112,7 @@ function resetBrowserStore(): void {
   useBrowserStore.setState({
     tabs: {},
     activeTabIds: {},
-    sidePaneOpen: {},
     modalOpen: {},
-    bottomPanelOpen: {},
   })
 }
 
@@ -129,7 +127,7 @@ describe('openBrowserTabFromNewWindow', () => {
       .getState()
       .addTab('worktree-1', 'https://example.com')
     useBrowserStore.getState().addTab('worktree-2', 'https://other.example')
-    useBrowserStore.getState().setBottomPanelOpen('worktree-1', true)
+    useBrowserStore.getState().setModalOpen('worktree-1', true)
 
     const createdId = openBrowserTabFromNewWindow(
       sourceId,
@@ -146,13 +144,7 @@ describe('openBrowserTabFromNewWindow', () => {
       createdId
     )
     expect(useBrowserStore.getState().getTabs('worktree-2')).toHaveLength(1)
-    expect(useBrowserStore.getState().bottomPanelOpen['worktree-1']).toBe(true)
-    expect(useBrowserStore.getState().sidePaneOpen['worktree-1'] ?? false).toBe(
-      false
-    )
-    expect(useBrowserStore.getState().modalOpen['worktree-1'] ?? false).toBe(
-      false
-    )
+    expect(useBrowserStore.getState().modalOpen['worktree-1']).toBe(true)
   })
 
   it('keeps a localhost popup url for the webview to preview-resolve', () => {

@@ -378,6 +378,7 @@ describe('MagicModal manual PR link', () => {
           {
             command: 'investigate',
             type: 'issue',
+            separate: false,
             override: { backend, model },
           },
         ])
@@ -430,6 +431,7 @@ describe('MagicModal manual PR link', () => {
           {
             command: 'investigate',
             type: 'issue',
+            separate: false,
             ...(source === 'magic-settings'
               ? {}
               : {

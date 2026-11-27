@@ -143,7 +143,7 @@ export function DirectoryBrowser({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none sm:!w-fit sm:!max-w-2xl sm:!h-fit sm:!max-h-[85vh] sm:!rounded-lg flex flex-col overflow-hidden">
+      <DialogContent className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none sm:!w-auto sm:!max-w-2xl sm:!h-fit sm:!max-h-[85vh] sm:!rounded-lg flex flex-col overflow-hidden">
         <DialogHeader>
           <DialogTitle>{title ?? 'Browse directories'}</DialogTitle>
           <DialogDescription>
@@ -154,7 +154,7 @@ export function DirectoryBrowser({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex-1 min-h-0 overflow-y-auto space-y-4 py-4 pr-1">
+        <div className="flex-auto min-h-0 overflow-y-auto space-y-4 py-4 pr-1">
           <div className="space-y-1.5">
             <Label htmlFor="directory-browser-path" className="text-xs">
               Current path

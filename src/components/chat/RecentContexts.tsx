@@ -23,6 +23,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { Markdown } from '@/components/ui/markdown'
+import { MessageThreadContextMenu } from './message-thread-context-menu'
 import {
   attachSavedContext,
   removeSavedContext,
@@ -262,9 +263,16 @@ export function RecentContexts({
               </DialogTitle>
             </DialogHeader>
             <ScrollArea className="flex-1 min-h-0">
-              <Markdown compact className="p-4 text-sm">
-                {preview.content}
-              </Markdown>
+              <MessageThreadContextMenu
+                messageText={preview.content}
+                copyMessageLabel="Copy context"
+              >
+                <div>
+                  <Markdown compact className="p-4 text-sm">
+                    {preview.content}
+                  </Markdown>
+                </div>
+              </MessageThreadContextMenu>
             </ScrollArea>
           </DialogContent>
         </Dialog>

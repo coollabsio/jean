@@ -3579,6 +3579,7 @@ pub fn execute_opencode_http(
                     output_tokens: output,
                     cache_read_input_tokens: cache_read,
                     cache_creation_input_tokens: cache_write,
+                    cost_usd: part.get("cost").and_then(|v| v.as_f64()),
                 });
             }
             _ => {}

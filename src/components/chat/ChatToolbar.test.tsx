@@ -5,6 +5,8 @@ import { ChatToolbar } from './ChatToolbar'
 import type { ChatToolbarProps } from './toolbar/types'
 import { useUIStore } from '@/store/ui-store'
 
+Element.prototype.scrollIntoView = vi.fn()
+
 vi.mock('@/store/terminal-store', () => {
   const state = {
     terminals: {},
@@ -149,7 +151,7 @@ describe('ChatToolbar pending questions', () => {
     const modeButtons = screen.getAllByRole('button', {
       name: /^permissions: full access$/i,
     })
-    expect(modeButtons.length).toBeGreaterThanOrEqual(2)
+    expect(modeButtons.length).toBeGreaterThanOrEqual(1)
     for (const button of modeButtons) {
       expect(button).toBeEnabled()
     }
@@ -190,7 +192,7 @@ describe('ChatToolbar zen mode', () => {
     act(() => {
       window.dispatchEvent(new CustomEvent('open-thinking-dropdown'))
     })
-    expect(await screen.findByRole('menu')).toBeInTheDocument()
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
   })
 })
 

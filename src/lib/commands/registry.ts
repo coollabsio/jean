@@ -10,6 +10,19 @@ export function clearRegistry(): void {
   commandRegistry.clear()
 }
 
+/**
+ * True when every whitespace-separated search term occurs in at least one
+ * of the fields, so "import worktree" matches "Import Existing Worktree".
+ */
+export function matchesSearchTerms(
+  fields: (string | undefined)[],
+  search: string
+): boolean {
+  const terms = search.toLowerCase().split(/\s+/).filter(Boolean)
+  const text = fields.filter(Boolean).join(' ').toLowerCase()
+  return terms.every(term => text.includes(term))
+}
+
 export function getAllCommands(
   context: CommandContext,
   searchValue = ''
@@ -19,12 +32,11 @@ export function getAllCommands(
   )
 
   if (searchValue.trim()) {
-    const search = searchValue.toLowerCase()
-    return allCommands.filter(
-      cmd =>
-        cmd.label.toLowerCase().includes(search) ||
-        cmd.description?.toLowerCase().includes(search) ||
-        cmd.keywords?.some(kw => kw.toLowerCase().includes(search))
+    return allCommands.filter(cmd =>
+      matchesSearchTerms(
+        [cmd.label, cmd.description, ...(cmd.keywords ?? [])],
+        searchValue
+      )
     )
   }
 

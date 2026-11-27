@@ -36,14 +36,11 @@ import { hydrateRunningSnapshot } from '@/lib/hydrate-running-snapshot'
 import { generateId } from '@/lib/uuid'
 import {
   ArrowDown,
-  ArrowUp,
   ClipboardList,
   GitBranch,
   GitMerge,
   Layers,
   Loader2,
-  Plus,
-  Square,
 } from '@/components/icons/reicon'
 import {
   useSession,
@@ -102,6 +99,7 @@ import {
   resolveMagicPromptBackend,
   resolveMagicPromptProvider,
   resolveProviderModelId,
+  fromProviderAliasModel,
   toProviderAliasModel,
   type CliBackend,
   type CodexProviderProfile,
@@ -152,18 +150,12 @@ import { refreshRunStates } from '@/services/run-states'
 import { isFirstWorktreeSession } from './setup-script-visibility'
 import { TodoWidget } from './TodoWidget'
 import { AgentWidget } from './AgentWidget'
-import {
-  assistantTextParts,
-  normalizeTodosForDisplay,
-  restoreOmittedStreamingPrefix,
-} from './tool-call-utils'
+import { normalizeTodosForDisplay } from './tool-call-utils'
 import { ImagePreview } from './ImagePreview'
 import { TextFilePreview } from './TextFilePreview'
 import { SkillBadge } from './SkillBadge'
 import { FilePreview } from './FilePreview'
 import { ChatInput } from './ChatInput'
-import { useAgentMentionCandidates } from './hooks/useAgentMentionCandidates'
-import { LOCAL_SERVER_ID } from '@/types/server-resource'
 import { SessionDebugPanel } from './SessionDebugPanel'
 import { ChatToolbar } from './ChatToolbar'
 import { SendCancelButton } from './toolbar/SendCancelButton'
@@ -181,7 +173,6 @@ import { useShowTableInChat } from './hooks/useShowTableInChat'
 import type { ApprovalModelOverride } from './ApprovalModelSubmenu'
 import { resolveApprovalLabel } from './approval-label-utils'
 import { CompactStreamingTicker } from './CompactStreamingTicker'
-import { latestAgentStatus } from './agent-status'
 import { CompactMessageList } from './CompactMessageList'
 import {
   getCurrentPromptStartIndex,
@@ -199,17 +190,13 @@ import {
 import { ErrorBanner } from './ErrorBanner'
 import type { MessageListHandle } from './message-list-handle'
 import { RecentContexts } from './RecentContexts'
-import {
-  isAgentUpdateTurn,
-  splitAgentUpdateTurns,
-} from './message-content-utils'
 import { useUIStore } from '@/store/ui-store'
 import { buildMcpConfigJson } from '@/services/mcp'
 import { CHECK_GITHUB_ISSUES_PROMPT } from '@/lib/github-discovery-prompt'
 import { routeCurrentSessionMagicPrompt } from '@/lib/magic-prompt-pty'
 import { buildCommentAndCloseIssuePrompt } from '@/lib/github-issue-close-prompt'
 import { buildCommitInSessionPrompt } from '@/lib/commit-in-session-prompt'
-import { agentExecutionMode, type McpServerInfo } from '@/types/chat'
+import type { McpServerInfo } from '@/types/chat'
 import { useGitStatus } from '@/services/git-status'
 import { useRemotePicker } from '@/hooks/useRemotePicker'
 import {
@@ -290,7 +277,6 @@ import { useChatWindowEvents } from './hooks/useChatWindowEvents'
 import { useInvestigateHandlers } from './hooks/useInvestigateHandlers'
 import { useMcpServerResolution } from './hooks/useMcpServerResolution'
 import { useInstalledBackends } from '@/hooks/useInstalledBackends'
-import { ReplyBubbles } from './ReplyBubble'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useToolbarHandlers } from './hooks/useToolbarHandlers'
 import { useMessageSending } from './hooks/useMessageSending'
@@ -314,7 +300,6 @@ const MESSAGES_BOTTOM_INSET = 'calc(var(--chat-composer-height, 0px) + 1.5rem)'
 // Using these constants ensures referential equality for empty states
 const EMPTY_TOOL_CALLS: ToolCall[] = []
 const EMPTY_CONTENT_BLOCKS: ContentBlock[] = []
-const EMPTY_TEXT_PARTS: string[] = []
 const EMPTY_PENDING_IMAGES: PendingImage[] = []
 const EMPTY_PENDING_TEXT_FILES: PendingTextFile[] = []
 const EMPTY_PENDING_FILES: PendingFile[] = []
@@ -353,11 +338,6 @@ function useStableMutation<T extends { mutate: unknown; mutateAsync: unknown }>(
   return useMemo(() => ({ mutate, mutateAsync }), [mutate, mutateAsync])
 }
 
-/** Tool calls that wait for the user and must stay visible in a quiet chat. */
-function needsUserInput(toolCall: ToolCall): boolean {
-  return isAskUserQuestion(toolCall) || isPlanToolCall(toolCall)
-}
-
 interface ChatWindowProps {
   /** When true, hides terminal panel and other elements not needed in modal */
   isModal?: boolean
@@ -365,17 +345,6 @@ interface ChatWindowProps {
   worktreeId?: string
   /** Override worktree path (used in modal mode to avoid setting global state) */
   worktreePath?: string
-  /**
-   * Quiet chat (agents): history shows only prose (no tool calls), and while
-   * a turn runs only this label and the timer instead of tool activity.
-   * Questions and plans still render because they need the user.
-   */
-  workingLabel?: string
-  /**
-   * Agent chat (not inside a project): `@` mentions agents, remote Jeans,
-   * and projects instead of files.
-   */
-  agentChat?: boolean
 }
 
 // PERFORMANCE: memoized - props are primitives, so parents re-rendering
@@ -410,8 +379,6 @@ const ChatWindowContent = memo(function ChatWindowContent({
   isModal = false,
   worktreeId: propWorktreeId,
   worktreePath: propWorktreePath,
-  workingLabel,
-  agentChat = false,
 }: ChatWindowProps = {}) {
   const isMobile = useIsMobile()
   const zenMode = useUIStore(state => state.zenMode)
@@ -803,9 +770,8 @@ const ChatWindowContent = memo(function ChatWindowContent({
 
   // Fetch projects to get project path for run toggle
   const { data: projects } = useProjects()
-  const project = worktree
-    ? projects?.find(p => p.id === worktree.project_id)
-    : null
+  const projectId = worktree?.project_id
+  const project = projectId ? projects?.find(p => p.id === projectId) : null
 
   // Git status for pull indicator
   const { data: gitStatus } = useGitStatus(activeWorktreeId ?? null)
@@ -1030,10 +996,14 @@ const ChatWindowContent = memo(function ChatWindowContent({
   )
   // A custom provider offers only the opus/sonnet/haiku aliases, so the
   // first-party default (`claude-opus-5-5`) becomes its alias (`opus`).
+  // The other way, an alias saved under a provider that is not active now
+  // becomes the first-party id (`opus` -> `claude-opus-5-5`).
   const selectedModel =
-    selectedBackend === 'claude' && isCustomProvider
-      ? toProviderAliasModel(resolvedModel)
-      : resolvedModel
+    selectedBackend !== 'claude'
+      ? resolvedModel
+      : isCustomProvider
+        ? toProviderAliasModel(resolvedModel)
+        : fromProviderAliasModel(resolvedModel)
   const buildNewContextLabel = resolveApprovalLabel(
     'build',
     preferences,
@@ -1174,25 +1144,6 @@ const ChatWindowContent = memo(function ChatWindowContent({
       ? (state.streamingContentBlocks[activeSessionId] ?? EMPTY_CONTENT_BLOCKS)
       : EMPTY_CONTENT_BLOCKS
   )
-  // Quiet (agent) chats hide tool activity: show the agent's text while it
-  // works, one bubble per part, so the user sees its progress messages
-  const quietStreamingParts = useMemo(
-    () =>
-      workingLabel
-        ? assistantTextParts(
-            restoreOmittedStreamingPrefix(
-              streamingContent,
-              currentStreamingContentBlocks
-            ),
-            streamingContent
-          )
-        : EMPTY_TEXT_PARTS,
-    [workingLabel, currentStreamingContentBlocks, streamingContent]
-  )
-  const agentStatus = useMemo(
-    () => (workingLabel ? latestAgentStatus(currentToolCalls) : undefined),
-    [workingLabel, currentToolCalls]
-  )
   // Per-session input - check if there's any input for submit button state
   // PERFORMANCE: Track hasValue via callback from ChatInput instead of store subscription
   // ChatInput notifies on mount, session change, and empty/non-empty boundary changes
@@ -1208,9 +1159,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
         defaultExecutionMode)
       : defaultExecutionMode
   )
-  const executionMode = agentChat
-    ? agentExecutionMode(selectedBackend, storedExecutionMode)
-    : storedExecutionMode
+  const executionMode = storedExecutionMode
   // Whether this session is waiting for user input (AskUserQuestion/ExitPlanMode)
   const rawIsWaitingForInput = useChatStore(state =>
     activeSessionId
@@ -1487,16 +1436,10 @@ const ChatWindowContent = memo(function ChatWindowContent({
   const enabledMcpServersRef = useRef(enabledMcpServers)
   const mcpServersDataRef = useRef<McpServerInfo[]>(availableMcpServers)
   const selectedBackendRef = useRef(selectedBackend)
-  const mentionCandidates = useAgentMentionCandidates(
-    agentChat,
-    targetServerId ?? LOCAL_SERVER_ID
-  )
-  const mentionCandidatesRef = useRef(mentionCandidates)
 
   // Keep refs in sync with current values (layout effect keeps render pure)
   useLayoutEffect(() => {
     activeSessionIdRef.current = activeSessionId
-    mentionCandidatesRef.current = mentionCandidates
     activeWorktreeIdRef.current = activeWorktreeId
     activeWorktreePathRef.current = activeWorktreePath
     selectedModelRef.current = selectedModel
@@ -1892,7 +1835,6 @@ const ChatWindowContent = memo(function ChatWindowContent({
     mcpServersDataRef,
     enabledMcpServersRef,
     selectedBackendRef,
-    mentionCandidatesRef,
     preferences,
     sendMessage,
     createSession,
@@ -2485,7 +2427,6 @@ const ChatWindowContent = memo(function ChatWindowContent({
     activeWorktreeId,
     activeWorktreePath,
     isModal,
-    allowPlanMode: !agentChat,
     session,
     gitStatus,
     setDiffRequest,
@@ -2624,18 +2565,13 @@ const ChatWindowContent = memo(function ChatWindowContent({
       streamingToolCalls: currentToolCalls,
     }
   )
-  // Agent replies to automatic updates show in the agent's Updates panel
   const messages = useMemo(
     () =>
-      splitAgentUpdateTurns(
-        hideTrailingInFlightMessage
-          ? rawSessionMessages.slice(0, -1)
-          : rawSessionMessages
-      ).chat,
+      hideTrailingInFlightMessage
+        ? rawSessionMessages.slice(0, -1)
+        : rawSessionMessages,
     [rawSessionMessages, hideTrailingInFlightMessage]
   )
-  const isUpdateTurnStreaming =
-    isSending && isAgentUpdateTurn(rawSessionMessages)
   const streamingTurnPrompt = useMemo(
     () => findTurnPrompt(rawSessionMessages, rawSessionMessages.length),
     [rawSessionMessages]
@@ -2656,8 +2592,6 @@ const ChatWindowContent = memo(function ChatWindowContent({
     return -1
   }, [messages])
 
-  // Simple agent chat uses a single-line pill composer
-  const pillComposer = Boolean(workingLabel)
   // Zen mode shows only the current prompt. Other chats show the full
   // history, and the prompt spacer scrolls a new prompt to the top.
   const zenStartIndex = useMemo(
@@ -2941,7 +2875,6 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                     )}
                                   <CompactMessageList
                                     ref={virtualizedListRef}
-                                    hideToolActivity={Boolean(workingLabel)}
                                     onSendAnswer={sendMagicPrompt}
                                     messages={compactMessages}
                                     scrollContainerRef={scrollViewportRef}
@@ -3013,52 +2946,29 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                 <div>
                                   {(currentStreamingContentBlocks.length > 0 ||
                                     currentToolCalls.length > 0 ||
-                                    streamingContent.trim().length > 0) &&
-                                    ((!workingLabel &&
-                                      !isUpdateTurnStreaming) ||
-                                      currentToolCalls.some(
-                                        needsUserInput
-                                      )) && (
-                                      <CompactStreamingTicker
-                                        sessionId={activeSessionId}
-                                        bubble={Boolean(workingLabel)}
-                                        contentBlocks={
-                                          currentStreamingContentBlocks
-                                        }
-                                        toolCalls={currentToolCalls}
-                                        streamingContent={streamingContent}
-                                        onQuestionAnswer={
-                                          handleResolvedQuestionAnswer
-                                        }
-                                        onQuestionSkip={
-                                          handleResolvedQuestionSkip
-                                        }
-                                        onFileClick={setViewingFilePath}
-                                        worktreePath={activeWorktreePath}
-                                        isQuestionAnswered={isQuestionAnswered}
-                                        getSubmittedAnswers={
-                                          getSubmittedAnswers
-                                        }
-                                        areQuestionsSkipped={
-                                          areQuestionsSkipped
-                                        }
-                                        turnPrompt={streamingTurnPrompt}
-                                      />
-                                    )}
-                                  {quietStreamingParts.length > 0 &&
-                                    !isUpdateTurnStreaming &&
-                                    !currentToolCalls.some(needsUserInput) && (
-                                      <div className="pb-2">
-                                        <ReplyBubbles
-                                          streaming
-                                          parts={quietStreamingParts}
-                                          sessionId={activeSessionId}
-                                        />
-                                      </div>
-                                    )}
+                                    streamingContent.trim().length > 0) && (
+                                    <CompactStreamingTicker
+                                      sessionId={activeSessionId}
+                                      contentBlocks={
+                                        currentStreamingContentBlocks
+                                      }
+                                      toolCalls={currentToolCalls}
+                                      streamingContent={streamingContent}
+                                      onQuestionAnswer={
+                                        handleResolvedQuestionAnswer
+                                      }
+                                      onQuestionSkip={
+                                        handleResolvedQuestionSkip
+                                      }
+                                      onFileClick={setViewingFilePath}
+                                      worktreePath={activeWorktreePath}
+                                      isQuestionAnswered={isQuestionAnswered}
+                                      getSubmittedAnswers={getSubmittedAnswers}
+                                      areQuestionsSkipped={areQuestionsSkipped}
+                                      turnPrompt={streamingTurnPrompt}
+                                    />
+                                  )}
                                   <StreamingStatusBar
-                                    workingLabel={workingLabel}
-                                    activityHint={agentStatus}
                                     isSending={isSending}
                                     sendStartedAt={sendStartedAt}
                                     completedDurationMs={completedDurationMs}
@@ -3290,10 +3200,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
                               {/* Goal, hidden history, pinned tables, and scroll-to-bottom tabs - attached to the top edge of the composer */}
                               <div
                                 className={cn(
-                                  'absolute right-3 bottom-full flex items-end gap-1',
-                                  // Pill composer: float the tabs as pills above it
-                                  pillComposer &&
-                                    'right-5 mb-2 [&_button]:h-7 [&_button]:rounded-full [&_button]:border-b [&_button]:px-3 [&_button]:shadow-sm'
+                                  'absolute right-3 bottom-full flex items-end gap-1'
                                 )}
                               >
                                 {!zenMode && (
@@ -3404,7 +3311,6 @@ const ChatWindowContent = memo(function ChatWindowContent({
                               {/* Subagents panel - separate section above the chat input */}
                               {!zenMode &&
                                 activeAgents.length > 0 &&
-                                !pillComposer &&
                                 !isAgentWidgetDismissed && (
                                   <AgentWidget
                                     key={`agents-${activeSessionId}`}
@@ -3448,8 +3354,6 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                 className={cn(
                                   'relative overflow-hidden transition-[background-color,border-color,box-shadow] duration-150 focus-within:border-border/60 sm:rounded-lg',
                                   COMPOSER_SURFACE_CLASS,
-                                  pillComposer &&
-                                    'mx-2 mb-4 rounded-[22px] border sm:mx-0 sm:mb-3 sm:rounded-[22px]',
                                   activeSessionId &&
                                     currentQueuedMessages.length > 0 &&
                                     'sm:rounded-t-none',
@@ -3459,25 +3363,15 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                 style={
                                   !isMobile
                                     ? undefined
-                                    : pillComposer
-                                      ? // Keep the pill one line tall: clear the home indicator outside it
-                                        {
-                                          marginBottom:
-                                            'max(var(--safe-area-bottom, 0px), 1rem)',
-                                        }
-                                      : {
-                                          paddingBottom:
-                                            'var(--safe-area-bottom)',
-                                        }
+                                    : {
+                                        paddingBottom:
+                                          'var(--safe-area-bottom)',
+                                      }
                                 }
                               >
                                 {executionMode === 'plan' && (
                                   <div
-                                    className={cn(
-                                      'flex items-start gap-2 border-b border-warning/30 bg-warning/10 px-4 py-2 text-xs text-warning',
-                                      pillComposer &&
-                                        'rounded-t-[20px] px-3 py-1.5'
-                                    )}
+                                    className="flex items-start gap-2 border-b border-warning/30 bg-warning/10 px-4 py-2 text-xs text-warning"
                                     role="status"
                                   >
                                     <ClipboardList className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -3564,27 +3458,14 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                   className={cn(
                                     zenMode &&
                                       'flex items-center overflow-hidden',
-                                    zenMode && 'max-h-20',
-                                    pillComposer && 'flex items-end gap-2 p-1.5'
+                                    zenMode && 'max-h-20'
                                   )}
                                 >
-                                  {pillComposer && (
-                                    <button
-                                      type="button"
-                                      onClick={handleToolbarAttach}
-                                      aria-label="Attach files"
-                                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
-                                    >
-                                      <Plus className="h-4 w-4" />
-                                    </button>
-                                  )}
                                   {/* Textarea section */}
                                   <div
                                     className={cn(
                                       'px-4 pt-3 pb-2 md:px-6',
-                                      zenMode && 'min-w-0 flex-1',
-                                      pillComposer &&
-                                        'min-w-0 flex-1 p-0 md:px-1'
+                                      zenMode && 'min-w-0 flex-1'
                                     )}
                                   >
                                     <ChatInput
@@ -3628,38 +3509,11 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                       inputRef={inputRef}
                                       installedBackends={installedBackends}
                                       selectedBackend={selectedBackend}
-                                      pill={pillComposer}
-                                      mentionCandidates={mentionCandidates}
                                     />
                                   </div>
 
                                   {/* Bottom toolbar */}
-                                  {pillComposer ? (
-                                    isSending && !hasInputValue ? (
-                                      <button
-                                        type="button"
-                                        onClick={handleCancel}
-                                        aria-label="Stop"
-                                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90"
-                                      >
-                                        <Square className="h-3.5 w-3.5" />
-                                      </button>
-                                    ) : (
-                                      <button
-                                        type="submit"
-                                        disabled={
-                                          !hasInputValue &&
-                                          !hasPendingAttachments
-                                        }
-                                        aria-label={
-                                          isSending ? 'Queue' : 'Send'
-                                        }
-                                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-40"
-                                      >
-                                        <ArrowUp className="h-4 w-4" />
-                                      </button>
-                                    )
-                                  ) : zenMode ? (
+                                  {zenMode ? (
                                     <div className="shrink-0 pr-3">
                                       <SendCancelButton
                                         isSending={isSending}
@@ -3692,7 +3546,6 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                         }
                                         hasInputValue={hasInputValue}
                                         executionMode={executionMode}
-                                        hidePlanMode={agentChat}
                                         selectedBackend={selectedBackend}
                                         isDevinCloud={
                                           selectedBackend === 'devin' &&

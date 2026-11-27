@@ -255,14 +255,14 @@ async fn handle_socket_request(app: &AppHandle, expected_token: &str, line: &str
         return json!({"error":"unauthorized"});
     }
 
-    let tool_call = match extract_tool_call(body.clone()) {
-        Ok(tool_call) => tool_call,
-        Err(e) => return jsonrpc_error(None, e.code, &e.message),
-    };
     let source = body
         .get("source")
         .and_then(|v| v.as_str())
         .unwrap_or("anon");
+    let tool_call = match extract_tool_call(body.clone()) {
+        Ok(tool_call) => tool_call,
+        Err(e) => return jsonrpc_error(None, e.code, &e.message),
+    };
     let depth = body.get("depth").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
 
     match call_tool(app, &tool_call.name, tool_call.arguments, source, depth).await {

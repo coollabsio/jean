@@ -12,6 +12,7 @@ let mockPreferences:
 let mockIsNativeApp = false
 let mockIsMobile = false
 const mockSetZoom = vi.fn()
+const mockInvoke = vi.fn()
 const mockOnScaleChanged = vi.fn()
 interface ScaleChangedEvent {
   payload: { scaleFactor: number }
@@ -56,6 +57,10 @@ vi.mock('@tauri-apps/api/window', () => ({
   }),
 }))
 
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (...args: unknown[]) => mockInvoke(...args),
+}))
+
 // Ensure dynamic imports hit the same mocks (vitest isolates some ESM paths).
 vi.mock('@tauri-apps/api/webview.js', () => ({
   getCurrentWebview: () => ({
@@ -85,6 +90,8 @@ describe('useZoom', () => {
     mockIsMobile = false
     mockSetZoom.mockReset()
     mockSetZoom.mockResolvedValue(undefined)
+    mockInvoke.mockReset()
+    mockInvoke.mockResolvedValue(null)
     mockOnScaleChanged.mockReset()
     scaleChangedHandler = null
     document.documentElement.style.zoom = ''
@@ -138,17 +145,40 @@ describe('useZoom', () => {
     expect(document.documentElement.style.getPropertyValue('--app-zoom')).toBe(
       '1.25'
     )
+    // Traffic lights could not move: keep the actions at a fixed 68pt.
     expect(
       document.documentElement.style.getPropertyValue(
         '--mac-titlebar-action-left-inset'
       )
     ).toBe('54.4px')
+    expect(document.documentElement.style.fontSize).toBe('')
+  })
+
+  it('moves the macOS traffic lights and shifts the actions with them', async () => {
+    mockIsNativeApp = true
+    mockInvoke.mockResolvedValue(52)
+
+    renderHook(() => useZoom())
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith('set_traffic_light_zoom', {
+        zoom: 1.25,
+        centerY: 22.5,
+      })
+    })
+    // Buttons keep their 52pt width; the 68px gap scales with the zoom.
+    await waitFor(() => {
+      expect(
+        document.documentElement.style.getPropertyValue(
+          '--mac-titlebar-action-left-inset'
+        )
+      ).toBe('57.6px')
+    })
     expect(
       document.documentElement.style.getPropertyValue(
         '--mac-titlebar-action-top-inset'
       )
-    ).toBe('5px')
-    expect(document.documentElement.style.fontSize).toBe('')
+    ).toBe('4px')
   })
 
   it('does not re-apply native zoom at 100% when display scale changes', async () => {

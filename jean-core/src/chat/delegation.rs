@@ -304,25 +304,12 @@ fn children_of(app: &AppHandle, lead_id: &str) -> Result<Vec<SessionMetadata>, S
 
 /// Runs that ended while Jean was closed reported nothing, and outcomes
 /// recorded right before a crash reached no lead. Called once after startup
-/// recovery; live runs keep their link and report when they end. Converges:
-/// a second sweep finds nothing armed and nothing pending.
-pub fn report_armed_links_on_startup(app: &AppHandle) {
-    let session_ids = match list_all_session_ids(app) {
-        Ok(ids) => ids,
-        Err(e) => {
-            log::warn!("[Delegation] startup sweep could not list sessions: {e}");
-            return;
-        }
-    };
+/// recovery with every delegation link the startup scan read; live runs keep
+/// their link and report when they end. Converges: a second sweep finds
+/// nothing armed and nothing pending.
+pub fn report_armed_links_on_startup(app: &AppHandle, links: Vec<(String, SessionDelegation)>) {
     let mut leads = BTreeSet::new();
-    for session_id in session_ids {
-        let Some(link) = load_metadata(app, &session_id)
-            .ok()
-            .flatten()
-            .and_then(|metadata| metadata.delegated_by)
-        else {
-            continue;
-        };
+    for (session_id, link) in links {
         if link.armed {
             report_run_end(app, &session_id, None);
         }
@@ -518,6 +505,11 @@ mod tests {
             .iter()
             .map(|m| m["message"].as_str().unwrap().to_string())
             .collect()
+    }
+
+    fn startup_sweep(app: &AppHandle) {
+        let scan = crate::chat::startup_scan::StartupScan::collect(app).unwrap();
+        report_armed_links_on_startup(app, scan.delegations);
     }
 
     fn link(app: &AppHandle, session_id: &str) -> Option<SessionDelegation> {
@@ -1035,8 +1027,8 @@ mod tests {
         child(&app, "typed");
         completed_run(&app, "typed");
 
-        report_armed_links_on_startup(&app);
-        report_armed_links_on_startup(&app);
+        startup_sweep(&app);
+        startup_sweep(&app);
 
         assert_eq!(
             queue(&app, "root"),
@@ -1080,8 +1072,8 @@ mod tests {
         }
         assert_eq!(queue(&app, "root"), Vec::<Value>::new());
 
-        report_armed_links_on_startup(&app);
-        report_armed_links_on_startup(&app);
+        startup_sweep(&app);
+        startup_sweep(&app);
 
         assert_eq!(
             messages(&app, "root"),

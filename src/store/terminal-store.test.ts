@@ -20,9 +20,6 @@ describe('TerminalStore', () => {
       terminalPanelOpen: {},
       terminalHeight: 30,
       modalTerminalOpen: {},
-      modalTerminalDockMode: 'floating',
-      modalTerminalWidth: 400,
-      modalTerminalHeight: 280,
     })
   })
 
@@ -81,23 +78,6 @@ describe('TerminalStore', () => {
 
       setTerminalHeight(50)
       expect(useTerminalStore.getState().terminalHeight).toBe(50)
-    })
-
-    it('sets modal terminal dock mode', () => {
-      const { setModalTerminalDockMode } = useTerminalStore.getState()
-
-      setModalTerminalDockMode('right')
-      expect(useTerminalStore.getState().modalTerminalDockMode).toBe('right')
-
-      setModalTerminalDockMode('bottom')
-      expect(useTerminalStore.getState().modalTerminalDockMode).toBe('bottom')
-    })
-
-    it('sets modal terminal height', () => {
-      const { setModalTerminalHeight } = useTerminalStore.getState()
-
-      setModalTerminalHeight(320)
-      expect(useTerminalStore.getState().modalTerminalHeight).toBe(320)
     })
 
     it('avoids replacing modal terminal open state on no-op updates', () => {
@@ -574,5 +554,42 @@ describe('TerminalStore', () => {
       expect(label?.length).toBeLessThanOrEqual(20)
       expect(label?.endsWith('...')).toBe(true)
     })
+  })
+})
+
+describe('right panel terminal tab (desktop)', () => {
+  beforeEach(async () => {
+    const { useUIStore } = await import('./ui-store')
+    const { useChatStore } = await import('./chat-store')
+    useTerminalStore.setState({ modalTerminalOpen: {} })
+    useChatStore.setState({ activeWorktreeId: 'wt-1' })
+    useUIStore.setState({
+      sessionChatModalOpen: false,
+      sessionChatModalWorktreeId: null,
+      fileBrowserVisible: false,
+      rightPanelTab: 'files',
+    })
+  })
+
+  it('toggles the right panel on the terminal tab', async () => {
+    const { useUIStore } = await import('./ui-store')
+
+    useTerminalStore.getState().toggleModalTerminal('wt-1')
+    expect(useUIStore.getState().fileBrowserVisible).toBe(true)
+    expect(useUIStore.getState().rightPanelTab).toBe('terminal')
+
+    useTerminalStore.getState().toggleModalTerminal('wt-1')
+    expect(useUIStore.getState().fileBrowserVisible).toBe(false)
+  })
+
+  it('hides the panel when the last terminal of its worktree closes', async () => {
+    const { useUIStore } = await import('./ui-store')
+    useTerminalStore.getState().setModalTerminalOpen('wt-1', true)
+
+    useTerminalStore.getState().setModalTerminalOpen('other', false)
+    expect(useUIStore.getState().fileBrowserVisible).toBe(true)
+
+    useTerminalStore.getState().setModalTerminalOpen('wt-1', false)
+    expect(useUIStore.getState().fileBrowserVisible).toBe(false)
   })
 })

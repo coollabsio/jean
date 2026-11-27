@@ -1,4 +1,5 @@
-import { ListChecks, Play, Star } from '@/components/icons/reicon'
+import { useEffect, useState } from 'react'
+import { ChevronDown, Play, Star } from '@/components/icons/reicon'
 import { Button, raisedToolbar } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -17,7 +18,10 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { Kbd } from '@/components/ui/kbd'
 import { cn } from '@/lib/utils'
+import { useUIStore } from '@/store/ui-store'
+import { DEFAULT_KEYBINDINGS, formatShortcutDisplay } from '@/types/keybindings'
 
 interface ScriptsButtonProps {
   projectId?: string
@@ -25,6 +29,11 @@ interface ScriptsButtonProps {
   owner: GitRepoOwner
   worktreePath: string
   onRun: (script: PackageScript) => void
+}
+
+interface ScriptsButtonOwnProps extends ScriptsButtonProps {
+  /** Plain text style for the window title bar */
+  inTitleBar?: boolean
 }
 
 function ScriptMenuItems({
@@ -98,33 +107,76 @@ function ScriptMenuItems({
   ))
 }
 
-export function ScriptsButton(props: ScriptsButtonProps) {
-  const { data: scripts = [] } = usePackageScripts(
+export function ScriptsButton({
+  inTitleBar = false,
+  ...props
+}: ScriptsButtonOwnProps) {
+  const { data: scripts = [], isLoading } = usePackageScripts(
     props.worktreePath,
     props.owner
   )
-  if (scripts.length === 0) return null
+  const { data: preferences } = usePreferences()
+  // `??` keeps an unbound ('') shortcut unbound instead of the default.
+  const shortcut = formatShortcutDisplay(
+    preferences?.keybindings?.open_scripts_menu ??
+      DEFAULT_KEYBINDINGS.open_scripts_menu
+  )
+  const [open, setOpen] = useState(false)
+  const menuRequested = useUIStore(state => state.scriptsMenuRequested)
+  const hasScripts = scripts.length > 0
+
+  // The open_scripts_menu shortcut opens the menu; arrow keys and Enter then
+  // pick a script through the dropdown's own keyboard navigation.
+  useEffect(() => {
+    if (!menuRequested || isLoading) return
+    useUIStore.getState().clearScriptsMenuRequest()
+    if (hasScripts) setOpen(true)
+  }, [menuRequested, isLoading, hasScripts])
+
+  if (!hasScripts) return null
+
+  const menuContent = (
+    <DropdownMenuContent align="end" className="min-w-48">
+      <ScriptMenuItems {...props} />
+    </DropdownMenuContent>
+  )
+
+  const trigger = inTitleBar ? (
+    <button
+      type="button"
+      className="flex h-6 items-center gap-1 px-1.5 text-xs text-foreground/70 hover:text-foreground"
+      aria-label="Scripts"
+    >
+      Scripts
+      <ChevronDown className="size-3" />
+    </button>
+  ) : (
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      className={raisedToolbar}
+      aria-label="Scripts"
+    >
+      <Play className="size-3.5" />
+    </Button>
+  )
 
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className={raisedToolbar}
-              aria-label="Scripts"
-            >
-              <ListChecks className="size-3.5" />
-            </Button>
-          </DropdownMenuTrigger>
+          <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
         </TooltipTrigger>
-        <TooltipContent>Scripts (package.json)</TooltipContent>
+        <TooltipContent>
+          Scripts (package.json)
+          {shortcut && (
+            <Kbd modHint className="ml-1">
+              {shortcut}
+            </Kbd>
+          )}
+        </TooltipContent>
       </Tooltip>
-      <DropdownMenuContent align="end" className="min-w-48">
-        <ScriptMenuItems {...props} />
-      </DropdownMenuContent>
+      {menuContent}
     </DropdownMenu>
   )
 }
@@ -140,7 +192,7 @@ export function ScriptsSubmenu(props: ScriptsButtonProps) {
   return (
     <DropdownMenuSub>
       <DropdownMenuSubTrigger className="gap-2">
-        <ListChecks className="h-4 w-4 text-muted-foreground" />
+        <Play className="h-4 w-4 text-muted-foreground" />
         <span className="flex-1">Scripts</span>
         <span className="ml-3 text-2xs text-muted-foreground">
           package.json

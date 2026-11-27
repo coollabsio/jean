@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { FALLBACK_APP_VERSION } from './app-version'
+import type * as TransportNamespace from './transport'
 
 const setWsConnectedMock = vi.fn()
 
@@ -35,17 +36,24 @@ class MockWebSocket {
   }
 }
 
+/** Sign-in resolves over several promise hops before the socket opens. */
 async function flushAsync() {
-  await Promise.resolve()
-  await Promise.resolve()
-  await Promise.resolve()
-  await Promise.resolve()
+  for (let hop = 0; hop < 12; hop++) await Promise.resolve()
 }
 
 function getWs(index: number): MockWebSocket {
   const ws = MockWebSocket.instances[index]
   if (!ws) throw new Error(`Expected websocket instance ${index}`)
   return ws
+}
+
+type TransportModule = typeof TransportNamespace
+const loadedTransports: TransportModule[] = []
+
+/** A transport left over from one test reconnects during the next one. */
+function trackTransport(transport: TransportModule): TransportModule {
+  loadedTransports.push(transport)
+  return transport
 }
 
 async function loadTransportModule() {
@@ -60,7 +68,7 @@ async function loadTransportModule() {
     getActiveRemoteConnection: () => null,
     getRemoteConnections: () => [],
   }))
-  return import('./transport')
+  return trackTransport(await import('./transport'))
 }
 
 async function loadNativeTransportModule(
@@ -74,7 +82,7 @@ async function loadNativeTransportModule(
     setWebAccessEnabled: vi.fn(),
   }))
   vi.doMock('@tauri-apps/api/core', () => ({ invoke: tauriInvoke }))
-  return import('./transport')
+  return trackTransport(await import('./transport'))
 }
 
 async function loadRemoteNativeTransportModule(
@@ -111,7 +119,7 @@ async function loadRemoteNativeTransportModule(
   if (tauriInvoke) {
     vi.doMock('@tauri-apps/api/core', () => ({ invoke: tauriInvoke }))
   }
-  return import('./transport')
+  return trackTransport(await import('./transport'))
 }
 
 describe('transport bootstrap', () => {
@@ -135,6 +143,9 @@ describe('transport bootstrap', () => {
   })
 
   afterEach(() => {
+    for (const transport of loadedTransports.splice(0)) {
+      transport.getLegacyWsTransport().dispose()
+    }
     vi.useRealTimers()
     vi.unstubAllGlobals()
     vi.doUnmock('./environment')
@@ -312,7 +323,8 @@ describe('transport bootstrap', () => {
 
     await waitFor(() => expect(MockWebSocket.instances.length).toBe(1))
     expect(fetch).toHaveBeenCalledWith(
-      expect.stringContaining('api/auth?token=link-token')
+      expect.stringContaining('api/auth?token=link-token'),
+      expect.anything()
     )
     expect(localStorage.setItem).not.toHaveBeenCalled()
     expect(window.location.search).toBe('?tab=1')
@@ -329,7 +341,8 @@ describe('transport bootstrap', () => {
 
     await waitFor(() => expect(MockWebSocket.instances.length).toBe(1))
     expect(fetch).toHaveBeenCalledWith(
-      expect.stringContaining('token=legacy-token')
+      expect.stringContaining('token=legacy-token'),
+      expect.anything()
     )
     expect(localStorage.removeItem).toHaveBeenCalledWith('jean-http-token')
     vi.mocked(localStorage.getItem).mockImplementation(() => null)
@@ -341,7 +354,10 @@ describe('transport bootstrap', () => {
     transport.connectTransport()
 
     await waitFor(() => expect(MockWebSocket.instances.length).toBe(1))
-    expect(fetch).toHaveBeenCalledWith(expect.not.stringContaining('token='))
+    expect(fetch).toHaveBeenCalledWith(
+      expect.not.stringContaining('token='),
+      expect.anything()
+    )
   })
 
   it('signs out by revoking the server session', async () => {
@@ -379,7 +395,8 @@ describe('transport bootstrap', () => {
 
     await waitFor(() =>
       expect(fetch).toHaveBeenCalledWith(
-        expect.stringContaining('token=refused-token')
+        expect.stringContaining('token=refused-token'),
+        expect.anything()
       )
     )
     await waitFor(() => expect(rejected.result.current).toBe('rejected'))
@@ -769,7 +786,7 @@ describe('transport bootstrap', () => {
     expect(handler).not.toHaveBeenCalled()
   })
 
-  it('keeps idle websocket alive when app-level heartbeats arrive', async () => {
+  it('gives an older server 25s for its first heartbeat, then its 50s window', async () => {
     vi.useFakeTimers()
     const transport = await loadTransportModule()
 
@@ -777,17 +794,29 @@ describe('transport bootstrap', () => {
     await flushAsync()
 
     const ws = getWs(0)
-    vi.advanceTimersByTime(49_000)
+    vi.advanceTimersByTime(24_000)
     expect(ws.close).not.toHaveBeenCalled()
 
     ws.receive({ type: 'heartbeat' })
-    vi.advanceTimersByTime(40_000)
+    vi.advanceTimersByTime(49_000)
     expect(ws.close).not.toHaveBeenCalled()
 
-    vi.advanceTimersByTime(11_000)
+    vi.advanceTimersByTime(2_000)
     expect(ws.close).toHaveBeenCalledTimes(1)
+  })
 
-    vi.useRealTimers()
+  it('drops a socket that never sends a first heartbeat after 25s', async () => {
+    vi.useFakeTimers()
+    const transport = await loadTransportModule()
+    transport.connectTransport()
+    await flushAsync()
+    const ws = getWs(0)
+
+    vi.advanceTimersByTime(25_000)
+    expect(ws.close).not.toHaveBeenCalled()
+
+    vi.advanceTimersByTime(1_000)
+    expect(ws.close).toHaveBeenCalledTimes(1)
   })
 
   it('replaces a stale websocket immediately when the page returns', async () => {
@@ -801,8 +830,11 @@ describe('transport bootstrap', () => {
     transport.connectTransport()
     await flushAsync()
     const ws = getWs(0)
+    ws.receive({ type: 'heartbeat', interval_ms: 5_000 })
 
-    vi.advanceTimersByTime(51_000)
+    // A suspended page: the clock moves on but no timer runs.
+    vi.setSystemTime(Date.now() + 11_000)
+    expect(ws.close).not.toHaveBeenCalled()
     act(() => document.dispatchEvent(new Event('visibilitychange')))
 
     expect(ws.close).toHaveBeenCalledTimes(1)
@@ -850,7 +882,7 @@ describe('transport bootstrap', () => {
     expect(ws.close).toHaveBeenCalledTimes(1)
   })
 
-  it('drops a silent socket after three announced heartbeat intervals', async () => {
+  it('drops a silent socket after two announced heartbeat intervals', async () => {
     vi.useFakeTimers()
     const transport = await loadTransportModule()
     transport.connectTransport()
@@ -858,14 +890,15 @@ describe('transport bootstrap', () => {
     const ws = getWs(0)
 
     ws.receive({ type: 'heartbeat', interval_ms: 5_000 })
-    vi.advanceTimersByTime(14_000)
+    vi.advanceTimersByTime(9_000)
     expect(ws.close).not.toHaveBeenCalled()
 
     ws.receive({ type: 'heartbeat', interval_ms: 5_000 })
-    vi.advanceTimersByTime(14_000)
+    vi.advanceTimersByTime(10_000)
     expect(ws.close).not.toHaveBeenCalled()
 
-    vi.advanceTimersByTime(6_000)
+    // Checked every second: dead at most 11s after the last frame.
+    vi.advanceTimersByTime(1_000)
     expect(ws.close).toHaveBeenCalledTimes(1)
   })
 
@@ -930,7 +963,8 @@ describe('transport bootstrap', () => {
     expect(ws.close).not.toHaveBeenCalled()
   })
 
-  it('recovers on wake when an established socket closed without a reload', async () => {
+  it('retries at once on wake instead of waiting out the backoff', async () => {
+    vi.useFakeTimers()
     Object.defineProperty(document, 'hidden', {
       configurable: true,
       value: false,
@@ -938,27 +972,71 @@ describe('transport bootstrap', () => {
     const transport = await loadTransportModule()
     transport.connectTransport()
     await flushAsync()
-    const recover = vi.fn()
-    transport.onEstablishedWsDisconnect(recover)
 
+    vi.mocked(fetch).mockRejectedValue(new TypeError('network changed'))
     getWs(0).close()
-    expect(recover).toHaveBeenCalledTimes(1)
+    // 250ms + 500ms + 1s + 2s of failed attempts: the next wait is 4s.
+    await vi.advanceTimersByTimeAsync(3_750)
+    expect(MockWebSocket.instances).toHaveLength(1)
 
-    // The reload did not happen (page frozen). Wake must recover again.
-    window.dispatchEvent(new Event('pageshow'))
-    expect(recover).toHaveBeenCalledTimes(2)
+    vi.mocked(fetch).mockResolvedValue({ ok: true } as Response)
+    window.dispatchEvent(new Event('online'))
+    await flushAsync()
+
+    expect(MockWebSocket.instances).toHaveLength(2)
+    expect(transport.isTransportConnected()).toBe(true)
   })
 
-  it('recovers at once when the listener registers after the socket dropped', async () => {
+  it('aborts a sign-in probe that hangs on the old network when the page wakes', async () => {
+    vi.useFakeTimers()
+    Object.defineProperty(document, 'hidden', {
+      configurable: true,
+      value: false,
+    })
+    const transport = await loadTransportModule()
+    transport.connectTransport()
+    await flushAsync()
+
+    vi.mocked(fetch).mockImplementationOnce(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () =>
+            reject(new DOMException('aborted', 'AbortError'))
+          )
+        })
+    )
+    getWs(0).close()
+    await vi.advanceTimersByTimeAsync(250)
+    expect(MockWebSocket.instances).toHaveLength(1)
+
+    window.dispatchEvent(new Event('online'))
+    await vi.advanceTimersByTimeAsync(250)
+
+    expect(MockWebSocket.instances).toHaveLength(2)
+  })
+
+  it('keeps the first sign-in probe when pageshow fires during page load', async () => {
+    const transport = await loadTransportModule()
+
+    transport.connectTransport()
+    window.dispatchEvent(new Event('pageshow'))
+    await flushAsync()
+
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(MockWebSocket.instances).toHaveLength(1)
+    expect(transport.isTransportConnected()).toBe(true)
+  })
+
+  it('reports a drop that is still in progress to a late recovery listener', async () => {
     const transport = await loadTransportModule()
     transport.connectTransport()
     await flushAsync()
 
     getWs(0).close()
-    const recover = vi.fn()
-    transport.onEstablishedWsDisconnect(recover)
+    const disconnected = vi.fn()
+    transport.onWsRecovery({ disconnected })
 
-    expect(recover).toHaveBeenCalledTimes(1)
+    expect(disconnected).toHaveBeenCalledTimes(1)
   })
 
   it('uses extended timeout for terminal lifecycle commands', async () => {
@@ -1028,17 +1106,233 @@ describe('transport bootstrap', () => {
     )
   })
 
-  it('does not open a second socket after an established connection closes', async () => {
+  it('reopens the socket in memory after an established connection closes', async () => {
     const transport = await loadTransportModule()
+    const handler = vi.fn()
+    await transport.listen('chat:chunk', handler)
 
     transport.connectTransport()
     await flushAsync()
 
-    const firstWs = getWs(0)
-    firstWs.close()
-    await new Promise(resolve => setTimeout(resolve, 150))
+    getWs(0).close()
+    expect(transport.isTransportConnected()).toBe(false)
+    await new Promise(resolve => setTimeout(resolve, 300))
     await flushAsync()
 
+    expect(MockWebSocket.instances).toHaveLength(2)
+    expect(transport.isTransportConnected()).toBe(true)
+    // Listeners registered before the drop receive the new socket's events.
+    getWs(1).receive({
+      type: 'event',
+      event: 'chat:chunk',
+      payload: { session_id: 's1', content: 'after' },
+      seq: 9,
+    })
+    expect(handler).toHaveBeenCalledWith({
+      payload: { session_id: 's1', content: 'after' },
+    })
+  })
+
+  it('backs off from 250ms to 5s while the server stays unreachable', async () => {
+    vi.useFakeTimers()
+    const transport = await loadTransportModule()
+    transport.connectTransport()
+    await flushAsync()
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockClear()
+    fetchMock.mockRejectedValue(new TypeError('offline'))
+
+    getWs(0).close()
+    const attemptsAt = async (ms: number) => {
+      await vi.advanceTimersByTimeAsync(ms)
+      return fetchMock.mock.calls.length
+    }
+
+    expect(await attemptsAt(249)).toBe(0)
+    expect(await attemptsAt(1)).toBe(1) // 250ms
+    expect(await attemptsAt(500)).toBe(2)
+    expect(await attemptsAt(1_000)).toBe(3)
+    expect(await attemptsAt(2_000)).toBe(4)
+    expect(await attemptsAt(4_000)).toBe(5)
+    expect(await attemptsAt(4_999)).toBe(5)
+    expect(await attemptsAt(1)).toBe(6) // capped at 5s
+    expect(await attemptsAt(5_000)).toBe(7)
+  })
+
+  it('rejects commands pending at the drop and runs commands sent during the gap', async () => {
+    vi.useFakeTimers()
+    const transport = await loadTransportModule()
+    transport.connectTransport()
+    await flushAsync()
+    const fetchMock = vi.mocked(fetch)
+
+    const pending = transport.invoke('send_chat_message', { message: 'hi' })
+    const pendingResult = pending.catch((error: Error) => error.message)
+    fetchMock.mockClear()
+    getWs(0).close()
+    expect(await pendingResult).toBe('WebSocket disconnected')
+
+    // Sent while disconnected: waits for the backoff, does not start a
+    // connection attempt of its own.
+    const queued = transport.invoke<string>('get_server_platform')
+    await flushAsync()
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(250)
+    const sent = getWs(1).send.mock.calls.map(call => JSON.parse(call[0]))
+    expect(sent.map(message => message.command)).toEqual([
+      'get_server_platform',
+    ])
+    getWs(1).receive({ type: 'response', id: sent[0].id, data: 'linux' })
+    await expect(queued).resolves.toBe('linux')
+  })
+
+  it('does not send a queued command whose caller already timed out', async () => {
+    vi.useFakeTimers()
+    const transport = await loadTransportModule()
+    transport.connectTransport()
+    await flushAsync()
+
+    vi.mocked(fetch).mockRejectedValue(new TypeError('offline'))
+    getWs(0).close()
+    const queued = transport
+      .invoke('create_session', { name: 'x' })
+      .catch((error: Error) => error.message)
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(await queued).toBe("Command 'create_session' timed out after 60s")
+
+    vi.mocked(fetch).mockResolvedValue({ ok: true } as Response)
+    await vi.advanceTimersByTimeAsync(5_000)
+
+    expect(MockWebSocket.instances).toHaveLength(2)
+    expect(getWs(1).send).not.toHaveBeenCalled()
+  })
+
+  it('holds events after a reconnect until the app has resynced', async () => {
+    const transport = await loadTransportModule()
+    const received: string[] = []
+    await transport.listen<{ content: string }>('chat:chunk', event => {
+      received.push(event.payload.content)
+    })
+    let finishResync: () => void = () => undefined
+    const disconnected = vi.fn()
+    transport.onWsRecovery({
+      disconnected,
+      reconnected: () =>
+        new Promise<void>(resolve => {
+          finishResync = resolve
+        }),
+    })
+    transport.connectTransport()
+    await flushAsync()
+    const chunk = (seq: number, content: string) => ({
+      type: 'event',
+      event: 'chat:chunk',
+      payload: { session_id: 's1', content },
+      seq,
+    })
+    getWs(0).receive(chunk(1, 'before'))
+
+    getWs(0).close()
+    expect(disconnected).toHaveBeenCalledTimes(1)
+    await new Promise(resolve => setTimeout(resolve, 300))
+    await flushAsync()
+
+    getWs(1).receive(chunk(7, 'live-1'))
+    getWs(1).receive(chunk(8, 'live-2'))
+    expect(received).toEqual(['before'])
+
+    finishResync()
+    await flushAsync()
+    expect(received).toEqual(['before', 'live-1', 'live-2'])
+
+    getWs(1).receive(chunk(9, 'live-3'))
+    expect(received).toEqual(['before', 'live-1', 'live-2', 'live-3'])
+  })
+
+  it('replays terminal output missed during the gap, in order', async () => {
+    const transport = await loadTransportModule()
+    const output: string[] = []
+    await transport.listen<{ data: string }>('terminal:output', event => {
+      output.push(event.payload.data)
+    })
+    let finishResync: () => void = () => undefined
+    transport.onWsRecovery({
+      disconnected: () => undefined,
+      reconnected: () =>
+        new Promise<void>(resolve => {
+          finishResync = resolve
+        }),
+    })
+    transport.connectTransport()
+    await flushAsync()
+    const term = (seq: number, data: string) => ({
+      type: 'event',
+      event: 'terminal:output',
+      payload: { terminal_id: 't1', data },
+      seq,
+    })
+    getWs(0).receive(term(10, 'a'))
+
+    getWs(0).close()
+    await new Promise(resolve => setTimeout(resolve, 300))
+    await flushAsync()
+
+    expect(JSON.parse(getWs(1).send.mock.calls[0]?.[0] ?? '')).toEqual({
+      type: 'terminal_replay',
+      terminal_id: 't1',
+      last_seq: 10,
+    })
+    // Live output can overtake the replay of older output; one event of the
+    // replay was already seen before the drop.
+    getWs(1).receive(term(13, 'd'))
+    getWs(1).receive(term(10, 'a'))
+    getWs(1).receive(term(11, 'b'))
+    getWs(1).receive(term(12, 'c'))
+    finishResync()
+    await flushAsync()
+
+    expect(output).toEqual(['a', 'b', 'c', 'd'])
+  })
+
+  it('asks for a reload when the reconnect reaches a restarted server', async () => {
+    const transport = await loadTransportModule()
+    const reloadRequired = vi.fn()
+    transport.onWsRecovery({ disconnected: () => undefined, reloadRequired })
+    transport.connectTransport()
+    await flushAsync()
+    getWs(0).receive({ type: 'heartbeat', interval_ms: 5_000, boot_id: 'a' })
+
+    getWs(0).close()
+    await new Promise(resolve => setTimeout(resolve, 300))
+    await flushAsync()
+    getWs(1).receive({ type: 'heartbeat', interval_ms: 5_000, boot_id: 'a' })
+    expect(reloadRequired).not.toHaveBeenCalled()
+
+    getWs(1).close()
+    await new Promise(resolve => setTimeout(resolve, 300))
+    await flushAsync()
+    getWs(2).receive({ type: 'heartbeat', interval_ms: 5_000, boot_id: 'b' })
+    expect(reloadRequired).toHaveBeenCalledTimes(1)
+  })
+
+  it('asks for a reload instead of reconnecting when the server serves a new web build', async () => {
+    const authBody = (webBuildId: string) =>
+      ({ ok: true, json: async () => ({ ok: true, webBuildId }) }) as Response
+    vi.mocked(fetch).mockResolvedValue(authBody('build-1'))
+    const transport = await loadTransportModule()
+    const reloadRequired = vi.fn()
+    transport.onWsRecovery({ disconnected: () => undefined, reloadRequired })
+    transport.connectTransport()
+    await flushAsync()
+    expect(MockWebSocket.instances).toHaveLength(1)
+
+    vi.mocked(fetch).mockResolvedValue(authBody('build-2'))
+    getWs(0).close()
+    await new Promise(resolve => setTimeout(resolve, 300))
+    await flushAsync()
+
+    expect(reloadRequired).toHaveBeenCalledTimes(1)
     expect(MockWebSocket.instances).toHaveLength(1)
   })
 
@@ -1092,56 +1386,17 @@ describe('transport bootstrap', () => {
     )
   })
 
-  it('notifies established disconnect listeners synchronously', async () => {
+  it('notifies recovery listeners of a disconnect synchronously', async () => {
     const transport = await loadTransportModule()
-    const onDisconnect = vi.fn()
+    const disconnected = vi.fn()
 
-    transport.onEstablishedWsDisconnect(onDisconnect)
+    transport.onWsRecovery({ disconnected })
     transport.connectTransport()
     await flushAsync()
 
     getWs(0).close()
 
-    expect(onDisconnect).toHaveBeenCalledOnce()
-  })
-
-  it('waits for the server to answer before resolving reachability', async () => {
-    vi.useFakeTimers()
-    const transport = await loadTransportModule()
-    vi.mocked(fetch)
-      .mockRejectedValueOnce(new TypeError('network changed'))
-      .mockResolvedValueOnce({ ok: false } as Response)
-      .mockResolvedValue({ ok: true } as Response)
-    const resolved = vi.fn()
-
-    void transport.waitUntilBackendReachable().then(resolved)
-    await vi.advanceTimersByTimeAsync(0)
-    expect(resolved).not.toHaveBeenCalled()
-
-    await vi.advanceTimersByTimeAsync(500)
-    expect(resolved).not.toHaveBeenCalled()
-
-    await vi.advanceTimersByTimeAsync(1_000)
-    expect(resolved).toHaveBeenCalledOnce()
-    expect(String(vi.mocked(fetch).mock.calls[0]?.[0])).toContain('/healthz')
-  })
-
-  it('probes again at once when the network comes back', async () => {
-    vi.useFakeTimers()
-    const transport = await loadTransportModule()
-    vi.mocked(fetch)
-      .mockRejectedValueOnce(new TypeError('network changed'))
-      .mockRejectedValueOnce(new TypeError('network changed'))
-      .mockResolvedValue({ ok: true } as Response)
-    const resolved = vi.fn()
-
-    void transport.waitUntilBackendReachable().then(resolved)
-    await vi.advanceTimersByTimeAsync(500)
-    expect(resolved).not.toHaveBeenCalled()
-
-    window.dispatchEvent(new Event('online'))
-    await vi.advanceTimersByTimeAsync(0)
-    expect(resolved).toHaveBeenCalledOnce()
+    expect(disconnected).toHaveBeenCalledOnce()
   })
 
   it('uploads attachments to the remote server over HTTP, not the WebSocket', async () => {

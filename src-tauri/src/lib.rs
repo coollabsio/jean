@@ -11,6 +11,7 @@ mod http_server;
 mod platform;
 mod remote_install;
 mod ssh_tunnel;
+mod traffic_lights;
 
 pub(crate) struct CoreRuntime(pub jean_core::RuntimeContext);
 
@@ -424,7 +425,9 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .setup(setup_runtime)
+        .on_window_event(traffic_lights::on_window_event)
         .invoke_handler(tauri::generate_handler![
+            traffic_lights::set_traffic_light_zoom,
             dispatch_core_command,
             desktop_commands::set_window_vibrancy,
             desktop_commands::send_native_notification,

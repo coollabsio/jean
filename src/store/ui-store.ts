@@ -123,28 +123,19 @@ export interface MinimizedCliUpdate {
   progress: number | null
 }
 
-/** Top-level Jean feature selected in the sidebar tabs */
-export type RailSection = 'workspace' | 'agents'
+export type RightPanelTab = 'files' | 'terminal' | 'browser'
 
 interface UIState {
   leftSidebarVisible: boolean
-  railSection: RailSection
-  /** Last sidebar visibility of each rail section, restored on switch */
-  railSidebarVisible: Partial<Record<RailSection, boolean>>
-  /** Agent open on the Agents page */
-  selectedAgentId: string
-  /** When the user last left the Agents page (ms, 0 = never this session) */
-  agentsLeftAt: number
-  /** Agents sidebar server filter: 'all' or a server ID */
-  agentsServerFilter: string
-  /** Agent pages show every tab and tool activity (off: Chat and Schedules) */
-  agentsAdvanced: boolean
-  /** Per agent: timestamp (unix s) of the newest update reply the user saw */
-  agentUpdatesSeenAt: Record<string, number>
   leftSidebarSize: number // Width in pixels, persisted across sessions
-  /** Agents sidebar width in pixels; can shrink to an icon column */
-  /** File browser (worktree explorer) visibility */
+  /** Right panel visibility (tabs: files, terminal, browser) */
   fileBrowserVisible: boolean
+  /** Tab shown in the right panel */
+  rightPanelTab: RightPanelTab
+  /** Tabs open in the right panel, in display order */
+  rightPanelOpenTabs: RightPanelTab[]
+  /** Set by the scripts shortcut; the Scripts button opens its menu and clears it */
+  scriptsMenuRequested: boolean
   /** File browser width in pixels, persisted across sessions */
   fileBrowserSize: number
   /** Absolute path of file open in the global FileContentModal (null = closed) */
@@ -269,13 +260,6 @@ interface UIState {
   availableCliUpdates: PendingCliUpdate[]
   toggleLeftSidebar: () => void
   setLeftSidebarVisible: (visible: boolean) => void
-  /** restoreSidebar: show the sidebar as the section last left it (desktop rail) */
-  setRailSection: (section: RailSection, restoreSidebar?: boolean) => void
-  setSelectedAgentId: (agentId: string) => void
-  setAgentsServerFilter: (serverId: string) => void
-  setAgentsAdvanced: (advanced: boolean) => void
-  markAgentUpdatesSeen: (agentId: string, timestamp: number) => void
-  setAgentUpdatesSeenAt: (seenAt: Record<string, number>) => void
   setLeftSidebarSize: (size: number) => void
   leftSidebarSwipe: {
     isDragging: boolean
@@ -285,6 +269,13 @@ interface UIState {
   setLeftSidebarSwipe: (swipe: UIState['leftSidebarSwipe']) => void
   toggleFileBrowser: () => void
   setFileBrowserVisible: (visible: boolean) => void
+  /** Show the right panel and open its Scripts menu */
+  requestScriptsMenu: () => void
+  clearScriptsMenuRequest: () => void
+  /** Show the right panel on this tab */
+  openRightPanelTab: (tab: RightPanelTab) => void
+  /** Remove a tab; hides the panel when it was the last one */
+  closeRightPanelTab: (tab: RightPanelTab) => void
   setFileBrowserSize: (size: number) => void
   setViewingFilePath: (path: string | null) => void
   toggleRightSidebar: () => void
@@ -447,13 +438,6 @@ export const useUIStore = create<UIState>()(
   devtools(
     (set, get) => ({
       leftSidebarVisible: false,
-      railSection: 'workspace',
-      railSidebarVisible: {},
-      selectedAgentId: 'jean',
-      agentsLeftAt: 0,
-      agentsServerFilter: 'all',
-      agentsAdvanced: false,
-      agentUpdatesSeenAt: {},
       leftSidebarSize: 250, // Default width in pixels
       leftSidebarSwipe: {
         isDragging: false,
@@ -461,7 +445,10 @@ export const useUIStore = create<UIState>()(
         dragTransition: '',
       },
       fileBrowserVisible: false,
-      fileBrowserSize: 280,
+      rightPanelTab: 'files',
+      rightPanelOpenTabs: ['files'],
+      scriptsMenuRequested: false,
+      fileBrowserSize: 400,
       viewingFilePath: null,
       rightSidebarVisible: false,
       commandPaletteOpen: false,
@@ -584,85 +571,6 @@ export const useUIStore = create<UIState>()(
           'setLeftSidebarVisible'
         ),
 
-      setRailSection: (section, restoreSidebar = false) =>
-        set(
-          state =>
-            state.railSection === section
-              ? state
-              : {
-                  railSection: section,
-                  railSidebarVisible: {
-                    ...state.railSidebarVisible,
-                    [state.railSection]: state.leftSidebarVisible,
-                  },
-                  // A section never opened before shows its panel
-                  ...(restoreSidebar && {
-                    leftSidebarVisible:
-                      state.railSidebarVisible[section] ?? true,
-                  }),
-                  ...(state.railSection === 'agents' && {
-                    agentsLeftAt: Date.now(),
-                  }),
-                },
-          undefined,
-          'setRailSection'
-        ),
-
-      setSelectedAgentId: agentId =>
-        set(
-          state =>
-            state.selectedAgentId === agentId
-              ? state
-              : { selectedAgentId: agentId },
-          undefined,
-          'setSelectedAgentId'
-        ),
-
-      setAgentsAdvanced: advanced =>
-        set(
-          state =>
-            state.agentsAdvanced === advanced
-              ? state
-              : { agentsAdvanced: advanced },
-          undefined,
-          'setAgentsAdvanced'
-        ),
-
-      markAgentUpdatesSeen: (agentId, timestamp) =>
-        set(
-          state =>
-            (state.agentUpdatesSeenAt[agentId] ?? 0) >= timestamp
-              ? state
-              : {
-                  agentUpdatesSeenAt: {
-                    ...state.agentUpdatesSeenAt,
-                    [agentId]: timestamp,
-                  },
-                },
-          undefined,
-          'markAgentUpdatesSeen'
-        ),
-
-      setAgentUpdatesSeenAt: seenAt =>
-        set(
-          state =>
-            state.agentUpdatesSeenAt === seenAt
-              ? state
-              : { agentUpdatesSeenAt: seenAt },
-          undefined,
-          'setAgentUpdatesSeenAt'
-        ),
-
-      setAgentsServerFilter: serverId =>
-        set(
-          state =>
-            state.agentsServerFilter === serverId
-              ? state
-              : { agentsServerFilter: serverId },
-          undefined,
-          'setAgentsServerFilter'
-        ),
-
       toggleRightSidebar: () =>
         set(
           state => ({ rightSidebarVisible: !state.rightSidebarVisible }),
@@ -705,6 +613,67 @@ export const useUIStore = create<UIState>()(
               : { fileBrowserVisible: visible },
           undefined,
           'setFileBrowserVisible'
+        ),
+
+      requestScriptsMenu: () =>
+        set(
+          { fileBrowserVisible: true, scriptsMenuRequested: true },
+          undefined,
+          'requestScriptsMenu'
+        ),
+
+      clearScriptsMenuRequest: () =>
+        set(
+          state =>
+            state.scriptsMenuRequested
+              ? { scriptsMenuRequested: false }
+              : state,
+          undefined,
+          'clearScriptsMenuRequest'
+        ),
+
+      openRightPanelTab: tab =>
+        set(
+          state => {
+            const isOpen = state.rightPanelOpenTabs.includes(tab)
+            if (
+              isOpen &&
+              state.fileBrowserVisible &&
+              state.rightPanelTab === tab
+            ) {
+              return state
+            }
+            return {
+              fileBrowserVisible: true,
+              rightPanelTab: tab,
+              rightPanelOpenTabs: isOpen
+                ? state.rightPanelOpenTabs
+                : [...state.rightPanelOpenTabs, tab],
+            }
+          },
+          undefined,
+          'openRightPanelTab'
+        ),
+
+      closeRightPanelTab: tab =>
+        set(
+          state => {
+            const index = state.rightPanelOpenTabs.indexOf(tab)
+            if (index === -1) return state
+            const rightPanelOpenTabs = state.rightPanelOpenTabs.filter(
+              t => t !== tab
+            )
+            if (rightPanelOpenTabs.length === 0) {
+              return { rightPanelOpenTabs, fileBrowserVisible: false }
+            }
+            if (state.rightPanelTab !== tab) return { rightPanelOpenTabs }
+            // Select the neighbor that took the closed tab's place
+            const next =
+              rightPanelOpenTabs[Math.min(index, rightPanelOpenTabs.length - 1)]
+            return { rightPanelOpenTabs, rightPanelTab: next ?? 'files' }
+          },
+          undefined,
+          'closeRightPanelTab'
         ),
 
       setFileBrowserSize: size =>

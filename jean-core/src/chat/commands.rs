@@ -357,13 +357,10 @@ pub(crate) fn resolve_default_backend(app: &AppHandle, worktree_id: Option<&str>
     // Check project-level override if worktree_id is provided
     if let Some(wt_id) = worktree_id {
         if let Ok(data) = load_projects_data(app) {
-            if let Some(project) = data.projects.iter().find(|p| {
-                !p.is_folder
-                    && data
-                        .worktrees
-                        .iter()
-                        .any(|w| w.id == wt_id && w.project_id == p.id)
-            }) {
+            if let Some(project) = data
+                .project_for_worktree(wt_id)
+                .filter(|project| !project.is_folder)
+            {
                 if let Some(ref pb) = project.default_backend {
                     resolved = match pb.as_str() {
                         "codex" => Backend::Codex,
@@ -596,8 +593,9 @@ fn default_provider_for_backend(
         Backend::Claude => load_projects_data(app)
             .ok()
             .and_then(|data| {
-                let project_id = data.find_worktree(worktree_id)?.project_id.clone();
-                data.find_project(&project_id)?.default_provider.clone()
+                data.project_for_worktree(worktree_id)?
+                    .default_provider
+                    .clone()
             })
             .or_else(|| prefs.and_then(|p| p.default_provider.clone())),
         Backend::Codex => prefs.and_then(|p| p.default_codex_provider.clone()),
@@ -627,8 +625,8 @@ fn default_execution_mode_for_worktree(
 ///
 /// Uses the worktree or preference default when that backend supports it.
 /// Plan is opt-in, so a saved Plan default and any unsupported policy fall
-/// through to Build, then Full access. Cursor has no Build mode, so that
-/// fallback is Full access rather than Plan.
+/// through to Build, then Full access. Cursor Build needs the Cursor sandbox,
+/// so native Windows without WSL falls through to Full access, never to Plan.
 pub(crate) fn default_execution_policy(
     app: &AppHandle,
     worktree_id: &str,
@@ -713,7 +711,7 @@ fn resolve_send_reasoning(
 fn validate_execution_policy(mode: &str, backend: &Backend) -> Result<(), String> {
     let supported = match mode {
         "plan" | "yolo" => true,
-        "build" => *backend != Backend::Cursor,
+        "build" => *backend != Backend::Cursor || super::cursor::cursor_build_available(),
         "supervised" => matches!(
             backend,
             Backend::Claude | Backend::Codex | Backend::Opencode | Backend::Grok | Backend::Kimi
@@ -749,7 +747,6 @@ fn build_kimi_system_prompt(
     worktree_id: &str,
     ai_language: Option<&str>,
     parallel_prompt: Option<&str>,
-    agent_prompt: Option<&str>,
     include_recap: bool,
     local_files_available: bool,
 ) -> Option<String> {
@@ -763,32 +760,29 @@ fn build_kimi_system_prompt(
         parallel_prompt,
         resolve_session_global_system_prompt(app, worktree_id, preferences.as_ref()),
     );
-    super::push_trimmed_prompt(&mut parts, agent_prompt);
     if let Ok(data) = load_projects_data(app) {
-        if let Some(worktree) = data.find_worktree(worktree_id) {
-            if let Some(project) = data.find_project(&worktree.project_id) {
-                if let Some(prompt) = project
-                    .custom_system_prompt
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                {
-                    parts.push(prompt.to_string());
-                }
-                let paths = project
-                    .linked_project_ids
-                    .iter()
-                    .filter_map(|id| data.find_project(id))
-                    .map(|project| project.path.trim())
-                    .filter(|path| !path.is_empty())
-                    .map(|path| format!("- {path}"))
-                    .collect::<Vec<_>>();
-                if local_files_available && !paths.is_empty() {
-                    parts.push(format!(
-                        "This project is linked to other projects for cross-project context. Check these directories for instructions and documentation:\n{}",
-                        paths.join("\n")
-                    ));
-                }
+        if let Some(project) = data.project_for_worktree(worktree_id) {
+            if let Some(prompt) = project
+                .custom_system_prompt
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                parts.push(prompt.to_string());
+            }
+            let paths = project
+                .linked_project_ids
+                .iter()
+                .filter_map(|id| data.find_project(id))
+                .map(|project| project.path.trim())
+                .filter(|path| !path.is_empty())
+                .map(|path| format!("- {path}"))
+                .collect::<Vec<_>>();
+            if local_files_available && !paths.is_empty() {
+                parts.push(format!(
+                    "This project is linked to other projects for cross-project context. Check these directories for instructions and documentation:\n{}",
+                    paths.join("\n")
+                ));
             }
         }
     }
@@ -986,55 +980,33 @@ pub async fn get_session_status(
 /// plus every session the registry manages; a client treats any other session
 /// as idle. Orphaned runs are repaired before reading so a crashed run never
 /// reports as running.
+///
+/// Answered from the run-state index, which waits for the startup pass. Only
+/// an orphan repair reads session files.
 pub async fn get_run_states(
     app: AppHandle,
     session_ids: Option<Vec<String>>,
 ) -> Result<Vec<RunState>, String> {
-    let explicit = session_ids.is_some();
-    let session_ids = match session_ids {
-        Some(ids) => ids,
-        None => super::storage::list_all_session_ids(&app)?,
-    };
+    let index = super::run_state_index::loaded_index(&app).await?;
     let managed = super::registry::get_actively_managed_sessions();
-    let mut loaded = Vec::with_capacity(session_ids.len());
-    let mut to_repair = Vec::new();
-    for session_id in session_ids {
-        match load_metadata(&app, &session_id) {
-            Ok(Some(metadata)) => {
-                // Only an unmanaged session with an unfinished run can be an
-                // orphan; everything else is already in its final state.
-                let unfinished = metadata
-                    .runs
-                    .iter()
-                    .any(|run| matches!(run.status, RunStatus::Running | RunStatus::Resumable));
-                if unfinished && !managed.contains(&session_id) {
-                    to_repair.push(session_id.clone());
-                }
-                loaded.push(metadata);
-            }
-            Ok(None) => {}
-            Err(e) => log::warn!("get_run_states: skipping {session_id}: {e}"),
-        }
-    }
+    // Only an unmanaged session with an unfinished run can be an orphan;
+    // everything else is already in its final state.
+    let to_repair: Vec<String> = index
+        .snapshot(session_ids.as_deref())
+        .into_iter()
+        .filter(|state| state.has_unfinished_run && !managed.contains(&state.session_id))
+        .map(|state| state.session_id)
+        .collect();
     if !to_repair.is_empty() {
-        if let Err(e) = super::run_log::recover_incomplete_runs_for(&app, to_repair.clone()) {
+        if let Err(e) = super::run_log::recover_incomplete_runs_for(&app, to_repair) {
             log::warn!("get_run_states: orphan repair failed: {e}");
         }
-        for metadata in &mut loaded {
-            if !to_repair.contains(&metadata.id) {
-                continue;
-            }
-            if let Ok(Some(repaired)) = load_metadata(&app, &metadata.id) {
-                *metadata = repaired;
-            }
-        }
     }
-    Ok(loaded
+    let explicit = session_ids.is_some();
+    Ok(index
+        .snapshot(session_ids.as_deref())
         .into_iter()
-        .map(|metadata| {
-            let actively_managed = managed.contains(&metadata.id);
-            metadata.run_state(actively_managed)
-        })
+        .map(|state| state.resolve(managed.contains(&state.session_id)))
         .filter(|state| explicit || state.status.is_live())
         .collect())
 }
@@ -1376,15 +1348,10 @@ pub async fn create_session(
             }
             // Check project-level override
             if let Ok(data) = crate::projects::storage::load_projects_data(&app) {
-                // Find project that owns this worktree path
-                if let Some(project) = data.projects.iter().find(|p| {
-                    // Match by worktree's project (worktree_id → project)
-                    !p.is_folder
-                        && data
-                            .worktrees
-                            .iter()
-                            .any(|w| w.id == worktree_id && w.project_id == p.id)
-                }) {
+                if let Some(project) = data
+                    .project_for_worktree(&worktree_id)
+                    .filter(|project| !project.is_folder)
+                {
                     if let Some(ref pb) = project.default_backend {
                         resolved = match pb.as_str() {
                             "codex" => Backend::Codex,
@@ -1843,11 +1810,6 @@ fn build_queued_message_with_refs(queued: &Value) -> Result<String, String> {
         .unwrap_or_default()
         .to_string();
 
-    let mention_refs = queued_mention_refs(queued);
-    if !mention_refs.is_empty() {
-        message = append_refs(message, mention_refs);
-    }
-
     let pending_files = queued
         .get("pendingFiles")
         .and_then(Value::as_array)
@@ -1950,48 +1912,6 @@ fn build_queued_message_with_refs(queued: &Value) -> Result<String, String> {
     Ok(message)
 }
 
-/// Context lines for `@` mentions in agent chats (`mentions` on a queued
-/// message). Keep in sync with `mentionRef` in
-/// src/components/chat/agent-mentions.ts.
-fn queued_mention_refs(queued: &Value) -> String {
-    queued
-        .get("mentions")
-        .and_then(Value::as_array)
-        .map(Vec::as_slice)
-        .unwrap_or(&[])
-        .iter()
-        .filter_map(mention_ref)
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn mention_ref(mention: &Value) -> Option<String> {
-    let text = |key: &str| {
-        mention
-            .get(key)
-            .and_then(Value::as_str)
-            .filter(|value| !value.is_empty())
-    };
-    let (label, id_label) = match text("type")? {
-        "agent" => ("agent", "agentId"),
-        "project" => ("project", "projectId"),
-        "remote_jean" => ("remote Jean", "serverId"),
-        _ => return None,
-    };
-    let mut details = vec![format!("{id_label}: {}", text("id")?)];
-    if let Some(server) = text("serverName") {
-        details.push(format!("on remote Jean: {server}"));
-    }
-    if let Some(url) = text("url") {
-        details.push(format!("url: {url}"));
-    }
-    let name = text("name")?;
-    Some(format!(
-        "[Mentioned {label}: {name} ({})]",
-        details.join(", ")
-    ))
-}
-
 fn queued_file_path(file: &Value) -> Result<String, String> {
     let relative_path = file
         .get("relativePath")
@@ -2036,11 +1956,7 @@ fn queued_message_base_prompt(queued: &Value) -> String {
 
 fn codex_steer_input_from_queued_message(queued: &Value) -> Result<Vec<Value>, String> {
     let mut input = Vec::new();
-    let mut message = queued_message_base_prompt(queued);
-    let mention_refs = queued_mention_refs(queued);
-    if !mention_refs.is_empty() {
-        message = append_refs(message, mention_refs);
-    }
+    let message = queued_message_base_prompt(queued);
     if !message.trim().is_empty() {
         input.push(serde_json::json!({
             "type": "text",
@@ -2614,7 +2530,7 @@ pub async fn close_session(
 
 /// Remove a session from its worktree index and delete its data on disk.
 ///
-/// Used by the retention purge and by the agents engine. Safe to repeat: a
+/// Used by the retention purge. Safe to repeat: a
 /// session already gone from the index still has its files removed.
 pub(crate) fn purge_session(
     app: &AppHandle,
@@ -2980,6 +2896,51 @@ pub async fn send_chat_message(
     backend: Option<String>,
     include_recap: Option<bool>,
 ) -> Result<ChatMessage, String> {
+    send_chat_message_checked(
+        app,
+        session_id,
+        worktree_id,
+        worktree_path,
+        message,
+        model,
+        execution_mode,
+        thinking_level,
+        effort_level,
+        parallel_execution_prompt,
+        ai_language,
+        allowed_tools,
+        mcp_config,
+        chrome_enabled,
+        custom_profile_name,
+        backend,
+        include_recap,
+    )
+    .await
+    .map_err(|e| e.message)
+}
+
+/// `send_chat_message` with the typed error: `user_turn` tells the caller
+/// whether the prompt was recorded in the chat.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn send_chat_message_checked(
+    app: tauri::AppHandle,
+    session_id: String,
+    worktree_id: String,
+    worktree_path: String,
+    message: String,
+    model: Option<String>,
+    execution_mode: Option<String>,
+    thinking_level: Option<ThinkingLevel>,
+    effort_level: Option<EffortLevel>,
+    parallel_execution_prompt: Option<String>,
+    ai_language: Option<String>,
+    allowed_tools: Option<Vec<String>>,
+    mcp_config: Option<String>,
+    chrome_enabled: Option<bool>,
+    custom_profile_name: Option<String>,
+    backend: Option<String>,
+    include_recap: Option<bool>,
+) -> Result<ChatMessage, SendError> {
     let drain_target = (
         app.clone(),
         worktree_id.clone(),
@@ -3005,8 +2966,7 @@ pub async fn send_chat_message(
         backend,
         include_recap,
     )
-    .await
-    .map_err(|e| e.message);
+    .await;
     // Start the queue drain only after the inner call returned and released
     // its send claim. A drain started while the claim is held sees the
     // session as busy and stops, so queued prompts waited until the session
@@ -3014,7 +2974,11 @@ pub async fn send_chat_message(
     let (app, worktree_id, worktree_path, session_id) = drain_target;
     // Report before the drain: a queued prompt would otherwise start the next
     // run first and the report would see the session as live.
-    super::delegation::report_run_end(&app, &session_id, result.as_ref().err().map(String::as_str));
+    super::delegation::report_run_end(
+        &app,
+        &session_id,
+        result.as_ref().err().map(|e| e.message.as_str()),
+    );
     trigger_backend_queue_drain(app, worktree_id, worktree_path, session_id);
     result
 }
@@ -3064,9 +3028,6 @@ async fn send_chat_message_inner(
         );
         return Err(SendError::busy());
     }
-
-    // Drops after the claim below, so agent lists see the run end.
-    let _agents_refresh = crate::agents::RefreshOnDrop::for_worktree(&app, &worktree_id);
 
     // Atomically claim the session's send slot for the duration of this call.
     // Two callers can pass the check above concurrently, but only one can take
@@ -3744,17 +3705,8 @@ async fn send_chat_message_inner(
     }
 
     // Use passed parameter for parallel execution prompt (None = disabled).
-    // The agent prompt stays separate so turning fan-out off still injects the
-    // "do not spawn sub-agents" policy instead of treating the agent prompt as
-    // that policy.
     let parallel_execution_prompt = crate::upgrade_legacy_parallel_execution_prompt(
         parallel_execution_prompt.filter(|p| !p.trim().is_empty()),
-    );
-    let agent_system_prompt = crate::agents::system_prompt_for_run(
-        &app,
-        &worktree_id,
-        Some(&session_id),
-        Some(message.as_str()),
     );
 
     // Use passed parameter for Chrome browser integration (default false - beta)
@@ -3834,17 +3786,7 @@ async fn send_chat_message_inner(
     let thread_effort_level = effort_level.clone();
     let thread_allowed_tools = allowed_tools_for_cli.clone();
     let thread_parallel_prompt = parallel_execution_prompt.clone();
-    let thread_agent_prompt = agent_system_prompt.clone();
     let thread_ai_language = ai_language.clone();
-    let backend_name = crate::agents::connectors::backend_label(&effective_backend);
-    let mcp_config = crate::agents::connectors::apply_agent_mcp_allowlist(
-        &app,
-        &session_id,
-        &worktree_path,
-        backend_name,
-        mcp_config,
-    )
-    .await;
     // Always inject Jean MCP for backends that honor runtime mcp_config.
     // Claude uses --mcp-config/--strict-mcp-config; Grok/Cursor use the same
     // JSON to decide which servers (including jean) stay enabled for the turn.
@@ -3887,8 +3829,7 @@ async fn send_chat_message_inner(
     };
     let thread_message = message_for_backend.clone();
     let thread_backend = effective_backend.clone();
-    // Agent sessions get their own recap format in the agent prompt.
-    let thread_include_recap = include_recap.unwrap_or(true) && agent_system_prompt.is_none();
+    let thread_include_recap = include_recap.unwrap_or(true);
     let thread_codex_search = codex_search_enabled;
 
     // For OpenCode sessions: create a cancel flag so we can signal the blocking HTTP thread.
@@ -3962,7 +3903,6 @@ async fn send_chat_message_inner(
                         thread_effort_level.as_ref(),
                         thread_allowed_tools.as_deref(),
                         thread_parallel_prompt.as_deref(),
-                        thread_agent_prompt.as_deref(),
                         thread_ai_language.as_deref(),
                         thread_mcp_config.as_deref(),
                         chrome,
@@ -4163,8 +4103,7 @@ async fn send_chat_message_inner(
                     crate::projects::storage::load_projects_data(&thread_app)
                         .ok()
                         .and_then(|data| {
-                            let worktree = data.find_worktree(&thread_worktree_id)?;
-                            let project = data.find_project(&worktree.project_id)?;
+                            let project = data.project_for_worktree(&thread_worktree_id)?;
                             Some(
                                 project
                                     .linked_project_ids
@@ -4221,35 +4160,29 @@ async fn send_chat_message_inner(
                         thread_parallel_prompt.as_deref(),
                         crate::apply_agent_browser_preference(global_prompt, preferences.as_ref()),
                     );
-                    super::push_trimmed_prompt(
-                        &mut system_prompt_parts,
-                        thread_agent_prompt.as_deref(),
-                    );
 
                     // Per-project custom system prompt + linked project instructions
                     if let Ok(data) = load_projects_data(&thread_app) {
-                        if let Some(worktree) = data.find_worktree(&thread_worktree_id) {
-                            if let Some(project) = data.find_project(&worktree.project_id) {
-                                if let Some(prompt) = &project.custom_system_prompt {
-                                    let prompt = prompt.trim();
-                                    if !prompt.is_empty() {
-                                        system_prompt_parts.push(prompt.to_string());
-                                    }
+                        if let Some(project) = data.project_for_worktree(&thread_worktree_id) {
+                            if let Some(prompt) = &project.custom_system_prompt {
+                                let prompt = prompt.trim();
+                                if !prompt.is_empty() {
+                                    system_prompt_parts.push(prompt.to_string());
                                 }
+                            }
 
-                                // Linked projects: inject instruction to check their directories
-                                if !linked_project_paths.is_empty() {
-                                    let dirs_list = linked_project_paths
-                                        .iter()
-                                        .map(|p| format!("- {p}"))
-                                        .collect::<Vec<_>>()
-                                        .join("\n");
-                                    system_prompt_parts.push(format!(
-                                        "This project is linked to other projects for cross-project context. \
-                                         Check the following directories for additional instructions and documentation \
-                                         (e.g., CLAUDE.md, AGENTS.md, docs/):\n{dirs_list}"
-                                    ));
-                                }
+                            // Linked projects: inject instruction to check their directories
+                            if !linked_project_paths.is_empty() {
+                                let dirs_list = linked_project_paths
+                                    .iter()
+                                    .map(|p| format!("- {p}"))
+                                    .collect::<Vec<_>>()
+                                    .join("\n");
+                                system_prompt_parts.push(format!(
+                                    "This project is linked to other projects for cross-project context. \
+                                     Check the following directories for additional instructions and documentation \
+                                     (e.g., CLAUDE.md, AGENTS.md, docs/):\n{dirs_list}"
+                                ));
                             }
                         }
                     }
@@ -4538,8 +4471,7 @@ async fn send_chat_message_inner(
                     crate::projects::storage::load_projects_data(&thread_app)
                         .ok()
                         .and_then(|data| {
-                            let worktree = data.find_worktree(&thread_worktree_id)?;
-                            let project = data.find_project(&worktree.project_id)?;
+                            let project = data.project_for_worktree(&thread_worktree_id)?;
                             Some(
                                 project
                                     .linked_project_ids
@@ -4598,35 +4530,29 @@ async fn send_chat_message_inner(
                             preferences.as_ref(),
                         ),
                     );
-                    super::push_trimmed_prompt(
-                        &mut system_prompt_parts,
-                        thread_agent_prompt.as_deref(),
-                    );
 
                     // Per-project custom system prompt + linked project instructions
                     if let Ok(data) = load_projects_data(&thread_app) {
-                        if let Some(worktree) = data.find_worktree(&thread_worktree_id) {
-                            if let Some(project) = data.find_project(&worktree.project_id) {
-                                if let Some(prompt) = &project.custom_system_prompt {
-                                    let prompt = prompt.trim();
-                                    if !prompt.is_empty() {
-                                        system_prompt_parts.push(prompt.to_string());
-                                    }
+                        if let Some(project) = data.project_for_worktree(&thread_worktree_id) {
+                            if let Some(prompt) = &project.custom_system_prompt {
+                                let prompt = prompt.trim();
+                                if !prompt.is_empty() {
+                                    system_prompt_parts.push(prompt.to_string());
                                 }
+                            }
 
-                                // Linked projects: inject instruction to check their directories
-                                if !opencode_linked_project_paths.is_empty() {
-                                    let dirs_list = opencode_linked_project_paths
-                                        .iter()
-                                        .map(|p| format!("- {p}"))
-                                        .collect::<Vec<_>>()
-                                        .join("\n");
-                                    system_prompt_parts.push(format!(
-                                        "This project is linked to other projects for cross-project context. \
-                                         Check the following directories for additional instructions and documentation \
-                                         (e.g., CLAUDE.md, AGENTS.md, docs/):\n{dirs_list}"
-                                    ));
-                                }
+                            // Linked projects: inject instruction to check their directories
+                            if !opencode_linked_project_paths.is_empty() {
+                                let dirs_list = opencode_linked_project_paths
+                                    .iter()
+                                    .map(|p| format!("- {p}"))
+                                    .collect::<Vec<_>>()
+                                    .join("\n");
+                                system_prompt_parts.push(format!(
+                                    "This project is linked to other projects for cross-project context. \
+                                     Check the following directories for additional instructions and documentation \
+                                     (e.g., CLAUDE.md, AGENTS.md, docs/):\n{dirs_list}"
+                                ));
                             }
                         }
                     }
@@ -4884,8 +4810,7 @@ async fn send_chat_message_inner(
                     crate::projects::storage::load_projects_data(&thread_app)
                         .ok()
                         .and_then(|data| {
-                            let worktree = data.find_worktree(&thread_worktree_id)?;
-                            let project = data.find_project(&worktree.project_id)?;
+                            let project = data.project_for_worktree(&thread_worktree_id)?;
                             Some(
                                 project
                                     .linked_project_ids
@@ -4920,30 +4845,27 @@ async fn send_chat_message_inner(
                             preferences.as_ref(),
                         ),
                     );
-                    super::push_trimmed_prompt(&mut parts, thread_agent_prompt.as_deref());
 
                     if let Ok(data) = load_projects_data(&thread_app) {
-                        if let Some(worktree) = data.find_worktree(&thread_worktree_id) {
-                            if let Some(project) = data.find_project(&worktree.project_id) {
-                                if let Some(prompt) = &project.custom_system_prompt {
-                                    let prompt = prompt.trim();
-                                    if !prompt.is_empty() {
-                                        parts.push(prompt.to_string());
-                                    }
+                        if let Some(project) = data.project_for_worktree(&thread_worktree_id) {
+                            if let Some(prompt) = &project.custom_system_prompt {
+                                let prompt = prompt.trim();
+                                if !prompt.is_empty() {
+                                    parts.push(prompt.to_string());
                                 }
+                            }
 
-                                if !cursor_linked_project_paths.is_empty() {
-                                    let dirs_list = cursor_linked_project_paths
-                                        .iter()
-                                        .map(|p| format!("- {p}"))
-                                        .collect::<Vec<_>>()
-                                        .join("\n");
-                                    parts.push(format!(
-                                        "This project is linked to other projects for cross-project context. \
-                                         Check the following directories for additional instructions and documentation \
-                                         (e.g., CLAUDE.md, AGENTS.md, docs/):\n{dirs_list}"
-                                    ));
-                                }
+                            if !cursor_linked_project_paths.is_empty() {
+                                let dirs_list = cursor_linked_project_paths
+                                    .iter()
+                                    .map(|p| format!("- {p}"))
+                                    .collect::<Vec<_>>()
+                                    .join("\n");
+                                parts.push(format!(
+                                    "This project is linked to other projects for cross-project context. \
+                                     Check the following directories for additional instructions and documentation \
+                                     (e.g., CLAUDE.md, AGENTS.md, docs/):\n{dirs_list}"
+                                ));
                             }
                         }
                     }
@@ -5073,37 +4995,34 @@ async fn send_chat_message_inner(
                             preferences.as_ref(),
                         ),
                     );
-                    super::push_trimmed_prompt(&mut parts, thread_agent_prompt.as_deref());
 
                     if let Ok(data) = load_projects_data(&thread_app) {
-                        if let Some(worktree) = data.find_worktree(&thread_worktree_id) {
-                            if let Some(project) = data.find_project(&worktree.project_id) {
-                                if let Some(prompt) = &project.custom_system_prompt {
-                                    let prompt = prompt.trim();
-                                    if !prompt.is_empty() {
-                                        parts.push(prompt.to_string());
-                                    }
+                        if let Some(project) = data.project_for_worktree(&thread_worktree_id) {
+                            if let Some(prompt) = &project.custom_system_prompt {
+                                let prompt = prompt.trim();
+                                if !prompt.is_empty() {
+                                    parts.push(prompt.to_string());
                                 }
+                            }
 
-                                let linked_paths = project
-                                    .linked_project_ids
+                            let linked_paths = project
+                                .linked_project_ids
+                                .iter()
+                                .filter_map(|id| data.find_project(id))
+                                .filter(|p| !p.path.trim().is_empty())
+                                .map(|p| p.path.clone())
+                                .collect::<Vec<_>>();
+                            if !linked_paths.is_empty() {
+                                let dirs_list = linked_paths
                                     .iter()
-                                    .filter_map(|id| data.find_project(id))
-                                    .filter(|p| !p.path.trim().is_empty())
-                                    .map(|p| p.path.clone())
-                                    .collect::<Vec<_>>();
-                                if !linked_paths.is_empty() {
-                                    let dirs_list = linked_paths
-                                        .iter()
-                                        .map(|p| format!("- {p}"))
-                                        .collect::<Vec<_>>()
-                                        .join("\n");
-                                    parts.push(format!(
-                                        "This project is linked to other projects for cross-project context. \
-                                         Check the following directories for additional instructions and documentation \
-                                         (e.g., CLAUDE.md, AGENTS.md, docs/):\n{dirs_list}"
-                                    ));
-                                }
+                                    .map(|p| format!("- {p}"))
+                                    .collect::<Vec<_>>()
+                                    .join("\n");
+                                parts.push(format!(
+                                    "This project is linked to other projects for cross-project context. \
+                                     Check the following directories for additional instructions and documentation \
+                                     (e.g., CLAUDE.md, AGENTS.md, docs/):\n{dirs_list}"
+                                ));
                             }
                         }
                     }
@@ -5180,37 +5099,34 @@ async fn send_chat_message_inner(
                             preferences.as_ref(),
                         ),
                     );
-                    super::push_trimmed_prompt(&mut parts, thread_agent_prompt.as_deref());
 
                     if let Ok(data) = load_projects_data(&thread_app) {
-                        if let Some(worktree) = data.find_worktree(&thread_worktree_id) {
-                            if let Some(project) = data.find_project(&worktree.project_id) {
-                                if let Some(prompt) = &project.custom_system_prompt {
-                                    let prompt = prompt.trim();
-                                    if !prompt.is_empty() {
-                                        parts.push(prompt.to_string());
-                                    }
+                        if let Some(project) = data.project_for_worktree(&thread_worktree_id) {
+                            if let Some(prompt) = &project.custom_system_prompt {
+                                let prompt = prompt.trim();
+                                if !prompt.is_empty() {
+                                    parts.push(prompt.to_string());
                                 }
+                            }
 
-                                let linked_paths = project
-                                    .linked_project_ids
+                            let linked_paths = project
+                                .linked_project_ids
+                                .iter()
+                                .filter_map(|id| data.find_project(id))
+                                .filter(|p| !p.path.trim().is_empty())
+                                .map(|p| p.path.clone())
+                                .collect::<Vec<_>>();
+                            if !linked_paths.is_empty() {
+                                let dirs_list = linked_paths
                                     .iter()
-                                    .filter_map(|id| data.find_project(id))
-                                    .filter(|p| !p.path.trim().is_empty())
-                                    .map(|p| p.path.clone())
-                                    .collect::<Vec<_>>();
-                                if !linked_paths.is_empty() {
-                                    let dirs_list = linked_paths
-                                        .iter()
-                                        .map(|p| format!("- {p}"))
-                                        .collect::<Vec<_>>()
-                                        .join("\n");
-                                    parts.push(format!(
-                                        "This project is linked to other projects for cross-project context. \
-                                         Check the following directories for additional instructions and documentation \
-                                         (e.g., CLAUDE.md, AGENTS.md, docs/):\n{dirs_list}"
-                                    ));
-                                }
+                                    .map(|p| format!("- {p}"))
+                                    .collect::<Vec<_>>()
+                                    .join("\n");
+                                parts.push(format!(
+                                    "This project is linked to other projects for cross-project context. \
+                                     Check the following directories for additional instructions and documentation \
+                                     (e.g., CLAUDE.md, AGENTS.md, docs/):\n{dirs_list}"
+                                ));
                             }
                         }
                     }
@@ -5295,7 +5211,6 @@ async fn send_chat_message_inner(
                     &thread_worktree_id,
                     thread_ai_language.as_deref(),
                     thread_parallel_prompt.as_deref(),
-                    thread_agent_prompt.as_deref(),
                     thread_include_recap,
                     true,
                 );
@@ -5339,7 +5254,6 @@ async fn send_chat_message_inner(
                     &thread_worktree_id,
                     thread_ai_language.as_deref(),
                     thread_parallel_prompt.as_deref(),
-                    thread_agent_prompt.as_deref(),
                     thread_include_recap,
                     devin_location == super::types::DevinLocation::Local,
                 );
@@ -5394,7 +5308,6 @@ async fn send_chat_message_inner(
                     &thread_worktree_id,
                     thread_ai_language.as_deref(),
                     thread_parallel_prompt.as_deref(),
-                    thread_agent_prompt.as_deref(),
                     thread_include_recap,
                     true,
                 );
@@ -5440,7 +5353,6 @@ async fn send_chat_message_inner(
                     &thread_worktree_id,
                     thread_ai_language.as_deref(),
                     thread_parallel_prompt.as_deref(),
-                    thread_agent_prompt.as_deref(),
                     thread_include_recap,
                     true,
                 );
@@ -5650,13 +5562,13 @@ async fn send_chat_message_inner(
     // reconstruct content after the live stream completes.
     // Skip when cancelled: cancelled turns stay in run metadata/logs for diagnostics
     // but are intentionally excluded from visible chat history on reload.
-    // Unix Grok/Kimi hosts already write ACP stream JSONL + a result marker — synthetic
-    // assistant lines would double content when parse_grok_run_to_message reloads.
+    // Unix Grok/Kimi/Muse/PI hosts already write their stream JSONL + a result marker —
+    // synthetic assistant lines would double content when the run log is parsed again.
     let skip_synthetic_history = unified_response.backend == Backend::Devin
         || (cfg!(unix)
             && matches!(
                 unified_response.backend,
-                Backend::Grok | Backend::Kimi | Backend::Muse
+                Backend::Grok | Backend::Kimi | Backend::Muse | Backend::Pi
             ));
     if matches!(
         unified_response.backend,
@@ -8689,6 +8601,9 @@ pub async fn get_session_debug_info(
             acc.output_tokens += u.output_tokens;
             acc.cache_read_input_tokens += u.cache_read_input_tokens;
             acc.cache_creation_input_tokens += u.cache_creation_input_tokens;
+            if let Some(cost) = u.cost_usd {
+                acc.cost_usd = Some(acc.cost_usd.unwrap_or(0.0) + cost);
+            }
             acc
         },
     );
@@ -9842,8 +9757,14 @@ pub async fn check_resumable_sessions(
     // This calls recover_incomplete_runs which updates statuses and returns info.
     // Note: recover_incomplete_runs skips sessions that are actively managed
     // (including sends still preparing a backend process) to avoid corrupting
-    // their metadata.
-    let recovered = super::run_log::recover_incomplete_runs(&app)?;
+    // their metadata. It waits for the startup pass and then reads only the
+    // sessions the run-state index marks unfinished.
+    let recover_app = app.clone();
+    let recovered = tauri::async_runtime::spawn_blocking(move || {
+        super::run_log::recover_incomplete_runs(&recover_app)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {e}"))??;
 
     let mut resumable: Vec<_> = recovered.into_iter().filter(|r| r.resumable).collect();
 
@@ -10456,9 +10377,6 @@ pub struct QueuedMessageEdit {
     pub pending_files: Vec<Value>,
     pub pending_skills: Vec<Value>,
     pub pending_text_files: Vec<Value>,
-    /// Agent chat `@` mentions. `None` leaves the queued mentions unchanged.
-    #[serde(default)]
-    pub mentions: Option<Vec<Value>>,
 }
 
 /// Replace a queued message's text and attachments by its `id` field.
@@ -10493,9 +10411,6 @@ fn apply_queued_message_edit(
         "pendingTextFiles".to_string(),
         Value::Array(edit.pending_text_files.clone()),
     );
-    if let Some(mentions) = &edit.mentions {
-        queued.insert("mentions".to_string(), Value::Array(mentions.clone()));
-    }
     true
 }
 
@@ -10878,7 +10793,7 @@ fn queued_message_supports_any_steering(msg: &serde_json::Value) -> bool {
 /// host. Errors when the run is not host-backed or the turn already finished;
 /// callers fall back to the queue. `chat:steered` is emitted when the host
 /// accepts the steer; the host writes `steered_user_message` to the run log
-/// when the CLI consumes it.
+/// at the same time (the CLI consumes it later, at its next turn boundary).
 pub async fn steer_claude_turn(
     app: AppHandle,
     worktree_id: String,
@@ -10917,9 +10832,9 @@ async fn steer_text_into_claude_turn(
             .map_err(|e| format!("Failed to resolve app data dir: {e}"))?;
         let socket_path =
             super::claude_host::claude_host_socket_path(&app_data, session_id, &run_id);
-        // The CLI consumes the steer only at its next turn boundary, which can
-        // take seconds. Show the prompt now; mark it first so the tailer does
-        // not emit it a second time on consumption (even when that is fast).
+        // The host writes the steer to the run log on accept. Show the prompt
+        // now; mark it first so the tailer does not emit it a second time when
+        // it reads that line (even when that is fast).
         super::claude_host::mark_steer_announced(session_id, message);
         let text = message.to_string();
         let result = tokio::task::spawn_blocking(move || {
@@ -11981,7 +11896,10 @@ mod tests {
                 )
             );
         }
-        assert!(validate_execution_policy("build", &Backend::Cursor).is_err());
+        assert_eq!(
+            validate_execution_policy("build", &Backend::Cursor).is_ok(),
+            crate::chat::cursor::cursor_build_available()
+        );
     }
 
     #[test]
@@ -11999,19 +11917,28 @@ mod tests {
             implement_execution_policy("plan", &Backend::Claude),
             "build"
         );
-        assert_eq!(implement_execution_policy("plan", &Backend::Cursor), "yolo");
-        assert_eq!(
-            implement_execution_policy("build", &Backend::Cursor),
+        let cursor_implement = if crate::chat::cursor::cursor_build_available() {
+            "build"
+        } else {
             "yolo"
+        };
+        assert_eq!(
+            implement_execution_policy("plan", &Backend::Cursor),
+            cursor_implement
         );
         assert_eq!(
+            implement_execution_policy("build", &Backend::Cursor),
+            cursor_implement
+        );
+        assert_eq!(implement_execution_policy("yolo", &Backend::Cursor), "yolo");
+        assert_eq!(
             implement_execution_policy("supervised", &Backend::Cursor),
-            "yolo"
+            cursor_implement
         );
         assert_eq!(implement_execution_policy("unknown", &Backend::Pi), "build");
         assert_eq!(
             implement_execution_policy("unknown", &Backend::Cursor),
-            "yolo"
+            cursor_implement
         );
     }
 
@@ -13156,35 +13083,6 @@ mod tests {
         assert!(message.contains(
             "[Text file attached: /tmp/notes.txt - Use the Read tool to view this file]"
         ));
-    }
-
-    #[test]
-    fn test_build_queued_message_with_mentions_matches_frontend_format() {
-        // Same input and output as message-with-refs.test.ts
-        let queued = serde_json::json!({
-            "message": "Ask @Reviewer about @coolify on @home",
-            "mentions": [
-                { "type": "agent", "id": "reviewer-1", "name": "Reviewer" },
-                {
-                    "type": "project",
-                    "id": "p-9",
-                    "name": "coolify",
-                    "serverName": "Home"
-                },
-                {
-                    "type": "remote_jean",
-                    "id": "srv-1",
-                    "name": "home",
-                    "url": "https://home.example"
-                },
-                { "type": "unknown", "id": "x", "name": "x" }
-            ]
-        });
-
-        assert_eq!(
-            build_queued_message_with_refs(&queued).unwrap(),
-            "Ask @Reviewer about @coolify on @home\n\n[Mentioned agent: Reviewer (agentId: reviewer-1)]\n[Mentioned project: coolify (projectId: p-9, on remote Jean: Home)]\n[Mentioned remote Jean: home (serverId: srv-1, url: https://home.example)]"
-        );
     }
 
     #[test]

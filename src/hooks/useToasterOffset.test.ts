@@ -13,52 +13,18 @@ vi.mock('@/lib/environment', () => ({
   isNativeApp: () => isNativeAppMock(),
 }))
 
-vi.mock('@/store/chat-store', () => ({
-  useChatStore: (selector: (state: { activeWorktreeId: null }) => unknown) =>
-    selector({ activeWorktreeId: null }),
-}))
-
 vi.mock('@/store/ui-store', () => ({
   useUIStore: (
     selector: (state: {
-      sessionChatModalOpen: boolean
-      sessionChatModalWorktreeId: null
+      fileBrowserVisible: boolean
+      rightPanelTab: string
+      fileBrowserSize: number
     }) => unknown
   ) =>
     selector({
-      sessionChatModalOpen: false,
-      sessionChatModalWorktreeId: null,
-    }),
-}))
-
-vi.mock('@/store/projects-store', () => ({
-  useProjectsStore: (
-    selector: (state: { selectedWorktreeId: null }) => unknown
-  ) => selector({ selectedWorktreeId: null }),
-}))
-
-vi.mock('@/store/browser-store', () => ({
-  useBrowserStore: (
-    selector: (state: {
-      sidePaneOpen: Record<string, boolean>
-      bottomPanelOpen: Record<string, boolean>
-      modalOpen: Record<string, boolean>
-      sidePaneWidth: number
-      bottomPanelHeight: number
-      modalDockMode: string
-      modalWidth: number
-      modalHeight: number
-    }) => unknown
-  ) =>
-    selector({
-      sidePaneOpen: {},
-      bottomPanelOpen: {},
-      modalOpen: {},
-      sidePaneWidth: 0,
-      bottomPanelHeight: 0,
-      modalDockMode: 'right',
-      modalWidth: 0,
-      modalHeight: 0,
+      fileBrowserVisible: false,
+      rightPanelTab: 'files',
+      fileBrowserSize: 400,
     }),
 }))
 

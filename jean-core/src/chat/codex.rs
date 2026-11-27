@@ -683,6 +683,8 @@ fn emit_codex_plan_tool_call(
 /// to end in `-fast` are left unchanged.
 pub(crate) fn split_fast_model(model: &str) -> (&str, bool) {
     match model {
+        "gpt-6.2-sol-fast" => ("gpt-6.2-sol", true),
+        "gpt-6.2-astra-fast" => ("gpt-6.2-astra", true),
         "gpt-6.1-sol-fast" => ("gpt-6.1-sol", true),
         "gpt-6.1-terra-fast" => ("gpt-6.1-terra", true),
         "gpt-6-astra-fast" => ("gpt-6-astra", true),
@@ -963,9 +965,15 @@ pub fn build_thread_start_params(
 ///
 /// `developer_instructions: null` means "use the built-in instructions for the
 /// selected mode" (see `turn/start.collaborationMode` experimental API).
+///
+/// `reasoning_effort` must be set here too: when `collaborationMode` is
+/// present, Codex takes its settings as-is and ignores top-level
+/// `turn/start.effort`, so a missing value falls back to the model default
+/// (issue #939).
 fn build_collaboration_mode_params(
     execution_mode: Option<&str>,
     model: Option<&str>,
+    reasoning_effort: Option<&str>,
 ) -> Option<serde_json::Value> {
     let model = model.map(|m| split_fast_model(m).0)?;
     let collab_mode = match execution_mode.unwrap_or("build") {
@@ -980,6 +988,8 @@ fn build_collaboration_mode_params(
             "model": model,
             // null => built-in template for the selected mode
             "developer_instructions": serde_json::Value::Null,
+            // null => model default
+            "reasoning_effort": reasoning_effort,
         }
     }))
 }
@@ -1077,7 +1087,9 @@ pub fn build_turn_start_params(
     // Native Codex collaboration mode (plan template / default). Takes
     // precedence over model + developer instructions when set. Experimental
     // field; requires experimentalApi on initialize (already enabled).
-    if let Some(collaboration_mode) = build_collaboration_mode_params(execution_mode, model) {
+    if let Some(collaboration_mode) =
+        build_collaboration_mode_params(execution_mode, model, reasoning_effort)
+    {
         params["collaborationMode"] = collaboration_mode;
     }
 
@@ -1932,7 +1944,7 @@ pub fn resume_codex_after_crash(
 fn apply_agent_browser_session(params: &mut serde_json::Value, session_id: &str) {
     let overrides = [
         crate::agent_browser::codex_session_config_override(session_id),
-        // Jean MCP must see the real session (agents, approvals, current context).
+        // Jean MCP must see the real session (current context, secrets).
         crate::jean_mcp_config::codex_session_config_override(session_id),
     ];
     for (key, value) in overrides.into_iter().flatten() {
@@ -2998,6 +3010,7 @@ fn process_server_notification(
                         .and_then(|v| v.as_u64())
                         .unwrap_or(0),
                     cache_creation_input_tokens: 0,
+                    cost_usd: None,
                 });
             }
         }
@@ -4634,6 +4647,7 @@ fn process_codex_event(
                         .and_then(|v| v.as_u64())
                         .unwrap_or(0),
                     cache_creation_input_tokens: 0,
+                    cost_usd: None,
                 });
             }
             *completed = true;
@@ -6358,6 +6372,12 @@ mod tests {
             ("gpt-6.1-terra", true)
         );
         assert_eq!(split_fast_model("gpt-6.1-terra"), ("gpt-6.1-terra", false));
+        assert_eq!(split_fast_model("gpt-6.2-sol-fast"), ("gpt-6.2-sol", true));
+        assert_eq!(
+            split_fast_model("gpt-6.2-astra-fast"),
+            ("gpt-6.2-astra", true)
+        );
+        assert_eq!(split_fast_model("gpt-6.2-sol"), ("gpt-6.2-sol", false));
     }
 
     #[test]
@@ -6708,6 +6728,43 @@ mod tests {
         assert_eq!(params["sandboxPolicy"]["type"], "dangerFullAccess");
         assert_eq!(params["approvalPolicy"], "never");
         assert_eq!(params["collaborationMode"]["mode"], "default");
+    }
+
+    #[test]
+    fn collaboration_mode_carries_selected_reasoning_effort() {
+        for mode in ["plan", "build", "yolo"] {
+            let params = build_turn_start_params(
+                "thread-1",
+                "hello",
+                std::path::Path::new("/tmp/worktree"),
+                Some(mode),
+                Some("high"),
+                &[],
+                &[],
+                Some("gpt-5.4"),
+            );
+            assert_eq!(params["effort"], "high", "mode={mode}");
+            assert_eq!(
+                params["collaborationMode"]["settings"]["reasoning_effort"], "high",
+                "mode={mode}"
+            );
+        }
+    }
+
+    #[test]
+    fn collaboration_mode_reasoning_effort_is_null_when_unset() {
+        let params = build_turn_start_params(
+            "thread-1",
+            "hello",
+            std::path::Path::new("/tmp/worktree"),
+            Some("build"),
+            None,
+            &[],
+            &[],
+            Some("gpt-5.4"),
+        );
+        assert!(params.get("effort").is_none());
+        assert!(params["collaborationMode"]["settings"]["reasoning_effort"].is_null());
     }
 
     #[test]

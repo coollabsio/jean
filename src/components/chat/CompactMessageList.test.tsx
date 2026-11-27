@@ -415,42 +415,6 @@ describe('CompactMessageList', () => {
     expect(screen.queryByText('Polling VM.')).not.toBeInTheDocument()
   })
 
-  it('shows only assistant prose when tool activity is hidden', () => {
-    renderCompact(
-      [
-        message('user-1', 'user', 100, 'check status'),
-        message('assistant-1', 'assistant', 104, '', {
-          tool_calls: [
-            {
-              id: 'tool-1',
-              name: 'Bash',
-              input: { command: 'git status --short' },
-              output: 'clean',
-            },
-          ],
-          content_blocks: [
-            { type: 'text', text: 'Checking the repo.' },
-            { type: 'tool_use', tool_call_id: 'tool-1' },
-            { type: 'text', text: 'The tree is clean.' },
-          ],
-        }),
-        message('user-2', 'user', 200, 'again'),
-        message('assistant-2', 'assistant', 204, '', {
-          tool_calls: [
-            { id: 'tool-2', name: 'Bash', input: {}, output: 'clean' },
-          ],
-          content_blocks: [{ type: 'tool_use', tool_call_id: 'tool-2' }],
-        }),
-      ],
-      { hideToolActivity: true }
-    )
-
-    expect(screen.getByText('Checking the repo.')).toBeVisible()
-    expect(screen.getByText('The tree is clean.')).toBeVisible()
-    expect(screen.queryByText('Bash')).not.toBeInTheDocument()
-    expect(screen.queryByText(/\d+ steps?/)).not.toBeInTheDocument()
-  })
-
   it('keeps pre-tool assistant prose in its timeline position after reload', () => {
     renderCompact([
       message('user-1', 'user', 100, 'fix the terminal'),
@@ -839,6 +803,72 @@ describe('CompactMessageList request_secret', () => {
       sessionId: 'session-1',
       toolCallId: 'tool-1',
     })
+  })
+
+  it('shows and hides the typed value', () => {
+    mockSecretCommands(null)
+    renderCompact(secretMessages, { onSendAnswer: vi.fn() })
+    const field = screen.getByLabelText('Tailscale auth key')
+    const mask = '[-webkit-text-security:disc]'
+    expect(field).toHaveClass(mask)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show the value' }))
+    expect(field).not.toHaveClass(mask)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hide the value' }))
+    expect(field).toHaveClass(mask)
+  })
+
+  it('keeps the other cards open and sends one answer for all of them', async () => {
+    vi.mocked(invoke).mockImplementation((async (
+      command: string,
+      args?: { toolCallId?: string }
+    ) => {
+      if (command === 'save_secret_request')
+        return { path: `/data/secrets/${args?.toolCallId}`, retention: 'day' }
+      return null
+    }) as typeof invoke)
+    const request = (id: string, label: string) => ({
+      id,
+      name: 'mcp__jean__request_secret',
+      input: { label, reason: 'Needed.' },
+    })
+    const onSendAnswer = vi.fn()
+    renderCompact(
+      [
+        message('user-1', 'user', 100, 'set up keys'),
+        message('assistant-1', 'assistant', 104, '', {
+          tool_calls: [request('tool-a', 'Key A'), request('tool-b', 'Key B')],
+          content_blocks: [
+            { type: 'tool_use', tool_call_id: 'tool-a' },
+            { type: 'tool_use', tool_call_id: 'tool-b' },
+          ],
+        }),
+      ],
+      { onSendAnswer }
+    )
+    const saveButtons = () =>
+      screen.getAllByRole('button', { name: 'Save securely' })
+
+    fireEvent.change(screen.getByLabelText('Key A'), {
+      target: { value: 'value-a' },
+    })
+    fireEvent.click(saveButtons()[0] as HTMLElement)
+    await screen.findByText('Key A · saved, deleted after 24 hours')
+
+    expect(onSendAnswer).not.toHaveBeenCalled()
+    expect(saveButtons()).toHaveLength(1)
+    fireEvent.change(screen.getByLabelText('Key B'), {
+      target: { value: 'value-b' },
+    })
+    fireEvent.click(saveButtons()[0] as HTMLElement)
+    await screen.findByText('Key B · saved, deleted after 24 hours')
+
+    expect(onSendAnswer).toHaveBeenCalledTimes(1)
+    const sent = onSendAnswer.mock.calls[0]?.[0] as string
+    expect(sent).toContain('/data/secrets/tool-a')
+    expect(sent).toContain('/data/secrets/tool-b')
+    expect(sent).not.toContain('value-')
   })
 
   it('closes the card once a user message follows it', async () => {

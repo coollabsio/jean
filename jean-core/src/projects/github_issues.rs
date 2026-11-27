@@ -1734,6 +1734,24 @@ pub fn cleanup_orphaned_contexts(
     Ok(deleted_count)
 }
 
+/// Scope an already-loaded issue or PR context to one session, without a
+/// GitHub fetch. The session then sees only its own refs instead of every
+/// worktree-level context (see `preferred_context_refs`).
+pub fn attach_loaded_context_to_session(
+    app: tauri::AppHandle,
+    session_id: String,
+    kind: String,
+    number: u32,
+    project_path: String,
+) -> Result<(), String> {
+    let repo_key = get_repo_identifier(&project_path)?.to_key();
+    match kind.as_str() {
+        "issue" => add_issue_reference(&app, &repo_key, number, &session_id),
+        "pr" => add_pr_reference(&app, &repo_key, number, &session_id),
+        other => Err(format!("Unsupported context kind: {other}")),
+    }
+}
+
 /// Load/refresh issue context for a session by fetching data from GitHub
 ///
 /// Context is stored in shared location: `git-context/{repo_key}-issue-{number}.md`

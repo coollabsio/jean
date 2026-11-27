@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { blankTabUrl, useBrowserStore } from './browser-store'
 import { useTerminalStore } from './terminal-store'
+import { useUIStore } from './ui-store'
+import { useChatStore } from './chat-store'
 
 describe('BrowserStore', () => {
   beforeEach(() => {
     useBrowserStore.setState({
       tabs: {},
       activeTabIds: {},
-      sidePaneOpen: {},
       modalOpen: {},
-      bottomPanelOpen: {},
     })
   })
 
@@ -17,9 +17,7 @@ describe('BrowserStore', () => {
     const firstTab = useBrowserStore.getState().addTab('worktree-1')
     const secondTab = useBrowserStore.getState().addTab('worktree-1')
     const retainedTab = useBrowserStore.getState().addTab('worktree-2')
-    useBrowserStore.getState().setSidePaneOpen('worktree-1', true)
     useBrowserStore.getState().setModalOpen('worktree-1', true)
-    useBrowserStore.getState().setBottomPanelOpen('worktree-1', true)
 
     const removed = useBrowserStore.getState().clearWorktreeState('worktree-1')
 
@@ -32,13 +30,7 @@ describe('BrowserStore', () => {
     expect(useBrowserStore.getState().activeTabIds).not.toHaveProperty(
       'worktree-1'
     )
-    expect(useBrowserStore.getState().sidePaneOpen).not.toHaveProperty(
-      'worktree-1'
-    )
     expect(useBrowserStore.getState().modalOpen).not.toHaveProperty(
-      'worktree-1'
-    )
-    expect(useBrowserStore.getState().bottomPanelOpen).not.toHaveProperty(
       'worktree-1'
     )
   })
@@ -48,123 +40,6 @@ describe('BrowserStore', () => {
 
     expect(useBrowserStore.getState().clearWorktreeState('missing')).toEqual([])
     expect(useBrowserStore.getState()).toBe(before)
-  })
-})
-
-describe('toggleBrowserSurface', () => {
-  beforeEach(() => {
-    useBrowserStore.setState({
-      tabs: {},
-      activeTabIds: {},
-      sidePaneOpen: {},
-      modalOpen: {},
-      bottomPanelOpen: {},
-    })
-    useTerminalStore.setState({
-      modalTerminalOpen: {},
-    })
-  })
-
-  it('cycles the main window through the side pane, then the bottom panel', () => {
-    useBrowserStore.getState().setSidePaneOpen('other', true)
-
-    useBrowserStore.getState().toggleBrowserSurface('worktree-1', false)
-
-    expect(useBrowserStore.getState().sidePaneOpen['worktree-1']).toBe(true)
-    expect(useBrowserStore.getState().bottomPanelOpen['worktree-1']).toBeFalsy()
-    expect(useBrowserStore.getState().modalOpen['worktree-1']).toBeFalsy()
-    expect(useBrowserStore.getState().sidePaneOpen.other).toBe(true)
-
-    useBrowserStore.getState().toggleBrowserSurface('worktree-1', false)
-
-    expect(useBrowserStore.getState().bottomPanelOpen['worktree-1']).toBe(true)
-    expect(useBrowserStore.getState().sidePaneOpen['worktree-1']).toBe(false)
-    expect(useBrowserStore.getState().modalOpen['worktree-1']).toBeFalsy()
-    expect(useBrowserStore.getState().sidePaneOpen.other).toBe(true)
-
-    useBrowserStore.getState().toggleBrowserSurface('worktree-1', false)
-
-    expect(useBrowserStore.getState().bottomPanelOpen['worktree-1']).toBe(false)
-    expect(useBrowserStore.getState().sidePaneOpen['worktree-1']).toBe(false)
-    expect(useBrowserStore.getState().sidePaneOpen.other).toBe(true)
-  })
-
-  it('opens the side pane when a stale modal is the only open surface', () => {
-    useBrowserStore.getState().setModalOpen('worktree-1', true)
-
-    useBrowserStore.getState().toggleBrowserSurface('worktree-1', false)
-
-    expect(useBrowserStore.getState().sidePaneOpen['worktree-1']).toBe(true)
-    expect(useBrowserStore.getState().modalOpen['worktree-1']).toBe(false)
-    expect(useBrowserStore.getState().bottomPanelOpen['worktree-1']).toBeFalsy()
-  })
-
-  it('cycles session chat through the modal drawer, then the bottom panel', () => {
-    useBrowserStore.getState().toggleBrowserSurface('worktree-1', true)
-
-    expect(useBrowserStore.getState().modalOpen['worktree-1']).toBe(true)
-    expect(useBrowserStore.getState().bottomPanelOpen['worktree-1']).toBeFalsy()
-    expect(useBrowserStore.getState().sidePaneOpen['worktree-1']).toBeFalsy()
-
-    useBrowserStore.getState().toggleBrowserSurface('worktree-1', true)
-
-    expect(useBrowserStore.getState().bottomPanelOpen['worktree-1']).toBe(true)
-    expect(useBrowserStore.getState().modalOpen['worktree-1']).toBe(false)
-    expect(useBrowserStore.getState().sidePaneOpen['worktree-1']).toBe(false)
-
-    useBrowserStore.getState().toggleBrowserSurface('worktree-1', true)
-
-    expect(useBrowserStore.getState().bottomPanelOpen['worktree-1']).toBe(false)
-    expect(useBrowserStore.getState().modalOpen['worktree-1']).toBe(false)
-  })
-
-  it('keeps the first session-chat press on the modal when the side pane is open', () => {
-    useBrowserStore.getState().setSidePaneOpen('worktree-1', true)
-
-    useBrowserStore.getState().toggleBrowserSurface('worktree-1', true)
-
-    expect(useBrowserStore.getState().modalOpen['worktree-1']).toBe(true)
-    expect(useBrowserStore.getState().sidePaneOpen['worktree-1']).toBe(false)
-    expect(useBrowserStore.getState().bottomPanelOpen['worktree-1']).toBeFalsy()
-  })
-
-  it('closes the terminal modal when opening the bottom panel or the modal drawer', () => {
-    useBrowserStore.getState().setSidePaneOpen('worktree-1', true)
-    useTerminalStore.setState({
-      modalTerminalOpen: { 'worktree-1': true, other: true },
-    })
-
-    useBrowserStore.getState().toggleBrowserSurface('worktree-1', false)
-
-    expect(useBrowserStore.getState().bottomPanelOpen['worktree-1']).toBe(true)
-    expect(useBrowserStore.getState().sidePaneOpen['worktree-1']).toBe(false)
-    expect(useTerminalStore.getState().modalTerminalOpen['worktree-1']).toBe(
-      false
-    )
-    expect(useTerminalStore.getState().modalTerminalOpen.other).toBe(true)
-
-    useBrowserStore.getState().toggleBrowserSurface('worktree-1', false)
-    useTerminalStore.setState({
-      modalTerminalOpen: { 'worktree-1': true },
-    })
-    useBrowserStore.getState().toggleBrowserSurface('worktree-1', true)
-
-    expect(useBrowserStore.getState().modalOpen['worktree-1']).toBe(true)
-    expect(useBrowserStore.getState().bottomPanelOpen['worktree-1']).toBe(false)
-    expect(useTerminalStore.getState().modalTerminalOpen['worktree-1']).toBe(
-      false
-    )
-
-    useTerminalStore.setState({
-      modalTerminalOpen: { 'worktree-1': true },
-    })
-    useBrowserStore.getState().toggleBrowserSurface('worktree-1', true)
-
-    expect(useBrowserStore.getState().bottomPanelOpen['worktree-1']).toBe(true)
-    expect(useBrowserStore.getState().modalOpen['worktree-1']).toBe(false)
-    expect(useTerminalStore.getState().modalTerminalOpen['worktree-1']).toBe(
-      false
-    )
   })
 })
 
@@ -183,5 +58,51 @@ describe('blankTabUrl', () => {
     expect(decodeURIComponent(url.split(',')[1] ?? '')).toContain(
       'background:#101010'
     )
+  })
+})
+
+describe('right panel browser tab (desktop)', () => {
+  beforeEach(() => {
+    useBrowserStore.setState({ modalOpen: {} })
+    useTerminalStore.setState({ modalTerminalOpen: {} })
+    useChatStore.setState({ activeWorktreeId: 'worktree-1' })
+    useUIStore.setState({
+      sessionChatModalOpen: false,
+      sessionChatModalWorktreeId: null,
+      fileBrowserVisible: false,
+      rightPanelTab: 'files',
+    })
+  })
+
+  it('toggles the right panel on the browser tab', () => {
+    useBrowserStore.getState().toggleModal('worktree-1')
+
+    expect(useUIStore.getState().fileBrowserVisible).toBe(true)
+    expect(useUIStore.getState().rightPanelTab).toBe('browser')
+    expect(useBrowserStore.getState().modalOpen['worktree-1']).toBe(true)
+
+    useBrowserStore.getState().toggleModal('worktree-1')
+
+    expect(useUIStore.getState().fileBrowserVisible).toBe(false)
+    expect(useBrowserStore.getState().modalOpen['worktree-1']).toBe(false)
+  })
+
+  it('switches to the browser tab when the panel shows another tab', () => {
+    useUIStore.setState({ fileBrowserVisible: true, rightPanelTab: 'files' })
+    useBrowserStore.setState({ modalOpen: { 'worktree-1': true } })
+
+    useBrowserStore.getState().toggleModal('worktree-1')
+
+    expect(useUIStore.getState().fileBrowserVisible).toBe(true)
+    expect(useUIStore.getState().rightPanelTab).toBe('browser')
+  })
+
+  it('keeps the panel open when another worktree closes its browser', () => {
+    useUIStore.setState({ fileBrowserVisible: true, rightPanelTab: 'browser' })
+    useBrowserStore.setState({ modalOpen: { other: true } })
+
+    useBrowserStore.getState().setModalOpen('other', false)
+
+    expect(useUIStore.getState().fileBrowserVisible).toBe(true)
   })
 })

@@ -1023,13 +1023,13 @@ function makeMagicPromptModelsPreset(
   }
 }
 
-/** Codex preset: use GPT-6.1 Sol for all magic prompts */
+/** Codex preset: use GPT-6.2 Sol for all magic prompts */
 export const CODEX_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
-  makeMagicPromptModelsPreset('gpt-6.1-sol')
+  makeMagicPromptModelsPreset('gpt-6.2-sol')
 
-/** Codex fast preset: use GPT-6.1 Sol Fast for all magic prompts */
+/** Codex fast preset: use GPT-6.2 Sol Fast for all magic prompts */
 export const CODEX_FAST_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
-  makeMagicPromptModelsPreset('gpt-6.1-sol-fast')
+  makeMagicPromptModelsPreset('gpt-6.2-sol-fast')
 
 /** GPT-5.6 Codex presets for all magic prompts */
 export const CODEX_56_SOL_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
@@ -1352,7 +1352,6 @@ export interface AppPreferences {
   applied_keybinding_migrations?: string[]
   syntax_theme_dark: SyntaxTheme // Syntax highlighting theme for dark mode
   syntax_theme_light: SyntaxTheme // Syntax highlighting theme for light mode
-  sidebar_hover_open_enabled?: boolean // Temporarily reveal the collapsed desktop sidebar from the left screen edge
   keep_ai_servers_warm?: boolean // Keep Codex/OpenCode servers alive briefly between requests
   magic_prompts: MagicPrompts // Customizable prompts for AI-powered features
   magic_prompt_models: MagicPromptModels // Per-prompt model overrides
@@ -1377,7 +1376,6 @@ export interface AppPreferences {
   auto_pull_base_branch: boolean // Auto-pull base branch before creating a new worktree
   auto_delete_worktree_on_pr_merged?: boolean // Delete a worktree when its linked PR is merged
   debug_mode_enabled: boolean // Show debug panel in chat sessions
-  agents_enabled?: boolean // Experimental: show the Agents tab
   default_enabled_mcp_servers: string[] // MCP server names enabled by default (empty = none)
   known_mcp_servers: string[] // All MCP server names ever seen (prevents re-enabling user-disabled servers)
   has_seen_feature_tour: boolean // Whether user has seen the feature tour onboarding
@@ -2027,6 +2025,24 @@ export function toProviderAliasModel(model: string): string {
 }
 
 /**
+ * First-party Claude id for a provider alias (`opus` -> `claude-opus-5-5`).
+ * A session saved under a custom provider keeps the alias. Without the
+ * provider, the alias is not in the model list, so the toolbar shows the raw
+ * alias and the wrong reasoning control. Other models are returned unchanged.
+ */
+export function fromProviderAliasModel(model: string): string {
+  if (!CLAUDE_ALIASES.some(alias => alias.value === model)) return model
+  if (modelOptions.some(option => option.value === model)) return model
+  return (
+    modelOptions.find(
+      option =>
+        CLAUDE_FAMILY_VERSION_PATTERN.exec(option.value)?.[1]?.toLowerCase() ===
+        model
+    )?.value ?? model
+  )
+}
+
+/**
  * Upstream model id the Claude CLI requests for `model` under `provider`.
  * A custom provider maps the opus/sonnet/haiku aliases through its profile
  * env (`ANTHROPIC_DEFAULT_OPUS_MODEL` for `opus`). Returns undefined when
@@ -2129,6 +2145,10 @@ export const effortLevelOptions: {
 // Codex Types
 // =============================================================================
 export type CodexModel =
+  | 'gpt-6.2-sol'
+  | 'gpt-6.2-sol-fast'
+  | 'gpt-6.2-astra'
+  | 'gpt-6.2-astra-fast'
   | 'gpt-6.1-sol'
   | 'gpt-6.1-sol-fast'
   | 'gpt-6.1-terra'
@@ -2161,6 +2181,8 @@ export type CodexModel =
 // Codex models that support fast service tier. Fast mode is exposed via a
 // separate UI toggle, not as standalone dropdown entries.
 export const CODEX_FAST_MODEL_MAP = {
+  'gpt-6.2-sol': 'gpt-6.2-sol-fast',
+  'gpt-6.2-astra': 'gpt-6.2-astra-fast',
   'gpt-6.1-sol': 'gpt-6.1-sol-fast',
   'gpt-6.1-terra': 'gpt-6.1-terra-fast',
   'gpt-6-astra': 'gpt-6-astra-fast',
@@ -2211,6 +2233,8 @@ export function getCodexFastInfo(model: string): CodexFastInfo {
 }
 
 export const codexModelOptions: { value: CodexModel; label: string }[] = [
+  { value: 'gpt-6.2-sol', label: 'GPT 6.2 Sol' },
+  { value: 'gpt-6.2-astra', label: 'GPT 6.2 Astra' },
   { value: 'gpt-6.1-sol', label: 'GPT 6.1 Sol' },
   { value: 'gpt-6.1-terra', label: 'GPT 6.1 Terra' },
   { value: 'gpt-6-astra', label: 'GPT 6 Astra' },
@@ -2234,6 +2258,10 @@ export const codexDefaultModelOptions: {
   value: CodexModel
   label: string
 }[] = [
+  { value: 'gpt-6.2-sol', label: 'GPT 6.2 Sol' },
+  { value: 'gpt-6.2-sol-fast', label: 'GPT 6.2 Sol Fast' },
+  { value: 'gpt-6.2-astra', label: 'GPT 6.2 Astra' },
+  { value: 'gpt-6.2-astra-fast', label: 'GPT 6.2 Astra Fast' },
   { value: 'gpt-6.1-sol', label: 'GPT 6.1 Sol' },
   { value: 'gpt-6.1-sol-fast', label: 'GPT 6.1 Sol Fast' },
   { value: 'gpt-6.1-terra', label: 'GPT 6.1 Terra' },
@@ -2260,6 +2288,8 @@ export const codexDefaultModelOptions: {
     option =>
       // react-doctor-disable-next-line react-doctor/js-set-map-lookups -- runs once at module load over a short model list
       ![
+        'gpt-6.2-sol',
+        'gpt-6.2-astra',
         'gpt-6.1-sol',
         'gpt-6.1-terra',
         'gpt-6-astra',
@@ -2300,7 +2330,7 @@ export function normalizeCodexModel(model: string): CodexModel {
     ]
   }
 
-  return isCodexModel(model) ? model : 'gpt-6.1-sol'
+  return isCodexModel(model) ? model : 'gpt-6.2-sol'
 }
 
 export type CodexReasoningEffort = string
@@ -2792,7 +2822,6 @@ export const defaultPreferences: AppPreferences = {
   applied_keybinding_migrations: [],
   syntax_theme_dark: 'vitesse-black',
   syntax_theme_light: 'github-light',
-  sidebar_hover_open_enabled: false, // Default: off (opt-in)
   keep_ai_servers_warm: true, // Default: enabled for faster follow-up requests
   magic_prompts: DEFAULT_MAGIC_PROMPTS,
   magic_prompt_models: DEFAULT_MAGIC_PROMPT_MODELS,
@@ -2817,7 +2846,6 @@ export const defaultPreferences: AppPreferences = {
   auto_pull_base_branch: true, // Default: enabled
   auto_delete_worktree_on_pr_merged: true, // Default: enabled
   debug_mode_enabled: false, // Default: disabled
-  agents_enabled: false, // Default: disabled (experimental)
   default_enabled_mcp_servers: [], // Default: no MCP servers enabled
   known_mcp_servers: [], // Default: no known servers
   has_seen_feature_tour: false, // Default: not seen
@@ -2844,7 +2872,7 @@ export const defaultPreferences: AppPreferences = {
   default_execution_mode: 'yolo', // Default: Full access
   default_backend: 'claude', // Default: Claude
   default_new_session_kind: 'chat', // Default: Jean Chat for CMD+T
-  selected_codex_model: 'gpt-6.1-sol', // Default: latest Codex model
+  selected_codex_model: 'gpt-6.2-sol', // Default: latest Codex model
   selected_opencode_model: 'opencode/gpt-6.1-sol', // Default OpenCode model
   selected_cursor_model: 'cursor/auto', // Default Cursor model
   selected_pi_model: 'pi/sonnet', // Default PI model
