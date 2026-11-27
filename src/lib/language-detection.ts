@@ -37,6 +37,10 @@ const EXTENSION_TO_LANGUAGE: Record<string, string> = {
   hxx: 'cpp',
   zig: 'zig',
 
+  // .NET
+  cs: 'csharp',
+  csx: 'csharp',
+
   // JVM
   java: 'java',
   kt: 'kotlin',
