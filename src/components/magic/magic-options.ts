@@ -52,6 +52,16 @@ export type MagicOption =
   | 'review-comments'
   | 'revert-last-commit'
 
+export interface MagicActionOptions {
+  /** Close the session after the action succeeds (Shift or long-press). */
+  closeSession?: boolean
+}
+
+/** `magic-option` event detail: an option, or an option with run options. */
+export type MagicOptionEventDetail =
+  | MagicOption
+  | ({ option: MagicOption } & MagicActionOptions)
+
 /** Options shown as menu items (load-context is only reachable via events). */
 export type MagicMenuOption = Exclude<MagicOption, 'load-context'>
 

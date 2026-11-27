@@ -8,6 +8,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { RevertLastCommitDialog } from '@/components/shared/RevertLastCommitDialog'
+import { CloseAfterLongPress } from '@/components/magic/CloseAfterLongPress'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 import { Input } from '@/components/ui/input'
@@ -39,6 +40,10 @@ import { notify } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
 import { toastActionLabel } from '@/lib/toast-action-label'
 import { parseServerResourceKey } from '@/lib/server-resource'
+import {
+  afterSuccessCloseOptions,
+  CLOSE_AFTER_OPTIONS,
+} from '@/lib/close-session-toast-action'
 import { toast } from 'sonner'
 import {
   gitPush,
@@ -72,6 +77,8 @@ import { useInstalledBackends } from '@/hooks/useInstalledBackends'
 import {
   chatQueryKeys,
   refreshWorktreeSessionsCaches,
+  useCloseSession,
+  useRestoreSession,
   useSession,
 } from '@/services/chat'
 import {
@@ -114,6 +121,8 @@ import {
   isMagicOptionUnavailable,
   type MagicOption,
   type MagicMenuOption,
+  type MagicActionOptions,
+  type MagicOptionEventDetail,
   type MagicOptionItem,
 } from '@/components/magic/magic-options'
 
@@ -312,6 +321,8 @@ export function MagicModal() {
   // Whether MagicModal was opened from ProjectCanvasView (no active chat session)
   const isOnCanvas =
     !useChatStore(state => state.activeWorktreePath) && !sessionModalOpen
+  // A session is on screen, so a commit can close it afterwards.
+  const canCloseAfter = !isOnCanvas
   const pickRemoteOrRun = useRemotePicker(
     worktree?.path,
     worktree ? { worktreeId: worktree.id } : null
@@ -374,6 +385,12 @@ export function MagicModal() {
   )
 
   const queryClient = useQueryClient()
+  const { mutate: closeSession } = useCloseSession()
+  const { mutate: restoreSession } = useRestoreSession()
+  const sessionActions = useMemo(
+    () => ({ close: closeSession, restore: restoreSession }),
+    [closeSession, restoreSession]
+  )
   const selectedProjectId = useProjectsStore(state => state.selectedProjectId)
   const { data: preferences } = usePreferences(targetServerId)
   const { data: projects } = useProjects()
@@ -631,7 +648,8 @@ export function MagicModal() {
     async (
       option: MagicOption,
       override?: { backend: CliBackend; model: string },
-      reviewSource: 'ai' | 'coderabbit-cli' | 'coderabbit-pr' = 'ai'
+      reviewSource: 'ai' | 'coderabbit-cli' | 'coderabbit-pr' = 'ai',
+      closeSession = false
     ) => {
       if (!selectedWorktreeId || !worktree?.path) return
 
@@ -640,6 +658,18 @@ export function MagicModal() {
 
       const doCommit = async (isPush: boolean, remote?: string) => {
         setWorktreeLoading(selectedWorktreeId, 'commit')
+        // Offer "Close session" only when a session is on screen.
+        const chatState = useChatStore.getState()
+        const sessionVisible =
+          Boolean(chatState.activeWorktreePath) ||
+          useUIStore.getState().sessionChatModalOpen
+        const closeTarget = sessionVisible
+          ? {
+              worktreeId: selectedWorktreeId,
+              worktreePath: worktree.path,
+              sessionId: chatState.activeSessionIds[selectedWorktreeId],
+            }
+          : null
         const branch = worktree.branch ?? ''
         const { gitDiffSelectedFiles, clearGitDiffSelectedFiles } =
           useUIStore.getState()
@@ -701,9 +731,23 @@ export function MagicModal() {
                 )
               } else if (result.commit_hash) {
                 const prefix = isPush ? 'Committed and pushed' : 'Committed'
-                opToast.success(`${prefix}: ${result.message.split('\n')[0]}`)
+                opToast.success(
+                  `${prefix}: ${result.message.split('\n')[0]}`,
+                  afterSuccessCloseOptions(
+                    closeTarget,
+                    sessionActions,
+                    closeSession
+                  )
+                )
               } else {
-                opToast.success('Pushed to remote')
+                opToast.success(
+                  'Pushed to remote',
+                  afterSuccessCloseOptions(
+                    closeTarget,
+                    sessionActions,
+                    closeSession
+                  )
+                )
               }
             }
           )
@@ -1658,6 +1702,7 @@ ${resolveInstructions}`
       project,
       queryClient,
       pickRemoteOrRun,
+      sessionActions,
     ]
   )
 
@@ -1818,7 +1863,7 @@ ${resolveInstructions}`
   }, [executeGitDirectly, selectedWorktreeId, setMagicModalOpen])
 
   const executeAction = useCallback(
-    async (option: MagicOption) => {
+    async (option: MagicOption, options?: MagicActionOptions) => {
       // Block disabled options on canvas
       if (isOnCanvas && !CANVAS_ALLOWED_OPTIONS.has(option)) {
         return
@@ -1973,7 +2018,12 @@ ${resolveInstructions}`
 
       if (DIRECT_MAGIC_GIT_OPTIONS.has(option)) {
         setMagicModalOpen(false)
-        void executeGitDirectly(option)
+        void executeGitDirectly(
+          option,
+          undefined,
+          undefined,
+          options?.closeSession
+        )
         return
       }
 
@@ -2032,7 +2082,9 @@ ${resolveInstructions}`
 
   useEffect(() => {
     const handleMagicOption = (event: Event) => {
-      void executeAction((event as CustomEvent<MagicOption>).detail)
+      const detail = (event as CustomEvent<MagicOptionEventDetail>).detail
+      if (typeof detail === 'string') void executeAction(detail)
+      else void executeAction(detail.option, detail)
     }
 
     window.addEventListener('magic-option', handleMagicOption)
@@ -2046,15 +2098,17 @@ ${resolveInstructions}`
 
       // Check for direct key shortcuts (s, l, c, p, r)
       const mappedOption = KEY_TO_OPTION[key]
+      // Shift + key runs the action, then closes the session.
+      const closeSession = e.shiftKey
       if (mappedOption) {
         e.preventDefault()
-        executeAction(mappedOption)
+        executeAction(mappedOption, { closeSession })
         return
       }
 
       if (key === 'enter') {
         e.preventDefault()
-        executeAction(selectedOption)
+        executeAction(selectedOption, { closeSession })
       } else if (key === 'arrowdown' || key === 'arrowup') {
         e.preventDefault()
         const currentIndex = allOptions.indexOf(selectedOption)
@@ -2098,28 +2152,40 @@ ${resolveInstructions}`
       })
 
     return (
-      <button
-        type="button"
+      <CloseAfterLongPress
         key={option.id}
-        aria-label={mobile ? option.label : `${option.label} ${option.key}`}
-        disabled={isDisabled}
-        onClick={() => executeAction(option.id)}
-        onMouseEnter={() => setSelectedOption(option.id)}
-        className={cn(
-          'group flex w-full items-center text-left text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-          mobile
-            ? 'min-h-12 gap-2.5 rounded-lg border border-border/70 bg-muted/30 px-3 py-2.5 active:bg-accent'
-            : 'justify-between px-4 py-2',
-          isDisabled ? 'cursor-not-allowed opacity-40' : 'hover:bg-accent',
-          isSelected && !isDisabled && !mobile && 'bg-accent'
-        )}
+        enabled={mobile && canCloseAfter && CLOSE_AFTER_OPTIONS.has(option.id)}
+        label={option.label}
+        onRun={closeSession => executeAction(option.id, { closeSession })}
       >
-        <span className="flex min-w-0 items-center gap-2.5">
-          <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <span className="leading-tight">{option.label}</span>
-        </span>
-        {!mobile && <Kbd data-web-visible>{option.key}</Kbd>}
-      </button>
+        {({ handlers, consumeLongPress }) => (
+          <button
+            type="button"
+            {...handlers}
+            aria-label={mobile ? option.label : `${option.label} ${option.key}`}
+            disabled={isDisabled}
+            onClick={e => {
+              if (consumeLongPress()) return
+              executeAction(option.id, { closeSession: e.shiftKey })
+            }}
+            onMouseEnter={() => setSelectedOption(option.id)}
+            className={cn(
+              'group flex w-full items-center text-left text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              mobile
+                ? 'min-h-12 select-none [-webkit-touch-callout:none] gap-2.5 rounded-lg border border-border/70 bg-muted/30 px-3 py-2.5 active:bg-accent'
+                : 'justify-between px-4 py-2',
+              isDisabled ? 'cursor-not-allowed opacity-40' : 'hover:bg-accent',
+              isSelected && !isDisabled && !mobile && 'bg-accent'
+            )}
+          >
+            <span className="flex min-w-0 items-center gap-2.5">
+              <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="leading-tight">{option.label}</span>
+            </span>
+            {!mobile && <Kbd data-web-visible>{option.key}</Kbd>}
+          </button>
+        )}
+      </CloseAfterLongPress>
     )
   }
 
@@ -2173,6 +2239,12 @@ ${resolveInstructions}`
                   </div>
                 </section>
               ))}
+              {canCloseAfter && (
+                <p className="px-1 text-xs text-muted-foreground">
+                  Long-press Commit or Commit &amp; Push to also close the
+                  session.
+                </p>
+              )}
             </div>
           ) : (
             <div className="grid min-h-0 flex-1 grid-cols-2 overflow-y-auto pb-2">
@@ -2198,6 +2270,12 @@ ${resolveInstructions}`
                 )
               )}
             </div>
+          )}
+          {!isMobile && canCloseAfter && (
+            <p className="shrink-0 border-t border-border/60 px-4 py-2 text-xs text-muted-foreground">
+              Hold Shift with Commit or Commit &amp; Push to also close the
+              session.
+            </p>
           )}
         </DialogContent>
       </Dialog>

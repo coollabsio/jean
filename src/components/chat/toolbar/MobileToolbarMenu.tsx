@@ -22,8 +22,11 @@ import {
   buildMagicColumns,
   isMagicOptionUnavailable,
   type MagicMenuOption,
+  type MagicOptionEventDetail,
   type MagicSection,
 } from '@/components/magic/magic-options'
+import { CloseAfterLongPress } from '@/components/magic/CloseAfterLongPress'
+import { CLOSE_AFTER_OPTIONS } from '@/lib/close-session-toast-action'
 
 const EMPTY_FAVORITES: string[] = []
 
@@ -166,6 +169,17 @@ export function MobileToolbarMenu({
       useUIStore.getState().setResolveConflictsDialogOpen(true),
   }
 
+  const runOption = (id: MagicMenuOption, closeSession: boolean) => {
+    setMenuOpen(false)
+    if (!closeSession) {
+      handlers[id]()
+      return
+    }
+    // MagicModal runs the commit and closes the session after it.
+    const detail: MagicOptionEventDetail = { option: id, closeSession }
+    window.dispatchEvent(new CustomEvent('magic-option', { detail }))
+  }
+
   const trigger = (
     <button
       type="button"
@@ -205,23 +219,34 @@ export function MobileToolbarMenu({
                     const isFavorite = favorites.includes(option.id)
                     return (
                       <div key={option.id} className="flex items-center">
-                        <button
-                          type="button"
-                          disabled={isMagicOptionUnavailable(
-                            option.id,
-                            availability
-                          )}
-                          className="flex min-h-12 min-w-0 flex-1 items-center gap-3 rounded-lg px-3 text-left active:bg-accent disabled:opacity-40"
-                          onClick={() => {
-                            setMenuOpen(false)
-                            handlers[option.id]()
-                          }}
+                        <CloseAfterLongPress
+                          enabled={CLOSE_AFTER_OPTIONS.has(option.id)}
+                          label={option.label}
+                          onRun={closeSession =>
+                            runOption(option.id, closeSession)
+                          }
                         >
-                          <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-                          <span className="truncate text-sm">
-                            {option.label}
-                          </span>
-                        </button>
+                          {({ handlers: pressHandlers, consumeLongPress }) => (
+                            <button
+                              type="button"
+                              {...pressHandlers}
+                              disabled={isMagicOptionUnavailable(
+                                option.id,
+                                availability
+                              )}
+                              className="flex min-h-12 min-w-0 flex-1 select-none items-center gap-3 rounded-lg px-3 text-left [-webkit-touch-callout:none] active:bg-accent disabled:opacity-40"
+                              onClick={() => {
+                                if (consumeLongPress()) return
+                                runOption(option.id, false)
+                              }}
+                            >
+                              <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                              <span className="truncate text-sm">
+                                {option.label}
+                              </span>
+                            </button>
+                          )}
+                        </CloseAfterLongPress>
                         <button
                           type="button"
                           aria-label={`${isFavorite ? 'Unfavorite' : 'Favorite'} ${option.label}`}
@@ -243,6 +268,10 @@ export function MobileToolbarMenu({
                   })}
                 </section>
               ))}
+              <p className="px-3 pt-3 text-xs text-muted-foreground">
+                Long-press Commit or Commit &amp; Push to also close the
+                session.
+              </p>
             </div>
           </SheetContent>
         </Sheet>

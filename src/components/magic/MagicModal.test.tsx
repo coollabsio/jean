@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import userEvent from '@testing-library/user-event'
 import { act, render, screen, waitFor, within } from '@/test/test-utils'
 import { MagicModal } from './MagicModal'
@@ -38,6 +38,7 @@ const mocks = vi.hoisted(() => {
     toastError: vi.fn(),
     toastLoading: vi.fn(() => 'toast-1'),
     startCommitJob: vi.fn(),
+    closeSession: vi.fn(),
     gitPush: vi.fn(),
     openExternal: vi.fn(),
     activeWorktreePath: null as string | null,
@@ -162,6 +163,8 @@ vi.mock('@/store/chat-store', () => ({
         clearInputDraft: mocks.clearInputDraft,
         setEnabledMcpServers: mocks.setEnabledMcpServers,
         copySessionSettings: vi.fn(),
+        sendingSessionIds: {},
+        waitingForInputSessionIds: {},
       }),
     }
   ),
@@ -232,6 +235,8 @@ vi.mock('@/services/preferences', () => ({
 vi.mock('@/services/chat', async importOriginal => ({
   ...(await importOriginal()),
   useSession: () => ({ data: mocks.investigationSession }),
+  useCloseSession: () => ({ mutate: mocks.closeSession }),
+  useRestoreSession: () => ({ mutate: vi.fn() }),
 }))
 
 vi.mock('@/services/opencode-cli', () => ({
@@ -1033,5 +1038,66 @@ describe('MagicModal manual PR link', () => {
     expect(mocks.toastSuccess).toHaveBeenCalledWith('Reverted: Test commit', {
       id: 'toast-1',
     })
+  })
+})
+
+describe('MagicModal commit and close session', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      value: 1024,
+    })
+    mocks.activeWorktreePath = '/repo/worktree'
+    mocks.activeSessionIds = { 'wt-1': 's-1' }
+    mocks.selectedWorktreeId = 'wt-1'
+    mocks.worktree.pr_number = null
+    mocks.startCommitJob.mockImplementation(
+      async (
+        _params: unknown,
+        onDone: (job: { status: string; response: unknown }) => void
+      ) =>
+        onDone({
+          status: 'completed',
+          response: { commit_hash: 'abc123', message: 'feat: add thing' },
+        })
+    )
+  })
+
+  afterEach(() => {
+    mocks.activeWorktreePath = null
+    mocks.activeSessionIds = {}
+  })
+
+  it('Shift+C commits, then closes the session on screen', async () => {
+    const user = userEvent.setup()
+    render(<MagicModal />)
+
+    await user.keyboard('{Shift>}C{/Shift}')
+
+    await waitFor(() =>
+      expect(mocks.closeSession).toHaveBeenCalledWith(
+        {
+          worktreeId: 'wt-1',
+          worktreePath: '/repo/worktree',
+          sessionId: 's-1',
+        },
+        expect.anything()
+      )
+    )
+  })
+
+  it('plain C commits and only offers Close session on the toast', async () => {
+    const user = userEvent.setup()
+    render(<MagicModal />)
+
+    await user.keyboard('c')
+
+    await waitFor(() => expect(mocks.startCommitJob).toHaveBeenCalled())
+    expect(mocks.closeSession).not.toHaveBeenCalled()
+    const successOptions = mocks.toastSuccess.mock.calls.at(-1)?.[1] as {
+      action?: { onClick: () => void }
+    }
+    expect(successOptions.action).toBeDefined()
   })
 })

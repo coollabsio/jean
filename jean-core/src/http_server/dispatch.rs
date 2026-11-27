@@ -1634,6 +1634,14 @@ pub async fn dispatch_command(
                     .await?;
             to_value(result)
         }
+        "restore_session" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            crate::chat::restore_session(app.clone(), worktree_id, worktree_path, session_id)
+                .await?;
+            Ok(Value::Null)
+        }
         "reorder_sessions" => {
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
             let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;

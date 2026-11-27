@@ -2528,6 +2528,33 @@ pub async fn close_session(
     Ok(new_active)
 }
 
+/// Restore a session that `close_session` soft-deleted and make it the active tab.
+///
+/// Safe to repeat: restoring a live session only selects it. A session that
+/// was removed outright (it had no messages) or already purged cannot come back.
+pub async fn restore_session(
+    app: AppHandle,
+    worktree_id: String,
+    worktree_path: String,
+    session_id: String,
+) -> Result<(), String> {
+    log::trace!("Restoring session: {session_id}");
+    with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
+        restore_session_in(sessions, &session_id)
+    })?;
+    emit_sessions_cache_invalidation(&app);
+    Ok(())
+}
+
+fn restore_session_in(sessions: &mut WorktreeSessions, session_id: &str) -> Result<(), String> {
+    let session = sessions
+        .find_session_mut(session_id)
+        .ok_or_else(|| "Session can no longer be restored".to_string())?;
+    session.archived_at = None;
+    sessions.active_session_id = Some(session_id.to_string());
+    Ok(())
+}
+
 /// Remove a session from its worktree index and delete its data on disk.
 ///
 /// Used by the retention purge. Safe to repeat: a
@@ -11504,6 +11531,39 @@ pub async fn respond_opencode_permission(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn restore_session_in_clears_deletion_and_selects_session() {
+        let mut closed = Session::new("Closed".to_string(), 0, Backend::Claude);
+        closed.archived_at = Some(123);
+        let closed_id = closed.id.clone();
+        let other = Session::new("Other".to_string(), 1, Backend::Claude);
+        let other_id = other.id.clone();
+        let mut sessions = WorktreeSessions {
+            sessions: vec![closed, other],
+            active_session_id: Some(other_id),
+            ..Default::default()
+        };
+
+        restore_session_in(&mut sessions, &closed_id).unwrap();
+        assert_eq!(sessions.find_session(&closed_id).unwrap().archived_at, None);
+        assert_eq!(
+            sessions.active_session_id.as_deref(),
+            Some(closed_id.as_str())
+        );
+
+        // Repeat is a no-op success.
+        restore_session_in(&mut sessions, &closed_id).unwrap();
+    }
+
+    #[test]
+    fn restore_session_in_fails_for_removed_session() {
+        let mut sessions = WorktreeSessions::default();
+        let before = sessions.active_session_id.clone();
+        let error = restore_session_in(&mut sessions, "gone").unwrap_err();
+        assert!(error.contains("can no longer be restored"));
+        assert_eq!(sessions.active_session_id, before);
+    }
 
     fn run_state_session(
         app: &AppHandle,

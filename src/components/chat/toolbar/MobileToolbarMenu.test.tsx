@@ -1,6 +1,14 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import userEvent from '@testing-library/user-event'
-import { render, screen, waitFor, within } from '@/test/test-utils'
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@/test/test-utils'
+import { LONG_PRESS_MS } from '@/hooks/use-long-press'
 import { MobileToolbarMenu } from './MobileToolbarMenu'
 
 const mocks = vi.hoisted(() => ({
@@ -565,6 +573,68 @@ describe('MobileToolbarMenu', () => {
     })
     expect(screen.getByRole('dialog', { name: 'Magic' })).toBeInTheDocument()
 
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      value: originalInnerWidth,
+    })
+  })
+
+  it('long-press Commit offers Commit & close session', async () => {
+    const user = userEvent.setup()
+    const originalInnerWidth = window.innerWidth
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      value: 390,
+    })
+    const onCommit = vi.fn()
+    const magicOption = vi.fn()
+    const onMagicOption = (e: Event) => magicOption((e as CustomEvent).detail)
+    window.addEventListener('magic-option', onMagicOption)
+
+    render(
+      <MobileToolbarMenu
+        isDisabled={false}
+        hasOpenPr={false}
+        hasIssueContexts={false}
+        hasPrContexts={false}
+        onLoadContext={vi.fn()}
+        onCommit={onCommit}
+        onCommitAndPush={vi.fn()}
+        onRevertLastCommit={vi.fn()}
+        onOpenPr={vi.fn()}
+        onReview={vi.fn()}
+        onMerge={vi.fn()}
+        onMergePr={vi.fn()}
+        handleSyncClick={vi.fn()}
+        handlePullClick={vi.fn()}
+        handlePushClick={vi.fn()}
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: /more actions/i }))
+    const sheet = screen.getByRole('dialog', { name: 'Magic' })
+    const commit = within(sheet).getByRole('button', { name: 'Commit' })
+
+    fireEvent.pointerDown(commit, { clientX: 10, clientY: 10 })
+    await act(
+      () => new Promise(resolve => setTimeout(resolve, LONG_PRESS_MS + 50))
+    )
+    fireEvent.pointerUp(commit)
+    // The click after a long press must not run the plain commit.
+    fireEvent.click(commit)
+    expect(onCommit).not.toHaveBeenCalled()
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Commit & close session' })
+    )
+
+    expect(magicOption).toHaveBeenCalledWith({
+      option: 'commit',
+      closeSession: true,
+    })
+    expect(onCommit).not.toHaveBeenCalled()
+
+    window.removeEventListener('magic-option', onMagicOption)
     Object.defineProperty(window, 'innerWidth', {
       configurable: true,
       value: originalInnerWidth,

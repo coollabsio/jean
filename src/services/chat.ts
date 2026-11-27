@@ -1315,6 +1315,41 @@ export function useCloseSession() {
 }
 
 /**
+ * Hook to restore a session that `close_session` soft-deleted.
+ * The restored session becomes the active tab.
+ */
+export function useRestoreSession() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({
+      worktreeId,
+      worktreePath,
+      sessionId,
+    }: {
+      worktreeId: string
+      worktreePath: string
+      sessionId: string
+    }): Promise<void> => {
+      await invoke('restore_session', { worktreeId, worktreePath, sessionId })
+    },
+    onSuccess: (_result, { worktreeId, sessionId }) => {
+      queryClient.invalidateQueries({
+        queryKey: chatQueryKeys.sessions(worktreeId),
+      })
+      queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
+      useChatStore.getState().setActiveSession(worktreeId, sessionId)
+    },
+    onError: error => {
+      if (isWsDisconnectError(error)) return
+      const message = error instanceof Error ? error.message : String(error)
+      logger.error('Failed to restore session', { error })
+      toast.error('Failed to restore session', { description: message })
+    },
+  })
+}
+
+/**
  * Close sessions of one worktree one after another, stopping at the first
  * failure (`useCloseSession` reports it). Used to close a lead session with
  * its finished sub-sessions.

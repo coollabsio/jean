@@ -1,4 +1,4 @@
-import { useCallback, useState, type RefObject } from 'react'
+import { useCallback, useMemo, useState, type RefObject } from 'react'
 import { startJeanReviewSession } from '@/lib/jean-review'
 import { openMagicPromptInTerminal } from '@/lib/magic-prompt-session'
 import { invoke, listen } from '@/lib/transport'
@@ -11,7 +11,13 @@ import { generateId } from '@/lib/uuid'
 import { useChatStore } from '@/store/chat-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
-import { chatQueryKeys, refreshWorktreeSessionsCaches } from '@/services/chat'
+import {
+  chatQueryKeys,
+  refreshWorktreeSessionsCaches,
+  useCloseSession,
+  useRestoreSession,
+} from '@/services/chat'
+import { closeSessionToastOptions } from '@/lib/close-session-toast-action'
 import { startCommitJob } from '@/services/commit-jobs'
 import { resolveDefaultModelForBackend } from '@/lib/session-defaults'
 import { buildMcpConfigJson } from '@/services/mcp'
@@ -163,6 +169,12 @@ export function useGitOperations({
   mcpServersDataRef,
   enabledMcpServersRef,
 }: UseGitOperationsParams): UseGitOperationsReturn {
+  const { mutate: closeSession } = useCloseSession()
+  const { mutate: restoreSession } = useRestoreSession()
+  const sessionActions = useMemo(
+    () => ({ close: closeSession, restore: restoreSession }),
+    [closeSession, restoreSession]
+  )
   // Merge dialog state
   const [showMergeDialog, setShowMergeDialog] = useState(false)
   const [pendingMergeWorktree, setPendingMergeWorktree] =
@@ -434,6 +446,11 @@ export function useGitOperations({
       gitDiffSelectedFiles.size > 0 ? Array.from(gitDiffSelectedFiles) : null
 
     setWorktreeLoading(activeWorktreeId, 'commit')
+    const closeTarget = {
+      worktreeId: activeWorktreeId,
+      worktreePath: activeWorktreePath,
+      sessionId: activeSessionId ?? undefined,
+    }
     const prefix =
       project?.name && worktree?.name
         ? `${project.name}/${worktree.name}`
@@ -466,7 +483,10 @@ export function useGitOperations({
           clearGitDiffSelectedFiles()
           triggerImmediateGitPoll()
           window.dispatchEvent(new CustomEvent('git-commit-completed'))
-          opToast.success(`${prefix}: ${job.response.message.split('\n')[0]}`)
+          opToast.success(
+            `${prefix}: ${job.response.message.split('\n')[0]}`,
+            closeSessionToastOptions(closeTarget, sessionActions)
+          )
         }
       )
     } catch (error) {
@@ -476,6 +496,8 @@ export function useGitOperations({
   }, [
     activeWorktreeId,
     activeWorktreePath,
+    activeSessionId,
+    sessionActions,
     project?.name,
     worktree?.name,
     preferences?.magic_prompts?.commit_message,
@@ -498,6 +520,11 @@ export function useGitOperations({
         gitDiffSelectedFiles.size > 0 ? Array.from(gitDiffSelectedFiles) : null
 
       setWorktreeLoading(activeWorktreeId, 'commit')
+      const closeTarget = {
+        worktreeId: activeWorktreeId,
+        worktreePath: activeWorktreePath,
+        sessionId: activeSessionId ?? undefined,
+      }
       const prefix =
         project?.name && worktree?.name
           ? `${project.name}/${worktree.name}`
@@ -556,9 +583,15 @@ export function useGitOperations({
                 `${prefix}: Could not push to PR branch, pushed to new branch instead`
               )
             } else if (result.commit_hash) {
-              opToast.success(`${prefix}: ${result.message.split('\n')[0]}`)
+              opToast.success(
+                `${prefix}: ${result.message.split('\n')[0]}`,
+                closeSessionToastOptions(closeTarget, sessionActions)
+              )
             } else {
-              opToast.success(`${prefix}: Pushed to remote`)
+              opToast.success(
+                `${prefix}: Pushed to remote`,
+                closeSessionToastOptions(closeTarget, sessionActions)
+              )
             }
           }
         )
@@ -570,6 +603,8 @@ export function useGitOperations({
     [
       activeWorktreeId,
       activeWorktreePath,
+      activeSessionId,
+      sessionActions,
       project?.name,
       worktree?.name,
       worktree?.pr_number,
