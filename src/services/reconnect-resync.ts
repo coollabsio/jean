@@ -5,7 +5,7 @@ import { hydrateRunningSnapshot } from '@/lib/hydrate-running-snapshot'
 import { logger } from '@/lib/logger'
 import { refreshRunStates } from '@/services/run-states'
 import { useChatStore } from '@/store/chat-store'
-import type { ChatMessage, Session } from '@/types/chat'
+import type { ChatMessage, QueuedMessage, Session } from '@/types/chat'
 
 /**
  * Bring a Web Access page back in line with its server after the socket
@@ -24,21 +24,32 @@ import type { ChatMessage, Session } from '@/types/chat'
 export async function resyncAfterReconnect(
   queryClient: QueryClient
 ): Promise<void> {
-  const prefetched = new Map(
-    Object.keys(useChatStore.getState().sendingSessionIds).map(sessionId => [
-      sessionId,
-      fetchRunningTurn(sessionId),
-    ])
-  )
+  // A session tail carries the running turn and the queue. Queues are
+  // refreshed too: the drain's `queue:updated` events were lost in the gap,
+  // so a prompt that ran meanwhile would otherwise stay listed as queued.
+  const tails = new Map<string, Promise<Session | null>>()
+  const fetchTails = () => {
+    const { sendingSessionIds, messageQueues } = useChatStore.getState()
+    for (const sessionId of [
+      ...Object.keys(sendingSessionIds),
+      ...Object.keys(messageQueues),
+    ]) {
+      if (!tails.has(sessionId))
+        tails.set(sessionId, fetchSessionTail(sessionId))
+    }
+  }
+  fetchTails()
   await refreshRunStates(queryClient)
+  // Turns found running by the run states are fetched too.
+  fetchTails()
   await Promise.all(
-    Object.keys(useChatStore.getState().sendingSessionIds).map(
-      async sessionId => {
-        const running = await (prefetched.get(sessionId) ??
-          fetchRunningTurn(sessionId))
-        if (running) restoreRunningTurn(sessionId, running)
-      }
-    )
+    [...tails].map(async ([sessionId, tail]) => {
+      const session = await tail
+      if (!session) return
+      restoreQueue(sessionId, session.queued_messages ?? [])
+      const running = runningTurn(session)
+      if (running) restoreRunningTurn(sessionId, running)
+    })
   )
   applyCacheInvalidationKeys(queryClient, ['sessions'])
   // 'chat' was refetched by 'sessions'. 'ui-state' is owned by this client:
@@ -83,34 +94,45 @@ function isExternalData(query: Query): boolean {
   return EXTERNAL_DATA_ROOTS.has(root) || root.endsWith('-cli')
 }
 
-/** The running turn is the last message of the latest run. */
-async function fetchRunningTurn(
-  sessionId: string
-): Promise<ChatMessage | null> {
+/** The latest run of a session, with its queue. */
+async function fetchSessionTail(sessionId: string): Promise<Session | null> {
   const { sessionWorktreeMap, worktreePaths } = useChatStore.getState()
   const worktreeId = sessionWorktreeMap[sessionId]
   const worktreePath = worktreeId ? worktreePaths[worktreeId] : undefined
   if (!worktreeId || !worktreePath) return null
 
   try {
-    const session = await invoke<Session>('get_session', {
+    return await invoke<Session>('get_session', {
       worktreeId,
       worktreePath,
       sessionId,
       limit: 1,
     })
-    const running = session.messages.at(-1)
-    return running?.role === 'assistant' && running.id.startsWith('running-')
-      ? running
-      : null
   } catch (error) {
     // The turn keeps streaming without its gap; `chat:done` loads the reply.
-    logger.warn('Failed to reload running session after reconnect', {
+    logger.warn('Failed to reload session after reconnect', {
       sessionId,
       error,
     })
     return null
   }
+}
+
+/** The running turn is the last message of the latest run. */
+function runningTurn(session: Session): ChatMessage | null {
+  const running = session.messages.at(-1)
+  return running?.role === 'assistant' && running.id.startsWith('running-')
+    ? running
+    : null
+}
+
+function restoreQueue(sessionId: string, queue: QueuedMessage[]): void {
+  const { messageQueues } = useChatStore.getState()
+  const current = messageQueues[sessionId] ?? []
+  if (JSON.stringify(current) === JSON.stringify(queue)) return
+  useChatStore.setState({
+    messageQueues: { ...messageQueues, [sessionId]: queue },
+  })
 }
 
 function restoreRunningTurn(sessionId: string, running: ChatMessage): void {

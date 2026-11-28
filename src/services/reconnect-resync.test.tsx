@@ -241,6 +241,40 @@ describe('web access reconnect resync', () => {
     })
   })
 
+  it('drops a queued prompt that the server ran while the socket was down', async () => {
+    useChatStore.getState().removeSendingSession('s1')
+    useChatStore.setState({
+      messageQueues: {
+        s1: [
+          {
+            id: 'q1',
+            message: 'also check the ui',
+            pendingImages: [],
+            pendingFiles: [],
+            pendingSkills: [],
+            pendingTextFiles: [],
+            model: 'sonnet',
+            provider: null,
+            executionMode: 'build',
+            thinkingLevel: 'off',
+            queuedAt: 1,
+          },
+        ],
+      },
+    })
+    FakeServerSocket.replies.get_run_states = () => []
+    FakeServerSocket.replies.get_session = () => ({
+      id: 's1',
+      messages: [],
+      queued_messages: [],
+    })
+
+    latestSocket().close()
+    await waitFor(() => expect(overlay).toBe(false), { timeout: 3_000 })
+
+    expect(useChatStore.getState().messageQueues.s1).toEqual([])
+  })
+
   it('loads the chat state before refetching anything else', async () => {
     FakeServerSocket.replies.list_github_issues = () => []
     renderHook(
