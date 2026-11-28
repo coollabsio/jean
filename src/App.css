@@ -668,6 +668,10 @@ body:not(.native-app) kbd:not([data-web-visible]) {
   position: fixed !important;
   inset: auto 0 0 0 !important;
   transform: none !important;
+  /* Floating UI sets `will-change: transform` on screens with a pixel ratio
+     of 1.5 or more (all phones). That makes the wrapper the containing block
+     of the fixed backdrop below, so the backdrop covers only the sheet. */
+  will-change: auto !important;
   min-width: 0 !important;
 }
 
