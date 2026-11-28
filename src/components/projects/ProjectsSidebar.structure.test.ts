@@ -72,7 +72,7 @@ describe('ProjectsSidebar server filter', () => {
     expect(projectTree).toBeGreaterThan(source.indexOf('<ServersList'))
     expect(source).toContain('<Plus className="size-3.5" />')
     expect(source).not.toContain('Add worktree to selected project')
-    expect(source).toContain('className="flex shrink-0 gap-1 px-3 pb-2"')
+    expect(source).toContain('className="flex shrink-0 gap-1 px-2 pb-2"')
     expect(source).toContain('border-transparent bg-transparent')
     expect(source).not.toContain('searchQuery')
     expect(source).not.toContain('aria-label="New"')

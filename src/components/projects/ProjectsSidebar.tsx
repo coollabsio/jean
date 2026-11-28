@@ -186,7 +186,7 @@ export function ProjectsSidebar() {
 
   // Workspace and Recent share one search row and add menu
   const searchRow = (
-    <div className="flex shrink-0 gap-1 px-3 pb-2">
+    <div className="flex shrink-0 gap-1 px-2 pb-2">
       <SidebarSearchField />
       <DropdownMenu>
         <Tooltip>
@@ -194,7 +194,7 @@ export function ProjectsSidebar() {
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="flex size-8 shrink-0 items-center justify-center rounded-md border border-transparent bg-transparent text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="flex h-8 shrink-0 items-center justify-center rounded-md border border-transparent px-[calc(0.75rem-1px)] bg-transparent text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 aria-label="Add project, server or folder"
               >
                 <Plus className="size-3.5" />

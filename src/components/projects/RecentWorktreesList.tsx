@@ -683,12 +683,15 @@ export function RecentWorktreesList({
     )
   }
   const listClassName = '@container flex flex-col gap-2 px-2'
+  // Shelf headers match the row box (list px-2) and row content (card px-3).
+  const shelfHeaderClassName =
+    'mx-2 flex h-8 w-[calc(100%-1rem)] items-center gap-1 rounded-md px-3'
   const workingShelfSection = workingRows.length > 0 && (
     <section aria-label="Working sessions" className="pb-2">
       <button
         type="button"
         aria-expanded={workingExpanded}
-        className="flex h-8 w-full items-center gap-1 px-3 text-2xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        className={`${shelfHeaderClassName} text-2xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring`}
         onClick={() => setWorkingExpanded(value => !value)}
       >
         <ChevronRight
@@ -749,7 +752,7 @@ export function RecentWorktreesList({
                 type="button"
                 aria-expanded={snoozedExpanded}
                 title="Inactive for 24 hours"
-                className="flex h-8 w-full items-center gap-1 px-3 text-2xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className={`${shelfHeaderClassName} text-2xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring`}
                 onClick={() => {
                   if (!snoozedExpanded && snoozedRows.length === 0) loadMore()
                   setSnoozedExpanded(value => !value)
